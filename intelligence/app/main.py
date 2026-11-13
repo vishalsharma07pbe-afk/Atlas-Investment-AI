@@ -625,3 +625,10 @@ from .fee_impact import FeeRequest,fee_impact
 @app.post("/api/v1/intelligence/planning/fee-impact")
 def planning_fee_impact(request:FeeRequest):
     return fee_impact(request)
+
+from .portfolio_concentration import LimitsRequest,concentration_report
+
+@app.post("/api/v1/intelligence/portfolio/concentration")
+def portfolio_concentration(request:LimitsRequest):
+    """Read-only concentration report for locally recorded holdings."""
+    return concentration_report(_fetch_portfolio_holdings(),request)
