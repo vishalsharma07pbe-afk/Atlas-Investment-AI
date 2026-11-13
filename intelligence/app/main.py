@@ -538,3 +538,19 @@ from .research_outcomes import OutcomeRequest,evaluate
 def broker_research_outcomes(request:OutcomeRequest):
     """Review historical research against dated prices without lookahead."""
     return evaluate(request)
+
+
+from fastapi import HTTPException
+from .notifications import summary as notification_summary,details as notification_details
+
+@app.get("/api/v1/intelligence/notifications/summary")
+def notifications_summary():
+    """Lightweight IDs for badge; never returns notification details."""
+    try:return notification_summary()
+    except RuntimeError:raise HTTPException(status_code=503,detail="Local notification source unavailable")
+
+@app.get("/api/v1/intelligence/notifications")
+def notifications_details():
+    """Fetch full notification details only when explicitly requested."""
+    try:return notification_details()
+    except RuntimeError:raise HTTPException(status_code=503,detail="Local notification source unavailable")

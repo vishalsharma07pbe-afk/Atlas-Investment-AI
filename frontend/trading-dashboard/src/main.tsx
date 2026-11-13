@@ -12,6 +12,7 @@ import InstitutionalFlows from "./InstitutionalFlows";
 import NewsEvidence from "./NewsEvidence";
 import ProviderQuality from "./ProviderQuality";
 import ProviderReconciliation from "./ProviderReconciliation";
+import NotificationCenter from "./NotificationCenter";
 
 type Holding = {id:number;symbol:string;asset_type:string;quantity:number;average_cost:number;last_price:number|null;invested:number;market_value:number|null;unrealized_pnl:number|null;price_as_of:string|null};
 type Analysis = {holdingCount:number;invested:number;pricedMarketValue:number;pricedUnrealizedPnl:number;unpricedHoldings:number;valuationComplete:boolean;riskFlags:string[]};
@@ -152,7 +153,7 @@ export function App() {
       </aside>
 
       <main className="content">
-        <header><div><div className="eyebrow"><span/> YOUR PRIVATE RESEARCH TERMINAL</div><h1>{activeTitle}</h1><p>{tab === 0 ? "Your holdings, performance and portfolio risk — all stored locally." : "Strict research gates. No invented prices or recommendations."}</p></div><div className="header-actions"><div className="headerbadge"><span/> MARKET FEED NOT CONNECTED</div><AppearanceControls value={appearance} onChange={setAppearance} open={appearanceOpen} onOpenChange={setAppearanceOpen}/></div></header>
+        <header><div><div className="eyebrow"><span/> YOUR PRIVATE RESEARCH TERMINAL</div><h1>{activeTitle}</h1><p>{tab === 0 ? "Your holdings, performance and portfolio risk — all stored locally." : "Strict research gates. No invented prices or recommendations."}</p></div><div className="header-actions"><NotificationCenter/><div className="headerbadge"><span/> MARKET FEED NOT CONNECTED</div><AppearanceControls value={appearance} onChange={setAppearance} open={appearanceOpen} onOpenChange={setAppearanceOpen}/></div></header>
         {error && <div className="error glass">{error} <button onClick={() => tab === 6 ? loadHealth() : load()}>Retry</button></div>}
 
         {tab === 0 ? <>
