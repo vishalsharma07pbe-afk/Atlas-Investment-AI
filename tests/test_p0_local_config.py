@@ -34,7 +34,7 @@ class LocalConfigurationGateTests(unittest.TestCase):
     def test_parses_comments_without_echoing_values(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / ".env"
-            path.write_text("# secret config\\nPOSTGRES_PASSWORD=unique\\nMARKET_DATA_PROVIDER=MANUAL_CSV\\n", encoding="utf-8")
+            path.write_text("# secret config\nPOSTGRES_PASSWORD=unique\nMARKET_DATA_PROVIDER=MANUAL_CSV\n", encoding="utf-8")
             self.assertEqual(module.parse_env(path)["POSTGRES_PASSWORD"], "unique")
 
 
