@@ -56,7 +56,7 @@ export default function MutualFundHoldings({holdings}:{holdings:FundHolding[]}){
     <MutualFundGoals/>
     <MutualFundRisk holdings={holdings}/>
     <MutualFundHistoricalRisk validatedHistory={validatedHistory}/>
-    <MutualFundReconciliation holdings={holdings}/>
+    <MutualFundReconciliation holdings={holdings} validatedHistories={validatedHistories}/>
     <NavRefreshPreflight/>
     <MutualFundNavResearch/>
   </div>;
