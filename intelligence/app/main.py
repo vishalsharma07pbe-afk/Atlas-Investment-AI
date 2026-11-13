@@ -782,3 +782,14 @@ from .mutual_fund_planning import FundPlanningRequest,plan_funds
 def mutual_fund_plan(request:FundPlanningRequest):
     """Illustrative SIP and read-only recorded portfolio analytics."""
     return plan_funds(request)
+
+from .mutual_fund_goals import FundGoalRequest,goal_plan
+
+@app.post("/api/v1/intelligence/mutual-funds/goal-plan")
+def mutual_fund_goal_plan(request:FundGoalRequest):
+    """Read-only monthly SIP target and shortfall analysis."""
+    from fastapi import HTTPException
+    try:
+        return goal_plan(request)
+    except ValueError:
+        raise HTTPException(status_code=422,detail="Goal is outside supported SIP planning limits") from None
