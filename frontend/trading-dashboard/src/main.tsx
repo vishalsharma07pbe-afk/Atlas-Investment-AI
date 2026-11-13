@@ -6,6 +6,7 @@ import PortfolioStress from "./PortfolioStress";
 import MutualFundHoldings from "./MutualFundHoldings";
 import DailyScreener from "./DailyScreener";
 import InstitutionalFlows from "./InstitutionalFlows";
+import NewsEvidence from "./NewsEvidence";
 
 type Holding = {id:number;symbol:string;asset_type:string;quantity:number;average_cost:number;last_price:number|null;invested:number;market_value:number|null;unrealized_pnl:number|null;price_as_of:string|null};
 type Analysis = {holdingCount:number;invested:number;pricedMarketValue:number;pricedUnrealizedPnl:number;unpricedHoldings:number;valuationComplete:boolean;riskFlags:string[]};
@@ -185,6 +186,7 @@ export function App() {
             <div className="notice warning-notice">Daily candles must explicitly declare RAW_UNADJUSTED or ADJUSTED. ATLAS never silently assumes corporate-action adjustment.</div>
           </section>
           <InstitutionalFlows/>
+          <NewsEvidence/>
           <div className="two health-two">
             <section className="panel glass"><div className="sectionhead"><div><small className="section-kicker">EXCHANGE COVERAGE</small><h2>Registry &amp; date coverage</h2></div></div><div className="tablewrap"><table><thead><tr><th>EXCHANGE</th><th>INSTRUMENTS</th><th>CANDLES</th><th>FIRST DATE</th><th>LATEST DATE</th></tr></thead><tbody>{health?.coverage.map(row=><tr key={row.exchange}><td className="symbol">{row.exchange}</td><td>{row.instruments}</td><td>{row.candle_count}</td><td>{row.first_date || "—"}</td><td>{row.latest_date || "—"}</td></tr>)}</tbody></table></div></section>
             <section className="panel glass"><div className="sectionhead"><div><small className="section-kicker">PROVENANCE</small><h2>Enabled data sources</h2></div></div><div className="tablewrap"><table><thead><tr><th>SOURCE</th><th>ACCESS</th><th>LICENSE SCOPE</th><th>LATEST CANDLE</th></tr></thead><tbody>{health?.sources.map(row=><tr key={row.source_code}><td><span className="asset-pill">{row.source_code}</span></td><td>{row.access_mode}</td><td>{row.license_scope}</td><td>{row.latest_candle ? new Date(row.latest_candle).toLocaleDateString("en-IN") : "—"}</td></tr>)}</tbody></table></div></section>
