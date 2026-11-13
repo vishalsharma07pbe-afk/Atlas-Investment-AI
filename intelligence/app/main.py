@@ -495,3 +495,17 @@ from .provider_reconciliation import ReconciliationRequest,reconcile
 def provider_reconciliation(request:ReconciliationRequest):
     """Review explicit instrument mapping and session/adjustment evidence; no writes."""
     return reconcile(request)
+
+
+from .broker_research import ConsensusRequest,consensus,SOURCES
+
+@app.get("/api/v1/intelligence/research/brokers/sources")
+def broker_research_sources():
+    """Supported source labels; not a claim of connected research feeds."""
+    return {"sources":SOURCES,"automatic_collection_enabled":False,
+            "notice":"Sources are supported for user-submitted report comparison only."}
+
+@app.post("/api/v1/intelligence/research/brokers/compare")
+def compare_broker_research(request:ConsensusRequest):
+    """Attributable, freshness-aware report comparison, not investment advice."""
+    return consensus(request)
