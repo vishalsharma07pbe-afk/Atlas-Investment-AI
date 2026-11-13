@@ -819,3 +819,34 @@ from .mutual_fund_snapshot_pipeline import SnapshotPortfolioRequest,inspect_snap
 def mutual_fund_snapshot_portfolio_review(request:SnapshotPortfolioRequest):
     """Review supplied NAV snapshot against explicitly mapped fund holdings, without writing."""
     return inspect_snapshot_portfolio(request)
+
+# Local NAV catalog: intentionally no unattended download until source rights are confirmed.
+from fastapi import HTTPException, Request
+from .nav_catalog import import_snapshot, search_schemes, catalog_status, MAX_BYTES
+
+@app.get("/api/v1/intelligence/mutual-funds/status")
+def mutual_fund_catalog_status():
+    return catalog_status()
+
+@app.get("/api/v1/intelligence/mutual-funds/search")
+def mutual_fund_catalog_search(q: str = "", limit: int = 30):
+    try:
+        return search_schemes(q, limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+@app.post("/api/v1/intelligence/mutual-funds/import")
+async def mutual_fund_catalog_import(request: Request):
+    # Loopback-only service behind the local frontend proxy; no external exposure.
+    # Importing data is a local user action, not an authorized automated feed.
+    if request.headers.get("content-length") and int(request.headers["content-length"]) > MAX_BYTES:
+        raise HTTPException(status_code=413, detail="NAV_FILE_TOO_LARGE")
+    payload = await request.body()
+    if len(payload) > MAX_BYTES:
+        raise HTTPException(status_code=413, detail="NAV_FILE_TOO_LARGE")
+    try:
+        return import_snapshot(payload.decode("utf-8-sig"))
+    except UnicodeError:
+        raise HTTPException(status_code=400, detail="NAV_FILE_NOT_UTF8")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
