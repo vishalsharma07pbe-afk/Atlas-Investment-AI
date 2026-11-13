@@ -50,7 +50,7 @@ async def receive_session(
     count=0
     async with connect(uri,open_timeout=policy.connect_timeout_seconds,
                        max_size=policy.max_frame_bytes,ping_interval=20,ping_timeout=20) as ws:
-        await ws.send(json.dumps(payload))
+        await ws.send(json.dumps(payload).encode('utf-8'))
         async for frame in ws:
             if not isinstance(frame,bytes):
                 continue
