@@ -15,6 +15,7 @@ from .technical import Candle, compute, levels
 from .patterns import detect
 from .institutional_flows import FlowRequest
 from .news_events import NewsRequest
+from .research_alerts import AlertRequest
 
 app = FastAPI(
     title="ATLAS Trading Intelligence Engine",
@@ -439,3 +440,11 @@ def risk_qualification(instrument_id: int, max_age_days: int = Query(default=7,g
     from .risk_qualification import qualify
     raw=backend_json(f"/api/v1/market-data/instruments/{instrument_id}/candles?limit=250")
     return qualify(raw,max_age_days=max_age_days)
+
+
+@app.post("/api/v1/intelligence/research-alerts/evaluate")
+def evaluate_research_alerts(request: AlertRequest):
+    """Evaluate daily threshold alerts on demand; no scheduling or push delivery."""
+    from .research_alerts import evaluate_alerts
+    raw=backend_json(f"/api/v1/market-data/instruments/{request.instrument_id}/candles?limit=250")
+    return evaluate_alerts(raw,request.rules,max_age_days=request.max_age_days)
