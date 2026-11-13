@@ -61,3 +61,15 @@ jobs:
       # Integration tests require PostgreSQL and the project's initialized schema.
       # Compile them here; execute database integration tests in the Docker-enabled environment.
       - run: mvn -B -ntp -DskipTests package
+
+  deployment-contract:
+    name: Compose config and Python syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose configuration without real credentials
+        env:
+          POSTGRES_PASSWORD: ci-placeholder-not-a-secret
+        run: docker compose config --quiet
+      - name: Check Python source syntax
+        run: python3 -m compileall -q intelligence/app intelligence/tests
