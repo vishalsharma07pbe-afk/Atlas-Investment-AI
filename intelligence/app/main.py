@@ -418,3 +418,16 @@ def news_evidence_analysis(request: NewsRequest):
         return analyze_news(request.events,request.max_age_hours)
     except ValueError as exc:
         raise HTTPException(status_code=422,detail=str(exc)) from exc
+
+
+@app.get("/api/v1/intelligence/backtest/{instrument_id}")
+def daily_backtest(instrument_id: int, fast: int = Query(default=10,ge=2,le=199), slow: int = Query(default=30,ge=3,le=200), fee_bps: int = Query(default=10,ge=0,le=100), slippage_bps: int = Query(default=5,ge=0,le=100)):
+    """Run a bounded historical simulation from stored validated daily candles."""
+    from .backtesting import backtest
+    if fast >= slow:
+        raise HTTPException(status_code=422,detail="Fast SMA must be smaller than slow SMA")
+    raw=backend_json(f"/api/v1/market-data/instruments/{instrument_id}/candles?limit=1000")
+    try:
+        return backtest(raw,fast=fast,slow=slow,fee_bps=fee_bps,slippage_bps=slippage_bps)
+    except (ValueError,KeyError,TypeError,OverflowError) as exc:
+        raise HTTPException(status_code=422,detail="Backtest input failed OHLCV validation") from exc
