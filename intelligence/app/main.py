@@ -619,3 +619,9 @@ def journal_delete(entry_id:str):
     try:found=delete_entry(entry_id)
     except (ValueError,OSError) as exc:raise HTTPException(status_code=503,detail="Local journal unavailable") from exc
     if not found:raise HTTPException(status_code=404,detail="Journal entry not found")
+
+from .fee_impact import FeeRequest,fee_impact
+
+@app.post("/api/v1/intelligence/planning/fee-impact")
+def planning_fee_impact(request:FeeRequest):
+    return fee_impact(request)
