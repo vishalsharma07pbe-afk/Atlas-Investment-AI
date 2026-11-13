@@ -1,6 +1,7 @@
 import React,{useEffect,useRef,useState} from "react";
 import BacktestPanel from "./BacktestPanel";
 import RiskQualification from "./RiskQualification";
+import ResearchAlerts from "./ResearchAlerts";
 import {CandlestickSeries,HistogramSeries,LineSeries,createChart,createSeriesMarkers,ColorType} from "lightweight-charts";
 
 type Instrument={id:number;exchange:string;symbol:string;series:string|null;isin:string|null;security_name:string|null;listing_status:string;source:string;source_revision:string|null};
@@ -39,6 +40,7 @@ export default function StockExplorer(){
       {loading&&<p className="muted tiny" role="status">Loading validated market records…</p>}{error&&<div className="error">{error}</div>}<div className="instrument-results">{results.map(x=><button key={x.id} onClick={()=>choose(x)} className={selected?.id===x.id?"selected":""}><strong>{x.exchange}:{x.symbol}</strong><span>{x.security_name||x.isin||"Name unavailable"}</span><small>{x.listing_status} · {x.source}</small></button>)}{!results.length&&!loading&&<p className="muted tiny">The production registry is empty until a lawfully sourced instrument file is imported.</p>}</div></section>
     {!selected?<section className="panel glass emptyfeature compact-empty"><div className="featureicon">⌁</div><h2>Select a validated instrument</h2><p>Charts and calculations appear only when registry and daily candle records exist. No demonstration prices are shown in production.</p></section>:
       technical?.candles?.length?<><div className="explorer-heading"><div><small className="section-kicker">{selected.exchange} · DAILY</small><h2>{selected.symbol} <span>{selected.security_name}</span></h2></div><div className="freshness"><span>Latest verified</span><strong>{technical.as_of}</strong><small>Not live · {technical.candle_count} candles · {technical.candles[technical.candles.length-1]?.source_code}</small></div></div>
+      <ResearchAlerts key={"alerts-"+selected.id} instrumentId={selected.id}/>
       <RiskQualification key={"risk-"+selected.id} instrumentId={selected.id}/>
       <BacktestPanel key={selected.id} instrumentId={selected.id}/>
       <section className="panel glass chart-panel"><div className="indicator-toggles">{["sma_20","sma_50","sma_200","ema_20"].map(x=><button key={x} className={toggles.has(x)?"on":""} onClick={()=>toggle(x)}>{x.toUpperCase().replace("_"," ")}</button>)}</div><MarketChart data={technical} toggles={toggles}/><div className="chart-attribution">Charts by <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView Lightweight Charts™</a></div></section>
