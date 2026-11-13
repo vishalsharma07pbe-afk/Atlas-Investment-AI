@@ -793,3 +793,10 @@ def mutual_fund_goal_plan(request:FundGoalRequest):
         return goal_plan(request)
     except ValueError:
         raise HTTPException(status_code=422,detail="Goal is outside supported SIP planning limits") from None
+
+from .mutual_fund_risk import FundRiskRequest,assess_fund_risk
+
+@app.post("/api/v1/intelligence/mutual-funds/portfolio-risk")
+def mutual_fund_portfolio_risk(request:FundRiskRequest):
+    """Read-only recorded-value concentration; no inferred fund risk scores."""
+    return assess_fund_risk(request)
