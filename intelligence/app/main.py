@@ -850,3 +850,16 @@ async def mutual_fund_catalog_import(request: FastAPIRequest):
         raise HTTPException(status_code=400, detail="NAV_FILE_NOT_UTF8")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+from .flow_ledger import import_evidence, list_evidence
+
+@app.post("/api/v1/intelligence/institutional-flows/ledger")
+def institutional_flow_ledger_import(request: FlowRequest):
+    try:
+        return import_evidence(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+@app.get("/api/v1/intelligence/institutional-flows/ledger")
+def institutional_flow_ledger_list(limit: int = 100):
+    return list_evidence(limit)
