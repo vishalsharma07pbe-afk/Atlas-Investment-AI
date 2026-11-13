@@ -448,3 +448,13 @@ footer { padding: 12px 0 25px; color: var(--ink-muted); font-size: 10px; letter-
     margin-right: 0;
   }
 }
+
+/* Additional accessibility polish; preserve the merged PR #75 layout rules. */
+.dashboard .panel :is(input,select,textarea):focus-visible,
+.dashboard .sidebar button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.dashboard .panel .sectionhead { flex-wrap: wrap; }
+.dashboard .panel .sectionhead > div { min-width: 0; }
+.dashboard .panel .tablewrap { max-width: 100%; }
