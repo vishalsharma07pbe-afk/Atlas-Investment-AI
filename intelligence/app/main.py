@@ -719,3 +719,16 @@ from .mutual_fund_nav import FundNavRequest,analyze_nav
 def mutual_fund_nav_analysis(request:FundNavRequest):
     """Calculate read-only NAV performance from explicitly attributed user data."""
     return analyze_nav(request)
+
+from .amfi_nav_import import AmfiImportRequest,parse_amfi
+
+@app.post("/api/v1/intelligence/mutual-funds/amfi-nav-import")
+def import_amfi_nav_snapshot(request:AmfiImportRequest):
+    """Inspect caller-provided NAV snapshot without storing or verifying it."""
+    from fastapi import HTTPException
+    try:
+        result=parse_amfi(request.text,request.scheme_codes)
+    except ValueError:
+        raise HTTPException(status_code=422,detail="Invalid NAV snapshot or scheme selection") from None
+    result["source"]["name"]=request.source_name
+    return result
