@@ -807,3 +807,9 @@ from .mutual_fund_historical_risk import HistoricalRiskRequest,historical_risk
 def mutual_fund_historical_risk(request:HistoricalRiskRequest):
     """Read-only historical NAV risk diagnostics."""
     return historical_risk(request)
+
+from .mutual_fund_scheme_search import SchemeSearchRequest,search_schemes
+@app.post("/api/v1/intelligence/mutual-funds/scheme-search")
+def mutual_fund_scheme_search(request:SchemeSearchRequest):
+    """Search names/codes within an explicitly supplied NAV snapshot, read only."""
+    return search_schemes(request)
