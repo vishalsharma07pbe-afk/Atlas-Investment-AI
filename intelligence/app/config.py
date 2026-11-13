@@ -9,5 +9,7 @@ class Settings:
     upstox_token: str | None = os.getenv("UPSTOX_ACCESS_TOKEN")
     automatic_refresh: bool = os.getenv("MARKET_DATA_AUTO_REFRESH", "false").lower() == "true"
     request_rate_per_second: float = float(os.getenv("MARKET_DATA_RATE_PER_SECOND", "1"))
+    licensed_data_access: bool = os.getenv("MARKET_DATA_USAGE_RIGHTS_CONFIRMED", "false").lower() == "true"
+    entitlement_confirmed: bool = os.getenv("MARKET_DATA_ENTITLEMENT_CONFIRMED", "false").lower() == "true"
 
 settings = Settings()
