@@ -9,3 +9,7 @@ This endpoint performs **no external fetching, writes, scheduled refresh, tradin
 ## Dashboard workflow
 
 In the Mutual Funds workspace, open **Validate a NAV batch**. Enter the source name, expected numeric scheme codes, and a JSON array of NAV records (scheme_code, nav, as_of). Confirm that you are authorized to use the supplied records, then select **Validate batch**. The panel shows BLOCKED or READY_FOR_MANUAL_REVIEW with missing/unexpected/duplicate schemes, stale/future NAVs and matched valuation dates. A ready result is only a manual-review signal; it never saves or updates a portfolio.
+
+## Export validation report
+
+After validation, choose **Export validation report (JSON)** to download a browser-generated diagnostic record. The report contains the UTC validation timestamp, result status, blocker codes, scheme coverage diagnostics, source name and user attestation. It intentionally excludes raw NAV prices, position units and holdings. Scheme codes and source name are still included, so review the file before sharing. This is a client-side download only: ATLAS does not persist the report or raw NAV batch on the server.
