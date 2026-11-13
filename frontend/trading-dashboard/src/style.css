@@ -380,3 +380,71 @@ footer { padding: 12px 0 25px; color: var(--ink-muted); font-size: 10px; letter-
 @media(max-width:680px){.atlas-notification-panel{position:fixed;top:70px;right:15px;max-height:70vh}}
 
 .atlas-notification-filters{display:flex;gap:10px;align-items:center;padding:12px 0}.atlas-notification-filters label{font-size:12px}.atlas-notification-filters select{flex:1;min-width:0;padding:8px;border-radius:8px;background:var(--panel,#17202c);color:inherit;border:1px solid rgba(140,160,180,.4)}.atlas-stale-label{display:block;color:#e8a044;font-size:11px;margin-top:5px}
+
+
+/* P0 usability: keep the desktop navigation in view and give controls their
+   own measured space instead of allowing adjacent labels to collide. */
+@media (min-width: 781px) {
+  .dashboard .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    height: 100dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+  .dashboard .layout { padding-left: 278px; }
+}
+.dashboard .content { flex: 1 1 auto; max-width: none; }
+.dashboard .panel { min-width: 0; }
+.dashboard .panel :is(input,select,textarea) {
+  max-width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+}
+.dashboard .panel textarea { resize: vertical; }
+.dashboard .panel label:has(> input:not([type="checkbox"]):not([type="radio"]), > select, > textarea) {
+  display: inline-grid;
+  grid-template-columns: minmax(0,1fr);
+  gap: 7px;
+  width: min(100%, 320px);
+  max-width: 100%;
+  margin: 7px 12px 12px 0;
+  vertical-align: top;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+  font-weight: 650;
+}
+.dashboard .panel label:has(> input:not([type="checkbox"]):not([type="radio"]), > select, > textarea) > :is(input,select,textarea) {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--field-border);
+  border-radius: 10px;
+  background: var(--field);
+  color: var(--ink);
+  font-size: 13px;
+}
+.dashboard .panel label:has(> textarea) { width: min(100%, 440px); }
+.dashboard .panel label:has(> textarea) > textarea { min-height: 88px; }
+.dashboard .panel :is(fieldset,form) { min-width: 0; max-width: 100%; }
+.dashboard .panel fieldset {
+  border-color: var(--row-line);
+  border-radius: 12px;
+  margin: 14px 0;
+  padding: 14px;
+}
+.dashboard .panel button { max-width: 100%; }
+@media (max-width: 780px) {
+  .dashboard .layout { padding-left: 0; }
+  .dashboard .sidebar { position: sticky; }
+  .dashboard .panel label:has(> input:not([type="checkbox"]):not([type="radio"]), > select, > textarea) {
+    width: 100%;
+    margin-right: 0;
+  }
+}
