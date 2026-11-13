@@ -22,6 +22,8 @@ class ProviderConfig(BaseModel):
         if parsed.scheme!="https" or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
             raise ValueError("A plain HTTPS endpoint without credentials or fragment is required")
         if parsed.port not in (None,443):raise ValueError("Only HTTPS port 443 is supported")
+        if parsed.hostname.lower() in ("localhost","localhost.localdomain") or parsed.hostname.lower().endswith(".local"):
+            raise ValueError("Local provider endpoints are forbidden")
         if self.enabled and not(self.collection_authorized and self.redistribution_authorized):
             raise ValueError("Enabled provider requires declared collection and redistribution permissions")
         return self
