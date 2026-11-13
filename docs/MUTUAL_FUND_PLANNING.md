@@ -14,3 +14,7 @@ All computations are read-only and user-data-dependent. Provider-backed NAV inge
 ## Goal-based SIP planning
 
 POST `/api/v1/intelligence/mutual-funds/goal-plan` with `target_amount`, `years`, `annual_return_pct`, optional `annual_step_up_pct`, `initial_amount` and `current_monthly_sip`. The endpoint calculates a rounded-up whole-rupee monthly SIP using the same beginning-of-month and annual-step-up assumptions as the SIP planner, and compares the user's current plan with the target. It returns required SIP, incremental SIP, current-plan projected shortfall and annual snapshots. The dashboard exposes this in **Monthly SIP required for your goal**. It does not save a goal or recommend funds; the assumed return is not guaranteed.
+
+## Recorded-value concentration diagnostics
+
+POST `/api/v1/intelligence/mutual-funds/portfolio-risk` with a non-empty list of holdings containing unique holding IDs, labels and nullable recorded values. The dashboard displays largest position weight, top-three weight, the Herfindahl-Hirschman concentration index (HHI, 0–10,000), and effective number of fund positions (1/sum of squared fund-position weights). Missing recorded values block full-portfolio conclusions. Zero total recorded value produces no invented weights. These are **fund-position concentration statistics**, not volatility estimates, risk ratings, sector allocation or underlying-security overlap. Those require verified underlying holdings and return histories.
