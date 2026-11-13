@@ -591,3 +591,31 @@ from .goal_comparison import ComparisonRequest,compare_scenarios
 @app.post('/api/v1/intelligence/planning/goal-comparison')
 def planning_goal_comparison(request:ComparisonRequest):
     return compare_scenarios(request)
+
+from fastapi import HTTPException
+from .research_journal import JournalEntryInput,list_entries,create_entry,update_entry,delete_entry
+
+@app.get("/api/v1/intelligence/journal")
+def journal_list():
+    try:return {"entries":list_entries()}
+    except (ValueError,OSError) as exc:raise HTTPException(status_code=503,detail="Local journal unavailable") from exc
+
+@app.post("/api/v1/intelligence/journal",status_code=201)
+def journal_create(entry:JournalEntryInput):
+    try:return create_entry(entry)
+    except ValueError as exc:raise HTTPException(status_code=409,detail=str(exc)) from exc
+    except OSError as exc:raise HTTPException(status_code=503,detail="Local journal unavailable") from exc
+
+@app.put("/api/v1/intelligence/journal/{entry_id}")
+def journal_update(entry_id:str,entry:JournalEntryInput):
+    try:result=update_entry(entry_id,entry)
+    except ValueError as exc:raise HTTPException(status_code=409,detail=str(exc)) from exc
+    except OSError as exc:raise HTTPException(status_code=503,detail="Local journal unavailable") from exc
+    if result is None:raise HTTPException(status_code=404,detail="Journal entry not found")
+    return result
+
+@app.delete("/api/v1/intelligence/journal/{entry_id}",status_code=204)
+def journal_delete(entry_id:str):
+    try:found=delete_entry(entry_id)
+    except (ValueError,OSError) as exc:raise HTTPException(status_code=503,detail="Local journal unavailable") from exc
+    if not found:raise HTTPException(status_code=404,detail="Journal entry not found")
