@@ -21,7 +21,7 @@ describe("Validated multi-fund comparison workflow",()=>{
    fireEvent.change(screen.getByLabelText("Source attribution"),{target:{value:"Authorized CSV"}});
    fireEvent.change(screen.getByLabelText("Historical NAV CSV"),{target:{value:`scheme_code,as_of,nav\n${code},2025-01-01,10\n${code},2025-01-02,11`}});
    fireEvent.click(screen.getByRole("button",{name:"Import and analyze history"}));
-   await waitFor(()=>expect(screen.getByText(new RegExp(`Validated NAV histories in this session \\\(${code==="12345"?"1":"2"}/5\\\)`))).toBeTruthy());
+   await waitFor(()=>expect(screen.getByText(`Validated NAV histories in this session (${code==="12345"?"1":"2"}/5)`)).toBeTruthy());
   }
   fireEvent.click(screen.getByRole("button",{name:"Compare validated imports"}));
   await waitFor(()=>expect(fetchMock).toHaveBeenCalledTimes(3));
