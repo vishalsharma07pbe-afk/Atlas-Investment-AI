@@ -813,3 +813,9 @@ from .mutual_fund_scheme_search import SchemeSearchRequest,search_schemes
 def mutual_fund_scheme_search(request:SchemeSearchRequest):
     """Search names/codes within an explicitly supplied NAV snapshot, read only."""
     return search_schemes(request)
+
+from .mutual_fund_snapshot_pipeline import SnapshotPortfolioRequest,inspect_snapshot_portfolio
+@app.post("/api/v1/intelligence/mutual-funds/snapshot-portfolio-review")
+def mutual_fund_snapshot_portfolio_review(request:SnapshotPortfolioRequest):
+    """Review supplied NAV snapshot against explicitly mapped fund holdings, without writing."""
+    return inspect_snapshot_portfolio(request)
