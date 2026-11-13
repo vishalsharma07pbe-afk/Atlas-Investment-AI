@@ -676,3 +676,28 @@ def resolve_stock_for_upstox(instrument_id: int):
         raise HTTPException(status_code=422,detail="Invalid instrument ID")
     record=backend_json(f"/api/v1/instruments/{instrument_id}")
     return resolve_upstox_instrument(record)
+
+from .upstox_quote_worker import quote_worker
+
+@app.get("/api/v1/intelligence/providers/upstox/quote-status")
+def upstox_quote_status():
+    """Read-only worker status; never reveal credentials or unverified quotes."""
+    gate=authorization_diagnostics(settings.provider,bool(settings.upstox_token),
+                                   settings.licensed_data_access,settings.entitlement_confirmed)
+    return {"worker_running":quote_worker.running,
+            "transport_connected":quote_worker.cache.connected,
+            "configuration_status":gate["status"],
+            "blockers":gate["blockers"],
+            **quote_worker.cache.diagnostics()}
+
+@app.get("/api/v1/intelligence/providers/upstox/quotes/{instrument_id}")
+def upstox_instrument_quote(instrument_id:int):
+    from fastapi import HTTPException
+    if instrument_id<=0:raise HTTPException(status_code=422,detail="Invalid instrument ID")
+    record=backend_json(f"/api/v1/instruments/{instrument_id}")
+    resolution=resolve_upstox_instrument(record)
+    if not resolution["subscription_ready"]:
+        return {"status":"UNAVAILABLE","quote":None,"reason":resolution["blocker"]}
+    if not (settings.provider=="UPSTOX" and settings.licensed_data_access and settings.entitlement_confirmed):
+        return {"status":"UNAVAILABLE","quote":None,"reason":"PROVIDER_RIGHTS_NOT_VERIFIED"}
+    return quote_worker.cache.snapshot(resolution["instrument_key"])
