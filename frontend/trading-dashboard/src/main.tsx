@@ -5,6 +5,7 @@ import StockExplorer from "./StockExplorer";
 import PortfolioStress from "./PortfolioStress";
 import MutualFundHoldings from "./MutualFundHoldings";
 import MarketIntelligence from "./MarketIntelligence";
+import BrokerResearch from "./BrokerResearch";
 import InstitutionalFlows from "./InstitutionalFlows";
 import NewsEvidence from "./NewsEvidence";
 import ProviderQuality from "./ProviderQuality";
@@ -175,7 +176,7 @@ export function App() {
             {holdings.map(holding => <tr key={holding.id}><td className="symbol">{holding.symbol}</td><td><span className="asset-pill">{holding.asset_type}</span></td><td>{holding.quantity}</td><td>{fmt(holding.average_cost)}</td><td>{fmt(holding.last_price)}</td><td>{fmt(holding.invested)}</td><td>{fmt(holding.market_value)}</td><td className={(holding.unrealized_pnl || 0) >= 0 ? "positive" : "negative"}>{fmt(holding.unrealized_pnl)}</td><td><button className="danger" onClick={() => remove(holding.id)}>Delete</button></td></tr>)}
             {!holdings.length && <tr><td colSpan={9} className="empty">No holdings yet. Add your first position above or import a CSV.</td></tr>}
           </tbody></table></div></section>
-        </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : (tab === 2 || tab === 3 || tab === 4) ? <MarketIntelligence/> : tab === 7 ? <StockExplorer/> : tab === 6 ? <>
+        </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : (tab === 2 || tab === 3 || tab === 4) ? <><MarketIntelligence/><BrokerResearch/></> : tab === 7 ? <StockExplorer/> : tab === 6 ? <>
           <ProviderQuality/>
           <ProviderReconciliation/>
           <div className="stats">
