@@ -495,3 +495,11 @@ from .provider_reconciliation import ReconciliationRequest,reconcile
 def provider_reconciliation(request:ReconciliationRequest):
     """Review explicit instrument mapping and session/adjustment evidence; no writes."""
     return reconcile(request)
+
+
+from .broker_reports import ReportRequest,report
+
+@app.post("/api/v1/intelligence/reports/brokers/consolidated")
+def consolidated_broker_report(request:ReportRequest):
+    """User-supplied cross-broker position aggregation; no broker connections."""
+    return report(request)
