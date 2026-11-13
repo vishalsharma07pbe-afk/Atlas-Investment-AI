@@ -1,12 +1,12 @@
 import React,{useState} from "react";
 type Result={scheme_name:string;latest_nav:{as_of:string;nav:number;status:string};trailing_returns_pct:Record<string,number|null>;import:{rows_accepted:number;stored:boolean};source:{verification:string}};
 export type SharedNavHistory={schemeCode:string;schemeName:string;sourceName:string;csvText:string;observations:{as_of:string;nav:string}[]};
-export default function MutualFundHistoryImport({onValidated}:{onValidated?:(history:SharedNavHistory|null)=>void}){
+export default function MutualFundHistoryImport({onValidated}:{onValidated?:(history:SharedNavHistory|null,schemeCode?:string)=>void}){
  const [code,setCode]=useState("");const [name,setName]=useState("");const [source,setSource]=useState("");
  const [csv,setCsv]=useState("");const [result,setResult]=useState<Result|null>(null);
  const [error,setError]=useState("");const [loading,setLoading]=useState(false);
  async function submit(){
-  setLoading(true);setError("");setResult(null);onValidated?.(null);
+  setLoading(true);setError("");setResult(null);onValidated?.(null,code);
   try{
    const response=await fetch("/intelligence/api/v1/intelligence/mutual-funds/nav-history-import",{
     method:"POST",headers:{"Content-Type":"application/json"},
