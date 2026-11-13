@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-trading}
+      POSTGRES_USER: ${POSTGRES_USER:-trading}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    ports: ["127.0.0.1:${POSTGRES_PORT:-5432}:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-trading} -d ${POSTGRES_DB:-trading}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+    ports: ["127.0.0.1:${REDIS_PORT:-6379}:6379"]
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: [redisdata:/data]
+  backend:
+    build: ./backend/trading-core
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-trading}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-trading}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    ports: ["127.0.0.1:${SPRING_PORT:-8080}:8080"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health/readiness | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+  intelligence:
+    build: ./intelligence
+    environment:
+      ATLAS_BACKEND_URL: http://backend:8080
+      MARKET_DATA_PROVIDER: ${MARKET_DATA_PROVIDER:-MANUAL_CSV}
+      MARKET_DATA_AUTO_REFRESH: ${MARKET_DATA_AUTO_REFRESH:-false}
+      MARKET_DATA_RATE_PER_SECOND: ${MARKET_DATA_RATE_PER_SECOND:-1}
+      UPSTOX_ACCESS_TOKEN: ${UPSTOX_ACCESS_TOKEN:-}
+    ports: ["127.0.0.1:${INTELLIGENCE_PORT:-8000}:8000"]
+    depends_on:
+      backend:
+        condition: service_healthy
+  frontend:
+    build: ./frontend/trading-dashboard
+    ports: ["127.0.0.1:${FRONTEND_PORT:-5173}:5173"]
+    depends_on: [backend, intelligence]
+volumes:
+  pgdata:
+  redisdata:

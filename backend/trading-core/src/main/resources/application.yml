@@ -1,0 +1,24 @@
+server:
+  port: 8080
+spring:
+  application:
+    name: trading-core
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/trading}
+    username: ${SPRING_DATASOURCE_USERNAME:trading}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 2
+    baseline-description: existing docker init schema through 002_portfolio
+    validate-on-migrate: true
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,info

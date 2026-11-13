@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+backups/
+*.dump
+*.sql.gz
+frontend/trading-dashboard/node_modules/
+frontend/trading-dashboard/dist/
+backend/trading-core/target/
+intelligence/.pytest_cache/
+**/__pycache__/
+*.pyc
+.DS_Store
+.idea/
+.vscode/
