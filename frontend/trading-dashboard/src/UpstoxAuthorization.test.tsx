@@ -13,7 +13,8 @@ describe("UpstoxAuthorization",()=>{
    fireEvent.click(screen.getByRole("button",{name:"Check Upstox configuration"}));
    await waitFor(()=>expect(screen.getByRole("status").textContent).toContain("BLOCKED"));
    expect(screen.getByRole("status").textContent).toContain("ACCESS TOKEN MISSING");
-   expect(fetcher).toHaveBeenCalledTimes(1);
+   await waitFor(()=>expect(fetcher).toHaveBeenCalledTimes(2));
+   expect(fetcher).toHaveBeenCalledWith("/intelligence/api/v1/intelligence/providers/upstox/quote-status");
  });
  it("shows a safe failure state",async()=>{
    vi.stubGlobal("fetch",vi.fn().mockRejectedValue(Error("offline")));
