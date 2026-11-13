@@ -30,7 +30,7 @@ export default function MutualFundSnapshotReview({holdings}:{holdings:FundHoldin
   <div className="sectionhead"><div><small className="section-kicker">END-TO-END NAV QUALITY · READ ONLY</small><h2>Review NAV snapshot against portfolio</h2></div><span className="tag">NO PORTFOLIO UPDATE</span></div>
   <p className="muted tiny">One review checks the supplied NAV snapshot, freshness, scheme coverage and portfolio estimates. Scheme mapping must be explicit. Source authorization is user-attested, not independently verified.</p>
   <label htmlFor="mf-review-source">Source name</label><input id="mf-review-source" value={source} onChange={e=>setSource(e.target.value)}/>
-  <label htmlFor="mf-review-map">Holding ID to scheme code JSON</label><textarea id="mf-review-map" rows={3} style={{width:"100%"}} value={mapping} onChange={e=>setMapping(e.target.value)} placeholder='{"1":"12345"}'/>
+  <label htmlFor="mf-review-map">Snapshot review holding ID to scheme code JSON</label><textarea id="mf-review-map" rows={3} style={{width:"100%"}} value={mapping} onChange={e=>setMapping(e.target.value)} placeholder='{"1":"12345"}'/>
   <label htmlFor="mf-review-text">AMFI-style NAV snapshot</label><textarea id="mf-review-text" rows={5} style={{width:"100%"}} value={text} onChange={e=>setText(e.target.value)}/>
   <label><input type="checkbox" checked={authorized} onChange={e=>setAuthorized(e.target.checked)}/> I confirm I am authorized to use this source</label>
   <button className="secondary" disabled={loading||!text.trim()||!source.trim()||!funds.length} onClick={inspect}>{loading?"Reviewing…":"Review portfolio snapshot"}</button>
