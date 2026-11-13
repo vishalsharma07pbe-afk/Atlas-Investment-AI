@@ -64,6 +64,9 @@ class QuoteWorker:
         self.running=True
         self.stop.clear()
         self.active_keys=set(keys)
+        async def on_connection_change(connected:bool):
+            self.cache.connected=connected
+            if not connected:self.cache.quotes.clear()
         async def on_frame(frame:bytes):
             try:self.cache.ingest(frame,self.active_keys)
             except (DecodeError,ValueError,OverflowError):
@@ -71,15 +74,21 @@ class QuoteWorker:
         try:
             # Connection state is not inferred from a decoded frame alone.
             # The transport needs lifecycle callbacks before a LIVE status is possible.
-            result=await stream(token,keys,on_frame,stop=self.stop)
+            if stream is reconnecting_stream:
+                result=await stream(token,keys,on_frame,stop=self.stop,
+                                    on_connection_change=on_connection_change)
+            else:
+                result=await stream(token,keys,on_frame,stop=self.stop)
             return result
         finally:
             self.cache.connected=False
+            self.cache.quotes.clear()
             self.active_keys.clear()
             self.running=False
 
     def shutdown(self):
         self.stop.set()
         self.cache.connected=False
+        self.cache.quotes.clear()
 
 quote_worker=QuoteWorker()
