@@ -72,7 +72,7 @@ def reconcile_funds(request:FundReconciliationRequest,today:date|None=None)->dic
         diagnostics.append({"code":"STALE_NAV","severity":"BLOCKER","count":stale,
                             "message":"NAVs older than seven days cannot support a complete estimate."})
     if len(matched_dates)>1:
-        diagnostics.append({"code":"MIXED_AS_OF_DATES","severity":"WARNING","count":len(matched_dates),
+        diagnostics.append({"code":"MIXED_AS_OF_DATES","severity":"BLOCKER","count":len(matched_dates),
                             "message":"Matched NAVs have different valuation dates."})
     if len(source_names)>1:
         diagnostics.append({"code":"MULTIPLE_SOURCES","severity":"INFO","count":len(source_names),
@@ -96,7 +96,7 @@ def reconcile_funds(request:FundReconciliationRequest,today:date|None=None)->dic
             "stale_nav_positions":stale,"total_invested":str(invested_total),
             "matched_estimated_value":str(eligible_value),
             "matched_estimated_pnl":str(eligible_value-eligible_cost),
-            "portfolio_estimate_complete":missing==0 and stale==0,
-            "portfolio_estimated_value":str(eligible_value) if missing==0 and stale==0 else None,
+            "portfolio_estimate_complete":missing==0 and stale==0 and len(matched_dates)==1,
+            "portfolio_estimated_value":str(eligible_value) if missing==0 and stale==0 and len(matched_dates)==1 else None,
             "verification":"USER_SUPPLIED_UNVERIFIED",
-            "notice":"Research-only estimate. Does not overwrite recorded values or confirm source rights; missing/stale NAVs prevent a complete portfolio estimate."}
+            "notice":"Research-only estimate. Does not overwrite recorded values or confirm source rights; missing, stale or mixed-date NAVs prevent a complete synchronized portfolio estimate."}
