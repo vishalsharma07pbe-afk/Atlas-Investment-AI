@@ -732,3 +732,14 @@ def import_amfi_nav_snapshot(request:AmfiImportRequest):
         raise HTTPException(status_code=422,detail="Invalid NAV snapshot or scheme selection") from None
     result["source"]["name"]=request.source_name
     return result
+
+from .mutual_fund_history import NavHistoryImport,import_nav_history
+
+@app.post("/api/v1/intelligence/mutual-funds/nav-history-import")
+def mutual_fund_history_import(request:NavHistoryImport):
+    """Validate one exact scheme's source-attributed NAV history and calculate returns."""
+    from fastapi import HTTPException
+    try:
+        return import_nav_history(request)
+    except ValueError:
+        raise HTTPException(status_code=422,detail="Invalid historical NAV CSV or scheme selection") from None
