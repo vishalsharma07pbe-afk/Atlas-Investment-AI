@@ -21,9 +21,10 @@ const fmt=(value:number)=>new Intl.NumberFormat("en-IN",{style:"currency",curren
 export default function MutualFundHoldings({holdings}:{holdings:FundHolding[]}){
   const [validatedHistory,setValidatedHistory]=useState<SharedNavHistory|null>(null);
   const [validatedHistories,setValidatedHistories]=useState<SharedNavHistory[]>([]);
-  function acceptHistory(history:SharedNavHistory|null){
+  function acceptHistory(history:SharedNavHistory|null,schemeCode?:string){
     setValidatedHistory(history);
     if(history)setValidatedHistories(previous=>[...previous.filter(item=>item.schemeCode!==history.schemeCode),history].slice(-5));
+    else if(schemeCode)setValidatedHistories(previous=>previous.filter(item=>item.schemeCode!==schemeCode));
   }
   const funds=holdings.filter(h=>h.asset_type==="MUTUAL_FUND");
   const invested=funds.reduce((sum,h)=>sum+Number(h.invested),0);
