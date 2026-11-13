@@ -59,7 +59,39 @@ def reconcile_funds(request:FundReconciliationRequest,today:date|None=None)->dic
                      "estimated_value":str(value),
                      "recorded_value":str(position.recorded_value) if position.recorded_value is not None else None,
                      "difference_from_recorded":str(value-position.recorded_value) if position.recorded_value is not None else None})
+    used_codes={position.scheme_code for position in request.positions}
+    unused_codes=sorted(set(navs)-used_codes)
+    no_recorded=sum(position.recorded_value is None for position in request.positions)
+    source_names=sorted({navs[code].source_name for code in used_codes if code in navs})
+    matched_dates={navs[code].as_of for code in used_codes if code in navs}
+    diagnostics=[]
+    if missing:
+        diagnostics.append({"code":"MISSING_NAV","severity":"BLOCKER","count":missing,
+                            "message":"Holdings lack matching scheme-code NAVs."})
+    if stale:
+        diagnostics.append({"code":"STALE_NAV","severity":"BLOCKER","count":stale,
+                            "message":"NAVs older than seven days cannot support a complete estimate."})
+    if len(matched_dates)>1:
+        diagnostics.append({"code":"MIXED_AS_OF_DATES","severity":"WARNING","count":len(matched_dates),
+                            "message":"Matched NAVs have different valuation dates."})
+    if len(source_names)>1:
+        diagnostics.append({"code":"MULTIPLE_SOURCES","severity":"INFO","count":len(source_names),
+                            "message":"Matched NAVs were supplied from different named sources."})
+    if unused_codes:
+        diagnostics.append({"code":"UNUSED_NAV_CODES","severity":"INFO","count":len(unused_codes),
+                            "message":"Some supplied scheme codes are not mapped to any holding."})
+    if no_recorded:
+        diagnostics.append({"code":"NO_RECORDED_VALUE","severity":"INFO","count":no_recorded,
+                            "message":"Some holdings have no recorded value for difference calculation."})
+    diagnostics.append({"code":"UNVERIFIED_PROVENANCE","severity":"WARNING","count":len(source_names),
+                        "message":"All NAV source names are user-supplied, not independently verified."})
     return {"rows":rows,"total_positions":len(request.positions),
+            "diagnostics":diagnostics,
+            "quality_summary":{"missing_nav":missing,"stale_nav":stale,
+                               "unused_nav_scheme_codes":unused_codes,
+                               "matched_nav_as_of_dates":sorted(day.isoformat() for day in matched_dates),
+                               "matched_source_names":source_names,
+                               "holdings_without_recorded_value":no_recorded},
             "matched_positions":len(request.positions)-missing,"missing_nav_positions":missing,
             "stale_nav_positions":stale,"total_invested":str(invested_total),
             "matched_estimated_value":str(eligible_value),
