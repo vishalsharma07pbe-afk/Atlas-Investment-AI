@@ -16,7 +16,8 @@ class NewsLedgerTests(unittest.TestCase):
     def test_persistence_dedup_freshness_and_filter(self):
         with tempfile.TemporaryDirectory() as folder:
             with patch.object(news_ledger, "DB_PATH", Path(folder)/"news.sqlite3"):
-                request=NewsRequest(events=[event()])
+                original=event()
+                request=NewsRequest(events=[original])
                 self.assertEqual(news_ledger.import_news(request)["inserted"],1)
                 self.assertEqual(news_ledger.import_news(request)["duplicates"],1)
                 listing=news_ledger.list_news()
@@ -26,7 +27,7 @@ class NewsLedgerTests(unittest.TestCase):
                 self.assertFalse(listing["events"][0]["independently_verified"])
                 self.assertEqual(news_ledger.list_news(geography="INDIA")["event_count"],0)
                 with self.assertRaisesRegex(ValueError,"CONFLICTING_NEWS_EVIDENCE"):
-                    news_ledger.import_news(NewsRequest(events=[event().model_copy(update={"headline":"Conflicting article headline"})]))
+                    news_ledger.import_news(NewsRequest(events=[original.model_copy(update={"headline":"Conflicting article headline"})]))
                 self.assertEqual(news_ledger.list_news()["event_count"],1)
 
     def test_reject_local_and_insecure_sources(self):
