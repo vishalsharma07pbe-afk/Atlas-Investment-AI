@@ -1,6 +1,7 @@
 """Read-only, source-attributed NAV history ingestion with strict scheme matching."""
 import csv
 import io
+from math import isfinite
 from datetime import date,datetime
 from decimal import Decimal,InvalidOperation
 from pydantic import BaseModel,Field
@@ -32,7 +33,7 @@ def import_nav_history(request:NavHistoryImport)->dict:
             if previous is not None and stamp<=previous:raise ValueError("NAV dates must increase strictly")
             if stamp>date.today():raise ValueError("Future NAV")
             converted=float(value)
-            if not __import__("math").isfinite(converted) or converted<=0:
+            if not isfinite(converted) or converted<=0:
                 raise ValueError("NAV outside finite numeric range")
             points.append({"as_of":stamp,"nav":converted})
             previous=stamp
