@@ -1,5 +1,6 @@
 import React,{useEffect,useState} from "react";
 import NotificationSourceHealth from "./NotificationSourceHealth";
+import {indiaDateToday,upcomingIpoEvents} from "./ipoCalendar";
 type Alert={id:string;revision_key?:string;freshness?:"STALE"|"RECENT"|"NOT_APPLICABLE";category:string;title:string;description:string;event_date:string|null;published_at:string;source_name:string;source_url:string;subscription_total_x:string|null;subscription_as_of:string|null};
 type Summary={ids:string[];revision_keys?:string[];total:number;live_feed_connected:boolean};
 const BASE="/intelligence/api/v1/intelligence/notifications";
@@ -8,6 +9,7 @@ function savedIds():string[]{try{const v=JSON.parse(localStorage.getItem(KEY)||"
 export default function NotificationCenter(){
   const [ids,setIds]=useState<string[]>([]);
   const [category,setCategory]=useState("ALL");
+  const [view,setView]=useState<"ALL"|"IPO_CALENDAR">("ALL");
   const [seen,setSeen]=useState<string[]>(savedIds);
   const [open,setOpen]=useState(false);
   const [alerts,setAlerts]=useState<Alert[]|null>(null);
@@ -43,6 +45,7 @@ export default function NotificationCenter(){
     };
   },[]);
   const count=ids.filter(id=>!seen.includes(id)).length;
+  const upcoming=alerts?upcomingIpoEvents(alerts,indiaDateToday()):[];
   async function toggle(){
     if(open){setOpen(false);return;}
     setOpen(true);setLoading(true);setError("");
@@ -65,11 +68,13 @@ export default function NotificationCenter(){
     {open&&<><button type="button" className="atlas-notification-backdrop" aria-label="Close notifications" onClick={()=>setOpen(false)}/>
       <section className="atlas-notification-panel glass" aria-label="Notification center">
         <div className="atlas-notification-heading"><div><strong>Notifications</strong><small>IPOs · subscription · market events</small></div><button type="button" aria-label="Close notifications" onClick={()=>setOpen(false)}>×</button></div>
-        {!loading&&!error&&alerts&&<div className="atlas-notification-filters"><label htmlFor="notification-filter">Filter</label><select id="notification-filter" value={category} onChange={e=>setCategory(e.target.value)}><option value="ALL">All notifications</option><option value="IPO_UPCOMING">Upcoming IPOs</option><option value="IPO_SUBSCRIPTION">IPO subscriptions</option><option value="IPO_ALLOTMENT">IPO allotments</option><option value="MARKET_EVENT">Market events</option><option value="CORPORATE_ACTION">Corporate actions</option><option value="RESEARCH_UPDATE">Research updates</option><option value="RISK_WARNING">Risk warnings</option></select></div>}
+        {!loading&&!error&&alerts&&<div className="atlas-notification-filters"><button type="button" aria-pressed={view==="ALL"} onClick={()=>setView("ALL")}>All alerts</button><button type="button" aria-pressed={view==="IPO_CALENDAR"} onClick={()=>setView("IPO_CALENDAR")}>IPO calendar (30 days)</button></div>}
+        {!loading&&!error&&alerts&&view==="ALL"&&<div className="atlas-notification-filters"><label htmlFor="notification-filter">Filter</label><select id="notification-filter" value={category} onChange={e=>setCategory(e.target.value)}><option value="ALL">All notifications</option><option value="IPO_UPCOMING">Upcoming IPOs</option><option value="IPO_SUBSCRIPTION">IPO subscriptions</option><option value="IPO_ALLOTMENT">IPO allotments</option><option value="MARKET_EVENT">Market events</option><option value="CORPORATE_ACTION">Corporate actions</option><option value="RESEARCH_UPDATE">Research updates</option><option value="RISK_WARNING">Risk warnings</option></select></div>}
         {loading&&<p role="status">Loading notifications…</p>}
         {error&&<p role="alert">{error}</p>}
         {!loading&&!error&&alerts?.length===0&&<p className="muted tiny">No verified local alerts available. Live IPO and subscription feeds are not connected yet.</p>}
-        {!loading&&!error&&alerts?.filter(a=>category==="ALL"||a.category===category).map(a=><article className="atlas-notification-item" key={a.id}>
+        {!loading&&!error&&view==="IPO_CALENDAR"&&upcoming.length===0&&<p className="muted tiny">No dated IPO events supplied for the next 30 days. This does not mean no IPOs are scheduled.</p>}
+        {!loading&&!error&&(view==="IPO_CALENDAR"?upcoming:alerts?.filter(a=>category==="ALL"||a.category===category))?.map(a=><article className="atlas-notification-item" key={a.id}>
           <div className="atlas-notification-category">{a.category.replace(/_/g," ")}</div>
           <strong>{a.title}</strong><p>{a.description}</p>
           {a.event_date&&<small>Event: {a.event_date}</small>}
@@ -77,7 +82,7 @@ export default function NotificationCenter(){
           <small>Published {new Date(a.published_at).toLocaleString("en-IN")} · {a.source_name}</small>
           <a href={a.source_url} target="_blank" rel="noopener noreferrer">Source</a>
         </article>)}
-        {!loading&&!error&&alerts&&alerts.length>0&&alerts.every(a=>category!=="ALL"&&a.category!==category)&&<p className="muted tiny">No alerts in this category.</p>}
+        {!loading&&!error&&view==="ALL"&&alerts&&alerts.length>0&&alerts.every(a=>category!=="ALL"&&a.category!==category)&&<p className="muted tiny">No alerts in this category.</p>}
         <NotificationSourceHealth/>
         <p className="muted tiny">Alerts are loaded only when opened. Badge checks lightweight local metadata; no background market scraping.</p>
       </section></>}
