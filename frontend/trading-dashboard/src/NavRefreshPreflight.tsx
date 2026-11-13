@@ -4,9 +4,9 @@ type Result={status:"BLOCKED"|"READY_FOR_MANUAL_REVIEW";blockers:string[];detail
 export default function NavRefreshPreflight(){
  const [source,setSource]=useState("");const [authorized,setAuthorized]=useState(false);
  const [expected,setExpected]=useState("");const [records,setRecords]=useState("[]");
- const [result,setResult]=useState<Result|null>(null);const [error,setError]=useState("");const [loading,setLoading]=useState(false);
+ const [result,setResult]=useState<Result|null>(null);const [reviewedAt,setReviewedAt]=useState<string|null>(null);const [error,setError]=useState("");const [loading,setLoading]=useState(false);
  async function validate(){
-  setLoading(true);setError("");setResult(null);
+  setLoading(true);setError("");setResult(null);setReviewedAt(null);
   try{
    const codes=expected.split(/[\s,]+/).map(s=>s.trim()).filter(Boolean);
    if(!codes.length||codes.some(s=>!/^\d{1,12}$/.test(s)))throw Error("Enter numeric scheme codes separated by commas or whitespace.");
@@ -17,9 +17,27 @@ export default function NavRefreshPreflight(){
     body:JSON.stringify({source_name:source,source_authorized:authorized,expected_scheme_codes:codes,records:parsed})
    });
    if(!response.ok)throw Error("Preflight input rejected. Check source, scheme codes and NAV records.");
-   setResult(await response.json());
+   const data:Result=await response.json();
+   setResult(data);setReviewedAt(new Date().toISOString());
   }catch(e){setError(e instanceof Error?e.message:"Validation unavailable");}
   finally{setLoading(false);}
+ }
+ function exportReport(){
+  if(!result||!reviewedAt)return;
+  const report={
+   report_type:"ATLAS_NAV_REFRESH_PREFLIGHT",schema_version:1,
+   generated_at:reviewedAt,status:result.status,blockers:result.blockers,
+   details:result.details,
+   source_name:source,source_verification:result.source.verification,
+   source_authorization_user_attested:authorized,
+   stored:result.stored,refresh_executed:result.refresh_executed,
+   notice:result.notice,
+   privacy_note:"Diagnostic report only. Raw NAV prices and units are deliberately excluded. Scheme identifiers and source name remain in this file."
+  };
+  const blob=new Blob([JSON.stringify(report,null,2)],{type:"application/json"});
+  const url=URL.createObjectURL(blob);
+  const anchor=document.createElement("a");anchor.href=url;anchor.download="atlas-nav-preflight-"+reviewedAt.slice(0,10)+".json";
+  document.body.appendChild(anchor);anchor.click();anchor.remove();URL.revokeObjectURL(url);
  }
  return <section className="panel glass" aria-label="NAV refresh batch preflight">
   <div className="sectionhead"><div><small className="section-kicker">NAV REFRESH · PREFLIGHT ONLY</small><h2>Validate a NAV batch</h2></div><span className="tag">READ ONLY</span></div>
@@ -37,6 +55,8 @@ export default function NavRefreshPreflight(){
    <p className="muted tiny">Missing: {result.details.missing_scheme_codes.join(", ")||"none"} · Unexpected: {result.details.unexpected_scheme_codes.join(", ")||"none"} · Duplicate: {result.details.duplicate_scheme_codes.join(", ")||"none"}</p>
    <p className="muted tiny">Future dates: {result.details.future_scheme_codes.join(", ")||"none"} · Stale dates: {result.details.stale_scheme_codes.join(", ")||"none"} · Valuation dates: {result.details.matched_as_of_dates.join(", ")||"none"}</p>
    <p className="muted tiny">{result.notice}</p>
+   <button className="secondary" onClick={exportReport} disabled={!reviewedAt}>Export validation report (JSON)</button>
+   <p className="muted tiny">Report is generated locally and excludes raw NAV prices. It includes scheme codes, source name and diagnostics; review before sharing.</p>
   </div>}
  </section>;
 }
