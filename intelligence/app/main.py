@@ -768,3 +768,10 @@ from .provider_batch_preflight import BatchPreflightRequest,preflight_batch
 def provider_batch_preflight(request:BatchPreflightRequest):
     """Inspect prospective provider records without ingesting or authorizing collection."""
     return preflight_batch(request)
+
+from .nav_refresh_preflight import NavRefreshPreflightRequest,preflight_nav_refresh
+
+@app.post("/api/v1/intelligence/mutual-funds/nav-refresh-preflight")
+def mutual_fund_nav_refresh_preflight(request:NavRefreshPreflightRequest):
+    """Validate an explicitly supplied NAV refresh batch without storing or fetching."""
+    return preflight_nav_refresh(request)
