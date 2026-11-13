@@ -378,3 +378,5 @@ footer { padding: 12px 0 25px; color: var(--ink-muted); font-size: 10px; letter-
 .atlas-notification-item a{color:#68a9ff;font-size:12px}
 .atlas-notification-category{font-size:10px;font-weight:800;letter-spacing:.09em;color:#67b6e7}
 @media(max-width:680px){.atlas-notification-panel{position:fixed;top:70px;right:15px;max-height:70vh}}
+
+.atlas-notification-filters{display:flex;gap:10px;align-items:center;padding:12px 0}.atlas-notification-filters label{font-size:12px}.atlas-notification-filters select{flex:1;min-width:0;padding:8px;border-radius:8px;background:var(--panel,#17202c);color:inherit;border:1px solid rgba(140,160,180,.4)}.atlas-stale-label{display:block;color:#e8a044;font-size:11px;margin-top:5px}
