@@ -32,12 +32,34 @@ export default function StockExplorer(){
   const [query,setQuery]=useState("");const [exchange,setExchange]=useState("");const [results,setResults]=useState<Instrument[]>([]);const [selected,setSelected]=useState<Instrument|null>(null);
   const [technical,setTechnical]=useState<Technical|null>(null);const [summary,setSummary]=useState<Summary|null>(null);const [loading,setLoading]=useState(false);const [error,setError]=useState("");
   const [toggles,setToggles]=useState(new Set(["sma_20","sma_50","ema_20"]));
-  async function search(){setLoading(true);try{const params=new URLSearchParams({q:query,limit:"50"});if(exchange)params.set("exchange",exchange);const r=await fetch("/api/v1/instruments?"+params);if(!r.ok)throw Error("Instrument search failed");setResults(await r.json());setError("");}catch(e){setError(String(e));}finally{setLoading(false);}}
-  async function choose(item:Instrument){setSelected(item);setLoading(true);try{const [t,s]=await Promise.all([fetch(`/intelligence/api/v1/intelligence/technical/${item.id}`),fetch(`/intelligence/api/v1/intelligence/technical/${item.id}/summary`)]);if(!t.ok||!s.ok)throw Error("Technical research API is unavailable");setTechnical(await t.json());setSummary(await s.json());setError("");}catch(e){setError(String(e));setTechnical(null);setSummary(null);}finally{setLoading(false);}}
+  const [providerResolution,setProviderResolution]=useState<{subscription_ready:boolean;instrument_key:string|null;blocker:string|null}|null>(null);
+  const searchSeq=useRef(0);
+  async function search(){
+    const sequence=++searchSeq.current;
+    if(!query.trim()){setResults([]);setError("");return;}
+    setLoading(true);
+    try{
+      const params=new URLSearchParams({q:query.trim(),limit:"50"});
+      if(exchange)params.set("exchange",exchange);
+      const response=await fetch("/api/v1/instruments?"+params);
+      if(!response.ok)throw Error("Instrument search failed");
+      const items:Instrument[]=await response.json();
+      if(sequence===searchSeq.current){setResults(items);setError("");}
+    }catch(e){if(sequence===searchSeq.current){setResults([]);setError(String(e));}}
+    finally{if(sequence===searchSeq.current)setLoading(false);}
+  }
+  useEffect(()=>{
+    if(!query.trim()){searchSeq.current++;setResults([]);setError("");return;}
+    const handle=setTimeout(()=>{void search();},350);
+    return()=>clearTimeout(handle);
+  },[query,exchange]);
+  async function choose(item:Instrument){setSelected(item);setProviderResolution(null);setLoading(true);try{const [t,s]=await Promise.all([fetch(`/intelligence/api/v1/intelligence/technical/${item.id}`),fetch(`/intelligence/api/v1/intelligence/technical/${item.id}/summary`)]);if(!t.ok||!s.ok)throw Error("Technical research API is unavailable");setTechnical(await t.json());setSummary(await s.json());setError("");
+    try{const resolution=await fetch(`/intelligence/api/v1/intelligence/providers/upstox/resolve?instrument_id=${item.id}`);if(resolution.ok)setProviderResolution(await resolution.json());}catch{/* provider mapping is optional research metadata */}}catch(e){setError(String(e));setTechnical(null);setSummary(null);}finally{setLoading(false);}}
   function toggle(key:string){const next=new Set(toggles);next.has(key)?next.delete(key):next.add(key);setToggles(next);}
   return <div className="explorer">
-    <section className="panel glass explorer-search"><div className="sectionhead"><div><small className="section-kicker">VALIDATED DAILY DATA</small><h2>Stock Explorer</h2></div><span className="tag">RESEARCH ONLY</span></div><div className="searchbar"><select value={exchange} onChange={e=>setExchange(e.target.value)} aria-label="Exchange"><option value="">NSE + BSE</option><option>NSE</option><option>BSE</option></select><input value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>e.key==="Enter"&&search()} placeholder="Search symbol, security name or ISIN"/><button className="primary" onClick={search} disabled={loading}>Search</button></div>
+    <section className="panel glass explorer-search"><div className="sectionhead"><div><small className="section-kicker">VALIDATED DAILY DATA</small><h2>Stock Explorer</h2></div><span className="tag">RESEARCH ONLY</span></div><div className="searchbar"><select value={exchange} onChange={e=>setExchange(e.target.value)} aria-label="Exchange"><option value="">NSE + BSE</option><option>NSE</option><option>BSE</option></select><input value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>e.key==="Enter"&&search()} placeholder="Type stock name, ticker or ISIN — searches automatically"/><button className="primary" onClick={search} disabled={loading}>Search</button></div>
       {loading&&<p className="muted tiny" role="status">Loading validated market records…</p>}{error&&<div className="error">{error}</div>}<div className="instrument-results">{results.map(x=><button key={x.id} onClick={()=>choose(x)} className={selected?.id===x.id?"selected":""}><strong>{x.exchange}:{x.symbol}</strong><span>{x.security_name||x.isin||"Name unavailable"}</span><small>{x.listing_status} · {x.source}</small></button>)}{!results.length&&!loading&&<p className="muted tiny">The production registry is empty until a lawfully sourced instrument file is imported.</p>}</div></section>
+    {selected&&providerResolution&&<section className="panel glass"><small className="section-kicker">UPSTOX INSTRUMENT DISCOVERY</small><h3>{providerResolution.subscription_ready?"Instrument key resolved":"Live subscription unavailable"}</h3><p className="muted tiny">{providerResolution.subscription_ready?`Provider key: ${providerResolution.instrument_key} · Not connected to live feed`:providerResolution.blocker?.replace(/_/g," ")}</p></section>}
     {!selected?<section className="panel glass emptyfeature compact-empty"><div className="featureicon">⌁</div><h2>Select a validated instrument</h2><p>Charts and calculations appear only when registry and daily candle records exist. No demonstration prices are shown in production.</p></section>:
       technical?.candles?.length?<><div className="explorer-heading"><div><small className="section-kicker">{selected.exchange} · DAILY</small><h2>{selected.symbol} <span>{selected.security_name}</span></h2></div><div className="freshness"><span>Latest verified</span><strong>{technical.as_of}</strong><small>Not live · {technical.candle_count} candles · {technical.candles[technical.candles.length-1]?.source_code}</small></div></div>
       <ResearchAlerts key={"alerts-"+selected.id} instrumentId={selected.id}/>

@@ -11,10 +11,12 @@ describe("StockExplorer",()=>{
   it("renders the truthful empty registry state",async()=>{
     vi.stubGlobal("fetch",vi.fn().mockResolvedValue({ok:true,json:async()=>[]}));
     render(<StockExplorer/>);
-    fireEvent.click(screen.getByRole("button",{name:"Search"}));
-    await waitFor(()=>expect(fetch).toHaveBeenCalledWith("/api/v1/instruments?q=&limit=50"));
+    fireEvent.change(screen.getByPlaceholderText(/Type stock name, ticker or ISIN/i),{target:{value:"RELIANCE"}});
+    await waitFor(()=>expect(fetch).toHaveBeenCalledWith("/api/v1/instruments?q=RELIANCE&limit=50"));
     expect(screen.getByText(/production registry is empty/i)).toBeTruthy();
     expect(screen.getByText(/No demonstration prices are shown/i)).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText(/Type stock name, ticker or ISIN/i),{target:{value:""}});
+    await waitFor(()=>expect(screen.getByText(/production registry is empty/i)).toBeTruthy());
   });
 });
 
