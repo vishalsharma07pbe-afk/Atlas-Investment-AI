@@ -17,6 +17,7 @@ import ResearchSourceAudit from "./ResearchSourceAudit";
 import InstitutionalFlows from "./InstitutionalFlows";
 import NewsEvidence from "./NewsEvidence";
 import ProviderQuality from "./ProviderQuality";
+import ProviderBatchPreflight from "./ProviderBatchPreflight";
 import UpstoxAuthorization from "./UpstoxAuthorization";
 import MarketReadiness from "./MarketReadiness";
 import ProviderReconciliation from "./ProviderReconciliation";
@@ -197,6 +198,7 @@ export function App() {
           <MarketReadiness/>
           <UpstoxAuthorization/>
           <ProviderQuality/>
+          <ProviderBatchPreflight/>
           <ProviderReconciliation/>
           <div className="stats">
             <div className="stat glass"><small>INSTRUMENTS</small><strong>{health?.instrumentCount ?? "—"}</strong><span>NSE/BSE registry records</span><b aria-hidden="true">◇</b></div>

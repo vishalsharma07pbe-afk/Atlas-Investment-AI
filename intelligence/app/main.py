@@ -761,3 +761,10 @@ from .mutual_fund_reconciliation import FundReconciliationRequest,reconcile_fund
 def mutual_fund_reconcile(request:FundReconciliationRequest):
     """Read-only valuation comparison; never mutate recorded portfolio values."""
     return reconcile_funds(request)
+
+from .provider_batch_preflight import BatchPreflightRequest,preflight_batch
+
+@app.post("/api/v1/intelligence/providers/batch-preflight")
+def provider_batch_preflight(request:BatchPreflightRequest):
+    """Inspect prospective provider records without ingesting or authorizing collection."""
+    return preflight_batch(request)
