@@ -2,6 +2,7 @@ import React from "react";
 import MutualFundNavResearch from "./MutualFundNavResearch";
 import AmfiNavImport from "./AmfiNavImport";
 import MutualFundHistoryImport from "./MutualFundHistoryImport";
+import MutualFundComparison from "./MutualFundComparison";
 
 export type FundHolding = {
   id:number;symbol:string;asset_type:string;quantity:number;average_cost:number;
@@ -36,6 +37,7 @@ export default function MutualFundHoldings({holdings}:{holdings:FundHolding[]}){
     </section>
     <AmfiNavImport/>
     <MutualFundHistoryImport/>
+    <MutualFundComparison/>
     <MutualFundNavResearch/>
   </div>;
 }
