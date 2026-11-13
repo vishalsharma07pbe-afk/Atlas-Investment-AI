@@ -1,0 +1,94 @@
+"""Read-only Upstox V3 WebSocket transport.
+
+This is an opt-in, server-side binary frame transport, not a verified live quote
+pipeline. Protobuf decoding/persistence are deliberately separate.
+"""
+import asyncio
+import json
+import random
+import uuid
+from dataclasses import dataclass
+from typing import Awaitable, Callable
+from .upstox_authorization import authorize_feed
+from .upstox_stream import StreamPolicy,subscription_request
+
+@dataclass(frozen=True)
+class TransportPolicy:
+    max_retries: int = 5
+    base_delay_seconds: float = 1.0
+    max_delay_seconds: float = 30.0
+    connect_timeout_seconds: float = 15.0
+    max_frame_bytes: int = 1_048_576
+
+class TransportUnavailable(RuntimeError):
+    pass
+
+async def receive_session(
+    token: str,
+    instrument_keys: list[str],
+    on_binary_frame: Callable[[bytes], Awaitable[None]],
+    *,
+    policy: TransportPolicy = TransportPolicy(),
+    connect=None,
+    authorize=authorize_feed,
+) -> int:
+    """Authorize, subscribe, and forward bounded binary frames for trusted decoding.
+
+    Caller must provide a verified decoder; this function never interprets bytes
+    as prices. Do not log the signed URI, bearer token or raw frames.
+    """
+    if not callable(on_binary_frame):
+        raise ValueError("Binary frame handler required")
+    payload=subscription_request(instrument_keys,StreamPolicy(),str(uuid.uuid4()))
+    uri=await asyncio.to_thread(authorize,token)
+    if connect is None:
+        try:
+            from websockets.asyncio.client import connect as ws_connect
+        except ImportError as exc:
+            raise TransportUnavailable("WebSocket dependency unavailable") from None
+        connect=ws_connect
+    count=0
+    async with connect(uri,open_timeout=policy.connect_timeout_seconds,
+                       max_size=policy.max_frame_bytes,ping_interval=20,ping_timeout=20) as ws:
+        await ws.send(json.dumps(payload))
+        async for frame in ws:
+            if not isinstance(frame,bytes):
+                continue
+            if len(frame)>policy.max_frame_bytes:
+                raise TransportUnavailable("Provider frame exceeds configured limit")
+            await on_binary_frame(frame)
+            count+=1
+    return count
+
+async def reconnecting_stream(
+    token: str,
+    instrument_keys: list[str],
+    on_binary_frame: Callable[[bytes],Awaitable[None]],
+    *,
+    stop: asyncio.Event,
+    policy: TransportPolicy = TransportPolicy(),
+    session=receive_session,
+    sleep=asyncio.sleep,
+) -> dict:
+    """Bounded retries; a fresh authorization URI is requested on each session."""
+    if policy.max_retries<0 or policy.base_delay_seconds<=0 or policy.max_delay_seconds<=0:
+        raise ValueError("Invalid retry policy")
+    attempts=0
+    sessions=0
+    while not stop.is_set():
+        try:
+            await session(token,instrument_keys,on_binary_frame,policy=policy)
+            sessions+=1
+            if stop.is_set():break
+            attempts+=1
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            attempts+=1
+        if attempts>policy.max_retries:
+            return {"status":"DISCONNECTED","sessions":sessions,"retries":attempts-1,
+                    "reason":"RETRY_BUDGET_EXHAUSTED"}
+        delay=min(policy.max_delay_seconds,policy.base_delay_seconds*(2**(attempts-1)))
+        # Small jitter avoids synchronized reconnect storms.
+        await sleep(delay*(0.8+random.random()*0.2))
+    return {"status":"STOPPED","sessions":sessions,"retries":attempts}
