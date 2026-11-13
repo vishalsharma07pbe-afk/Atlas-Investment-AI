@@ -262,7 +262,7 @@ from urllib.request import Request, urlopen
 from fastapi import HTTPException, Query
 from pydantic import ValidationError
 
-_BACKEND_HOLDINGS_URL = "http://backend:8080/api/v1/portfolio/holdings"
+_BACKEND_HOLDINGS_URL = settings.backend_url.rstrip("/") + "/api/v1/portfolio/holdings"
 
 
 class PortfolioHolding(BaseModel):
