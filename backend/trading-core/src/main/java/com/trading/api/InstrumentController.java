@@ -29,4 +29,14 @@ public class InstrumentController {
       "WHERE (i.symbol ILIKE ? OR i.isin ILIKE ? OR i.security_name ILIKE ?) AND e.code=? ORDER BY CASE WHEN i.symbol ILIKE ? THEN 0 ELSE 1 END,e.code,i.symbol LIMIT ?",
       contains,contains,contains,exchange.trim().toUpperCase(),term+"%",safeLimit);
   }
+
+  @GetMapping("/{id}")
+  public org.springframework.http.ResponseEntity<Map<String,Object>> getById(@PathVariable long id) {
+    if (id <= 0) return org.springframework.http.ResponseEntity.badRequest().build();
+    var rows = jdbc.queryForList(
+      "SELECT i.id,e.code AS exchange,i.symbol,i.series,i.isin,i.security_name,i.instrument_type,i.listing_status,i.active,i.source,i.source_revision,i.updated_at " +
+      "FROM instruments i JOIN exchanges e ON e.id=i.exchange_id WHERE i.id=? LIMIT 1", id);
+    return rows.isEmpty() ? org.springframework.http.ResponseEntity.notFound().build()
+                          : org.springframework.http.ResponseEntity.ok(rows.get(0));
+  }
 }
