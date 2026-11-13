@@ -800,3 +800,10 @@ from .mutual_fund_risk import FundRiskRequest,assess_fund_risk
 def mutual_fund_portfolio_risk(request:FundRiskRequest):
     """Read-only recorded-value concentration; no inferred fund risk scores."""
     return assess_fund_risk(request)
+
+from .mutual_fund_historical_risk import HistoricalRiskRequest,historical_risk
+
+@app.post("/api/v1/intelligence/mutual-funds/historical-risk")
+def mutual_fund_historical_risk(request:HistoricalRiskRequest):
+    """Read-only historical NAV risk diagnostics."""
+    return historical_risk(request)
