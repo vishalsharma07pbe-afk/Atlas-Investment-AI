@@ -1,6 +1,6 @@
 import React,{useState} from "react";
 type Result={scheme_name:string;latest_nav:{as_of:string;nav:number;status:string};trailing_returns_pct:Record<string,number|null>;import:{rows_accepted:number;stored:boolean};source:{verification:string}};
-export type SharedNavHistory={schemeCode:string;sourceName:string;observations:{as_of:string;nav:string}[]};
+export type SharedNavHistory={schemeCode:string;schemeName:string;sourceName:string;csvText:string;observations:{as_of:string;nav:string}[]};
 export default function MutualFundHistoryImport({onValidated}:{onValidated?:(history:SharedNavHistory|null)=>void}){
  const [code,setCode]=useState("");const [name,setName]=useState("");const [source,setSource]=useState("");
  const [csv,setCsv]=useState("");const [result,setResult]=useState<Result|null>(null);
@@ -20,7 +20,7 @@ export default function MutualFundHistoryImport({onValidated}:{onValidated?:(his
     const header=lines.shift()?.split(",").map(v=>v.trim());
     if(header?.join(",")==="scheme_code,as_of,nav"){
      const observations=lines.map(line=>line.split(",").map(v=>v.trim())).map(fields=>({as_of:fields[1],nav:fields[2]}));
-     if(observations.length===data.import.rows_accepted)onValidated({schemeCode:code,sourceName:source,observations});
+     if(observations.length===data.import.rows_accepted)onValidated({schemeCode:code,schemeName:name,sourceName:source,csvText:csv,observations});
     }
    }
   }catch(e){setError(e instanceof Error?e.message:"Import unavailable");}
