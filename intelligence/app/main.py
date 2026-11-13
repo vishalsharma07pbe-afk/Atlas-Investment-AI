@@ -373,3 +373,10 @@ def portfolio_research(
         "actionable_recommendations_enabled": False,
         "notice": "Read-only portfolio research readiness. No independent market evidence, calibrated risk tier, investment recommendation, or trade execution.",
     }
+
+
+@app.get("/api/v1/intelligence/portfolio/stress-scenarios")
+def portfolio_stress_scenarios():
+    """Illustrative, uniform portfolio shocks; excludes unpriced holdings."""
+    from .portfolio_scenarios import stress_portfolio
+    return stress_portfolio(_fetch_portfolio_holdings())
