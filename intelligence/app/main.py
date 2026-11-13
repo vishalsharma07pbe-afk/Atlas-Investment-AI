@@ -431,3 +431,11 @@ def daily_backtest(instrument_id: int, fast: int = Query(default=10,ge=2,le=199)
         return backtest(raw,fast=fast,slow=slow,fee_bps=fee_bps,slippage_bps=slippage_bps)
     except (ValueError,KeyError,TypeError,OverflowError) as exc:
         raise HTTPException(status_code=422,detail="Backtest input failed OHLCV validation") from exc
+
+
+@app.get("/api/v1/intelligence/risk-qualification/{instrument_id}")
+def risk_qualification(instrument_id: int, max_age_days: int = Query(default=7,ge=0,le=30)):
+    """Read-only historical research gate, not a trading signal."""
+    from .risk_qualification import qualify
+    raw=backend_json(f"/api/v1/market-data/instruments/{instrument_id}/candles?limit=250")
+    return qualify(raw,max_age_days=max_age_days)
