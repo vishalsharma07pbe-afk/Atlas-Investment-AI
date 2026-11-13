@@ -17,8 +17,7 @@ class FeedSupervisor:
     async def start(self,*,enabled:bool,keys:list[str],token:str|None,
                     provider:str,rights:bool,entitlement:bool):
         if not enabled:
-        feed_supervisor.startup_result={"status":"DISABLED"}
-        return feed_supervisor.startup_result
+            return {"status":"DISABLED"}
         if self.task and not self.task.done():return {"status":"ALREADY_RUNNING"}
         if not keys:return {"status":"BLOCKED","blockers":["INSTRUMENT_KEYS_MISSING"]}
         try:subscription_request(keys,StreamPolicy(),"supervisor")
