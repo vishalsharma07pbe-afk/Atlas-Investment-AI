@@ -6,6 +6,7 @@ import PortfolioStress from "./PortfolioStress";
 import PortfolioAllocation from "./PortfolioAllocation";
 import GoalPlanner from "./GoalPlanner";
 import GoalComparison from "./GoalComparison";
+import ResearchJournal from "./ResearchJournal";
 import MutualFundHoldings from "./MutualFundHoldings";
 import MarketIntelligence from "./MarketIntelligence";
 import BrokerResearch from "./BrokerResearch";
@@ -181,6 +182,7 @@ export function App() {
           <PortfolioAllocation revision={portfolioRevision}/>
           <GoalPlanner/>
           <GoalComparison/>
+          <ResearchJournal/>
           <section className="panel glass holdings-panel"><div className="sectionhead"><div><small className="section-kicker">LIVE WORKSPACE</small><h2>Your holdings</h2></div><label className="upload">Import CSV <input type="file" accept=".csv,text/csv" hidden disabled={loading} onChange={e => { const file = e.target.files?.[0]; if (file) importCsv(file); e.target.value = ""; }}/></label></div><p className="muted tiny">CSV format: symbol,asset_type,quantity,average_cost,last_price. Use EQUITY or MUTUAL_FUND. Imports update matching holdings; they do not add transactions. Avoid commas inside fields.</p><div className="tablewrap"><table><thead><tr><th>SYMBOL</th><th>TYPE</th><th>QTY</th><th>AVG COST</th><th>LAST PRICE*</th><th>INVESTED</th><th>VALUE*</th><th>P&amp;L*</th><th/></tr></thead><tbody>
             {holdings.map(holding => <tr key={holding.id}><td className="symbol">{holding.symbol}</td><td><span className="asset-pill">{holding.asset_type}</span></td><td>{holding.quantity}</td><td>{fmt(holding.average_cost)}</td><td>{fmt(holding.last_price)}</td><td>{fmt(holding.invested)}</td><td>{fmt(holding.market_value)}</td><td className={(holding.unrealized_pnl || 0) >= 0 ? "positive" : "negative"}>{fmt(holding.unrealized_pnl)}</td><td><button className="danger" onClick={() => remove(holding.id)}>Delete</button></td></tr>)}
             {!holdings.length && <tr><td colSpan={9} className="empty">No holdings yet. Add your first position above or import a CSV.</td></tr>}
