@@ -380,3 +380,65 @@ footer { padding: 12px 0 25px; color: var(--ink-muted); font-size: 10px; letter-
 @media(max-width:680px){.atlas-notification-panel{position:fixed;top:70px;right:15px;max-height:70vh}}
 
 .atlas-notification-filters{display:flex;gap:10px;align-items:center;padding:12px 0}.atlas-notification-filters label{font-size:12px}.atlas-notification-filters select{flex:1;min-width:0;padding:8px;border-radius:8px;background:var(--panel,#17202c);color:inherit;border:1px solid rgba(140,160,180,.4)}.atlas-stale-label{display:block;color:#e8a044;font-size:11px;margin-top:5px}
+
+
+/* P0 usability: consistent responsive form fields across research and planning panels.
+   Existing feature forms often contain bare labels and controls without .form. */
+.panel form:not(.form) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: end;
+  margin: 18px 0;
+}
+.panel form:not(.form) > label {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+  min-width: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+.panel form:not(.form) > label > :is(input, select, textarea),
+.panel > label > :is(input, select, textarea),
+.panel .form :is(input, select, textarea) {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--field-border);
+  border-radius: 10px;
+  background: var(--field);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+.panel form:not(.form) textarea { min-height: 100px; resize: vertical; }
+.panel form:not(.form) > :is(button, .primary, .secondary) { justify-self: start; }
+.panel > label { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0; color: var(--ink-soft); font-size: 12px; }
+.panel > label > :is(input,select,textarea) { width: min(100%, 280px); }
+.panel :is(input,select,textarea):focus-visible,
+.sidebar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.panel .sectionhead { flex-wrap: wrap; }
+.panel .sectionhead > div { min-width: 0; }
+.panel .tablewrap { max-width: 100%; }
+.panel { min-width: 0; }
+.content { flex: 1 1 0; }
+.sidebar { position: sticky; top: 0; height: 100dvh; }
+.sidebar nav { min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; }
+.sidebar .brand, .sidebar .sidebottom { flex-shrink: 0; }
+@media (max-width: 1050px) {
+  .panel form:not(.form) { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 780px) {
+  .sidebar { height: auto; max-height: 42vh; overflow: visible; }
+  .sidebar nav { overflow-x: auto; overflow-y: hidden; }
+  .content { width: 100%; }
+  .panel form:not(.form) { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .panel form:not(.form) > :is(button,.primary,.secondary) { width: 100%; }
+}
