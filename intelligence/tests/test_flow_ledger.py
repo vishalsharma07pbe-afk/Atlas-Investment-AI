@@ -21,7 +21,7 @@ class FlowLedgerTests(unittest.TestCase):
                 self.assertEqual(flow_ledger.import_evidence(request)["unchanged"],1)
                 result=flow_ledger.list_evidence()
                 self.assertEqual(result["total"],1)
-                self.assertEqual(result["records"][0]["net_crore_inr"],"20.0000")
+                self.assertEqual(Decimal(result["records"][0]["net_crore_inr"]),Decimal("20"))
                 self.assertFalse(result["live_feed_connected"])
                 self.assertFalse(result["independently_verified"])
 
