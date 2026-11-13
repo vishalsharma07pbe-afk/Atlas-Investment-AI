@@ -15,12 +15,32 @@ export default function NotificationCenter(){
   const [error,setError]=useState("");
   const [summaryError,setSummaryError]=useState(false);
   useEffect(()=>{
+    let cancelled=false;
+    let inFlight=false;
     const controller=new AbortController();
-    fetch(BASE+"/summary",{signal:controller.signal})
-      .then(async response=>{if(!response.ok)throw Error("Unavailable");return response.json() as Promise<Summary>;})
-      .then(value=>{if(!controller.signal.aborted)setIds(value.revision_keys??value.ids);})
-      .catch(()=>{if(!controller.signal.aborted)setSummaryError(true);});
-    return ()=>controller.abort();
+    async function refreshSummary(){
+      if(cancelled||inFlight||document.visibilityState==="hidden")return;
+      inFlight=true;
+      try{
+        const response=await fetch(BASE+"/summary",{signal:controller.signal,cache:"no-store"});
+        if(!response.ok)throw Error("Notification summary unavailable");
+        const value=await response.json() as Summary;
+        if(!cancelled){setIds(value.revision_keys??value.ids);setSummaryError(false);}
+      }catch{
+        if(!cancelled)setSummaryError(true);
+      }finally{inFlight=false;}
+    }
+    void refreshSummary();
+    const onFocus=()=>{void refreshSummary();};
+    const onVisibility=()=>{if(document.visibilityState==="visible")void refreshSummary();};
+    window.addEventListener("focus",onFocus);
+    document.addEventListener("visibilitychange",onVisibility);
+    const timer=window.setInterval(()=>{void refreshSummary();},5*60*1000);
+    return ()=>{
+      cancelled=true;controller.abort();window.clearInterval(timer);
+      window.removeEventListener("focus",onFocus);
+      document.removeEventListener("visibilitychange",onVisibility);
+    };
   },[]);
   const count=ids.filter(id=>!seen.includes(id)).length;
   async function toggle(){
