@@ -8,6 +8,7 @@ import NavRefreshPreflight from "./NavRefreshPreflight";
 import MutualFundPlanning from "./MutualFundPlanning";
 import MutualFundGoals from "./MutualFundGoals";
 import MutualFundRisk from "./MutualFundRisk";
+import MutualFundHistoricalRisk from "./MutualFundHistoricalRisk";
 
 export type FundHolding = {
   id:number;symbol:string;asset_type:string;quantity:number;average_cost:number;
@@ -46,6 +47,7 @@ export default function MutualFundHoldings({holdings}:{holdings:FundHolding[]}){
     <MutualFundPlanning holdings={holdings}/>
     <MutualFundGoals/>
     <MutualFundRisk holdings={holdings}/>
+    <MutualFundHistoricalRisk/>
     <MutualFundReconciliation holdings={holdings}/>
     <NavRefreshPreflight/>
     <MutualFundNavResearch/>
