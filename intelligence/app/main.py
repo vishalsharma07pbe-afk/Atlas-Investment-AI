@@ -14,6 +14,7 @@ from .market_client import backend_json
 from .technical import Candle, compute, levels
 from .patterns import detect
 from .institutional_flows import FlowRequest
+from .news_events import NewsRequest
 
 app = FastAPI(
     title="ATLAS Trading Intelligence Engine",
@@ -407,3 +408,13 @@ def institutional_flow_analysis(request: "FlowRequest"):
         return analyze_flows(request.records)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/intelligence/news/analyze")
+def news_evidence_analysis(request: NewsRequest):
+    """Classify freshness of source-attributed user-supplied news events."""
+    from .news_events import analyze_news
+    try:
+        return analyze_news(request.events,request.max_age_hours)
+    except ValueError as exc:
+        raise HTTPException(status_code=422,detail=str(exc)) from exc
