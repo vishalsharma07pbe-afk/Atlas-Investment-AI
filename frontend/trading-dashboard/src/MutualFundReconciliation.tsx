@@ -5,7 +5,7 @@ type Row={holding_id:number;scheme_code:string;status:string;estimated_value:str
 type Diagnostic={code:string;severity:string;count:number;message:string};
 type Result={diagnostics:Diagnostic[];rows:Row[];missing_nav_positions:number;stale_nav_positions:number;portfolio_estimated_value:string|null;verification:string;notice:string};
 export default function MutualFundReconciliation({holdings,validatedHistories=[]}:{holdings:FundHolding[];validatedHistories?:SharedNavHistory[]}){
- const [mapping,setMapping]=useState("");const [navText,setNavText]=useState("[]");
+ const [mapping,setMapping]=useState("{}");const [navText,setNavText]=useState("[]");
  const [result,setResult]=useState<Result|null>(null);const [error,setError]=useState("");const [loading,setLoading]=useState(false);
  const funds=holdings.filter(h=>h.asset_type==="MUTUAL_FUND");
  async function inspect(useValidated=false){
