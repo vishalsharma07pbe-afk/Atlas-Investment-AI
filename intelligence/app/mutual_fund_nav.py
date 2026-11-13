@@ -3,12 +3,11 @@
 Data is supplied by caller, never fetched or claimed independently verified.
 """
 from datetime import date
-from math import isfinite
 from pydantic import BaseModel,Field,model_validator
 
 class NavPoint(BaseModel):
     as_of:date
-    nav:float=Field(gt=0)
+    nav:float=Field(gt=0,allow_inf_nan=False)
 
 class FundNavRequest(BaseModel):
     scheme_code:str=Field(min_length=1,max_length=40,pattern=r"^[A-Za-z0-9_-]+$")
