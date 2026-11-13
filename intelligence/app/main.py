@@ -743,3 +743,14 @@ def mutual_fund_history_import(request:NavHistoryImport):
         return import_nav_history(request)
     except ValueError:
         raise HTTPException(status_code=422,detail="Invalid historical NAV CSV or scheme selection") from None
+
+from .mutual_fund_comparison import FundComparisonRequest,compare_funds
+
+@app.post("/api/v1/intelligence/mutual-funds/compare")
+def mutual_fund_compare(request:FundComparisonRequest):
+    """Compare source-attributed NAV histories without ranking unverified funds."""
+    from fastapi import HTTPException
+    try:
+        return compare_funds(request)
+    except ValueError:
+        raise HTTPException(status_code=422,detail="Invalid fund comparison histories") from None
