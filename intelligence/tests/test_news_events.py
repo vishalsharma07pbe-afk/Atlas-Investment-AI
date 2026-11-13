@@ -25,7 +25,6 @@ class NewsTests(unittest.TestCase):
 
     def test_future_and_timezone_naive_rejected(self):
         with self.assertRaises(ValidationError):
-            event().model_copy(update={"published_at":None})
             NewsEvent(headline="Synthetic example headline",source_name="Publisher",
                 source_url="https://example.com/a",published_at=datetime.now(timezone.utc)+timedelta(days=1),
                 geography="GLOBAL",event_type="MACRO")
