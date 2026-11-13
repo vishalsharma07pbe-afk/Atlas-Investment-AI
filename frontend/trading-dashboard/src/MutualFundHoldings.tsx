@@ -1,6 +1,7 @@
 import React,{useState} from "react";
 import MutualFundNavResearch from "./MutualFundNavResearch";
 import MutualFundSchemeSearch from "./MutualFundSchemeSearch";
+import MutualFundSnapshotReview from "./MutualFundSnapshotReview";
 import AmfiNavImport from "./AmfiNavImport";
 import MutualFundHistoryImport from "./MutualFundHistoryImport";
 import type {SharedNavHistory} from "./MutualFundHistoryImport";
@@ -59,6 +60,7 @@ export default function MutualFundHoldings({holdings}:{holdings:FundHolding[]}){
     <MutualFundRisk holdings={holdings}/>
     <MutualFundHistoricalRisk validatedHistory={validatedHistory}/>
     <MutualFundReconciliation holdings={holdings} validatedHistories={validatedHistories}/>
+    <MutualFundSnapshotReview holdings={holdings}/>
     <NavRefreshPreflight/>
     <MutualFundNavResearch/>
   </div>;
