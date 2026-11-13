@@ -4,7 +4,7 @@ import "./style.css";
 import StockExplorer from "./StockExplorer";
 import PortfolioStress from "./PortfolioStress";
 import MutualFundHoldings from "./MutualFundHoldings";
-import DailyScreener from "./DailyScreener";
+import MarketIntelligence from "./MarketIntelligence";
 import InstitutionalFlows from "./InstitutionalFlows";
 import NewsEvidence from "./NewsEvidence";
 
@@ -173,7 +173,7 @@ export function App() {
             {holdings.map(holding => <tr key={holding.id}><td className="symbol">{holding.symbol}</td><td><span className="asset-pill">{holding.asset_type}</span></td><td>{holding.quantity}</td><td>{fmt(holding.average_cost)}</td><td>{fmt(holding.last_price)}</td><td>{fmt(holding.invested)}</td><td>{fmt(holding.market_value)}</td><td className={(holding.unrealized_pnl || 0) >= 0 ? "positive" : "negative"}>{fmt(holding.unrealized_pnl)}</td><td><button className="danger" onClick={() => remove(holding.id)}>Delete</button></td></tr>)}
             {!holdings.length && <tr><td colSpan={9} className="empty">No holdings yet. Add your first position above or import a CSV.</td></tr>}
           </tbody></table></div></section>
-        </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : (tab === 2 || tab === 3 || tab === 4) ? <DailyScreener/> : tab === 7 ? <StockExplorer/> : tab === 6 ? <>
+        </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : (tab === 2 || tab === 3 || tab === 4) ? <MarketIntelligence/> : tab === 7 ? <StockExplorer/> : tab === 6 ? <>
           <div className="stats">
             <div className="stat glass"><small>INSTRUMENTS</small><strong>{health?.instrumentCount ?? "—"}</strong><span>NSE/BSE registry records</span><b aria-hidden="true">◇</b></div>
             <div className="stat glass"><small>DAILY CANDLES</small><strong>{health?.candleCount ?? "—"}</strong><span>Validated 1d OHLCV records</span><b aria-hidden="true">▥</b></div>

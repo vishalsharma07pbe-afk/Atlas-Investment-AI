@@ -462,3 +462,20 @@ def upstox_daily_preview(instrument_key: str = Query(min_length=8,max_length=40)
     """Opt-in, read-only provider historical candle preview; never ingests data."""
     from .upstox_preview import preview_daily
     return preview_daily(instrument_key,from_date,to_date)
+
+
+@app.get("/api/v1/intelligence/market/overview")
+def integrated_market_overview(exchange: Literal["NSE","BSE"] | None = None,
+                               limit: int = Query(default=20,ge=1,le=20),
+                               max_age_days: int = Query(default=7,ge=0,le=30)):
+    """Daily sampled breadth, momentum, volume and anomaly observations."""
+    from urllib.parse import urlencode
+    from .market_intelligence import analyze_market
+    params={"limit":limit}
+    if exchange:params["exchange"]=exchange
+    instruments=backend_json("/api/v1/instruments?"+urlencode(params))
+    if not isinstance(instruments,list):
+        raise HTTPException(status_code=502,detail="Invalid instrument registry response")
+    def load(instrument_id):
+        return backend_json(f"/api/v1/market-data/instruments/{instrument_id}/candles?limit=250")
+    return analyze_market(instruments,load,max_age_days=max_age_days)
