@@ -1,5 +1,6 @@
 import React from "react";
 import MutualFundNavResearch from "./MutualFundNavResearch";
+import AmfiNavImport from "./AmfiNavImport";
 
 export type FundHolding = {
   id:number;symbol:string;asset_type:string;quantity:number;average_cost:number;
@@ -32,6 +33,7 @@ export default function MutualFundHoldings({holdings}:{holdings:FundHolding[]}){
       </tbody></table></div>
       <p className="muted tiny">Benchmark returns, expense ratios, fund overlap and forward NAV predictions are unavailable until verified fund reference and historical data are connected. No estimates are fabricated.</p>
     </section>
+    <AmfiNavImport/>
     <MutualFundNavResearch/>
   </div>;
 }
