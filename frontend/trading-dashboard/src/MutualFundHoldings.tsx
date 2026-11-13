@@ -4,6 +4,7 @@ import AmfiNavImport from "./AmfiNavImport";
 import MutualFundHistoryImport from "./MutualFundHistoryImport";
 import MutualFundComparison from "./MutualFundComparison";
 import MutualFundReconciliation from "./MutualFundReconciliation";
+import NavRefreshPreflight from "./NavRefreshPreflight";
 
 export type FundHolding = {
   id:number;symbol:string;asset_type:string;quantity:number;average_cost:number;
@@ -40,6 +41,7 @@ export default function MutualFundHoldings({holdings}:{holdings:FundHolding[]}){
     <MutualFundHistoryImport/>
     <MutualFundComparison/>
     <MutualFundReconciliation holdings={holdings}/>
+    <NavRefreshPreflight/>
     <MutualFundNavResearch/>
   </div>;
 }
