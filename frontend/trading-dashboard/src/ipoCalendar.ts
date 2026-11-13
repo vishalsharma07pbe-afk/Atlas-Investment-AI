@@ -12,5 +12,7 @@ export function upcomingIpoEvents<T extends CalendarAlert>(alerts:T[],today:stri
   }).sort((a,b)=>a.event_date!.localeCompare(b.event_date!)||b.published_at.localeCompare(a.published_at));
 }
 export function indiaDateToday(now=new Date()):string{
-  return new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).format(now);
+  const parts=new Intl.DateTimeFormat("en-US",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(now);
+  const value=(type:string)=>parts.find(p=>p.type===type)?.value??"";
+  return `${value("year")}-${value("month")}-${value("day")}`;
 }
