@@ -1,10 +1,10 @@
 /** @vitest-environment jsdom */
 import React from "react";
 import {describe,it,expect,vi,afterEach} from "vitest";
-import {render,screen,fireEvent,waitFor} from "@testing-library/react";
+import {render,screen,fireEvent,waitFor,cleanup} from "@testing-library/react";
 import ProviderBatchPreflight,{containsCredentialFields} from "./ProviderBatchPreflight";
 
-afterEach(()=>vi.unstubAllGlobals());
+afterEach(()=>{cleanup();vi.unstubAllGlobals();});
 describe("provider preflight credential protection",()=>{
  it("rejects nested and array credential keys",()=>{
   expect(containsCredentialFields({candles:[{metadata:{api_key:"secret"}}]})).toBe(true);
