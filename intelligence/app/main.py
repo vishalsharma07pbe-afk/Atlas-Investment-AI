@@ -712,3 +712,10 @@ async def start_opt_in_upstox_feed():
 @app.on_event("shutdown")
 async def stop_opt_in_upstox_feed():
     await feed_supervisor.stop()
+
+from .mutual_fund_nav import FundNavRequest,analyze_nav
+
+@app.post("/api/v1/intelligence/mutual-funds/nav-analysis")
+def mutual_fund_nav_analysis(request:FundNavRequest):
+    """Calculate read-only NAV performance from explicitly attributed user data."""
+    return analyze_nav(request)
