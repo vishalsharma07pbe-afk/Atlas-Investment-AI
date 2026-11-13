@@ -821,7 +821,7 @@ def mutual_fund_snapshot_portfolio_review(request:SnapshotPortfolioRequest):
     return inspect_snapshot_portfolio(request)
 
 # Local NAV catalog: intentionally no unattended download until source rights are confirmed.
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request as FastAPIRequest
 from .nav_catalog import import_snapshot, search_schemes, catalog_status, MAX_BYTES
 
 @app.get("/api/v1/intelligence/mutual-funds/status")
@@ -836,7 +836,7 @@ def mutual_fund_catalog_search(q: str = "", limit: int = 30):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 @app.post("/api/v1/intelligence/mutual-funds/import")
-async def mutual_fund_catalog_import(request: Request):
+async def mutual_fund_catalog_import(request: FastAPIRequest):
     # Loopback-only service behind the local frontend proxy; no external exposure.
     # Importing data is a local user action, not an authorized automated feed.
     if request.headers.get("content-length") and int(request.headers["content-length"]) > MAX_BYTES:
