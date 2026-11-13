@@ -554,3 +554,12 @@ def notifications_details():
     """Fetch full notification details only when explicitly requested."""
     try:return notification_details()
     except RuntimeError:raise HTTPException(status_code=503,detail="Local notification source unavailable")
+
+
+from .notification_source_health import inspect_sources
+
+@app.get("/api/v1/intelligence/notifications/sources/health")
+def notification_source_health():
+    """Read-only diagnostics for locally configured IPO notification sources."""
+    try:return inspect_sources()
+    except (ValueError,OSError):raise HTTPException(status_code=503,detail="Notification source health unavailable")

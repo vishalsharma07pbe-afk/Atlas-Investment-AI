@@ -1,4 +1,5 @@
 import React,{useEffect,useState} from "react";
+import NotificationSourceHealth from "./NotificationSourceHealth";
 type Alert={id:string;revision_key?:string;freshness?:"STALE"|"RECENT"|"NOT_APPLICABLE";category:string;title:string;description:string;event_date:string|null;published_at:string;source_name:string;source_url:string;subscription_total_x:string|null;subscription_as_of:string|null};
 type Summary={ids:string[];revision_keys?:string[];total:number;live_feed_connected:boolean};
 const BASE="/intelligence/api/v1/intelligence/notifications";
@@ -57,6 +58,7 @@ export default function NotificationCenter(){
           <a href={a.source_url} target="_blank" rel="noopener noreferrer">Source</a>
         </article>)}
         {!loading&&!error&&alerts&&alerts.length>0&&alerts.every(a=>category!=="ALL"&&a.category!==category)&&<p className="muted tiny">No alerts in this category.</p>}
+        <NotificationSourceHealth/>
         <p className="muted tiny">Alerts are loaded only when opened. Badge checks lightweight local metadata; no background market scraping.</p>
       </section></>}
   </div>;
