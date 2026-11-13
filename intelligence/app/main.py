@@ -522,3 +522,11 @@ from .research_ingestion import IngestionReview,audit_manifests
 def broker_research_ingestion_review(request:IngestionReview):
     """Audit source declarations before any future permitted collection."""
     return audit_manifests(request)
+
+
+from .research_coverage import CoverageRequest,coverage
+
+@app.post("/api/v1/intelligence/research/brokers/coverage")
+def broker_research_coverage(request:CoverageRequest):
+    """Per-provider user-submitted report coverage, without invented feeds."""
+    return coverage(request)
