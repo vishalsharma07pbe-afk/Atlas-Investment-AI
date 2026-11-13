@@ -29,6 +29,16 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ws.sent[0]["method"],"sub")
         self.assertEqual(len(urls),1)
 
+    async def test_connection_lifecycle(self):
+        states=[]
+        async def change(connected):states.append(connected)
+        async def callback(frame):pass
+        ws=FakeWebSocket([b"frame"])
+        await receive_session("secret",["NSE_EQ|INE002A01018"],callback,
+            connect=lambda *a,**k:ws,authorize=lambda token:"wss://feed.upstox.com/test",
+            on_connection_change=change)
+        self.assertEqual(states,[True,False])
+
     async def test_oversize_frame_fails_closed(self):
         ws=FakeWebSocket([b"0123456789"])
         async def callback(frame):self.fail("Oversized frame forwarded")
