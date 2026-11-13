@@ -665,3 +665,14 @@ def upstox_feed_authorization_readiness():
         settings.licensed_data_access,
         settings.entitlement_confirmed,
     )
+
+from .instrument_resolution import resolve_upstox_instrument
+
+@app.get("/api/v1/intelligence/providers/upstox/resolve")
+def resolve_stock_for_upstox(instrument_id: int):
+    """Read-only local registry resolution, not a market-data subscription."""
+    from fastapi import HTTPException
+    if instrument_id <= 0:
+        raise HTTPException(status_code=422,detail="Invalid instrument ID")
+    record=backend_json(f"/api/v1/instruments/{instrument_id}")
+    return resolve_upstox_instrument(record)
