@@ -29,7 +29,7 @@ class ResearchRecord(BaseModel):
     report_url:str=Field(min_length=12,max_length=1000)
     report_title:str=Field(min_length=3,max_length=250)
     report_id:str=Field(min_length=1,max_length=120)
-    evidence_status:Literal["USER_SUBMITTED","SOURCE_VERIFIED"]="USER_SUBMITTED"
+    evidence_status:Literal["USER_SUBMITTED"]="USER_SUBMITTED"
 
     @model_validator(mode="after")
     def validate_source(self):
