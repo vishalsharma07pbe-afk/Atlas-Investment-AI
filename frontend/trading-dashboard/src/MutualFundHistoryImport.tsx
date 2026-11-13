@@ -1,18 +1,28 @@
 import React,{useState} from "react";
 type Result={scheme_name:string;latest_nav:{as_of:string;nav:number;status:string};trailing_returns_pct:Record<string,number|null>;import:{rows_accepted:number;stored:boolean};source:{verification:string}};
-export default function MutualFundHistoryImport(){
+export type SharedNavHistory={schemeCode:string;sourceName:string;observations:{as_of:string;nav:string}[]};
+export default function MutualFundHistoryImport({onValidated}:{onValidated?:(history:SharedNavHistory|null)=>void}){
  const [code,setCode]=useState("");const [name,setName]=useState("");const [source,setSource]=useState("");
  const [csv,setCsv]=useState("");const [result,setResult]=useState<Result|null>(null);
  const [error,setError]=useState("");const [loading,setLoading]=useState(false);
  async function submit(){
-  setLoading(true);setError("");setResult(null);
+  setLoading(true);setError("");setResult(null);onValidated?.(null);
   try{
    const response=await fetch("/intelligence/api/v1/intelligence/mutual-funds/nav-history-import",{
     method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({scheme_code:code,scheme_name:name,source_name:source,csv_text:csv})
    });
    if(!response.ok)throw Error("Invalid historical NAV CSV, source or scheme code");
-   setResult(await response.json());
+   const data:Result=await response.json();
+   setResult(data);
+   if(onValidated){
+    const lines=csv.trim().split(/\r?\n/);
+    const header=lines.shift()?.split(",").map(v=>v.trim());
+    if(header?.join(",")==="scheme_code,as_of,nav"){
+     const observations=lines.map(line=>line.split(",").map(v=>v.trim())).map(fields=>({as_of:fields[1],nav:fields[2]}));
+     if(observations.length===data.import.rows_accepted)onValidated({schemeCode:code,sourceName:source,observations});
+    }
+   }
   }catch(e){setError(e instanceof Error?e.message:"Import unavailable");}
   finally{setLoading(false);}
  }
