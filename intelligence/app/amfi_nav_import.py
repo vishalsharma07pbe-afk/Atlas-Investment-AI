@@ -23,6 +23,7 @@ def parse_amfi(text:str,scheme_codes:list[str],today:date|None=None)->dict:
     if len(set(scheme_codes))!=len(scheme_codes):raise ValueError("Duplicate scheme codes")
     selected=set(scheme_codes)
     found={}
+    seen=set()
     rejected=0
     rows=0
     for line in text.splitlines():
@@ -35,10 +36,11 @@ def parse_amfi(text:str,scheme_codes:list[str],today:date|None=None)->dict:
         rows+=1
         if rows>MAX_ROWS:raise ValueError("Too many scheme rows")
         if code not in selected:continue
-        if code in found:
+        if code in seen:
             rejected+=1
             found.pop(code,None)
             continue
+        seen.add(code)
         try:
             value=Decimal(parts[4].strip())
             if not value.is_finite() or value<=0:raise ValueError("Invalid NAV")
