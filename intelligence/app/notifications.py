@@ -48,11 +48,14 @@ def _load():
 def summary():
     alerts=_load()
     return {"status":"LOCAL_SOURCE_ONLY","ids":[a.id for a in alerts],
+            "revision_keys":[a.id+"@"+a.published_at.isoformat() for a in alerts],
             "total":len(alerts),"live_feed_connected":False}
 
 def details():
     alerts=_load()
     return {"status":"LOCAL_SOURCE_ONLY","alerts":[{**a.model_dump(mode="json"),
+        "revision_key":a.id+"@"+a.published_at.isoformat(),
+        "freshness":("STALE" if (datetime.now(timezone.utc)-a.subscription_as_of).total_seconds()>3600*24 else "RECENT") if a.category=="IPO_SUBSCRIPTION" and a.subscription_as_of else "NOT_APPLICABLE",
         "subscription_total_x":str(a.subscription_total_x) if a.subscription_total_x is not None else None}
         for a in alerts],"total":len(alerts),"live_feed_connected":False,
         "notice":"Local, attributed alerts only. IPO dates and subscription rates are not independently verified or automatically refreshed."}
