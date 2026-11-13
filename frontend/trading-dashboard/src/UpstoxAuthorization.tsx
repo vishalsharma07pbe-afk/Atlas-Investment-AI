@@ -22,7 +22,7 @@ export default function UpstoxAuthorization(){
    <p className="muted tiny">Check local provider configuration without exposing tokens or initiating a provider connection. CONFIGURED does not mean connected.</p>
    <button className="secondary" disabled={loading} onClick={inspect}>{loading?"Checking…":"Check Upstox configuration"}</button>
    {error&&<p role="alert">{error}</p>}
-   {feed&&<div role="status"><p><strong>Worker:</strong> {feed.worker_running?"Running":"Stopped"} · <strong>WebSocket:</strong> {feed.transport_connected?"Connected":"Disconnected"} · <strong>Subscriptions:</strong> {feed.selected_instruments||0}</p><p className="muted tiny">Startup: {feed.startup?.status||"Unknown"}{feed.startup?.blockers?.length?` · ${feed.startup.blockers.join(", ").replace(/_/g," ")}`:""}. A connected socket alone does not establish a live quote.</p></div>}
+   {feed&&<div aria-label="Upstox worker diagnostics"><p><strong>Worker:</strong> {feed.worker_running?"Running":"Stopped"} · <strong>WebSocket:</strong> {feed.transport_connected?"Connected":"Disconnected"} · <strong>Subscriptions:</strong> {feed.selected_instruments||0}</p><p className="muted tiny">Startup: {feed.startup?.status||"Unknown"}{feed.startup?.blockers?.length?` · ${feed.startup.blockers.join(", ").replace(/_/g," ")}`:""}. A connected socket alone does not establish a live quote.</p></div>}
    {result&&<div role="status"><p><strong>{result.status}</strong> · Stream {result.live_stream_connected?"connected":"not connected"}</p>
      {result.blockers.length>0&&<ul>{result.blockers.map(x=><li key={x}>{x.replace(/_/g," ")}</li>)}</ul>}
      <p className="muted tiny">{result.notice}</p>
