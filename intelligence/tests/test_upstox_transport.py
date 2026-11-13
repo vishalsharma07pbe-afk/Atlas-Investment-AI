@@ -7,7 +7,7 @@ class FakeWebSocket:
     def __init__(self,frames):self.frames=frames;self.sent=[]
     async def __aenter__(self):return self
     async def __aexit__(self,*args):return False
-    async def send(self,message):self.sent.append(json.loads(message))
+    async def send(self,message):self.sent.append(json.loads(message.decode('utf-8')))
     def __aiter__(self):return self._iterate()
     async def _iterate(self):
         for frame in self.frames:yield frame
