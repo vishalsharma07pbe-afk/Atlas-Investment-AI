@@ -13,7 +13,7 @@ class Alert(BaseModel):
     event_date:date|None=None
     published_at:datetime
     source_name:str=Field(min_length=2,max_length=100)
-    source_url:str=Field(pattern=r"^https://[^\\s]+$",max_length=1000)
+    source_url:str=Field(pattern=r"^https://[^\s]+$",max_length=1000)
     subscription_total_x:Decimal|None=Field(default=None,ge=0,le=100000)
     subscription_as_of:datetime|None=None
 
