@@ -44,7 +44,7 @@ export default function NotificationCenter(){
       <section className="atlas-notification-panel glass" aria-label="Notification center">
         <div className="atlas-notification-heading"><div><strong>Notifications</strong><small>IPOs · subscription · market events</small></div><button type="button" aria-label="Close notifications" onClick={()=>setOpen(false)}>×</button></div>
         {loading&&<p role="status">Loading notifications…</p>}
-        {error&&<p role="alert">{error} <button type="button" onClick={()=>{setOpen(false);void toggle();}}>Retry</button></p>}
+        {error&&<p role="alert">{error}</p>}
         {!loading&&!error&&alerts?.length===0&&<p className="muted tiny">No verified local alerts available. Live IPO and subscription feeds are not connected yet.</p>}
         {!loading&&!error&&alerts?.map(a=><article className="atlas-notification-item" key={a.id}>
           <div className="atlas-notification-category">{a.category.replace(/_/g," ")}</div>
