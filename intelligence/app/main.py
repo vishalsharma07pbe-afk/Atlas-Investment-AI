@@ -585,3 +585,9 @@ from .goal_planning import GoalRequest,goal_projection
 def planning_goal_projection(request:GoalRequest):
     """Pure illustrative calculations, without price feeds or persisted personal goals."""
     return goal_projection(request)
+
+from .goal_comparison import ComparisonRequest,compare_scenarios
+
+@app.post('/api/v1/intelligence/planning/goal-comparison')
+def planning_goal_comparison(request:ComparisonRequest):
+    return compare_scenarios(request)
