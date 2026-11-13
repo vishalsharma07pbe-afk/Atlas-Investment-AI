@@ -75,6 +75,15 @@ The frontend proxies `/api` to trading-core and `/intelligence` to the intellige
 - Dark/light ambient gradients are animated with compositor-friendly transforms and disabled by `prefers-reduced-motion`.
 - Tables retain horizontal scrolling, Stock Explorer prioritizes chart width, and card grids collapse at tablet/mobile breakpoints.
 
+### Form and control refinement (2026-11-14)
+
+- Replaced arbitrary inline field widths with shared full-width `field`, `control-grid`, `editor`, and `form-actions` layout primitives.
+- Paired date/number fields now use equal columns; related JSON editors use symmetrical two-column or full-width layouts.
+- Labels, supporting hints, input heights, padding, focus rings, borders, and button rows now follow one consistent rhythm.
+- Restored the native `hidden` behavior for file inputs so browser “Choose File” controls no longer leak through the custom upload cards.
+- JSON and CSV editors use a readable monospaced treatment with controlled minimum heights and responsive wrapping.
+- Below 780px, all multi-column form groups collapse to a single column and actions become full-width.
+
 ## Production verification and actual data
 
 Persistent database after migration:

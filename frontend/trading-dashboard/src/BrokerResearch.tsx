@@ -28,11 +28,11 @@ export default function BrokerResearch(){
   return <div><section className="panel glass">
     <div className="sectionhead"><div><small className="section-kicker">MULTI-BROKER RESEARCH · SOURCE ATTRIBUTION</small><h2>Research consensus comparison</h2></div><span className="tag">NOT A TRADE SIGNAL</span></div>
     <p className="muted tiny">Compare dated, source-attributed research from Groww, Zerodha, Upstox, Angel One, ICICI Direct, Motilal Oswal, Nuvama and other providers. Reports must be supplied by you; ATLAS does not yet retrieve or verify broker research automatically.</p>
-    <label htmlFor="research-instrument">Instrument ISIN / identifier</label>
-    <input id="research-instrument" aria-label="Research instrument identifier" value={instrument} onChange={e=>setInstrument(e.target.value)} placeholder="INE848E01016"/>
-    <label htmlFor="research-records">Research records JSON</label>
-    <textarea id="research-records" aria-label="Research records JSON" rows={5} value={raw} onChange={e=>setRaw(e.target.value)} placeholder='[{"source":"ICICI_DIRECT","instrument_id":"...","symbol":"...","published_on":"YYYY-MM-DD","rating":"BUY","target_price":"1200","report_url":"https://...","report_title":"...","report_id":"..."}]'/>
-    <button className="primary" disabled={loading} onClick={compare}>{loading?"Comparing…":"Compare broker research"}</button>
+    <div className="form-layout">
+      <label className="field field-medium" htmlFor="research-instrument"><span>Instrument ISIN / identifier</span><input id="research-instrument" aria-label="Research instrument identifier" value={instrument} onChange={e=>setInstrument(e.target.value)} placeholder="INE848E01016"/></label>
+      <label className="field field-full" htmlFor="research-records"><span>Research records JSON</span><textarea className="editor" id="research-records" aria-label="Research records JSON" rows={5} value={raw} onChange={e=>setRaw(e.target.value)} placeholder='[{"source":"ICICI_DIRECT","instrument_id":"...","symbol":"...","published_on":"YYYY-MM-DD","rating":"BUY","target_price":"1200","report_url":"https://...","report_title":"...","report_id":"..."}]'/></label>
+      <div className="form-actions"><button className="primary" disabled={loading} onClick={compare}>{loading?"Comparing…":"Compare broker research"}</button></div>
+    </div>
     {error&&<p role="alert" className="error">{error}</p>}
     {result&&<div role="status"><p className="muted tiny">Fresh providers: {result.fresh_provider_count} · Fresh reports: {result.fresh_records} · Excluded stale/superseded: {result.excluded_stale_or_superseded}</p>
       <p>Ratings: {Object.entries(result.rating_counts).map(([k,v])=>k+": "+v).join(" · ")}</p>

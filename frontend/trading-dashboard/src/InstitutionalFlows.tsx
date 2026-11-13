@@ -32,11 +32,11 @@ export default function InstitutionalFlows(){
   return <section className="panel glass">
     <div className="sectionhead"><div><small className="section-kicker">INSTITUTIONAL FLOW RESEARCH</small><h2>FII / FPI / DII / Retail flows</h2></div><span className="tag">USER-SUPPLIED</span></div>
     <p className="muted tiny">Paste source-attributed CSV data to calculate net buying or selling in ₹ crore. No live exchange feed is connected. Never combine overlapping exchange and India-combined figures.</p>
-    <textarea aria-label="Institutional flow CSV" rows={6} value={csv} onChange={e=>setCsv(e.target.value)}
-      placeholder={"trade_date,market,participant,buy_crore_inr,sell_crore_inr,source_name\n2026-11-12,NSE,FII,100,120,Example source"}/>
-    <div><button className="primary" disabled={loading} onClick={async()=>{
+    <div className="form-layout"><label className="field field-full"><span>Source-attributed flow CSV</span><textarea className="editor" aria-label="Institutional flow CSV" rows={6} value={csv} onChange={e=>setCsv(e.target.value)}
+      placeholder={"trade_date,market,participant,buy_crore_inr,sell_crore_inr,source_name\n2026-11-12,NSE,FII,100,120,Example source"}/></label>
+    <div className="form-actions"><button className="primary" disabled={loading} onClick={async()=>{
       try{await analyze();}catch(e){setError(String(e));}
-    }}>{loading?"Analyzing…":"Analyze flow evidence"}</button></div>
+    }}>{loading?"Analyzing…":"Analyze flow evidence"}</button></div></div>
     {error&&<p role="alert" className="error">{error}</p>}
     {result&&<><p role="status" className="muted tiny">{result.notice}</p><div className="tablewrap"><table><thead><tr><th>DATE</th><th>MARKET</th><th>PARTICIPANT</th><th>NET ₹ CR</th><th>DIRECTION</th><th>SOURCE</th></tr></thead><tbody>{result.records.map((r,i)=><tr key={i}><td>{r.trade_date}</td><td>{r.market}</td><td>{r.participant}</td><td>{r.net_crore_inr}</td><td>{r.direction}</td><td>{r.source_name}</td></tr>)}</tbody></table></div></>}
   </section>;

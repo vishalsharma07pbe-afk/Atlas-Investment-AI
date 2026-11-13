@@ -382,8 +382,7 @@ footer { padding: 12px 0 25px; color: var(--ink-muted); font-size: 10px; letter-
 .atlas-notification-filters{display:flex;gap:10px;align-items:center;padding:12px 0}.atlas-notification-filters label{font-size:12px}.atlas-notification-filters select{flex:1;min-width:0;padding:8px;border-radius:8px;background:var(--panel,#17202c);color:inherit;border:1px solid rgba(140,160,180,.4)}.atlas-stale-label{display:block;color:#e8a044;font-size:11px;margin-top:5px}
 
 
-/* P0 usability: keep the desktop navigation in view and give controls their
-   own measured space instead of allowing adjacent labels to collide. */
+/* Unified form system: every control gets a predictable row, rhythm and width. */
 @media (min-width: 781px) {
   .dashboard .sidebar {
     position: fixed;
@@ -399,39 +398,64 @@ footer { padding: 12px 0 25px; color: var(--ink-muted); font-size: 10px; letter-
 }
 .dashboard .content { flex: 1 1 auto; max-width: none; }
 .dashboard .panel { min-width: 0; }
-.dashboard .panel :is(input,select,textarea) {
-  max-width: 100%;
-  box-sizing: border-box;
-  font: inherit;
-}
-.dashboard .panel textarea { resize: vertical; }
-.dashboard .panel label:has(> input:not([type="checkbox"]):not([type="radio"]), > select, > textarea) {
-  display: inline-grid;
-  grid-template-columns: minmax(0,1fr);
-  gap: 7px;
-  width: min(100%, 320px);
-  max-width: 100%;
-  margin: 7px 12px 12px 0;
-  vertical-align: top;
-  color: var(--ink-soft);
-  font-size: 12px;
-  line-height: 1.45;
-  font-weight: 650;
-}
-.dashboard .panel label:has(> input:not([type="checkbox"]):not([type="radio"]), > select, > textarea) > :is(input,select,textarea) {
+.dashboard input[hidden] { display: none !important; }
+.dashboard .panel :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),select,textarea) {
   display: block;
   width: 100%;
   min-width: 0;
-  min-height: 42px;
-  padding: 10px 12px;
-  border: 1px solid var(--field-border);
-  border-radius: 10px;
-  background: var(--field);
+  min-height: 46px;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 11px 13px;
+  border: 1px solid rgba(147, 170, 224, .26);
+  border-radius: 12px;
+  outline: none;
+  background: rgba(3, 8, 25, .68);
   color: var(--ink);
+  font: inherit;
   font-size: 13px;
+  line-height: 1.45;
+  box-shadow: inset 0 1px rgba(255,255,255,.045), 0 8px 24px rgba(1,5,18,.08);
+  transition: border-color .2s ease, box-shadow .2s ease, background-color .2s ease;
 }
-.dashboard .panel label:has(> textarea) { width: min(100%, 440px); }
-.dashboard .panel label:has(> textarea) > textarea { min-height: 88px; }
+.dashboard[data-theme="light"] .panel :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),select,textarea) { background: rgba(255,255,255,.76); }
+@media (prefers-color-scheme: light) {
+  .dashboard[data-theme="system"] .panel :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),select,textarea) { background: rgba(255,255,255,.76); }
+}
+.dashboard .panel :is(input,textarea)::placeholder { color: var(--ink-muted); opacity: .82; }
+.dashboard .panel textarea { resize: vertical; overflow-wrap: normal; tab-size: 2; }
+.dashboard .panel :is(input:not([type="range"]),select,textarea):focus {
+  border-color: rgba(91, 224, 199, .72);
+  background-color: rgba(6, 13, 35, .86);
+  box-shadow: 0 0 0 4px rgba(70, 215, 190, .1), inset 0 1px rgba(255,255,255,.06);
+}
+.dashboard[data-theme="light"] .panel :is(input:not([type="range"]),select,textarea):focus { background-color: rgba(255,255,255,.95); }
+.dashboard .panel label:has(> input:not([type="checkbox"]):not([type="radio"]), > select, > textarea) {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+  font-weight: 720;
+}
+.dashboard .panel label > span { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.dashboard .panel label > span small { color: var(--ink-muted); font-size: 9px; font-weight: 600; letter-spacing: .01em; }
+.form-layout { display: grid; gap: 16px; margin-top: 18px; min-width: 0; }
+.control-grid { display: grid; gap: 14px; min-width: 0; align-items: start; }
+.control-grid-2 { grid-template-columns: repeat(2,minmax(0,1fr)); }
+.control-grid-3 { grid-template-columns: repeat(3,minmax(0,1fr)); }
+.field { display: grid; gap: 8px; min-width: 0; margin: 0; color: var(--ink-soft); font-size: 12px; font-weight: 720; }
+.field-medium { max-width: 560px; }
+.field-full { width: 100%; }
+.editor { min-height: 132px !important; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important; font-size: 12px !important; line-height: 1.55 !important; }
+.editor-compact { min-height: 108px !important; }
+.editor-tall { min-height: 220px !important; }
+.form-actions { display: flex; align-items: center; justify-content: flex-start; gap: 10px; padding-top: 2px; }
+.form-actions :is(.primary,.secondary) { min-width: 190px; min-height: 44px; }
+.dashboard .panel > label:not(.upload):not(.border-toggle) { display: block; margin: 16px 0 7px; color: var(--ink-soft); font-size: 12px; font-weight: 720; }
+.dashboard .panel > :is(input:not([type="file"]):not([type="range"]),select,textarea) { margin-bottom: 14px; }
 .dashboard .panel :is(fieldset,form) { min-width: 0; max-width: 100%; }
 .dashboard .panel fieldset {
   border-color: var(--row-line);
@@ -440,13 +464,14 @@ footer { padding: 12px 0 25px; color: var(--ink-muted); font-size: 10px; letter-
   padding: 14px;
 }
 .dashboard .panel button { max-width: 100%; }
+.import-grid .upload { display: grid; place-items: center; min-height: 76px; padding: 16px; line-height: 1.35; }
+.import-grid .upload input[hidden] { display: none !important; }
 @media (max-width: 780px) {
   .dashboard .layout { padding-left: 0; }
   .dashboard .sidebar { position: sticky; }
-  .dashboard .panel label:has(> input:not([type="checkbox"]):not([type="radio"]), > select, > textarea) {
-    width: 100%;
-    margin-right: 0;
-  }
+  .control-grid-2,.control-grid-3 { grid-template-columns: 1fr; }
+  .form-actions { align-items: stretch; flex-direction: column; }
+  .form-actions :is(.primary,.secondary) { width: 100%; }
 }
 
 /* Additional accessibility polish; preserve the merged PR #75 layout rules. */
