@@ -1,4 +1,5 @@
 import React,{useState} from "react";
+import IpoImportHistory from "./IpoImportHistory";
 type Source={source_name:string;enabled:boolean;permission_declared:boolean;alert_count:number;latest_publication_at:string|null;latest_subscription_as_of:string|null;subscription_snapshot_stale:boolean|null;status:string};
 type Health={status:string;configured_sources:number;sources:Source[];live_feed_connected:boolean;notice:string};
 export default function NotificationSourceHealth(){
@@ -32,5 +33,6 @@ export default function NotificationSourceHealth(){
         <p className="muted tiny">{health.notice}</p>
       </>}
     </div>}
+    <IpoImportHistory/>
   </div>;
 }
