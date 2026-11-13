@@ -1,7 +1,8 @@
 import React,{useState} from "react";
 import type {FundHolding} from "./MutualFundHoldings";
 type Row={holding_id:number;scheme_code:string;status:string;estimated_value:string|null;difference_from_recorded:string|null};
-type Result={rows:Row[];missing_nav_positions:number;stale_nav_positions:number;portfolio_estimated_value:string|null;verification:string;notice:string};
+type Diagnostic={code:string;severity:string;count:number;message:string};
+type Result={diagnostics:Diagnostic[];rows:Row[];missing_nav_positions:number;stale_nav_positions:number;portfolio_estimated_value:string|null;verification:string;notice:string};
 export default function MutualFundReconciliation({holdings}:{holdings:FundHolding[]}){
  const [mapping,setMapping]=useState("");const [navText,setNavText]=useState("[]");
  const [result,setResult]=useState<Result|null>(null);const [error,setError]=useState("");const [loading,setLoading]=useState(false);
@@ -35,6 +36,8 @@ export default function MutualFundReconciliation({holdings}:{holdings:FundHoldin
   {result&&<div role="status">
    <p>{result.portfolio_estimated_value===null?"Complete portfolio estimate unavailable":"Estimated total: ₹"+result.portfolio_estimated_value}</p>
    <p className="muted tiny">Missing NAV positions: {result.missing_nav_positions} · Stale NAV positions: {result.stale_nav_positions}</p>
+   <h3>Data-quality diagnostics</h3>
+   <ul>{result.diagnostics.map(d=><li key={d.code}><strong>{d.severity}: {d.code.replace(/_/g," ")}</strong> ({d.count}) — {d.message}</li>)}</ul>
    <div className="tablewrap"><table><thead><tr><th>Holding ID</th><th>Scheme code</th><th>Status</th><th>Estimated value</th><th>Difference from recorded</th></tr></thead><tbody>
     {result.rows.map(row=><tr key={row.holding_id}><td>{row.holding_id}</td><td>{row.scheme_code}</td><td>{row.status}</td><td>{row.estimated_value??"—"}</td><td>{row.difference_from_recorded??"—"}</td></tr>)}
    </tbody></table></div><p className="muted tiny">{result.notice}</p>
