@@ -13,8 +13,10 @@ export default function ProviderBatchPreflight(){
  async function inspect(){
   setLoading(true);setError("");setReport(null);
   try{
+   const requestPayload:unknown=JSON.parse(input);
+   if(containsCredentialFields(requestPayload)) throw Error("Credential fields detected. Remove tokens, passwords and API secrets before preflight.");
    const response=await fetch("/intelligence/api/v1/intelligence/providers/batch-preflight",{
-    method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)
+    method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(requestPayload)
    });
    if(!response.ok)throw Error("Invalid provider batch; check schema, OHLC bounds and dates");
    const payload:Report=await response.json();
