@@ -11,7 +11,12 @@ export default function MutualFundHistoryImport({onValidated}:{onValidated?:(his
   requestVersion.current+=1;
   setResult(null);setError("");setLoading(false);
   const oldCode=validatedCode.current;
-  if(oldCode){onValidated?.(null,oldCode);validatedCode.current=null;}
+  if(oldCode){
+   // Switching to another scheme preserves its previously validated basket entry.
+   // Editing any other field invalidates the current scheme’s validation.
+   if(field!=="code"||value===oldCode)onValidated?.(null,oldCode);
+   validatedCode.current=null;
+  }
   if(field==="code")setCode(value);
   if(field==="name")setName(value);
   if(field==="source")setSource(value);
