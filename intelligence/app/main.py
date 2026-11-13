@@ -487,3 +487,11 @@ from .provider_batch import BatchRequest,review_batch
 def upstox_batch_review(request:BatchRequest):
     """Bounded, on-demand provider health review. Never persists candles."""
     return review_batch(request)
+
+
+from .provider_reconciliation import ReconciliationRequest,reconcile
+
+@app.post("/api/v1/intelligence/providers/reconcile")
+def provider_reconciliation(request:ReconciliationRequest):
+    """Review explicit instrument mapping and session/adjustment evidence; no writes."""
+    return reconcile(request)
