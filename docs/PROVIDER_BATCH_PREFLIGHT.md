@@ -9,3 +9,9 @@ Validations include positive finite OHLC, consistent high/low bounds, nonnegativ
 The response **always blocks ingestion**, even with otherwise valid test fixtures, until a verified adapter, official instrument registry mapping, entitlement and license approval, production backend ingestion, and an exchange-aware freshness gate are implemented. This is not a live-feed connection.
 
 Dashboard: Provider batch preflight in the market data health section. Use only test or authorized data, never credentials.
+
+## Browser-side credential guard
+
+The dashboard rejects JSON containing credential-like field names (including nested or array entries) such as `access_token`, `refresh_token`, `api_key`, `api_secret`, `client_secret`, `authorization`, `bearer_token`, or `password` before making a network request. This is defense-in-depth for accidental token paste, not a replacement for backend redaction, access control, or secure credential storage. Do not paste secrets into the dashboard, including under arbitrary field names or in string values. The dry-run API remains blocked and does not authorize ingestion.
+
+Regression tests cover nested credential rejection, zero network requests for blocked input, and the expected blocked dry-run response.
