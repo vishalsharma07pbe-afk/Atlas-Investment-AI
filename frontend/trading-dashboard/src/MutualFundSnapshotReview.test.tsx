@@ -11,7 +11,7 @@ describe("Integrated snapshot portfolio review",()=>{
   vi.stubGlobal("fetch",fetchMock);
   render(<MutualFundSnapshotReview holdings={[holding]}/>);
   fireEvent.change(screen.getByLabelText("Source name"),{target:{value:"Local NAV export"}});
-  fireEvent.change(screen.getByLabelText("Holding ID to scheme code JSON"),{target:{value:'{"7":"12345"}'}});
+  fireEvent.change(screen.getByLabelText("Snapshot review holding ID to scheme code JSON"),{target:{value:'{"7":"12345"}'}});
   fireEvent.change(screen.getByLabelText("AMFI-style NAV snapshot"),{target:{value:"12345;A;B;Fund A;12.5;01-Jan-2025"}});
   fireEvent.click(screen.getByRole("button",{name:"Review portfolio snapshot"}));
   await waitFor(()=>expect(screen.getByText(/STALE_NAV_DATES/)).toBeTruthy());
