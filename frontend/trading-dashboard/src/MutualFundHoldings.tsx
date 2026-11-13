@@ -1,5 +1,6 @@
 import React,{useState} from "react";
 import MutualFundNavResearch from "./MutualFundNavResearch";
+import MutualFundSchemeSearch from "./MutualFundSchemeSearch";
 import AmfiNavImport from "./AmfiNavImport";
 import MutualFundHistoryImport from "./MutualFundHistoryImport";
 import type {SharedNavHistory} from "./MutualFundHistoryImport";
@@ -49,6 +50,7 @@ export default function MutualFundHoldings({holdings}:{holdings:FundHolding[]}){
       </tbody></table></div>
       <p className="muted tiny">Benchmark returns, expense ratios, fund overlap and forward NAV predictions are unavailable until verified fund reference and historical data are connected. No estimates are fabricated.</p>
     </section>
+    <MutualFundSchemeSearch/>
     <AmfiNavImport/>
     <MutualFundHistoryImport onValidated={acceptHistory}/>
     <MutualFundComparison validatedHistories={validatedHistories} onRemoveValidated={code=>setValidatedHistories(previous=>previous.filter(item=>item.schemeCode!==code))}/>
