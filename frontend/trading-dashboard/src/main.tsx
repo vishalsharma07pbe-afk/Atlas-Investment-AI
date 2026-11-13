@@ -17,6 +17,7 @@ import ResearchSourceAudit from "./ResearchSourceAudit";
 import InstitutionalFlows from "./InstitutionalFlows";
 import NewsEvidence from "./NewsEvidence";
 import ProviderQuality from "./ProviderQuality";
+import UpstoxAuthorization from "./UpstoxAuthorization";
 import MarketReadiness from "./MarketReadiness";
 import ProviderReconciliation from "./ProviderReconciliation";
 import NotificationCenter from "./NotificationCenter";
@@ -194,6 +195,7 @@ export function App() {
           </tbody></table></div></section>
         </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : (tab === 2 || tab === 3 || tab === 4) ? <><MarketIntelligence/><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/></> : tab === 7 ? <StockExplorer/> : tab === 6 ? <>
           <MarketReadiness/>
+          <UpstoxAuthorization/>
           <ProviderQuality/>
           <ProviderReconciliation/>
           <div className="stats">
