@@ -19,7 +19,7 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(result["quality_summary"]["unused_nav_scheme_codes"],["789"])
         self.assertFalse(result["portfolio_estimate_complete"])
         self.assertIsNone(result["portfolio_estimated_value"])
-        self.assertIn("MIXED_AS_OF_DATES",{d["code"] for d in result["diagnostics"] if d["severity"]=="BLOCKER")
+        self.assertIn("MIXED_AS_OF_DATES",{d["code"] for d in result["diagnostics"] if d["severity"]=="BLOCKER"})
     def test_missing_and_stale_blockers(self):
         request=FundReconciliationRequest(
             positions=[{"holding_id":1,"scheme_code":"123","units":"10","invested":"100"},
