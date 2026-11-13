@@ -12,16 +12,20 @@ class FeedSupervisor:
         self.task=None
         self.last_result=None
         self.selected_count=0
+        self.startup_result={"status":"NOT_STARTED"}
 
     async def start(self,*,enabled:bool,keys:list[str],token:str|None,
                     provider:str,rights:bool,entitlement:bool):
-        if not enabled:return {"status":"DISABLED"}
+        if not enabled:
+        feed_supervisor.startup_result={"status":"DISABLED"}
+        return feed_supervisor.startup_result
         if self.task and not self.task.done():return {"status":"ALREADY_RUNNING"}
         if not keys:return {"status":"BLOCKED","blockers":["INSTRUMENT_KEYS_MISSING"]}
         try:subscription_request(keys,StreamPolicy(),"supervisor")
         except ValueError:return {"status":"BLOCKED","blockers":["INVALID_INSTRUMENT_KEYS"]}
         if provider!="UPSTOX" or not token or not rights or not entitlement:
-            return {"status":"BLOCKED","blockers":["PROVIDER_CONFIGURATION_INCOMPLETE"]}
+            feed_supervisor.startup_result={"status":"BLOCKED","blockers":["PROVIDER_CONFIGURATION_INCOMPLETE"]}
+        return feed_supervisor.startup_result
         async def runner():
             try:self.last_result=await self.worker.run(token,keys,provider=provider,
                                   rights=rights,entitlement=entitlement)
@@ -43,7 +47,7 @@ class FeedSupervisor:
         self.selected_count=0
 
     def status(self):
-        return {"selected_instruments":self.selected_count,
+        return {"startup":self.startup_result,"selected_instruments":self.selected_count,
                 "supervised_task_running":bool(self.task and not self.task.done()),
                 "last_result":self.last_result}
 
@@ -55,7 +59,8 @@ async def startup_feed():
     raw_ids=os.getenv("ATLAS_UPSTOX_INSTRUMENT_IDS","")
     raw_keys=os.getenv("ATLAS_UPSTOX_INSTRUMENT_KEYS","")
     if raw_ids.strip() and raw_keys.strip():
-        return {"status":"BLOCKED","blockers":["CONFLICTING_INSTRUMENT_SELECTION"]}
+        feed_supervisor.startup_result={"status":"BLOCKED","blockers":["CONFLICTING_INSTRUMENT_SELECTION"]}
+        return feed_supervisor.startup_result
     if not (settings.provider=="UPSTOX" and settings.upstox_token and
             settings.licensed_data_access and settings.entitlement_confirmed):
         return {"status":"BLOCKED","blockers":["PROVIDER_CONFIGURATION_INCOMPLETE"]}
@@ -66,7 +71,9 @@ async def startup_feed():
         else:
             keys=[x.strip() for x in raw_keys.split(",") if x.strip()]
     except FeedSelectionError:
-        return {"status":"BLOCKED","blockers":["INSTRUMENT_REGISTRY_RESOLUTION_FAILED"]}
-    return await feed_supervisor.start(enabled=enabled,keys=keys,token=settings.upstox_token,
+        feed_supervisor.startup_result={"status":"BLOCKED","blockers":["INSTRUMENT_REGISTRY_RESOLUTION_FAILED"]}
+        return feed_supervisor.startup_result
+    feed_supervisor.startup_result=await feed_supervisor.start(enabled=enabled,keys=keys,token=settings.upstox_token,
                                       provider=settings.provider,rights=settings.licensed_data_access,
                                       entitlement=settings.entitlement_confirmed)
+    return feed_supervisor.startup_result
