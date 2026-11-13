@@ -45,6 +45,7 @@ services:
       MARKET_DATA_RATE_PER_SECOND: ${MARKET_DATA_RATE_PER_SECOND:-1}
       UPSTOX_ACCESS_TOKEN: ${UPSTOX_ACCESS_TOKEN:-}
       ATLAS_ALERTS_FILE: /app/data/alerts.json
+      ATLAS_ALERT_FEED_REGISTRY: /app/data/feeds.json
     volumes:
       - ./data/notifications:/app/data:ro
     ports: ["127.0.0.1:${INTELLIGENCE_PORT:-8000}:8000"]
