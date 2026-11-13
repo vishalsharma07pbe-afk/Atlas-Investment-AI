@@ -632,3 +632,23 @@ from .portfolio_concentration import LimitsRequest,concentration_report
 def portfolio_concentration(request:LimitsRequest):
     """Read-only concentration report for locally recorded holdings."""
     return concentration_report(_fetch_portfolio_holdings(),request)
+
+from .market_readiness import ReadinessPolicy,evaluate_readiness
+
+@app.get("/api/v1/intelligence/market/readiness")
+def market_data_readiness(
+    max_calendar_age_days: int = Query(default=7,ge=0,le=30),
+    minimum_instruments: int = Query(default=1,ge=1,le=1000000),
+    minimum_candles: int = Query(default=1,ge=1,le=100000000),
+    require_live_feed: bool = True,
+):
+    """Fail-closed evaluation of locally recorded source health, no provider calls."""
+    health=backend_json("/api/v1/data-health/summary")
+    if not isinstance(health,dict):
+        raise HTTPException(status_code=502,detail="Invalid backend data-health response")
+    return evaluate_readiness(health,ReadinessPolicy(
+        max_calendar_age_days=max_calendar_age_days,
+        minimum_instruments=minimum_instruments,
+        minimum_candles=minimum_candles,
+        require_live_feed=require_live_feed,
+    ))
