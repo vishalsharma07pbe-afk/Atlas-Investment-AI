@@ -2,6 +2,7 @@ import React, {useEffect, useState} from "react";
 import {createRoot} from "react-dom/client";
 import "./style.css";
 import StockExplorer from "./StockExplorer";
+import PortfolioStress from "./PortfolioStress";
 
 type Holding = {id:number;symbol:string;asset_type:string;quantity:number;average_cost:number;last_price:number|null;invested:number;market_value:number|null;unrealized_pnl:number|null;price_as_of:string|null};
 type Analysis = {holdingCount:number;invested:number;pricedMarketValue:number;pricedUnrealizedPnl:number;unpricedHoldings:number;valuationComplete:boolean;riskFlags:string[]};
@@ -60,13 +61,14 @@ export function App() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [health, setHealth] = useState<DataHealth|null>(null);
+  const [portfolioRevision, setPortfolioRevision] = useState(0);
   const [form, setForm] = useState({symbol:"", assetType:"EQUITY", quantity:"", averageCost:"", lastPrice:""});
 
   async function load() {
     try {
       const [h, a] = await Promise.all([fetch(API + "/holdings"), fetch(API + "/analysis")]);
       if (!h.ok || !a.ok) throw Error("Portfolio API is unavailable. Start the local backend.");
-      setHoldings(await h.json()); setAnalysis(await a.json()); setError("");
+      setHoldings(await h.json()); setAnalysis(await a.json()); setPortfolioRevision(v => v + 1); setError("");
     } catch (e) { setError(String(e)); }
   }
 
@@ -162,6 +164,7 @@ export function App() {
               <button className="primary" disabled={loading}>Save holding <span>→</span></button>
             </form></section>
           </div>
+          <PortfolioStress revision={portfolioRevision}/>
           <section className="panel glass holdings-panel"><div className="sectionhead"><div><small className="section-kicker">LIVE WORKSPACE</small><h2>Your holdings</h2></div><label className="upload">Import CSV <input type="file" accept=".csv,text/csv" hidden disabled={loading} onChange={e => { const file = e.target.files?.[0]; if (file) importCsv(file); e.target.value = ""; }}/></label></div><p className="muted tiny">CSV format: symbol,asset_type,quantity,average_cost,last_price. Use EQUITY or MUTUAL_FUND. Imports update matching holdings; they do not add transactions. Avoid commas inside fields.</p><div className="tablewrap"><table><thead><tr><th>SYMBOL</th><th>TYPE</th><th>QTY</th><th>AVG COST</th><th>LAST PRICE*</th><th>INVESTED</th><th>VALUE*</th><th>P&amp;L*</th><th/></tr></thead><tbody>
             {holdings.map(holding => <tr key={holding.id}><td className="symbol">{holding.symbol}</td><td><span className="asset-pill">{holding.asset_type}</span></td><td>{holding.quantity}</td><td>{fmt(holding.average_cost)}</td><td>{fmt(holding.last_price)}</td><td>{fmt(holding.invested)}</td><td>{fmt(holding.market_value)}</td><td className={(holding.unrealized_pnl || 0) >= 0 ? "positive" : "negative"}>{fmt(holding.unrealized_pnl)}</td><td><button className="danger" onClick={() => remove(holding.id)}>Delete</button></td></tr>)}
             {!holdings.length && <tr><td colSpan={9} className="empty">No holdings yet. Add your first position above or import a CSV.</td></tr>}
