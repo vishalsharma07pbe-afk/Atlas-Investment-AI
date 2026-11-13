@@ -380,3 +380,19 @@ def portfolio_stress_scenarios():
     """Illustrative, uniform portfolio shocks; excludes unpriced holdings."""
     from .portfolio_scenarios import stress_portfolio
     return stress_portfolio(_fetch_portfolio_holdings())
+
+
+@app.get("/api/v1/intelligence/screener/daily")
+def daily_screener(exchange: Literal["NSE", "BSE"] | None = None, limit: int = Query(default=20, ge=1, le=20), max_age_days: int = Query(default=7, ge=0, le=30)):
+    """On-demand daily sample only; no background work or market-wide claim."""
+    from urllib.parse import urlencode
+    from .screener import screen
+    params = {"limit": limit}
+    if exchange:
+        params["exchange"] = exchange
+    instruments = backend_json("/api/v1/instruments?" + urlencode(params))
+    if not isinstance(instruments, list):
+        raise HTTPException(status_code=502, detail="Invalid instrument registry response")
+    def load(instrument_id):
+        return backend_json(f"/api/v1/market-data/instruments/{instrument_id}/candles?limit=250")
+    return screen(instruments, load, max_age_days=max_age_days)
