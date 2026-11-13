@@ -20,3 +20,8 @@ This release **does not scrape or automatically collect broker reports**. Inputs
 Build permissioned report ingestion adapters per provider; record report publication and retrieval times, source rights, document hashes, analyst identity and revisions; extract claims with traceable page references; compare earnings assumptions and target methodologies; evaluate historical forecast calibration with survivorship/lookahead safeguards; then combine research as one input to a strict independent decision gate.
 
 Tests: `cd intelligence && python3 -m unittest discover -s tests -v` and `cd frontend/trading-dashboard && npm test && npm run build`.
+
+
+## Source manifest audit (this batch)
+
+`POST /api/v1/intelligence/research/brokers/ingestion-review` accepts up to 100 user-supplied metadata manifests with provider code, acquisition mode, access and redistribution declarations, report/document ID, publication/retrieval dates, HTTPS provenance URL and SHA-256 declaration. It flags duplicate document IDs, unconfirmed permissions and unverified automated connectors. **Every document remains quarantined** because no report is downloaded, independently hashed, parsed or authenticated. The dashboard has a separate on-demand source audit panel. This is a provenance review, not a licensed feed integration.
