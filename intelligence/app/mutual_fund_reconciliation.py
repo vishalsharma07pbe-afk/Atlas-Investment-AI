@@ -6,13 +6,13 @@ from pydantic import BaseModel,Field,model_validator
 class FundPosition(BaseModel):
     holding_id:int=Field(gt=0)
     scheme_code:str=Field(min_length=1,max_length=12,pattern=r"^[0-9]+$")
-    units:Decimal=Field(gt=0)
-    invested:Decimal=Field(ge=0)
-    recorded_value:Decimal|None=Field(default=None,ge=0)
+    units:Decimal=Field(gt=0,allow_inf_nan=False)
+    invested:Decimal=Field(ge=0,allow_inf_nan=False)
+    recorded_value:Decimal|None=Field(default=None,ge=0,allow_inf_nan=False)
 
 class FundNav(BaseModel):
     scheme_code:str=Field(min_length=1,max_length=12,pattern=r"^[0-9]+$")
-    nav:Decimal=Field(gt=0)
+    nav:Decimal=Field(gt=0,allow_inf_nan=False)
     as_of:date
     source_name:str=Field(min_length=1,max_length=120)
 
