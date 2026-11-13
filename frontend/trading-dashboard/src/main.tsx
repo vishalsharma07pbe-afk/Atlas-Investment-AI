@@ -16,6 +16,7 @@ import BrokerResearch from "./BrokerResearch";
 import ResearchOutcomes from "./ResearchOutcomes";
 import ResearchSourceAudit from "./ResearchSourceAudit";
 import InstitutionalFlows from "./InstitutionalFlows";
+import FlowLedger from "./FlowLedger";
 import NewsEvidence from "./NewsEvidence";
 import ProviderQuality from "./ProviderQuality";
 import ProviderBatchPreflight from "./ProviderBatchPreflight";
@@ -213,6 +214,7 @@ export function App() {
             <div className="notice warning-notice">Daily candles must explicitly declare RAW_UNADJUSTED or ADJUSTED. ATLAS never silently assumes corporate-action adjustment.</div>
           </section>
           <InstitutionalFlows/>
+          <FlowLedger/>
           <NewsEvidence/>
           <div className="two health-two">
             <section className="panel glass"><div className="sectionhead"><div><small className="section-kicker">EXCHANGE COVERAGE</small><h2>Registry &amp; date coverage</h2></div></div><div className="tablewrap"><table><thead><tr><th>EXCHANGE</th><th>INSTRUMENTS</th><th>CANDLES</th><th>FIRST DATE</th><th>LATEST DATE</th></tr></thead><tbody>{health?.coverage.map(row=><tr key={row.exchange}><td className="symbol">{row.exchange}</td><td>{row.instruments}</td><td>{row.candle_count}</td><td>{row.first_date || "—"}</td><td>{row.latest_date || "—"}</td></tr>)}</tbody></table></div></section>
