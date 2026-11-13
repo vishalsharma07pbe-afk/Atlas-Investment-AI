@@ -3,7 +3,7 @@
 This module deliberately does not issue investment recommendations. Factor scores are
 user-/upstream-supplied observations, not independently verified market research.
 """
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Literal
 
