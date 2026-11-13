@@ -1,6 +1,6 @@
 import unittest
 from datetime import date
-from intelligence.app.market_readiness import ReadinessPolicy, evaluate_readiness
+from app.market_readiness import ReadinessPolicy, evaluate_readiness
 
 TODAY = date(2026, 11, 13)
 def healthy():
