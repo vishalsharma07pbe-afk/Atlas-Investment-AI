@@ -1,7 +1,8 @@
-import React from "react";
+import React,{useState} from "react";
 import MutualFundNavResearch from "./MutualFundNavResearch";
 import AmfiNavImport from "./AmfiNavImport";
 import MutualFundHistoryImport from "./MutualFundHistoryImport";
+import type {SharedNavHistory} from "./MutualFundHistoryImport";
 import MutualFundComparison from "./MutualFundComparison";
 import MutualFundReconciliation from "./MutualFundReconciliation";
 import NavRefreshPreflight from "./NavRefreshPreflight";
@@ -18,6 +19,7 @@ export type FundHolding = {
 const fmt=(value:number)=>new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",maximumFractionDigits:2}).format(value);
 
 export default function MutualFundHoldings({holdings}:{holdings:FundHolding[]}){
+  const [validatedHistory,setValidatedHistory]=useState<SharedNavHistory|null>(null);
   const funds=holdings.filter(h=>h.asset_type==="MUTUAL_FUND");
   const invested=funds.reduce((sum,h)=>sum+Number(h.invested),0);
   const priced=funds.filter(h=>h.last_price!==null && h.market_value!==null);
@@ -42,12 +44,12 @@ export default function MutualFundHoldings({holdings}:{holdings:FundHolding[]}){
       <p className="muted tiny">Benchmark returns, expense ratios, fund overlap and forward NAV predictions are unavailable until verified fund reference and historical data are connected. No estimates are fabricated.</p>
     </section>
     <AmfiNavImport/>
-    <MutualFundHistoryImport/>
+    <MutualFundHistoryImport onValidated={setValidatedHistory}/>
     <MutualFundComparison/>
     <MutualFundPlanning holdings={holdings}/>
     <MutualFundGoals/>
     <MutualFundRisk holdings={holdings}/>
-    <MutualFundHistoricalRisk/>
+    <MutualFundHistoricalRisk validatedHistory={validatedHistory}/>
     <MutualFundReconciliation holdings={holdings}/>
     <NavRefreshPreflight/>
     <MutualFundNavResearch/>
