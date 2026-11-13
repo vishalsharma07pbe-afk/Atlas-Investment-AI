@@ -17,6 +17,7 @@ import ResearchSourceAudit from "./ResearchSourceAudit";
 import InstitutionalFlows from "./InstitutionalFlows";
 import NewsEvidence from "./NewsEvidence";
 import ProviderQuality from "./ProviderQuality";
+import MarketReadiness from "./MarketReadiness";
 import ProviderReconciliation from "./ProviderReconciliation";
 import NotificationCenter from "./NotificationCenter";
 
@@ -192,6 +193,7 @@ export function App() {
             {!holdings.length && <tr><td colSpan={9} className="empty">No holdings yet. Add your first position above or import a CSV.</td></tr>}
           </tbody></table></div></section>
         </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : (tab === 2 || tab === 3 || tab === 4) ? <><MarketIntelligence/><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/></> : tab === 7 ? <StockExplorer/> : tab === 6 ? <>
+          <MarketReadiness/>
           <ProviderQuality/>
           <ProviderReconciliation/>
           <div className="stats">
