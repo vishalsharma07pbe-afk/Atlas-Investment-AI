@@ -10,14 +10,18 @@ export default function MutualFundHistoricalRisk({validatedHistory}:{validatedHi
    const selectedCode=shared?.schemeCode??code;
    const selectedSource=shared?.sourceName??source;
    if(!/^[0-9]{1,12}$/.test(selectedCode))throw Error("Enter an exact numeric scheme code.");
-   const lines=csv.trim().split(/\r?\n/);
-   if(lines.shift()?.trim()!=="as_of,nav")throw Error("CSV header must be as_of,nav.");
-   const manualObservations=lines.map(line=>{
-    const fields=line.split(",").map(x=>x.trim());
-    if(fields.length!==2||!/^\d{4}-\d{2}-\d{2}$/.test(fields[0])||!fields[1])throw Error("Each row needs an ISO date and NAV.");
-    return {as_of:fields[0],nav:fields[1]};
-   });
-   const observations=shared?.observations??manualObservations;
+   let observations:{as_of:string;nav:string}[];
+   if(shared){
+    observations=shared.observations;
+   }else{
+    const lines=csv.trim().split(/\r?\n/);
+    if(lines.shift()?.trim()!=="as_of,nav")throw Error("CSV header must be as_of,nav.");
+    observations=lines.map(line=>{
+     const fields=line.split(",").map(x=>x.trim());
+     if(fields.length!==2||!/^\d{4}-\d{2}-\d{2}$/.test(fields[0])||!fields[1])throw Error("Each row needs an ISO date and NAV.");
+     return {as_of:fields[0],nav:fields[1]};
+    });
+   }
    const response=await fetch("/intelligence/api/v1/intelligence/mutual-funds/historical-risk",{
     method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({scheme_code:selectedCode,source_name:selectedSource,observations})
