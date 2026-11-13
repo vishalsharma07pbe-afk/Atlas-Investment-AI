@@ -863,3 +863,19 @@ def institutional_flow_ledger_import(request: FlowRequest):
 @app.get("/api/v1/intelligence/institutional-flows/ledger")
 def institutional_flow_ledger_list(limit: int = 100):
     return list_evidence(limit)
+
+from .news_ledger import import_news, list_news
+
+@app.post("/api/v1/intelligence/news/ledger")
+def news_ledger_import(request: NewsRequest):
+    try:
+        return import_news(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+@app.get("/api/v1/intelligence/news/ledger")
+def news_ledger_list(limit: int = 50, max_age_hours: int = 72, geography: str | None = None):
+    try:
+        return list_news(limit, max_age_hours, geography)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
