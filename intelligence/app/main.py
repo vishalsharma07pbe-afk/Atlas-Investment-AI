@@ -563,3 +563,11 @@ def notification_source_health():
     """Read-only diagnostics for locally configured IPO notification sources."""
     try:return inspect_sources()
     except (ValueError,OSError):raise HTTPException(status_code=503,detail="Notification source health unavailable")
+
+from .ipo_operations import import_history
+
+@app.get("/api/v1/intelligence/notifications/providers/import-history")
+def ipo_provider_import_history():
+    """Read only bounded, sanitized local import history; never initiates provider fetch."""
+    try:return import_history()
+    except (ValueError,OSError,TypeError):raise HTTPException(status_code=503,detail="IPO import history unavailable")
