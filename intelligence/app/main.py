@@ -514,3 +514,11 @@ def broker_research_sources():
 @app.post("/api/v1/intelligence/research/brokers/compare")
 def compare_broker_research(request:ConsensusRequest):
     return consensus(request)
+
+
+from .research_ingestion import IngestionReview,audit_manifests
+
+@app.post("/api/v1/intelligence/research/brokers/ingestion-review")
+def broker_research_ingestion_review(request:IngestionReview):
+    """Audit source declarations before any future permitted collection."""
+    return audit_manifests(request)
