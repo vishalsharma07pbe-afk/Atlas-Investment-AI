@@ -10,3 +10,7 @@ The dashboard uses recorded values from saved fund holdings. Unpriced positions 
 
 ## Boundaries
 All computations are read-only and user-data-dependent. Provider-backed NAV ingestion, independently verified scheme directories, benchmarks, fund holdings overlap and personalized investment recommendations remain unavailable until trustworthy data and permissions are established. This implementation does not constitute a complete production fund-data platform.
+
+## Goal-based SIP planning
+
+POST `/api/v1/intelligence/mutual-funds/goal-plan` with `target_amount`, `years`, `annual_return_pct`, optional `annual_step_up_pct`, `initial_amount` and `current_monthly_sip`. The endpoint calculates a rounded-up whole-rupee monthly SIP using the same beginning-of-month and annual-step-up assumptions as the SIP planner, and compares the user's current plan with the target. It returns required SIP, incremental SIP, current-plan projected shortfall and annual snapshots. The dashboard exposes this in **Monthly SIP required for your goal**. It does not save a goal or recommend funds; the assumed return is not guaranteed.
