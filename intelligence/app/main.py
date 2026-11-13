@@ -13,6 +13,7 @@ from .config import settings
 from .market_client import backend_json
 from .technical import Candle, compute, levels
 from .patterns import detect
+from .institutional_flows import FlowRequest
 
 app = FastAPI(
     title="ATLAS Trading Intelligence Engine",
@@ -396,3 +397,13 @@ def daily_screener(exchange: Literal["NSE", "BSE"] | None = None, limit: int = Q
     def load(instrument_id):
         return backend_json(f"/api/v1/market-data/instruments/{instrument_id}/candles?limit=250")
     return screen(instruments, load, max_age_days=max_age_days)
+
+
+@app.post("/api/v1/intelligence/institutional-flows/analyze")
+def institutional_flow_analysis(request: "FlowRequest"):
+    """Compute net flows from user-provided, source-attributed records only."""
+    from .institutional_flows import analyze_flows
+    try:
+        return analyze_flows(request.records)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
