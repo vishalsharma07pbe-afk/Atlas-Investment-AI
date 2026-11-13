@@ -754,3 +754,10 @@ def mutual_fund_compare(request:FundComparisonRequest):
         return compare_funds(request)
     except ValueError:
         raise HTTPException(status_code=422,detail="Invalid fund comparison histories") from None
+
+from .mutual_fund_reconciliation import FundReconciliationRequest,reconcile_funds
+
+@app.post("/api/v1/intelligence/mutual-funds/reconcile")
+def mutual_fund_reconcile(request:FundReconciliationRequest):
+    """Read-only valuation comparison; never mutate recorded portfolio values."""
+    return reconcile_funds(request)
