@@ -23,7 +23,8 @@ it("blocks invalid month horizon before request",()=>{
   const fetchMock=vi.fn();vi.stubGlobal("fetch",fetchMock);
   render(<GoalPlanner/>);
   fireEvent.change(screen.getByLabelText("Time horizon in months"),{target:{value:"0"}});
+  const horizon=screen.getByLabelText("Time horizon in months") as HTMLInputElement;
+  expect(horizon.checkValidity()).toBe(false);
   fireEvent.click(screen.getByRole("button",{name:"Calculate goal"}));
-  expect(screen.getByRole("alert")).toBeTruthy();
   expect(fetchMock).not.toHaveBeenCalled();
 });
