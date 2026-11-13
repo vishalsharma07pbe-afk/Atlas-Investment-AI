@@ -49,6 +49,7 @@ services:
       ATLAS_UPSTOX_INSTRUMENT_IDS: ${ATLAS_UPSTOX_INSTRUMENT_IDS:-}
       ATLAS_NAV_DB_PATH: /app/nav-data/catalog.sqlite3
       ATLAS_FLOW_DB_PATH: /app/flow-data/flows.sqlite3
+      ATLAS_NEWS_DB_PATH: /app/news-data/events.sqlite3
       ATLAS_RESEARCH_JOURNAL_FILE: /app/journal/entries.json
       ATLAS_ALERTS_FILE: /app/data/alerts.json
       ATLAS_ALERT_FEED_REGISTRY: /app/data/feeds.json
@@ -57,6 +58,7 @@ services:
       - ./data/research-journal:/app/journal
       - navcatalog:/app/nav-data
       - flowledger:/app/flow-data
+      - newsledger:/app/news-data
     ports: ["127.0.0.1:${INTELLIGENCE_PORT:-8000}:8000"]
     depends_on:
       backend:
@@ -70,3 +72,4 @@ volumes:
   redisdata:
   navcatalog:
   flowledger:
+  newsledger:
