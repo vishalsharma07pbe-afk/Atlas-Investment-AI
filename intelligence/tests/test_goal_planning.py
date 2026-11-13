@@ -25,7 +25,7 @@ class GoalPlanningTests(unittest.TestCase):
         self.assertGreater(Decimal(result["hypothetical_growth"]),0)
     def test_invalid_input_rejected(self):
         for kwargs in [{"months":0},{"annual_return_percent":100},{"target_amount":-1},{"monthly_contribution":-1}]:
-            with self.assertRaises(ValidationError):GoalRequest(target_amount=1000,months=12,**kwargs)
+            with self.assertRaises(ValidationError):GoalRequest(**{"target_amount":1000,"months":12,**kwargs})
     def test_api(self):
         result=main.planning_goal_projection(GoalRequest(target_amount=1200,months=12,monthly_contribution=100))
         self.assertEqual(result["status"],"TARGET_MET")
