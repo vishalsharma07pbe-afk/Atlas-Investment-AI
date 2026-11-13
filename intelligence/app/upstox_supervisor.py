@@ -4,12 +4,14 @@ import os
 from .upstox_quote_worker import quote_worker
 from .upstox_stream import StreamPolicy,subscription_request
 from .config import settings
+from .upstox_feed_selection import parse_ids,resolve_ids,FeedSelectionError
 
 class FeedSupervisor:
     def __init__(self,worker=quote_worker):
         self.worker=worker
         self.task=None
         self.last_result=None
+        self.selected_count=0
 
     async def start(self,*,enabled:bool,keys:list[str],token:str|None,
                     provider:str,rights:bool,entitlement:bool):
@@ -27,6 +29,7 @@ class FeedSupervisor:
             except Exception:
                 self.last_result={"status":"FAILED","reason":"FEED_WORKER_UNAVAILABLE"}
             finally:self.worker.shutdown()
+        self.selected_count=len(keys)
         self.task=asyncio.create_task(runner(),name="atlas-upstox-feed")
         return {"status":"STARTING"}
 
@@ -37,16 +40,33 @@ class FeedSupervisor:
             try:await self.task
             except asyncio.CancelledError:pass
         self.task=None
+        self.selected_count=0
 
     def status(self):
-        return {"supervised_task_running":bool(self.task and not self.task.done()),
+        return {"selected_instruments":self.selected_count,
+                "supervised_task_running":bool(self.task and not self.task.done()),
                 "last_result":self.last_result}
 
 feed_supervisor=FeedSupervisor()
 
 async def startup_feed():
     enabled=os.getenv("ATLAS_UPSTOX_FEED_ENABLED","false").lower()=="true"
-    keys=[x.strip() for x in os.getenv("ATLAS_UPSTOX_INSTRUMENT_KEYS","").split(",") if x.strip()]
+    if not enabled:return {"status":"DISABLED"}
+    raw_ids=os.getenv("ATLAS_UPSTOX_INSTRUMENT_IDS","")
+    raw_keys=os.getenv("ATLAS_UPSTOX_INSTRUMENT_KEYS","")
+    if raw_ids.strip() and raw_keys.strip():
+        return {"status":"BLOCKED","blockers":["CONFLICTING_INSTRUMENT_SELECTION"]}
+    if not (settings.provider=="UPSTOX" and settings.upstox_token and
+            settings.licensed_data_access and settings.entitlement_confirmed):
+        return {"status":"BLOCKED","blockers":["PROVIDER_CONFIGURATION_INCOMPLETE"]}
+    try:
+        if raw_ids.strip():
+            ids=parse_ids(raw_ids)
+            keys=await asyncio.to_thread(resolve_ids,ids)
+        else:
+            keys=[x.strip() for x in raw_keys.split(",") if x.strip()]
+    except FeedSelectionError:
+        return {"status":"BLOCKED","blockers":["INSTRUMENT_REGISTRY_RESOLUTION_FAILED"]}
     return await feed_supervisor.start(enabled=enabled,keys=keys,token=settings.upstox_token,
                                       provider=settings.provider,rights=settings.licensed_data_access,
                                       entitlement=settings.entitlement_confirmed)
