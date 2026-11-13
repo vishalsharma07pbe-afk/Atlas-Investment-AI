@@ -530,3 +530,11 @@ from .research_coverage import CoverageRequest,coverage
 def broker_research_coverage(request:CoverageRequest):
     """Per-provider user-submitted report coverage, without invented feeds."""
     return coverage(request)
+
+
+from .research_outcomes import OutcomeRequest,evaluate
+
+@app.post("/api/v1/intelligence/research/brokers/outcomes")
+def broker_research_outcomes(request:OutcomeRequest):
+    """Review historical research against dated prices without lookahead."""
+    return evaluate(request)
