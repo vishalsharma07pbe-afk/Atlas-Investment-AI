@@ -479,3 +479,11 @@ def integrated_market_overview(exchange: Literal["NSE","BSE"] | None = None,
     def load(instrument_id):
         return backend_json(f"/api/v1/market-data/instruments/{instrument_id}/candles?limit=250")
     return analyze_market(instruments,load,max_age_days=max_age_days)
+
+
+from .provider_batch import BatchRequest,review_batch
+
+@app.post("/api/v1/intelligence/providers/upstox/batch-review")
+def upstox_batch_review(request:BatchRequest):
+    """Bounded, on-demand provider health review. Never persists candles."""
+    return review_batch(request)
