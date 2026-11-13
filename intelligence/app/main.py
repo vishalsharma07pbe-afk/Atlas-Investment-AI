@@ -110,10 +110,16 @@ def capabilities():
 
 @app.get("/api/v1/intelligence/providers/status")
 def provider_status():
-    configured=settings.provider=="UPSTOX" and bool(settings.upstox_token)
-    return {"provider":settings.provider,"configured":configured,"automatic_refresh_enabled":settings.automatic_refresh and configured,
-            "live":False,"latency":"END_OF_DAY_OR_PROVIDER_DELAYED","coverage":"NSE/BSE depends on authenticated account entitlements",
-            "notice":"Automatic collection remains disabled unless credentials and usage rights are explicitly configured. Manual CSV remains available."}
+    """Truthful provider readiness; never expose credentials or claim live access."""
+    from .provider_readiness import ProviderConfig,provider_readiness
+    return provider_readiness(ProviderConfig(
+        provider=settings.provider,
+        access_token=settings.upstox_token,
+        automatic_refresh=settings.automatic_refresh,
+        licensed_data_access=settings.licensed_data_access,
+        entitlement_confirmed=settings.entitlement_confirmed,
+        rate_per_second=settings.request_rate_per_second,
+    ))
 
 def _technical_payload(instrument_id:int,limit:int=1000):
     raw=backend_json(f"/api/v1/market-data/instruments/{instrument_id}/candles?limit={max(1,min(limit,2000))}")
