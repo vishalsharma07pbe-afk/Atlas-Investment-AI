@@ -652,3 +652,16 @@ def market_data_readiness(
         minimum_candles=minimum_candles,
         require_live_feed=require_live_feed,
     ))
+
+from .upstox_authorization import authorization_diagnostics
+
+@app.get("/api/v1/intelligence/providers/upstox/feed-authorization-readiness")
+def upstox_feed_authorization_readiness():
+    """Safe configuration-only diagnostics; never returns credentials or signed feed URLs."""
+    from .config import settings
+    return authorization_diagnostics(
+        settings.provider,
+        bool(settings.upstox_token and settings.upstox_token.strip()),
+        settings.licensed_data_access,
+        settings.entitlement_confirmed,
+    )
