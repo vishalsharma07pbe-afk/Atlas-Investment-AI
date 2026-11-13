@@ -10,7 +10,7 @@ from .notifications import Alert
 
 class Snapshot(BaseModel):
     source_name:str=Field(min_length=2,max_length=100)
-    source_url:str=Field(pattern=r"^https://[^\\s]+$",max_length=1000)
+    source_url:str=Field(pattern=r"^https://[^\s]+$",max_length=1000)
     retrieved_at:datetime
     collection_authorized:bool
     redistribution_authorized:bool

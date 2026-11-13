@@ -10,7 +10,7 @@ from .notification_import import Snapshot,import_snapshot
 
 class FeedConfig(BaseModel):
     source_name:str=Field(min_length=2,max_length=100)
-    source_url:str=Field(pattern=r"^https://[^\\s]+$",max_length=1000)
+    source_url:str=Field(pattern=r"^https://[^\s]+$",max_length=1000)
     collection_authorized:bool=False
     redistribution_authorized:bool=False
     enabled:bool=False
