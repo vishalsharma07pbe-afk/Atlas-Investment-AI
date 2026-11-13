@@ -24,8 +24,7 @@ class FeedSupervisor:
         try:subscription_request(keys,StreamPolicy(),"supervisor")
         except ValueError:return {"status":"BLOCKED","blockers":["INVALID_INSTRUMENT_KEYS"]}
         if provider!="UPSTOX" or not token or not rights or not entitlement:
-            feed_supervisor.startup_result={"status":"BLOCKED","blockers":["PROVIDER_CONFIGURATION_INCOMPLETE"]}
-        return feed_supervisor.startup_result
+            return {"status":"BLOCKED","blockers":["PROVIDER_CONFIGURATION_INCOMPLETE"]}
         async def runner():
             try:self.last_result=await self.worker.run(token,keys,provider=provider,
                                   rights=rights,entitlement=entitlement)
@@ -63,7 +62,8 @@ async def startup_feed():
         return feed_supervisor.startup_result
     if not (settings.provider=="UPSTOX" and settings.upstox_token and
             settings.licensed_data_access and settings.entitlement_confirmed):
-        return {"status":"BLOCKED","blockers":["PROVIDER_CONFIGURATION_INCOMPLETE"]}
+        feed_supervisor.startup_result={"status":"BLOCKED","blockers":["PROVIDER_CONFIGURATION_INCOMPLETE"]}
+        return feed_supervisor.startup_result
     try:
         if raw_ids.strip():
             ids=parse_ids(raw_ids)
