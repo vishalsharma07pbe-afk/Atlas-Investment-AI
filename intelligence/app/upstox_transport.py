@@ -31,6 +31,7 @@ async def receive_session(
     policy: TransportPolicy = TransportPolicy(),
     connect=None,
     authorize=authorize_feed,
+    on_connection_change=None,
 ) -> int:
     """Authorize, subscribe, and forward bounded binary frames for trusted decoding.
 
@@ -48,17 +49,23 @@ async def receive_session(
             raise TransportUnavailable("WebSocket dependency unavailable") from None
         connect=ws_connect
     count=0
-    async with connect(uri,open_timeout=policy.connect_timeout_seconds,
-                       max_size=policy.max_frame_bytes,ping_interval=20,ping_timeout=20) as ws:
-        await ws.send(json.dumps(payload).encode('utf-8'))
-        async for frame in ws:
-            if not isinstance(frame,bytes):
-                continue
-            if len(frame)>policy.max_frame_bytes:
-                raise TransportUnavailable("Provider frame exceeds configured limit")
-            await on_binary_frame(frame)
-            count+=1
-    return count
+    try:
+        async with connect(uri,open_timeout=policy.connect_timeout_seconds,
+                           max_size=policy.max_frame_bytes,ping_interval=20,ping_timeout=20) as ws:
+            await ws.send(json.dumps(payload).encode("utf-8"))
+            if on_connection_change is not None:
+                await on_connection_change(True)
+            async for frame in ws:
+                if not isinstance(frame,bytes):
+                    continue
+                if len(frame)>policy.max_frame_bytes:
+                    raise TransportUnavailable("Provider frame exceeds configured limit")
+                await on_binary_frame(frame)
+                count+=1
+        return count
+    finally:
+        if on_connection_change is not None:
+            await on_connection_change(False)
 
 async def reconnecting_stream(
     token: str,
@@ -69,6 +76,7 @@ async def reconnecting_stream(
     policy: TransportPolicy = TransportPolicy(),
     session=receive_session,
     sleep=asyncio.sleep,
+    on_connection_change=None,
 ) -> dict:
     """Bounded retries; a fresh authorization URI is requested on each session."""
     if policy.max_retries<0 or policy.base_delay_seconds<=0 or policy.max_delay_seconds<=0:
@@ -77,7 +85,11 @@ async def reconnecting_stream(
     sessions=0
     while not stop.is_set():
         try:
-            await session(token,instrument_keys,on_binary_frame,policy=policy)
+            if on_connection_change is None:
+                await session(token,instrument_keys,on_binary_frame,policy=policy)
+            else:
+                await session(token,instrument_keys,on_binary_frame,policy=policy,
+                              on_connection_change=on_connection_change)
             sessions+=1
             if stop.is_set():break
             attempts+=1
@@ -85,6 +97,9 @@ async def reconnecting_stream(
             raise
         except Exception:
             attempts+=1
+        finally:
+            if on_connection_change is not None:
+                await on_connection_change(False)
         if attempts>policy.max_retries:
             return {"status":"DISCONNECTED","sessions":sessions,"retries":attempts-1,
                     "reason":"RETRY_BUDGET_EXHAUSTED"}
