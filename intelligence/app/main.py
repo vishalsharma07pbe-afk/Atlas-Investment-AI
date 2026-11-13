@@ -684,7 +684,8 @@ def upstox_quote_status():
     """Read-only worker status; never reveal credentials or unverified quotes."""
     gate=authorization_diagnostics(settings.provider,bool(settings.upstox_token),
                                    settings.licensed_data_access,settings.entitlement_confirmed)
-    return {"worker_running":quote_worker.running,
+    return {**feed_supervisor.status(),
+            "worker_running":quote_worker.running,
             "transport_connected":quote_worker.cache.connected,
             "configuration_status":gate["status"],
             "blockers":gate["blockers"],
@@ -701,3 +702,13 @@ def upstox_instrument_quote(instrument_id:int):
     if not (settings.provider=="UPSTOX" and settings.licensed_data_access and settings.entitlement_confirmed):
         return {"status":"UNAVAILABLE","quote":None,"reason":"PROVIDER_RIGHTS_NOT_VERIFIED"}
     return quote_worker.cache.snapshot(resolution["instrument_key"])
+
+from .upstox_supervisor import feed_supervisor,startup_feed
+
+@app.on_event("startup")
+async def start_opt_in_upstox_feed():
+    await startup_feed()
+
+@app.on_event("shutdown")
+async def stop_opt_in_upstox_feed():
+    await feed_supervisor.stop()
