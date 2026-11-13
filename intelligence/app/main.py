@@ -775,3 +775,10 @@ from .nav_refresh_preflight import NavRefreshPreflightRequest,preflight_nav_refr
 def mutual_fund_nav_refresh_preflight(request:NavRefreshPreflightRequest):
     """Validate an explicitly supplied NAV refresh batch without storing or fetching."""
     return preflight_nav_refresh(request)
+
+from .mutual_fund_planning import FundPlanningRequest,plan_funds
+
+@app.post("/api/v1/intelligence/mutual-funds/plan")
+def mutual_fund_plan(request:FundPlanningRequest):
+    """Illustrative SIP and read-only recorded portfolio analytics."""
+    return plan_funds(request)
