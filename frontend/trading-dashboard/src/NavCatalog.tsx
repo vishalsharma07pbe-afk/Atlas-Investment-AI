@@ -2,7 +2,7 @@ import React, {useEffect, useState} from "react";
 
 type Fund = {scheme_code:number;scheme_name:string;nav:string;nav_date:string;stale:boolean;source:string};
 type Status = {scheme_count:number;latest_nav_date:string|null;mode:string;blocker:string};
-const BASE="/api/v1/intelligence/mutual-funds";
+const BASE="/intelligence/api/v1/intelligence/mutual-funds";
 
 export default function NavCatalog() {
   const [q,setQ]=useState("");
