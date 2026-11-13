@@ -21,3 +21,9 @@
 7. **Operational quality:** integration tests with provider fixtures, authorization/security tests, large-file and concurrency tests, performance budgets, accessibility and deployment/runbook checks.
 
 **Current safety boundary:** All imported snapshots and historical NAVs are user-supplied and unverified. Research calculations are read-only; neither automated trades nor authoritative portfolio updates are enabled. The scheme discovery feature never infers a holding's scheme code.
+
+## Integrated snapshot-to-portfolio review (read only)
+
+The Mutual Funds workspace now offers **Review NAV snapshot against portfolio**. Supply an authorized AMFI-style text export, source name, explicit holding-ID-to-scheme-code mapping and optional authorization attestation. One API request parses selected NAV rows, performs fail-closed refresh preflight, and computes per-holding valuation diagnostics. Missing, stale, duplicate and mixed-date records block a review-ready result; the response never updates saved holdings or persists NAV data. User attestation does not constitute independent provider verification. The endpoint is `POST /api/v1/intelligence/mutual-funds/snapshot-portfolio-review`.
+
+This consolidates the existing manual research workflow but does **not** satisfy the outstanding licensed-provider, persisted ingestion or audited portfolio ledger production gates.
