@@ -2,6 +2,7 @@ import json
 import unittest
 from datetime import date
 from unittest.mock import patch
+from types import SimpleNamespace
 from fastapi import HTTPException
 from app import upstox_preview as preview
 
@@ -20,7 +21,7 @@ class FakeOpener:
 
 class ProviderPreviewTests(unittest.TestCase):
     def test_defaults_block_without_network(self):
-        with patch.object(preview.settings,"provider","MANUAL_CSV"):
+        with patch.object(preview,"settings",SimpleNamespace(provider="MANUAL_CSV",licensed_data_access=False,entitlement_confirmed=False,upstox_token=None)):
             with patch.object(preview,"build_opener") as opener:
                 with self.assertRaises(HTTPException) as exc:
                     preview.preview_daily("NSE_EQ|INE848E01016",date(2026,1,1),date(2026,1,2))
@@ -32,7 +33,7 @@ class ProviderPreviewTests(unittest.TestCase):
             ["2026-01-02T00:00:00+05:30",100,105,99,103,1200,0]
         ]}}).encode()
         opener=FakeOpener(data)
-        with patch.object(preview.settings,"provider","UPSTOX"),patch.object(preview.settings,"licensed_data_access",True),patch.object(preview.settings,"entitlement_confirmed",True),patch.object(preview.settings,"upstox_token","test-secret"),patch.object(preview,"build_opener",return_value=opener):
+        with patch.object(preview,"settings",SimpleNamespace(provider="UPSTOX",licensed_data_access=True,entitlement_confirmed=True,upstox_token="test-secret")),patch.object(preview,"build_opener",return_value=opener):
             result=preview.preview_daily("NSE_EQ|INE848E01016",date(2026,1,1),date(2026,1,2))
         self.assertEqual(result["status"],"PREVIEW_ONLY")
         self.assertEqual(result["candles"][0]["adjustment_status"],"UNVERIFIED")
@@ -41,7 +42,7 @@ class ProviderPreviewTests(unittest.TestCase):
         self.assertNotIn("test-secret",str(result))
 
     def test_invalid_key_rejected_before_network(self):
-        with patch.object(preview.settings,"provider","UPSTOX"),patch.object(preview.settings,"licensed_data_access",True),patch.object(preview.settings,"entitlement_confirmed",True),patch.object(preview.settings,"upstox_token","secret"),patch.object(preview,"build_opener") as opener:
+        with patch.object(preview,"settings",SimpleNamespace(provider="UPSTOX",licensed_data_access=True,entitlement_confirmed=True,upstox_token="secret")),patch.object(preview,"build_opener") as opener:
             with self.assertRaises(HTTPException) as exc:
                 preview.preview_daily("https://attacker.invalid/",date(2026,1,1),date(2026,1,2))
             self.assertEqual(exc.exception.status_code,422)
@@ -51,7 +52,7 @@ class ProviderPreviewTests(unittest.TestCase):
         data=json.dumps({"status":"success","data":{"candles":[
             ["2026-01-02T00:00:00+05:30",100,90,99,103,1200,0]
         ]}}).encode()
-        with patch.object(preview.settings,"provider","UPSTOX"),patch.object(preview.settings,"licensed_data_access",True),patch.object(preview.settings,"entitlement_confirmed",True),patch.object(preview.settings,"upstox_token","secret"),patch.object(preview,"build_opener",return_value=FakeOpener(data)):
+        with patch.object(preview,"settings",SimpleNamespace(provider="UPSTOX",licensed_data_access=True,entitlement_confirmed=True,upstox_token="secret")),patch.object(preview,"build_opener",return_value=FakeOpener(data)):
             with self.assertRaises(HTTPException) as exc:
                 preview.preview_daily("NSE_EQ|INE848E01016",date(2026,1,1),date(2026,1,2))
             self.assertEqual(exc.exception.status_code,502)
