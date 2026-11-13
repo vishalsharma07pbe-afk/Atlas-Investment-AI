@@ -578,3 +578,10 @@ from .portfolio_allocation import PlanRequest,allocation_plan
 def portfolio_allocation_plan(request:PlanRequest):
     """On-demand, read-only contribution planner using locally recorded holdings."""
     return allocation_plan(_fetch_portfolio_holdings(),request)
+
+from .goal_planning import GoalRequest,goal_projection
+
+@app.post("/api/v1/intelligence/planning/goal-projection")
+def planning_goal_projection(request:GoalRequest):
+    """Pure illustrative calculations, without price feeds or persisted personal goals."""
+    return goal_projection(request)
