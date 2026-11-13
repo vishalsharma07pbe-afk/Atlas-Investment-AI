@@ -1,12 +1,31 @@
-import React,{useState} from "react";
+import React,{useRef,useState} from "react";
 type Result={scheme_name:string;latest_nav:{as_of:string;nav:number;status:string};trailing_returns_pct:Record<string,number|null>;import:{rows_accepted:number;stored:boolean};source:{verification:string}};
 export type SharedNavHistory={schemeCode:string;schemeName:string;sourceName:string;csvText:string;observations:{as_of:string;nav:string}[]};
 export default function MutualFundHistoryImport({onValidated}:{onValidated?:(history:SharedNavHistory|null,schemeCode?:string)=>void}){
  const [code,setCode]=useState("");const [name,setName]=useState("");const [source,setSource]=useState("");
  const [csv,setCsv]=useState("");const [result,setResult]=useState<Result|null>(null);
  const [error,setError]=useState("");const [loading,setLoading]=useState(false);
+ const requestVersion=useRef(0);
+ const validatedCode=useRef<string|null>(null);
+ function edit(field:"code"|"name"|"source"|"csv",value:string){
+  requestVersion.current+=1;
+  setResult(null);setError("");setLoading(false);
+  const oldCode=validatedCode.current;
+  if(oldCode){
+   // Switching to another scheme preserves its previously validated basket entry.
+   // Editing any other field invalidates the current scheme’s validation.
+   if(field!=="code"||value===oldCode)onValidated?.(null,oldCode);
+   validatedCode.current=null;
+  }
+  if(field==="code")setCode(value);
+  if(field==="name")setName(value);
+  if(field==="source")setSource(value);
+  if(field==="csv")setCsv(value);
+ }
  async function submit(){
+  const version=++requestVersion.current;
   setLoading(true);setError("");setResult(null);onValidated?.(null,code);
+  validatedCode.current=null;
   try{
    const response=await fetch("/intelligence/api/v1/intelligence/mutual-funds/nav-history-import",{
     method:"POST",headers:{"Content-Type":"application/json"},
@@ -14,25 +33,29 @@ export default function MutualFundHistoryImport({onValidated}:{onValidated?:(his
    });
    if(!response.ok)throw Error("Invalid historical NAV CSV, source or scheme code");
    const data:Result=await response.json();
+   if(version!==requestVersion.current)return;
    setResult(data);
    if(onValidated){
     const lines=csv.trim().split(/\r?\n/);
     const header=lines.shift()?.split(",").map(v=>v.trim());
     if(header?.join(",")==="scheme_code,as_of,nav"){
      const observations=lines.map(line=>line.split(",").map(v=>v.trim())).map(fields=>({as_of:fields[1],nav:fields[2]}));
-     if(observations.length===data.import.rows_accepted)onValidated({schemeCode:code,schemeName:name,sourceName:source,csvText:csv,observations});
+     if(observations.length===data.import.rows_accepted){
+      validatedCode.current=code;
+      onValidated({schemeCode:code,schemeName:name,sourceName:source,csvText:csv,observations});
+     }
     }
    }
-  }catch(e){setError(e instanceof Error?e.message:"Import unavailable");}
-  finally{setLoading(false);}
+  }catch(e){if(version===requestVersion.current)setError(e instanceof Error?e.message:"Import unavailable");}
+  finally{if(version===requestVersion.current)setLoading(false);}
  }
  return <section className="panel glass" aria-label="Mutual fund historical NAV import">
   <div className="sectionhead"><div><small className="section-kicker">HISTORICAL NAV · RESEARCH ONLY</small><h2>Import fund history and calculate returns</h2></div><span className="tag">LOCAL CSV</span></div>
   <p className="muted tiny">Provide authorized historical NAV records for one exact scheme code. No data is saved or independently verified.</p>
-  <label htmlFor="history-code">Scheme code</label><input id="history-code" value={code} onChange={e=>setCode(e.target.value)} placeholder="12345"/>
-  <label htmlFor="history-name">Scheme name</label><input id="history-name" value={name} onChange={e=>setName(e.target.value)} placeholder="Fund Direct Growth"/>
-  <label htmlFor="history-source">Source attribution</label><input id="history-source" value={source} onChange={e=>setSource(e.target.value)} placeholder="Authorized local export"/>
-  <label htmlFor="history-csv">Historical NAV CSV</label><textarea id="history-csv" rows={5} style={{width:"100%"}} value={csv} onChange={e=>setCsv(e.target.value)} placeholder={"scheme_code,as_of,nav\n12345,2025-01-01,10.0"}/>
+  <label htmlFor="history-code">Scheme code</label><input id="history-code" value={code} onChange={e=>edit("code",e.target.value)} placeholder="12345"/>
+  <label htmlFor="history-name">Scheme name</label><input id="history-name" value={name} onChange={e=>edit("name",e.target.value)} placeholder="Fund Direct Growth"/>
+  <label htmlFor="history-source">Source attribution</label><input id="history-source" value={source} onChange={e=>edit("source",e.target.value)} placeholder="Authorized local export"/>
+  <label htmlFor="history-csv">Historical NAV CSV</label><textarea id="history-csv" rows={5} style={{width:"100%"}} value={csv} onChange={e=>edit("csv",e.target.value)} placeholder={"scheme_code,as_of,nav\n12345,2025-01-01,10.0"}/>
   <button className="secondary" disabled={loading} onClick={submit}>{loading?"Analyzing…":"Import and analyze history"}</button>
   {error&&<p role="alert">{error}</p>}
   {result&&<div role="status"><h3>{result.scheme_name}</h3>

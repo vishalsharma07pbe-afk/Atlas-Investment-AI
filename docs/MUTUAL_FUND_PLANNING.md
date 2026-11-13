@@ -34,3 +34,7 @@ Import NAV history for two to five different numeric scheme codes using **Import
 ## Validated NAV import to portfolio reconciliation
 
 After importing one or more historical NAV CSVs, **Reconcile fund valuations** offers **Reconcile with validated imports**. The latest dated NAV per validated scheme is passed to the existing read-only reconciliation API, alongside the saved mutual fund positions. The user must still enter a holding-ID-to-exact-scheme-code JSON mapping; no automatic symbol inference or changes to portfolio prices occur. Stale, missing or mixed-date NAVs remain blockers for a complete synchronized valuation. Manual NAV JSON entry is still supported. An integrated React test verifies the import-to-reconciliation request, the explicit mapping guard and the unchanged saved holding.
+
+## Validation lifecycle safeguards
+
+A successful NAV history import is valid only for the exact scheme code, scheme name, source attribution and CSV content submitted. Editing the source, name or CSV for the currently validated scheme clears that scheme's prior result until revalidation. Switching the scheme-code field to import a different fund preserves previously validated schemes in the comparison basket; submitting a new import for an existing scheme invalidates its old entry first. Responses from imports superseded by subsequent edits are ignored, so slow network responses cannot repopulate outdated history. Regression tests cover invalidation and late responses. This remains session-only user-supplied research data.
