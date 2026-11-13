@@ -39,7 +39,7 @@ class ProviderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);cfg=root/"provider.json";out=root/"alerts.json"
             cfg.write_text(json.dumps(config()))
-            with patch.dict(os.environ,{"ATLAS_PROVIDER_IPO_TOKEN":"test-token"}),patch("app.authorized_ipo_provider._public_host"),patch("urllib.request.OpenerDirector.open",return_value=Response(payload())):
+            with patch.dict(os.environ,{"ATLAS_PROVIDER_IPO_TOKEN":"test-token"}),patch("app.authorized_ipo_provider._public_host"),patch("urllib.request.OpenerDirector.open",side_effect=lambda *args,**kwargs:Response(payload())):
                 result=sync_provider(cfg,out)
                 self.assertEqual(result["status"],"DRY_RUN")
                 self.assertFalse(out.exists())
