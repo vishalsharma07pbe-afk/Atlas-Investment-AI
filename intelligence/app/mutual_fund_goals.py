@@ -26,8 +26,12 @@ def goal_plan(request:FundGoalRequest)->dict:
     required=max(Decimal(0),(request.target_amount-baseline)/factor)
     # Round up to a whole rupee and confirm against the same projection engine.
     monthly=required.to_integral_value(rounding=ROUND_CEILING)
-    while project(monthly)<request.target_amount:
+    if monthly>100000000:raise ValueError("Required monthly SIP exceeds supported limit")
+    # Rounded output from the projection engine can differ by a few paise.
+    for _ in range(3):
+        if project(monthly)>=request.target_amount:break
         monthly+=1
+    if monthly>100000000:raise ValueError("Required monthly SIP exceeds supported limit")
     current=project(request.current_monthly_sip)
     shortfall=max(Decimal(0),request.target_amount-current)
     result=plan_funds(FundPlanningRequest(sip=SipPlan(
