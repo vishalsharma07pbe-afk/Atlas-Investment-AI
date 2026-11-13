@@ -1,6 +1,7 @@
 import React,{useState} from "react";
 type Attempt={attempted_at:string|null;mode:string;outcome:string;error_category:string|null;added:number|null;updated:number|null;skipped_older_or_equal:number|null;retained:number|null;input_sha256:string|null};
-type History={status:string;attempts:Attempt[];total:number;notice:string};
+type Freshness={status:string;last_successful_apply_at:string|null;last_successful_dry_run_at:string|null;hours_since_successful_apply:number|null;stale_after_hours:number;notice:string};
+type History={status:string;attempts:Attempt[];total:number;notice:string;freshness?:Freshness};
 export default function IpoImportHistory(){
   const [open,setOpen]=useState(false);
   const [history,setHistory]=useState<History|null>(null);
@@ -22,6 +23,12 @@ export default function IpoImportHistory(){
       {error&&<p role="alert">{error}</p>}
       {!loading&&!error&&history&&<>
         <p className="muted tiny">{history.total} recorded attempts · {history.status.replace(/_/g," ")}</p>
+        {history.freshness&&<div aria-label="Provider import freshness">
+          <strong>Local import status: {history.freshness.status.replace(/_/g," ")}</strong>
+          <small>Last successful apply: {history.freshness.last_successful_apply_at??"Never recorded"}</small>
+          <small>Last successful dry run: {history.freshness.last_successful_dry_run_at??"Never recorded"}</small>
+          <p className="muted tiny">{history.freshness.notice}</p>
+        </div>}
         {history.attempts.map((a,i)=><div className="atlas-notification-item" key={i}>
           <strong>{a.outcome} · {a.mode}</strong>
           <small>{a.attempted_at??"Timestamp unavailable"}</small>
