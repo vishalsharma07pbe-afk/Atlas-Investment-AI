@@ -3,7 +3,7 @@
 This module deliberately does not issue investment recommendations. Factor scores are
 user-/upstream-supplied observations, not independently verified market research.
 """
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Literal
 
@@ -454,3 +454,11 @@ def evaluate_research_alerts(request: AlertRequest):
     from .research_alerts import evaluate_alerts
     raw=backend_json(f"/api/v1/market-data/instruments/{request.instrument_id}/candles?limit=250")
     return evaluate_alerts(raw,request.rules,max_age_days=request.max_age_days)
+
+
+@app.get("/api/v1/intelligence/providers/upstox/daily-preview")
+def upstox_daily_preview(instrument_key: str = Query(min_length=8,max_length=40),
+                         from_date: date = Query(),to_date: date = Query()):
+    """Opt-in, read-only provider historical candle preview; never ingests data."""
+    from .upstox_preview import preview_daily
+    return preview_daily(instrument_key,from_date,to_date)
