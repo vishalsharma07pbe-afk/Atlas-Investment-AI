@@ -503,3 +503,14 @@ from .broker_reports import ReportRequest,report
 def consolidated_broker_report(request:ReportRequest):
     """User-supplied cross-broker position aggregation; no broker connections."""
     return report(request)
+
+
+from .broker_research import ConsensusRequest,consensus,SOURCES
+
+@app.get("/api/v1/intelligence/research/brokers/sources")
+def broker_research_sources():
+    return {"sources":SOURCES,"automatic_collection_enabled":False,"notice":"User-submitted research comparison only."}
+
+@app.post("/api/v1/intelligence/research/brokers/compare")
+def compare_broker_research(request:ConsensusRequest):
+    return consensus(request)
