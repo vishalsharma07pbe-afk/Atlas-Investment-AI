@@ -2,14 +2,17 @@ import React,{useEffect,useState} from "react";
 type Source={code:string;datasets:string[];transport:string;authorized:boolean;state:string;live:boolean};
 type Health={checked_at:string;sources:Source[];live_feed_verified:boolean;notice:string};
 type Item={symbol:string;value:string;observed_at:string;source:string;freshness:string;live:boolean};
+type Failover={status:string;router_capabilities:string[];configured_adapters:number;automatic_live_failover_enabled:boolean;blockers:string[];notice:string};
 type Lookup={items:Item[];status:string;live:boolean;notice?:string};
 export default function MultiProviderHub(){
   const [health,setHealth]=useState<Health|null>(null);
+  const [failover,setFailover]=useState<Failover|null>(null);
   const [query,setQuery]=useState("");
   const [type,setType]=useState("MUTUAL_FUND");
   const [result,setResult]=useState<Lookup|null>(null);
   const [error,setError]=useState("");
   const [loading,setLoading]=useState(false);
+  useEffect(()=>{const controller=new AbortController();fetch("/intelligence/api/v1/intelligence/data-hub/failover-readiness",{signal:controller.signal}).then(r=>{if(!r.ok)throw Error("Failover readiness unavailable");return r.json()}).then(setFailover).catch(e=>{if(e.name!=="AbortError")setError(String(e))});return ()=>controller.abort()},[]);
   useEffect(()=>{const controller=new AbortController();fetch("/intelligence/api/v1/intelligence/data-hub/sources",{signal:controller.signal}).then(r=>{if(!r.ok)throw Error("Provider status unavailable");return r.json()}).then(setHealth).catch(e=>{if(e.name!=="AbortError")setError(String(e))});return ()=>controller.abort()},[]);
   async function search(e:React.FormEvent){e.preventDefault();setLoading(true);setError("");setResult(null);try{
     const response=await fetch("/intelligence/api/v1/intelligence/data-hub/search?asset_type="+encodeURIComponent(type)+"&query="+encodeURIComponent(query.trim()));
@@ -25,6 +28,7 @@ export default function MultiProviderHub(){
     </form>
     {error&&<p role="alert">{error}</p>}
     <p role="status">Live market feed: <strong>Not verified</strong>. Automated provider failover remains blocked pending access and usage rights.</p>
+    {failover&&<div role="status" className="panel"><strong>Failover readiness: {failover.status.replace(/_/g," ")}</strong><p>Authorized live adapters: {failover.configured_adapters} · Automatic live failover: disabled</p><p>Implemented safeguards: {failover.router_capabilities.join(" · ")}</p><p>Activation blockers: {failover.blockers.join(" · ")}</p></div>}
     {health&&<div className="tablewrap"><table><thead><tr><th>Provider</th><th>Coverage</th><th>Access</th><th>Status</th></tr></thead><tbody>{health.sources.map(s=><tr key={s.code}><td>{s.code}</td><td>{s.datasets.join(", ")}</td><td>{s.transport}</td><td>{s.state.replace(/_/g," ")}</td></tr>)}</tbody></table></div>}
     {result&&<><p role="status">Search status: {result.status.replace(/_/g," ")} · {result.items.length} validated observations</p>
       {result.notice&&<p>{result.notice}</p>}
