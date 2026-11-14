@@ -908,3 +908,29 @@ from .ingestion_quality import BatchRequest, inspect_batch
 def ingestion_quality_preflight(request: BatchRequest):
     """Validate a candidate batch without storing data or authorizing a feed."""
     return inspect_batch(request)
+
+# Local readiness incident snapshots. No external feeds or trade side effects.
+from .reliability_incidents import record_snapshot as record_reliability_snapshot, history as reliability_history
+
+@app.get("/api/v1/intelligence/reliability/incidents")
+def reliability_incidents(limit: int = 50):
+    try:
+        return reliability_history(limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+@app.post("/api/v1/intelligence/reliability/observe")
+def reliability_observe():
+    snapshot = get_data_readiness()
+    codes = {
+        "NOT_IMPORTED": "MISSING", "STALE_DATA": "STALE",
+        "FUTURE_TIMESTAMP": "FUTURE_TIMESTAMP",
+        "INVALID_TIMESTAMP": "STORAGE_ERROR",
+        "STORAGE_UNAVAILABLE": "STORAGE_ERROR",
+    }
+    issues = [{"dataset": item["code"], "code": codes[item["status"]]}
+              for item in snapshot["datasets"] if item["status"] in codes]
+    issues.append({"dataset": "MARKET_DATA", "code": "UNVERIFIED_SOURCE"})
+    result = record_reliability_snapshot(issues)
+    return {**result, "readiness_generated_at": snapshot["generated_at"],
+            "source": "SERVER_COMPUTED_LOCAL_READINESS"}
