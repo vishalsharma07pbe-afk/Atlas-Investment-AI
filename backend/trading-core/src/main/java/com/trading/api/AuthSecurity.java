@@ -9,6 +9,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.UUID;
@@ -31,7 +32,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Configuration
 public class AuthSecurity {
   @Bean PasswordEncoder passwordEncoder(){return new BCryptPasswordEncoder(12);}
-  @Bean JwtTokens jwtTokens(@Value("${ATLAS_JWT_SECRET:}") String secret){return new JwtTokens(secret);}
+  @Bean JwtTokens jwtTokens(@Value("${ATLAS_JWT_SECRET:}") String secret,JdbcTemplate jdbc){return new JwtTokens(secret,jdbc);}
   @Bean SecurityFilterChain security(HttpSecurity http,JwtTokens tokens) throws Exception {
     return http.csrf(c->c.disable()).httpBasic(c->c.disable()).formLogin(c->c.disable())
       .sessionManagement(s->s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -51,8 +52,10 @@ public class AuthSecurity {
   }
   public static class JwtTokens {
     private final byte[] key;
+    private final JdbcTemplate jdbc;
     private final ObjectMapper json=new ObjectMapper();
-    JwtTokens(String secret){
+    JwtTokens(String secret,JdbcTemplate jdbc){
+      this.jdbc=jdbc;
       if(secret==null || secret.isBlank()){key=null;return;}
       byte[] decoded;
       try {decoded=Base64.getDecoder().decode(secret);}catch(IllegalArgumentException ex){throw new IllegalStateException("ATLAS_JWT_SECRET must be base64",ex);}
@@ -74,6 +77,15 @@ public class AuthSecurity {
       mac.init(new SecretKeySpec(key,"HmacSHA256"));
       return mac.doFinal(s.getBytes(StandardCharsets.US_ASCII));
     }
+    private String sha(String token){
+      try {return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.UTF_8)));}
+      catch(Exception ex){throw new IllegalStateException(ex);}
+    }
+    public void revoke(String token,UUID user){
+      UUID valid=verify(token);
+      if(!user.equals(valid))throw new IllegalArgumentException("INVALID_SESSION");
+      jdbc.update("INSERT INTO revoked_jwt(token_sha256,user_id,expires_at) VALUES (?,?,now()+interval '15 minutes') ON CONFLICT DO NOTHING",sha(token),user);
+    }
     public UUID verify(String token){
       if(key==null || token==null || token.length()>4096)return null;
       try {
@@ -85,7 +97,9 @@ public class AuthSecurity {
         JsonNode claims=json.readTree(Base64.getUrlDecoder().decode(parts[1]));
         if(!"HS256".equals(header.path("alg").asText()) || !"atlas-local".equals(claims.path("iss").asText())
            || claims.path("exp").asLong(0)<=Instant.now().getEpochSecond())return null;
-        return UUID.fromString(claims.path("sub").asText());
+        UUID user=UUID.fromString(claims.path("sub").asText());
+        Integer revoked=jdbc.queryForObject("SELECT count(*) FROM revoked_jwt WHERE token_sha256=?",Integer.class,sha(token));
+        return revoked!=null && revoked>0 ? null : user;
       }catch(Exception ex){return null;}
     }
   }
