@@ -47,6 +47,14 @@ class AiBridgeHttpIntegrationTest {
       .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
     String token="Bearer "+json.readTree(login).path("access_token").asText();
     mvc.perform(get("/api/v1/ai/providers/health").header("Authorization",token)).andExpect(status().isOk());
+    java.net.http.HttpClient http=java.net.http.HttpClient.newHttpClient();
+    for(String candidate:List.of("","incorrect-service-token-with-length-40-xxxx")){
+      java.net.http.HttpRequest request=java.net.http.HttpRequest.newBuilder(
+        java.net.URI.create("http://127.0.0.1:18000/api/v1/ai/providers/health"))
+        .header("X-Atlas-Service-Token",candidate).GET().build();
+      int status=http.send(request,java.net.http.HttpResponse.BodyHandlers.discarding()).statusCode();
+      assertThat(status).isIn(401,403);
+    }
     mvc.perform(post("/api/v1/portfolio/holdings").header("Authorization",token)
       .contentType(MediaType.APPLICATION_JSON).content("""
       {"symbol":"TCS","assetType":"EQUITY","quantity":3,"averageCost":123456,"lastPrice":1000}
