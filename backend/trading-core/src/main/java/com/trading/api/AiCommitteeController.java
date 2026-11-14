@@ -1,5 +1,6 @@
 package com.trading.api;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -21,7 +22,7 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/v1/ai")
 public class AiCommitteeController {
     private static final Pattern SYMBOL = Pattern.compile("[A-Z0-9._&-]{1,40}");
-    private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
+    private final HttpClient client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(3)).build();
     private final ObjectMapper mapper = new ObjectMapper();
     private final JdbcTemplate jdbc;
     public AiCommitteeController(JdbcTemplate jdbc){this.jdbc=jdbc;}
@@ -32,16 +33,27 @@ public class AiCommitteeController {
     @Value("${INTERNAL_SERVICE_TOKEN:}")
     private String serviceToken;
 
+    private record AnalysisDto(@JsonProperty("symbol") String symbol,
+                               @JsonProperty("market") String market,
+                               @JsonProperty("price_change_pct") Double priceChangePct,
+                               @JsonProperty("volume_change_pct") Double volumeChangePct,
+                               @JsonProperty("technical_summary") String technicalSummary) {}
+
     private ResponseEntity<JsonNode> proxy(String path, String body) {
         if (!enabled || serviceToken == null || serviceToken.length() < 32)
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
         // Destination is operator-configured, never taken from user input.
         try {
             HttpRequest.Builder builder=HttpRequest.newBuilder(URI.create(intelligenceUrl+path))
+                .version(HttpClient.Version.HTTP_1_1)
                 .timeout(Duration.ofSeconds(30)).header("Accept","application/json")
                 .header("X-Atlas-Service-Token",serviceToken);
             if (body == null) builder.GET();
-            else builder.header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(body));
+            else {
+                if (body.isBlank()) return ResponseEntity.status(502).build();
+                builder.header("Content-Type","application/json; charset=utf-8")
+                    .POST(HttpRequest.BodyPublishers.ofString(body,java.nio.charset.StandardCharsets.UTF_8));
+            }
             HttpResponse<String> response=client.send(builder.build(),HttpResponse.BodyHandlers.ofString());
             if (response.body().length()>262144) return ResponseEntity.status(502).build();
             JsonNode json=mapper.readTree(response.body());
@@ -93,6 +105,18 @@ public class AiCommitteeController {
           String exposure="Portfolio position weight: 0.0% (no priced holdings).";
           if(existing.length()+exposure.length()+1<=600)safe.put("technical_summary",existing+" "+exposure);
         }
-        return proxy("/api/v1/ai/analyze/"+symbol,safe.toString());
+        AnalysisDto dto = new AnalysisDto(symbol,
+            safe.path("market").asText("NSE"),
+            safe.hasNonNull("price_change_pct") ? safe.get("price_change_pct").asDouble() : null,
+            safe.hasNonNull("volume_change_pct") ? safe.get("volume_change_pct").asDouble() : null,
+            safe.path("technical_summary").asText(""));
+        try {
+            String serialized=mapper.writeValueAsString(dto);
+            if (serialized.isBlank() || !symbol.equals(mapper.readTree(serialized).path("symbol").asText()))
+                return ResponseEntity.status(502).build();
+            return proxy("/api/v1/ai/analyze/"+symbol,serialized);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException ex) {
+            return ResponseEntity.status(502).build();
+        }
     }
 }
