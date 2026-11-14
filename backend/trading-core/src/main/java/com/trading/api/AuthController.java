@@ -60,6 +60,12 @@ public class AuthController {
     try {return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));}
     catch(Exception ex){throw new IllegalStateException(ex);}
   }
+  @PostMapping("/logout")
+  public Map<String,Boolean> logout(@org.springframework.web.bind.annotation.RequestHeader("Authorization") String authorization){
+    if(!authorization.startsWith("Bearer "))throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+    jwt.revoke(authorization.substring(7),AuthSecurity.currentUser());
+    return Map.of("logged_out",true);
+  }
   @GetMapping("/me")
   public Map<String,Object> me(){
     UUID id=AuthSecurity.currentUser();
