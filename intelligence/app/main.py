@@ -931,3 +931,10 @@ app.add_event_handler("shutdown", readiness_monitor.stop)
 @app.get("/api/v1/intelligence/reliability/monitor")
 def reliability_monitor_status():
     return readiness_monitor.status()
+
+# Read-only feed observability. Does not start, reconnect, or authorize a provider.
+from .feed_health import assess_feed
+
+@app.get("/api/v1/intelligence/providers/upstox/feed-health")
+def upstox_feed_health():
+    return assess_feed(upstox_quote_status())
