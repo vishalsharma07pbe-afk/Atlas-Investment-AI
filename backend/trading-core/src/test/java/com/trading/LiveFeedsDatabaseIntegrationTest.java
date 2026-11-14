@@ -67,7 +67,7 @@ class LiveFeedsDatabaseIntegrationTest {
  }
  @Test void postHoldingsSyncIsScopedToAuthenticatedOwner()throws Exception{
   UUID a=UUID.randomUUID(),b=UUID.randomUUID();
-  db.update("INSERT INTO app_users(id,email,password_hash) VALUES (?,'feed-owner-a@example.test','test'),(?,'feed-owner-b@example.test','test') ON CONFLICT DO NOTHING",a,b);
+  db.update("INSERT INTO atlas_users(id,email,password_hash) VALUES (?,'feed-owner-a@example.test','test'),(?,'feed-owner-b@example.test','test') ON CONFLICT DO NOTHING",a,b);
   when(vault.decrypt(a,"UPSTOX")).thenReturn("owner-a-secret");
   when(http.text(contains("long-term-holdings"),eq("owner-a-secret"),anyInt()))
    .thenReturn("{\"data\":[{\"trading_symbol\":\"OWNERTEST\",\"quantity\":3,\"average_price\":120}]}");
