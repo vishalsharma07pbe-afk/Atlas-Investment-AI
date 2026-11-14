@@ -35,6 +35,7 @@ public class AuthSecurity {
   @Bean SecurityFilterChain security(HttpSecurity http,JwtTokens tokens) throws Exception {
     return http.csrf(c->c.disable()).httpBasic(c->c.disable()).formLogin(c->c.disable())
       .sessionManagement(s->s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+      .exceptionHandling(e->e.authenticationEntryPoint((request,response,exception)->response.sendError(401)))
       .authorizeHttpRequests(a->a
         .requestMatchers(HttpMethod.POST,"/api/v1/auth/register","/api/v1/auth/login").permitAll()
         .requestMatchers("/api/v1/health","/actuator/health/**").permitAll()
