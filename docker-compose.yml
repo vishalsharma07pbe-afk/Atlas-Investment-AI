@@ -47,6 +47,7 @@ services:
       ATLAS_UPSTOX_FEED_ENABLED: ${ATLAS_UPSTOX_FEED_ENABLED:-false}
       ATLAS_UPSTOX_INSTRUMENT_KEYS: ${ATLAS_UPSTOX_INSTRUMENT_KEYS:-}
       ATLAS_UPSTOX_INSTRUMENT_IDS: ${ATLAS_UPSTOX_INSTRUMENT_IDS:-}
+      ATLAS_ENTITLEMENT_MANIFEST: /app/entitlements/sources.json
       ATLAS_NAV_DB_PATH: /app/nav-data/catalog.sqlite3
       ATLAS_FLOW_DB_PATH: /app/flow-data/flows.sqlite3
       ATLAS_NEWS_DB_PATH: /app/news-data/events.sqlite3
@@ -55,6 +56,7 @@ services:
       ATLAS_ALERT_FEED_REGISTRY: /app/data/feeds.json
     volumes:
       - ./data/notifications:/app/data:ro
+      - ./data/entitlements:/app/entitlements:ro
       - ./data/research-journal:/app/journal
       - navcatalog:/app/nav-data
       - flowledger:/app/flow-data

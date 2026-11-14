@@ -13,3 +13,6 @@ intelligence/.pytest_cache/
 .DS_Store
 .idea/
 .vscode/
+
+# Local provider permission declarations (never commit)
+data/entitlements/sources.json
