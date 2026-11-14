@@ -28,8 +28,8 @@ export default function ProviderBatchPreflight(){
  return <section className="panel glass" aria-label="Provider batch preflight">
   <div className="sectionhead"><div><small className="section-kicker">PROVIDER INGESTION · DRY RUN</small><h2>Validate a prospective market-data batch</h2></div><span className="tag">NO DATA WRITES</span></div>
   <p className="muted tiny">Test OHLCV source freshness, instrument mapping and entitlement declarations. Example data is synthetic, not a real market feed. Credential-like JSON keys are rejected before transmission; never paste API tokens or secrets.</p>
-  <div className="form-layout"><label className="field field-full" htmlFor="provider-batch-json"><span>Provider batch JSON</span><textarea className="editor editor-tall" id="provider-batch-json" rows={8} value={input} onChange={e=>setInput(e.target.value)}/></label>
-  <div className="form-actions"><button className="secondary" disabled={loading} onClick={inspect}>{loading?"Validating…":"Run dry-run preflight"}</button></div></div>
+  <details className="atlas-advanced"><summary>Advanced developer tools · JSON batch validation</summary><div className="form-layout"><label className="field field-full" htmlFor="provider-batch-json"><span>Provider batch JSON</span><textarea className="editor editor-tall" id="provider-batch-json" rows={8} value={input} onChange={e=>setInput(e.target.value)}/></label>
+  <div className="form-actions"><button className="secondary" disabled={loading} onClick={inspect}>{loading?"Validating…":"Run dry-run preflight"}</button></div></div></details>
   {error&&<p role="alert">{error}</p>}
   {report&&<div role="status"><p><strong>{report.status}</strong> · {report.records_examined} records · {report.instruments_examined} instruments · Latest {report.latest_trade_date}</p>
    <ul>{report.blockers.map(reason=><li key={reason}>{reason.replace(/_/g," ")}</li>)}</ul>

@@ -29,15 +29,15 @@ export default function PortfolioAllocation({revision}:{revision:number}){
   return <section className="panel glass" aria-label="Portfolio allocation planner">
     <div className="sectionhead"><div><small className="section-kicker">PORTFOLIO PLANNING</small><h2>Allocation & contribution planner</h2></div><span className="tag">HYPOTHETICAL</span></div>
     <p className="muted tiny">Uses manually recorded prices. Set asset-type targets and explore a cash-only contribution; no orders or sales.</p>
-    <form onSubmit={calculate}>
-      <label>Additional contribution (INR) <input aria-label="Additional contribution" type="number" min="0" max="100000000" step="0.01" value={contribution} onChange={e=>setContribution(e.target.value)}/></label>
-      {targets.map((target,i)=><div key={i}>
-        <label>Asset type <input aria-label={`Asset type ${i+1}`} value={target.asset_type} onChange={e=>setTargets(old=>old.map((t,j)=>i===j?{...t,asset_type:e.target.value.toUpperCase()}:t))}/></label>
+    <form onSubmit={calculate} className="atlas-compact-form">
+      <div className="atlas-form-row"><label>Additional contribution (INR) <input aria-label="Additional contribution" type="number" min="0" max="100000000" step="0.01" value={contribution} onChange={e=>setContribution(e.target.value)}/></label></div>
+      {targets.map((target,i)=><div className="atlas-target-row" key={i}>
+        <label>Asset type <select aria-label={`Asset type ${i+1}`} value={target.asset_type} onChange={e=>setTargets(old=>old.map((t,j)=>i===j?{...t,asset_type:e.target.value}:t))}><option value="">Select type</option><option value="EQUITY">Equity</option><option value="MUTUAL_FUND">Mutual fund</option></select></label>
         <label>Target % <input aria-label={`Target percent ${i+1}`} type="number" min="0" max="100" step="0.01" value={target.weight_percent} onChange={e=>setTargets(old=>old.map((t,j)=>i===j?{...t,weight_percent:e.target.value}:t))}/></label>
-        <button type="button" className="secondary" onClick={()=>setTargets(old=>old.filter((_,j)=>j!==i))}>Remove</button>
+        <button type="button" className="secondary" aria-label={`Remove asset type ${i+1}`} onClick={()=>setTargets(old=>old.filter((_,j)=>j!==i))}>Remove</button>
       </div>)}
-      <button type="button" className="secondary" disabled={targets.length>=20} onClick={()=>setTargets(old=>[...old,{asset_type:"",weight_percent:"0"}])}>Add asset type</button>
-      <button type="submit" className="primary" disabled={loading}>{loading?"Calculating…":"Calculate hypothetical allocation"}</button>
+      <div className="atlas-form-actions"><button type="button" className="secondary" disabled={targets.length>=20} onClick={()=>setTargets(old=>[...old,{asset_type:"",weight_percent:"0"}])}>Add asset type</button>
+      <button type="submit" className="primary" disabled={loading}>{loading?"Calculating…":"Calculate hypothetical allocation"}</button></div>
     </form>
     {error&&<p role="alert">{error}</p>}
     {result&&<div aria-label="Allocation results">
