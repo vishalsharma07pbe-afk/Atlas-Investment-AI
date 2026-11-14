@@ -1,5 +1,6 @@
 """Local-first, opt-in LLM routing. Never forwards raw portfolio records or broker credentials."""
 import json
+import math
 import os
 import re
 from urllib.request import Request, urlopen
@@ -43,6 +44,8 @@ def _safe_payload(data):
     clean = {}
     for key,value in data.items():
         if not isinstance(value,(str,int,float)) or isinstance(value,bool):
+            raise ValueError("INVALID_MARKET_FIELD")
+        if isinstance(value,float) and not math.isfinite(value):
             raise ValueError("INVALID_MARKET_FIELD")
         rendered=str(value)
         if len(rendered)>600 or BLOCKED.search(rendered):
