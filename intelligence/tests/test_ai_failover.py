@@ -22,7 +22,7 @@ class AIFailoverTests(unittest.TestCase):
             if provider=="OLLAMA":
                 raise ai.AIProviderError("UNAVAILABLE")
             self.assertNotIn("account_id",prompt)
-            return "Risk assessment."
+            return "{\"action\":\"HOLD\",\"confidence\":0.6,\"target_1\":null,\"target_2\":null,\"stop_loss\":null,\"holding_horizon\":\"SWING\",\"pros\":[\"Market liquidity\"],\"cons\":[\"Trend uncertain\"]}"
         with patch.dict("os.environ",env,clear=False),patch.object(ai,"_generate",side_effect=fake_generate):
             result=ai.analyze_market({"symbol":"AAPL","sector":"Technology"})
             self.assertEqual(result["provider"],"GROQ")
