@@ -953,3 +953,8 @@ def data_hub_search(query: str, asset_type: Literal["EQUITY", "MUTUAL_FUND"]):
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+
+@app.get("/api/v1/intelligence/data-hub/failover-readiness")
+def failover_readiness():
+    from .provider_router import readiness
+    return readiness()
