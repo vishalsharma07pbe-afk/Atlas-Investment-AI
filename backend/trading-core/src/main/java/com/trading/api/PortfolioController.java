@@ -23,8 +23,8 @@ public class PortfolioController {
       quantity*average_cost AS invested,
       CASE WHEN last_price IS NOT NULL THEN quantity*last_price ELSE NULL END AS market_value,
       CASE WHEN last_price IS NOT NULL THEN quantity*(last_price-average_cost) ELSE NULL END AS unrealized_pnl
-      FROM personal_holdings ORDER BY asset_type,symbol
-      """);
+      FROM personal_holdings WHERE user_id=? ORDER BY asset_type,symbol
+      """,AuthSecurity.currentUser());
   }
 
   @PostMapping("/holdings")
@@ -40,18 +40,18 @@ public class PortfolioController {
     if (input.notes()!=null && input.notes().length()>500)
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Notes too long");
     jdbc.update("""
-      INSERT INTO personal_holdings(symbol,asset_type,quantity,average_cost,last_price,price_as_of,notes)
-      VALUES (?,?,?,?,?,CASE WHEN ? IS NULL THEN NULL ELSE now() END,?)
-      ON CONFLICT(symbol,asset_type) DO UPDATE SET quantity=EXCLUDED.quantity,
+      INSERT INTO personal_holdings(user_id,symbol,asset_type,quantity,average_cost,last_price,price_as_of,notes)
+      VALUES (?,?,?,?,?,?,CASE WHEN ? IS NULL THEN NULL ELSE now() END,?)
+      ON CONFLICT(user_id,symbol,asset_type) DO UPDATE SET quantity=EXCLUDED.quantity,
       average_cost=EXCLUDED.average_cost,last_price=EXCLUDED.last_price,
       price_as_of=EXCLUDED.price_as_of,notes=EXCLUDED.notes,updated_at=now()
-      """,symbol,input.assetType(),input.quantity(),input.averageCost(),input.lastPrice(),input.lastPrice(),input.notes());
+      """,AuthSecurity.currentUser(),symbol,input.assetType(),input.quantity(),input.averageCost(),input.lastPrice(),input.lastPrice(),input.notes());
     return Map.of("saved",true,"symbol",symbol);
   }
 
   @DeleteMapping("/holdings/{id}")
   public Map<String,Object> delete(@PathVariable long id) {
-    int deleted=jdbc.update("DELETE FROM personal_holdings WHERE id=?",id);
+    int deleted=jdbc.update("DELETE FROM personal_holdings WHERE id=? AND user_id=?",id,AuthSecurity.currentUser());
     if(deleted==0) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Holding not found");
     return Map.of("deleted",true);
   }

@@ -19,7 +19,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @SpringBootTest
-@AutoConfigureMockMvc
+@AutoConfigureMockMvc(addFilters=false)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class DataFoundationIntegrationTest {
   static final String EXTERNAL_URL=System.getenv("TEST_DATABASE_URL");

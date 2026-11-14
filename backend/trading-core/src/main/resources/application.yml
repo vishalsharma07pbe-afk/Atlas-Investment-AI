@@ -22,3 +22,7 @@ management:
     web:
       exposure:
         include: health,info
+
+atlas:
+  ai:
+    proxy-enabled: ${ATLAS_AI_PROXY_ENABLED:false}
