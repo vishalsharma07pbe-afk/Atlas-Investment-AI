@@ -23,13 +23,17 @@ public class AiCommitteeController {
     private boolean enabled;
     @Value("${atlas.ai.intelligence-url:http://intelligence:8000}")
     private String intelligenceUrl;
+    @Value("${INTERNAL_SERVICE_TOKEN:}")
+    private String serviceToken;
 
     private ResponseEntity<JsonNode> proxy(String path, String body) {
-        if (!enabled) return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
+        if (!enabled || serviceToken == null || serviceToken.length() < 32)
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
         // Destination is operator-configured, never taken from user input.
         try {
             HttpRequest.Builder builder=HttpRequest.newBuilder(URI.create(intelligenceUrl+path))
-                .timeout(Duration.ofSeconds(30)).header("Accept","application/json");
+                .timeout(Duration.ofSeconds(30)).header("Accept","application/json")
+                .header("X-Atlas-Service-Token",serviceToken);
             if (body == null) builder.GET();
             else builder.header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(body));
             HttpResponse<String> response=client.send(builder.build(),HttpResponse.BodyHandlers.ofString());
