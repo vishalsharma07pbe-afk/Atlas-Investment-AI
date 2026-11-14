@@ -886,3 +886,18 @@ from .data_readiness import readiness as get_data_readiness
 def data_readiness():
     """Read-only source readiness. Never asserts live connectivity from local imports."""
     return get_data_readiness()
+
+# Read-only entitlement declaration review. This never enables collection.
+from fastapi import HTTPException as EntitlementHTTPException
+from .entitlement_registry import entitlement_preflight, entitlement_summary
+
+@app.get("/api/v1/intelligence/entitlements")
+def entitlement_registry_status():
+    return entitlement_summary()
+
+@app.get("/api/v1/intelligence/entitlements/preflight")
+def entitlement_registry_preflight(dataset: str, mode: str, purpose: str = "PERSONAL_RESEARCH"):
+    try:
+        return entitlement_preflight(dataset, mode, purpose)
+    except ValueError as exc:
+        raise EntitlementHTTPException(status_code=400, detail=str(exc)) from exc
