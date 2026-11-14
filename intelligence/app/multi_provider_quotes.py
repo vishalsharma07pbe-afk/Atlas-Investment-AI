@@ -107,11 +107,23 @@ def configured_router():
                       and bool(upstox_token) and bool(mapping))
     polygon_allowed = (os.getenv("ATLAS_POLYGON_QUOTES_AUTHORIZED", "false").lower() == "true"
                        and bool(polygon_key))
+    # Never substitute a US ticker quote for an Indian equity with the same symbol.
+    us_symbols = set(os.getenv("ATLAS_POLYGON_US_SYMBOLS", "").split(","))
+    us_symbols = {s for s in us_symbols if SYMBOL_RE.fullmatch(s)}
     adapters = [
-        ("UPSTOX", lambda s: upstox_quote(s, mapping[s], upstox_token), upstox_allowed),
+        ("UPSTOX", lambda s: upstox_quote(s, mapping[s], upstox_token),
+         upstox_allowed and bool(mapping)),
         ("POLYGON", lambda s: polygon_quote(s, polygon_key), polygon_allowed),
     ]
-    return ReadOnlyRouter(adapters)
+    # Route eligibility is checked per requested symbol, not merely per provider.
+    class SymbolScopedRouter(ReadOnlyRouter):
+        def quote(self, symbol, max_age_seconds=60):
+            self.adapters = [
+                ("UPSTOX", adapters[0][1], upstox_allowed and symbol in mapping),
+                ("POLYGON", adapters[1][1], polygon_allowed and symbol in us_symbols),
+            ]
+            return super().quote(symbol, max_age_seconds)
+    return SymbolScopedRouter(adapters)
 
 def quote_status(symbol, max_age_seconds=60):
     result = configured_router().quote(symbol, max_age_seconds)
