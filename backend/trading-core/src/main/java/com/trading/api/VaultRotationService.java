@@ -22,8 +22,8 @@ public class VaultRotationService {
   @Transactional
   public int rotateVersioned(String oldKey,String newKey,int oldVersion,int newVersion){
     if(oldVersion<=0 || newVersion<=oldVersion)throw new IllegalArgumentException("Invalid key versions");
-    if(currentKey==null || !currentKey.equals(oldKey))
-      throw new IllegalStateException("Old key does not match current configured key");
+    if(currentKey==null || !currentKey.equals(newKey))
+      throw new IllegalStateException("New key must match configured active key");
     if(oldKey.equals(newKey))throw new IllegalArgumentException("New key must differ");
     VaultCrypto oldCrypto=new VaultCrypto(oldKey),newCrypto=new VaultCrypto(newKey);
     var rows=jdbc.query("SELECT id,user_id,broker_name,encrypted_access_token,iv_nonce FROM broker_credentials WHERE key_version=? FOR UPDATE",
