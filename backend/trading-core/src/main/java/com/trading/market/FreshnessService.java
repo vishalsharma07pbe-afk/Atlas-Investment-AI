@@ -21,5 +21,13 @@ import org.springframework.stereotype.Service;
    }
   }
  }
+ public List<Map<String,Object>> mutualFundSnapshot(){
+  return jdbc.queryForList("""
+    SELECT 'MUTUAL_FUND' asset_type,s.scheme_code,s.scheme_name,s.last_synced_at,
+      (SELECT max(nav_date) FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code) latest_nav_date,
+      CASE WHEN s.last_synced_at < now()-interval '36 hours' THEN true ELSE false END stale
+    FROM mutual_fund_schemes s ORDER BY s.scheme_name
+    """);
+ }
  public List<Map<String,Object>> snapshot(){return jdbc.queryForList("SELECT e.code exchange,i.symbol,f.instrument_id,ds.source_code,f.last_synced_at,f.latest_candle_at,f.source_revision,q.id alert_id FROM instrument_source_freshness f JOIN instruments i ON i.id=f.instrument_id JOIN exchanges e ON e.id=i.exchange_id JOIN data_sources ds ON ds.id=f.source_id LEFT JOIN data_quality_events q ON q.instrument_id=f.instrument_id AND q.source_id=f.source_id AND q.event_type='SOURCE_STALE' AND q.resolved_at IS NULL ORDER BY e.code,i.symbol,ds.source_code");}
 }

@@ -60,6 +60,20 @@ import org.springframework.stereotype.Service;
    double elapsed=java.time.temporal.ChronoUnit.DAYS.between(day,latest)/365.2425;
    out.put("cagr"+years+"Y",Math.pow(current.doubleValue()/old.doubleValue(),1.0/elapsed)-1);
   }
+  for(int years:List.of(1,3)){
+   LocalDate earliest=latest.minusYears(years);List<Double> rolling=new ArrayList<>();
+   for(int i=0;i<rows.size();i++){
+    LocalDate end=((java.sql.Date)rows.get(i).get("nav_date")).toLocalDate();
+    if(end.isBefore(earliest))continue;
+    LocalDate start=end.minusYears(years);Map<String,Object> prior=null;
+    for(int j=0;j<i;j++){LocalDate date=((java.sql.Date)rows.get(j).get("nav_date")).toLocalDate();if(!date.isAfter(start))prior=rows.get(j);else break;}
+    if(prior==null)continue;
+    BigDecimal startNav=(BigDecimal)prior.get("nav"),endNav=(BigDecimal)rows.get(i).get("nav");
+    double days=java.time.temporal.ChronoUnit.DAYS.between(((java.sql.Date)prior.get("nav_date")).toLocalDate(),end);
+    if(days>0)rolling.add(Math.pow(endNav.doubleValue()/startNav.doubleValue(),365.2425/days)-1);
+   }
+   out.put("rolling"+years+"Y",rolling);
+  }
   return out;
  }
 }
