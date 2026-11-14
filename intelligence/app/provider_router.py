@@ -36,7 +36,7 @@ class CircuitBreaker:
     def failure(self, name):
         with self._lock:
             failures,until=self._states.get(name,(0,0))
-            failures=failures+1 if self.clock()>=until else failures
+            failures=(1 if until>0 and self.clock()>=until else failures+1) if self.clock()>=until else failures
             self._states[name]=(failures,self.clock()+self.cooldown_seconds if failures>=self.threshold else 0)
     def status(self, name):
         with self._lock:
