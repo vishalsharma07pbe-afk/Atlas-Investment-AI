@@ -52,6 +52,8 @@ services:
       ATLAS_FLOW_DB_PATH: /app/flow-data/flows.sqlite3
       ATLAS_NEWS_DB_PATH: /app/news-data/events.sqlite3
       ATLAS_RELIABILITY_DB_PATH: /app/reliability-data/incidents.sqlite3
+      ATLAS_READINESS_MONITOR_ENABLED: ${ATLAS_READINESS_MONITOR_ENABLED:-false}
+      ATLAS_READINESS_MONITOR_INTERVAL_SECONDS: ${ATLAS_READINESS_MONITOR_INTERVAL_SECONDS:-900}
       ATLAS_RESEARCH_JOURNAL_FILE: /app/journal/entries.json
       ATLAS_ALERTS_FILE: /app/data/alerts.json
       ATLAS_ALERT_FEED_REGISTRY: /app/data/feeds.json

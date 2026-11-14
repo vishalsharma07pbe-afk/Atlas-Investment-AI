@@ -921,16 +921,13 @@ def reliability_incidents(limit: int = 50):
 
 @app.post("/api/v1/intelligence/reliability/observe")
 def reliability_observe():
-    snapshot = get_data_readiness()
-    codes = {
-        "NOT_IMPORTED": "MISSING", "STALE_DATA": "STALE",
-        "FUTURE_TIMESTAMP": "FUTURE_TIMESTAMP",
-        "INVALID_TIMESTAMP": "STORAGE_ERROR",
-        "STORAGE_UNAVAILABLE": "STORAGE_ERROR",
-    }
-    issues = [{"dataset": item["code"], "code": codes[item["status"]]}
-              for item in snapshot["datasets"] if item["status"] in codes]
-    issues.append({"dataset": "MARKET_DATA", "code": "UNVERIFIED_SOURCE"})
-    result = record_reliability_snapshot(issues)
-    return {**result, "readiness_generated_at": snapshot["generated_at"],
-            "source": "SERVER_COMPUTED_LOCAL_READINESS"}
+    return monitor_observe_once()
+
+# Optional, local-only scheduled observations. No external market data collection.
+from .reliability_monitor import monitor as readiness_monitor, observe_once as monitor_observe_once
+app.add_event_handler("startup", readiness_monitor.start)
+app.add_event_handler("shutdown", readiness_monitor.stop)
+
+@app.get("/api/v1/intelligence/reliability/monitor")
+def reliability_monitor_status():
+    return readiness_monitor.status()
