@@ -938,3 +938,18 @@ from .feed_health import assess_feed
 @app.get("/api/v1/intelligence/providers/upstox/feed-health")
 def upstox_feed_health():
     return assess_feed(upstox_quote_status())
+
+@app.get("/api/v1/intelligence/data-hub/sources")
+def data_hub_sources():
+    from .data_hub import health
+    return health()
+
+@app.get("/api/v1/intelligence/data-hub/search")
+def data_hub_search(query: str, asset_type: Literal["EQUITY", "MUTUAL_FUND"]):
+    from fastapi import HTTPException
+    from .data_hub import lookup
+    try:
+        return lookup(query, asset_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
