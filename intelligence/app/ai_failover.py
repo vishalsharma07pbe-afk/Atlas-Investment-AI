@@ -7,6 +7,7 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 from pydantic import ValidationError
 from .ai_verdict import VERDICT_PROMPT, parse_verdict
+from . import ai_budgets
 
 ALLOWED = ("OLLAMA", "GEMINI", "GROQ", "OPENAI", "XAI")
 FIELDS = {"symbol", "market", "price_change_pct", "volume_change_pct", "sector", "technical_summary", "news_summary"}
@@ -112,6 +113,9 @@ def analyze_market(data):
             attempts.append({"provider":provider,"status":"DISABLED"})
             continue
         try:
+            if not ai_budgets.reserve(provider):
+                attempts.append({"provider":provider,"status":"BUDGET_EXHAUSTED"})
+                continue
             answer=_generate(provider,prompt)
             verdict=parse_verdict(answer)
             return {"status":"AVAILABLE","provider":provider,"analysis":verdict.model_dump(),
@@ -123,6 +127,7 @@ def analyze_market(data):
             "personal_data_forwarded":False}
 
 def provider_health():
-    return {"providers":[{"name":p,"enabled":_enabled(p)} for p in ALLOWED],
+    return {"providers":[{"name":p,"enabled":_enabled(p),
+                          "budget":ai_budgets.usage(p)} for p in ALLOWED],
             "active_connection_verified":False,"external_calls_opt_in":True,
             "paid_providers_require_separate_opt_in":True}
