@@ -988,3 +988,12 @@ def multi_provider_equity_quote(symbol: str, max_age_seconds: int = 60):
 def multi_provider_adapter_status():
     from .multi_provider_quotes import provider_status
     return provider_status()
+
+@app.get("/api/v1/intelligence/data-hub/ohlcv/{market}/{symbol}")
+def ohlcv_history(market: str, symbol: str, limit: int = 365):
+    """Read-only imported daily candles; includes source and age."""
+    from .ohlcv_store import history
+    try:
+        return history(symbol, market, limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
