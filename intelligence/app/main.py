@@ -997,3 +997,18 @@ def ohlcv_history(market: str, symbol: str, limit: int = 365):
         return history(symbol, market, limit)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+# Research-only AI committee endpoints. Do not expose on a public network without auth.
+from .sanitizer import AllowlistedAnalysisPayload
+from .consensus import committee
+from .ai_failover import provider_health as ai_provider_health
+
+@app.get("/api/v1/ai/providers/health")
+def ai_providers_health():
+    return ai_provider_health()
+
+@app.post("/api/v1/ai/analyze/{symbol}")
+async def ai_analyze(symbol: str, observations: AllowlistedAnalysisPayload):
+    if observations.symbol != symbol:
+        raise HTTPException(status_code=422,detail="SYMBOL_MISMATCH")
+    return await committee(symbol,observations.model_dump(exclude={"symbol"},exclude_none=True))
