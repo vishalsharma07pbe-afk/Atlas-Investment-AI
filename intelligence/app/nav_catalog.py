@@ -53,13 +53,26 @@ def _connect():
       nav_date TEXT NOT NULL, isin_growth TEXT, isin_reinvestment TEXT,
       imported_at TEXT NOT NULL, source TEXT NOT NULL)""")
     db.execute("CREATE INDEX IF NOT EXISTS idx_nav_scheme_name ON nav_schemes(scheme_name)")
+    db.execute("""CREATE TABLE IF NOT EXISTS nav_history(
+      scheme_code INTEGER NOT NULL, nav_date TEXT NOT NULL, nav TEXT NOT NULL,
+      source TEXT NOT NULL, imported_at TEXT NOT NULL,
+      PRIMARY KEY(scheme_code, nav_date))""")
+    db.execute("""CREATE TABLE IF NOT EXISTS nav_import_audit(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, imported_at TEXT NOT NULL,
+      source TEXT NOT NULL, parsed INTEGER NOT NULL, invalid_rows INTEGER NOT NULL,
+      inserted_history_rows INTEGER NOT NULL)""")
     return db
 
 def import_snapshot(text: str, source: str = "AMFI_MANUAL_DOWNLOAD"):
     records, invalid = parse_nav(text)
     now = datetime.now(timezone.utc).isoformat()
     with _LOCK, _connect() as db:
+        inserted_history = 0
         for code, name, nav, day, isin1, isin2 in records:
+            cursor = db.execute("""INSERT OR IGNORE INTO nav_history
+                (scheme_code,nav_date,nav,source,imported_at) VALUES(?,?,?,?,?)""",
+                (code, day, nav, source, now))
+            inserted_history += cursor.rowcount
             db.execute("""INSERT INTO nav_schemes VALUES(?,?,?,?,?,?,?,?)
               ON CONFLICT(scheme_code) DO UPDATE SET scheme_name=excluded.scheme_name,
               nav=excluded.nav, nav_date=excluded.nav_date,
@@ -67,8 +80,12 @@ def import_snapshot(text: str, source: str = "AMFI_MANUAL_DOWNLOAD"):
               imported_at=excluded.imported_at, source=excluded.source
               WHERE excluded.nav_date >= nav_schemes.nav_date""",
               (code, name, nav, day, isin1, isin2, now, source))
+        db.execute("""INSERT INTO nav_import_audit
+            (imported_at,source,parsed,invalid_rows,inserted_history_rows)
+            VALUES(?,?,?,?,?)""",(now,source,len(records),invalid,inserted_history))
         db.commit()
     return {"status": "IMPORTED", "parsed": len(records), "invalid_rows": invalid,
+            "inserted_history_rows": inserted_history,
             "source": source, "live_feed_connected": False}
 
 def search_schemes(query: str = "", limit: int = 30):
@@ -92,3 +109,31 @@ def catalog_status():
             "mode": "MANUAL_IMPORT", "automatic_collection_enabled": False,
             "blocker": "AUTOMATED_SOURCE_USAGE_RIGHTS_NOT_VERIFIED",
             "live_feed_connected": False}
+
+def scheme_history(scheme_code: int, limit: int = 365):
+    """Validated local observations only. No inferred NAVs or ratings."""
+    if not 1 <= scheme_code <= 999999999:
+        raise ValueError("INVALID_SCHEME_CODE")
+    if not 1 <= limit <= 2000:
+        raise ValueError("INVALID_LIMIT")
+    with _LOCK, _connect() as db:
+        rows = db.execute("""SELECT nav_date, nav, source, imported_at FROM nav_history
+            WHERE scheme_code=? ORDER BY nav_date DESC LIMIT ?""",
+            (scheme_code, limit)).fetchall()
+    items = [dict(r) for r in reversed(rows)]
+    performance = None
+    if len(items) >= 2:
+        start = Decimal(items[0]["nav"])
+        end = Decimal(items[-1]["nav"])
+        performance = str(((end / start) - 1) * 100)
+    return {"scheme_code": scheme_code, "items": items,
+            "observed_period_return_percent": performance,
+            "verified_rating": None, "live_feed_connected": False,
+            "notice": "Returns use only imported observation dates; not annualized or adjusted for distributions."}
+
+def import_audit(limit: int = 20):
+    if not 1 <= limit <= 100:
+        raise ValueError("INVALID_LIMIT")
+    with _LOCK, _connect() as db:
+        rows = db.execute("SELECT * FROM nav_import_audit ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    return {"items": [dict(r) for r in rows], "automatic_collection_enabled": False}
