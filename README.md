@@ -1,5 +1,7 @@
 # ATLAS — Private Investment Intelligence (Local Alpha)
 
+**P0 verification:** See [docs/P0_VERIFICATION_RUNBOOK.md](docs/P0_VERIFICATION_RUNBOOK.md) for JWT login, Upstox vault setup, NSE/BSE search, AMFI NAV, AI committee, freshness checks and local smoke-test gates. The original alpha instructions below describe earlier milestones; do not assume they reflect the latest authenticated API.
+
 A local-first investment research dashboard. This is a **functional portfolio alpha**, not a complete live trading intelligence system. It does not produce stock tips without verified feeds.
 
 The market-data foundation now supports a validated NSE/BSE instrument registry and strict manual CSV ingestion of daily OHLCV data. See [docs/M1_DATA_INGESTION.md](docs/M1_DATA_INGESTION.md) for source/legal boundaries, templates, validation, migrations and security.
