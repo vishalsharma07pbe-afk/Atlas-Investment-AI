@@ -79,6 +79,10 @@ public class AiCommitteeController {
           String existing=safe.path("technical_summary").asText("");
           String exposure="Portfolio position weight: "+pct+"% (priced holdings only).";
           if(existing.length()+exposure.length()+1<=600)safe.put("technical_summary",existing+" "+exposure);
+        } else {
+          String existing=safe.path("technical_summary").asText("");
+          String exposure="Portfolio position weight: 0.0% (no priced holdings).";
+          if(existing.length()+exposure.length()+1<=600)safe.put("technical_summary",existing+" "+exposure);
         }
         return proxy("/api/v1/ai/analyze/"+symbol,safe.toString());
     }
