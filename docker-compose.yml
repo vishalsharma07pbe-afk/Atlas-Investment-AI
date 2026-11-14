@@ -51,6 +51,7 @@ services:
       ATLAS_NAV_DB_PATH: /app/nav-data/catalog.sqlite3
       ATLAS_FLOW_DB_PATH: /app/flow-data/flows.sqlite3
       ATLAS_NEWS_DB_PATH: /app/news-data/events.sqlite3
+      ATLAS_RELIABILITY_DB_PATH: /app/reliability-data/incidents.sqlite3
       ATLAS_RESEARCH_JOURNAL_FILE: /app/journal/entries.json
       ATLAS_ALERTS_FILE: /app/data/alerts.json
       ATLAS_ALERT_FEED_REGISTRY: /app/data/feeds.json
@@ -61,6 +62,7 @@ services:
       - navcatalog:/app/nav-data
       - flowledger:/app/flow-data
       - newsledger:/app/news-data
+      - reliabilityledger:/app/reliability-data
     ports: ["127.0.0.1:${INTELLIGENCE_PORT:-8000}:8000"]
     depends_on:
       backend:
@@ -75,3 +77,4 @@ volumes:
   navcatalog:
   flowledger:
   newsledger:
+  reliabilityledger:
