@@ -958,3 +958,19 @@ def data_hub_search(query: str, asset_type: Literal["EQUITY", "MUTUAL_FUND"]):
 def failover_readiness():
     from .provider_router import readiness
     return readiness()
+
+@app.get("/api/v1/intelligence/mutual-funds/{scheme_code}/history")
+def mutual_fund_scheme_history(scheme_code: int, limit: int = 365):
+    from .nav_catalog import scheme_history
+    try:
+        return scheme_history(scheme_code, limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+@app.get("/api/v1/intelligence/mutual-funds/import-audit")
+def mutual_fund_import_audit(limit: int = 20):
+    from .nav_catalog import import_audit
+    try:
+        return import_audit(limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
