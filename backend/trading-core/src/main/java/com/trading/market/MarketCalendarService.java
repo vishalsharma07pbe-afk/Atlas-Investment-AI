@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
  public boolean isTradingDay(String exchange,LocalDate day){
   if(!Set.of("NSE","BSE").contains(exchange))throw new IllegalArgumentException("exchange");
   if(day.getDayOfWeek()==DayOfWeek.SATURDAY||day.getDayOfWeek()==DayOfWeek.SUNDAY)return false;
+  if(Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM exchange_holidays WHERE exchange_code=? AND holiday_date=?)",Boolean.class,exchange,day)))return false;
   List<Boolean> result=jdbc.query("SELECT ms.is_trading_day FROM market_sessions ms JOIN exchanges e ON e.id=ms.exchange_id WHERE e.code=? AND ms.session_date=? AND ms.session_type='REGULAR'",(rs,n)->rs.getBoolean(1),exchange,day);
   return result.size()==1&&result.get(0);
  }
