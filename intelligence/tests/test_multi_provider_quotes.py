@@ -35,7 +35,8 @@ class MultiProviderTests(unittest.TestCase):
             "UPSTOX_ACCESS_TOKEN":"dummy","ATLAS_POLYGON_API_KEY":"dummy",
             "ATLAS_UPSTOX_SYMBOL_MAP":'{"AAPL":"NSE_EQ|TEST"}',
             "ATLAS_UPSTOX_QUOTES_AUTHORIZED":"true",
-            "ATLAS_POLYGON_QUOTES_AUTHORIZED":"true"},clear=False):
+            "ATLAS_POLYGON_QUOTES_AUTHORIZED":"true",
+            "ATLAS_POLYGON_US_SYMBOLS":"AAPL"},clear=False):
             result = multi.quote_status("AAPL")
             self.assertEqual(result["status"],"VALIDATED")
             self.assertEqual(result["quote"]["source"],"POLYGON")
