@@ -49,6 +49,7 @@ services:
       ATLAS_UPSTOX_INSTRUMENT_IDS: ${ATLAS_UPSTOX_INSTRUMENT_IDS:-}
       ATLAS_ENTITLEMENT_MANIFEST: /app/entitlements/sources.json
       ATLAS_NAV_DB_PATH: /app/nav-data/catalog.sqlite3
+      ATLAS_INGESTION_DB_PATH: /app/ingestion-data/jobs.sqlite3
       ATLAS_FLOW_DB_PATH: /app/flow-data/flows.sqlite3
       ATLAS_NEWS_DB_PATH: /app/news-data/events.sqlite3
       ATLAS_RELIABILITY_DB_PATH: /app/reliability-data/incidents.sqlite3
@@ -62,6 +63,7 @@ services:
       - ./data/entitlements:/app/entitlements:ro
       - ./data/research-journal:/app/journal
       - navcatalog:/app/nav-data
+      - ingestionledger:/app/ingestion-data
       - flowledger:/app/flow-data
       - newsledger:/app/news-data
       - reliabilityledger:/app/reliability-data
@@ -77,6 +79,7 @@ volumes:
   pgdata:
   redisdata:
   navcatalog:
+  ingestionledger:
   flowledger:
   newsledger:
   reliabilityledger:
