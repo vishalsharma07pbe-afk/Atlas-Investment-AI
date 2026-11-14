@@ -599,3 +599,27 @@ footer { padding: 12px 0 25px; color: var(--ink-muted); font-size: 10px; letter-
   }
   .dashboard .panel :is(.form-actions,.actions) { align-self: stretch; }
 }
+
+/* Compact page-specific forms: visual alignment cannot be achieved by generic input rules alone. */
+.dashboard .atlas-compact-form {display:grid;gap:18px;max-width:100%;margin-top:18px}
+.dashboard .atlas-form-row {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:end}
+.dashboard .atlas-compact-form label {display:flex;flex-direction:column;gap:7px;min-width:0;font-size:13px;font-weight:600;color:var(--ink-soft);margin:0}
+.dashboard .atlas-compact-form :is(input,select) {width:100%;min-width:0;height:44px;min-height:44px;border:1px solid var(--field-border);border-radius:12px;padding:9px 13px;background:var(--field);color:var(--ink);font-size:14px}
+.dashboard .atlas-target-row {display:grid;grid-template-columns:minmax(0,1.6fr) minmax(100px,.7fr) auto;gap:14px;align-items:end;padding:14px;border:1px solid var(--row-line);border-radius:14px}
+.dashboard .atlas-target-row button {min-height:44px;white-space:nowrap}
+.dashboard .atlas-form-actions {display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.dashboard .atlas-form-actions button {min-height:44px}
+.dashboard .atlas-scenario-grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,290px),1fr));gap:14px;align-items:start}
+.dashboard .atlas-scenario-card {min-width:0;margin:0;padding:16px;border:1px solid var(--row-line);border-radius:16px}
+.dashboard .atlas-scenario-card legend {padding:0 8px;color:var(--ink);font-weight:700}
+.dashboard .atlas-scenario-fields {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:12px}
+.dashboard .atlas-scenario-fields label:first-child {grid-column:1/-1}
+.dashboard .atlas-advanced {margin-top:14px;border:1px solid var(--row-line);border-radius:14px;padding:12px 16px}
+.dashboard .atlas-advanced summary {cursor:pointer;font-weight:600;color:var(--ink-soft)}
+.dashboard .atlas-advanced[open] summary {margin-bottom:14px}
+.dashboard .atlas-advanced textarea {max-height:210px;min-height:110px!important;resize:vertical}
+@media(max-width:680px) {
+.dashboard .atlas-form-row,.dashboard .atlas-target-row,.dashboard .atlas-scenario-fields {grid-template-columns:1fr}
+.dashboard .atlas-scenario-fields label:first-child {grid-column:auto}
+.dashboard .atlas-form-actions button {width:100%}
+}
