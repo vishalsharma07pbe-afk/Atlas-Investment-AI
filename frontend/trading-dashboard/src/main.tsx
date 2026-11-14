@@ -1,6 +1,7 @@
 import React, {useEffect, useState} from "react";
 import {createRoot} from "react-dom/client";
 import "./style.css";
+import {AtlasLiveWorkspace} from "./AtlasLiveWorkspace";
 import StockExplorer from "./StockExplorer";
 import PortfolioStress from "./PortfolioStress";
 import PortfolioAllocation from "./PortfolioAllocation";
@@ -172,6 +173,7 @@ export function App() {
 
       <main className="content">
         <header><div><div className="eyebrow"><span/> YOUR PRIVATE RESEARCH TERMINAL</div><h1>{activeTitle}</h1><p>{tab === 0 ? "Your holdings, performance and portfolio risk — all stored locally." : "Strict research gates. No invented prices or recommendations."}</p></div><div className="header-actions"><NotificationCenter/><div className="headerbadge"><span/> MARKET FEED NOT CONNECTED</div><AppearanceControls value={appearance} onChange={setAppearance} open={appearanceOpen} onOpenChange={setAppearanceOpen}/></div></header>
+        <AtlasLiveWorkspace/>
         {error && <div className="error glass">{error} <button onClick={() => tab === 6 ? loadHealth() : load()}>Retry</button></div>}
 
         {tab === 0 ? <>
