@@ -25,4 +25,4 @@ management:
 
 atlas:
   ai:
-    proxy-enabled: ${ATLAS_AI_PROXY_ENABLED:true}
+    proxy-enabled: ${ATLAS_AI_PROXY_ENABLED:false}
