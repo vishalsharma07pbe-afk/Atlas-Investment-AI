@@ -97,9 +97,9 @@ jobs:
           INTERNAL_SERVICE_TOKEN: bridge-integration-secret-at-least-32-chars
           ATLAS_AI_BUDGET_DB_PATH: ${{ runner.temp }}/ai-bridge-budget.sqlite3
           ATLAS_BRIDGE_CAPTURE_FILE: ${{ runner.temp }}/ai-bridge-capture.json
-          PYTHONPATH: intelligence
+          PYTHONPATH: intelligence/intelligence-tests:./intelligence/tests:./intelligence
         run: |
-          python -m uvicorn tests.bridge_probe:app --host 127.0.0.1 --port 18000 > /tmp/atlas-ai-bridge-uvicorn.log 2>&1 &
+          python -m uvicorn bridge_probe:app --host 127.0.0.1 --port 18000 > /tmp/atlas-ai-bridge-uvicorn.log 2>&1 &
           for attempt in $(seq 1 30); do
             if curl -sf http://127.0.0.1:18000/openapi.json > /dev/null; then exit 0; fi
             sleep 1
