@@ -30,10 +30,10 @@ export default function DataReadiness(){
       <div className="tablewrap"><table><thead><tr><th>Dataset</th><th>Records</th><th>Latest observation</th><th>Freshness</th><th>Collection</th></tr></thead>
         <tbody>{data.datasets.map(d=><tr key={d.code}>
           <td>{d.label}</td><td>{d.records}</td><td>{d.latest_observed_at??"No records"}</td>
-          <td>{d.status.replaceAll("_"," ")}{d.age!==null?" ("+d.age+" "+d.age_unit+" old)":""}</td>
+          <td>{d.status.replace(/_/g," ")}{d.age!==null?" ("+d.age+" "+d.age_unit+" old)":""}</td>
           <td>Manual only</td>
         </tr>)}</tbody></table></div>
-      <p><strong>Activation blockers:</strong> {data.blockers.map(x=>x.replaceAll("_"," ")).join(" · ")}</p>
+      <p><strong>Activation blockers:</strong> {data.blockers.map(x=>x.replace(/_/g," ")).join(" · ")}</p>
       <p>{data.notice}</p>
     </>}
   </section>;
