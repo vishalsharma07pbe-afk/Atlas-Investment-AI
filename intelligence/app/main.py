@@ -1001,9 +1001,9 @@ def ohlcv_history(market: str, symbol: str, limit: int = 365):
 # Research-only AI committee endpoints. Internal caller authentication required.
 import os
 import secrets
-from fastapi import Request
+from fastapi import Request as FastAPIRequest
 
-def _require_internal_service(request: Request):
+def _require_internal_service(request: FastAPIRequest):
     expected=os.getenv("INTERNAL_SERVICE_TOKEN","")
     received=request.headers.get("X-Atlas-Service-Token","")
     if len(expected)<32 or not secrets.compare_digest(expected,received):
@@ -1014,12 +1014,12 @@ from .consensus import committee
 from .ai_failover import provider_health as ai_provider_health
 
 @app.get("/api/v1/ai/providers/health")
-def ai_providers_health(request: Request):
+def ai_providers_health(request: FastAPIRequest):
     _require_internal_service(request)
     return ai_provider_health()
 
 @app.post("/api/v1/ai/analyze/{symbol}")
-async def ai_analyze(symbol: str, observations: AllowlistedAnalysisPayload, request: Request):
+async def ai_analyze(symbol: str, observations: AllowlistedAnalysisPayload, request: FastAPIRequest):
     _require_internal_service(request)
     if observations.symbol != symbol:
         raise HTTPException(status_code=422,detail="SYMBOL_MISMATCH")
