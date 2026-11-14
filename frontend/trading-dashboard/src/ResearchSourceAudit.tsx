@@ -24,8 +24,8 @@ export default function ResearchSourceAudit(){
   return <section className="panel glass">
     <div className="sectionhead"><div><small className="section-kicker">RESEARCH PROVENANCE · PERMISSIONS</small><h2>Broker research source audit</h2></div><span className="tag">NO SCRAPING</span></div>
     <p className="muted tiny">Review source permissions, document IDs, publication dates and declared hashes before any future ingestion. This never fetches documents or verifies broker research independently.</p>
-    <div className="form-layout"><label className="field field-full" htmlFor="research-manifests"><span>Source manifests JSON</span><textarea className="editor" id="research-manifests" aria-label="Research source manifests" rows={5} value={raw} onChange={e=>setRaw(e.target.value)}/></label>
-    <div className="form-actions"><button className="primary" disabled={loading} onClick={audit}>{loading?"Auditing…":"Audit research sources"}</button></div></div>
+    <details className="atlas-advanced"><summary>Advanced · Audit source manifest JSON</summary><div className="form-layout"><label className="field field-full" htmlFor="research-manifests"><span>Source manifests JSON</span><textarea className="editor" id="research-manifests" aria-label="Research source manifests" rows={5} value={raw} onChange={e=>setRaw(e.target.value)}/></label>
+    <div className="form-actions"><button className="primary" disabled={loading} onClick={audit}>{loading?"Auditing…":"Audit research sources"}</button></div></div></details>
     {error&&<p role="alert" className="error">{error}</p>}
     {result&&<div role="status"><p className="muted tiny">Documents reviewed: {result.documents_reviewed}. {result.notice}</p>
       <div className="tablewrap"><table><thead><tr><th>PROVIDER</th><th>DOCUMENT</th><th>STATUS</th><th>BLOCKERS</th></tr></thead><tbody>
