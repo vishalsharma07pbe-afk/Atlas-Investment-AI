@@ -901,3 +901,10 @@ def entitlement_registry_preflight(dataset: str, mode: str, purpose: str = "PERS
         return entitlement_preflight(dataset, mode, purpose)
     except ValueError as exc:
         raise EntitlementHTTPException(status_code=400, detail=str(exc)) from exc
+
+from .ingestion_quality import BatchRequest, inspect_batch
+
+@app.post("/api/v1/intelligence/ingestion/quality-preflight")
+def ingestion_quality_preflight(request: BatchRequest):
+    """Validate a candidate batch without storing data or authorizing a feed."""
+    return inspect_batch(request)
