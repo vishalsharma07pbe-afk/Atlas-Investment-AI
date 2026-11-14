@@ -85,6 +85,7 @@ public class AuthSecurity {
       UUID valid=verify(token);
       if(!user.equals(valid))throw new IllegalArgumentException("INVALID_SESSION");
       jdbc.update("INSERT INTO revoked_jwt(token_sha256,user_id,expires_at) VALUES (?,?,now()+interval '15 minutes') ON CONFLICT DO NOTHING",sha(token),user);
+      jdbc.update("DELETE FROM revoked_jwt WHERE expires_at < now()");
     }
     public UUID verify(String token){
       if(key==null || token==null || token.length()>4096)return null;
