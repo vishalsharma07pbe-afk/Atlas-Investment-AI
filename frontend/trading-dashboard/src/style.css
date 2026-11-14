@@ -483,3 +483,119 @@ footer { padding: 12px 0 25px; color: var(--ink-muted); font-size: 10px; letter-
 .dashboard .panel .sectionhead { flex-wrap: wrap; }
 .dashboard .panel .sectionhead > div { min-width: 0; }
 .dashboard .panel .tablewrap { max-width: 100%; }
+
+/* ATLAS motion layer: GPU-friendly, subtle, and opt-out accessible. */
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+  .dashboard :is(.content,.sidebar,.atlas-notification-panel,.appearance-panel,.tablewrap) {
+    scroll-behavior: smooth;
+  }
+  .dashboard .content > :is(section,article,.panel),
+  .dashboard .content :is(.stat,.panel,.card) {
+    animation: atlas-enter .42s cubic-bezier(.2,.75,.25,1) both;
+  }
+  .dashboard .content :is(.stat,.panel,.card):nth-child(2n) { animation-delay: 45ms; }
+  .dashboard .content :is(.stat,.panel,.card):nth-child(3n) { animation-delay: 85ms; }
+  @keyframes atlas-enter {
+    from { opacity: .55; transform: translate3d(0,9px,0); }
+    to { opacity: 1; transform: translate3d(0,0,0); }
+  }
+  .dashboard :is(.primary,.secondary,.atlas-bell,nav button,.appearance-trigger) {
+    transition: transform .18s ease, box-shadow .22s ease, background-color .22s ease, border-color .22s ease, color .22s ease;
+  }
+  .dashboard :is(.primary,.secondary,.atlas-bell,.appearance-trigger):hover:not(:disabled) {
+    transform: translateY(-2px);
+  }
+  .dashboard :is(.primary,.secondary,.atlas-bell,.appearance-trigger):active:not(:disabled) {
+    transform: translateY(0) scale(.985);
+  }
+  .dashboard :is(.atlas-notification-panel,.appearance-panel) {
+    animation: atlas-drawer-in .24s cubic-bezier(.2,.75,.25,1) both;
+  }
+  @keyframes atlas-drawer-in {
+    from { opacity: 0; transform: translate3d(0,-8px,0); }
+    to { opacity: 1; transform: translate3d(0,0,0); }
+  }
+  .dashboard .canvas { animation: atlas-ambient 32s ease-in-out infinite alternate; }
+  @keyframes atlas-ambient {
+    from { filter: hue-rotate(0deg) brightness(1); }
+    to { filter: hue-rotate(10deg) brightness(1.07); }
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html, .dashboard, .dashboard * { scroll-behavior: auto !important; }
+  .dashboard .canvas { animation: none !important; }
+}
+
+/* Consistent compact, baseline-aligned forms across ATLAS modules. */
+.dashboard {
+  --atlas-control-height: 44px;
+  --atlas-control-radius: 12px;
+  --atlas-form-gap: 14px;
+}
+.dashboard .panel :is(.form,.form-layout,.control-grid,.import-grid,.searchbar) {
+  align-items: end;
+  column-gap: var(--atlas-form-gap);
+  row-gap: var(--atlas-form-gap);
+}
+.dashboard .panel :is(.form,.form-layout,.control-grid,.import-grid,.searchbar) > * {
+  min-width: 0;
+}
+.dashboard .panel :is(.field,label:has(> input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),> select,> textarea)) {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 7px;
+  min-width: 0;
+  margin-block: 0;
+  line-height: 1.35;
+}
+.dashboard .panel :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),select) {
+  height: var(--atlas-control-height);
+  min-height: var(--atlas-control-height);
+  padding-block: 9px;
+  border-radius: var(--atlas-control-radius);
+  background-color: var(--field);
+  border-color: var(--field-border);
+  color: var(--ink);
+}
+.dashboard .panel textarea {
+  min-height: 88px;
+  border-radius: var(--atlas-control-radius);
+  background-color: var(--field);
+  border-color: var(--field-border);
+  color: var(--ink);
+}
+.dashboard .panel :is(.editor,.editor-compact) { min-height: 108px !important; }
+.dashboard .panel .editor-tall { min-height: 176px !important; }
+.dashboard .panel :is(.form-actions,.actions) {
+  align-self: end;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.dashboard .panel :is(.form-actions,.actions) :is(button,.primary,.secondary) {
+  min-height: var(--atlas-control-height);
+  border-radius: var(--atlas-control-radius);
+}
+.dashboard .panel :is(.form,.control-grid,.import-grid,.searchbar) > button {
+  min-height: var(--atlas-control-height);
+  align-self: end;
+  border-radius: var(--atlas-control-radius);
+}
+.dashboard .panel :is(input,select,textarea):disabled {
+  opacity: .62;
+  cursor: not-allowed;
+}
+.dashboard .panel :is(input,select,textarea):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+@media (max-width: 780px) {
+  .dashboard .panel :is(.form,.form-layout,.control-grid,.import-grid,.searchbar) {
+    align-items: stretch;
+  }
+  .dashboard .panel :is(.form-actions,.actions) { align-self: stretch; }
+}
