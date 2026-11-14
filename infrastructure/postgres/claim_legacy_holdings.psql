@@ -1,0 +1,25 @@
+\\set ON_ERROR_STOP on
+BEGIN;
+CREATE TEMP TABLE _claim_owner AS
+ SELECT id FROM atlas_users WHERE lower(email)=lower(:'owner_email');
+DO $$ BEGIN
+ IF (SELECT count(*) FROM _claim_owner) <> 1 THEN
+  RAISE EXCEPTION 'Owner email must match exactly one user';
+ END IF;
+ IF EXISTS (
+   SELECT 1 FROM personal_holdings orphan
+   JOIN personal_holdings existing
+     ON existing.user_id=(SELECT id FROM _claim_owner)
+     AND existing.symbol=orphan.symbol AND existing.asset_type=orphan.asset_type
+   WHERE orphan.user_id IS NULL
+ ) THEN
+  RAISE EXCEPTION 'Conflicting owner holding; resolve manually';
+ END IF;
+END $$;
+UPDATE personal_holdings SET user_id=(SELECT id FROM _claim_owner) WHERE user_id IS NULL;
+DO $$ BEGIN
+ IF EXISTS (SELECT 1 FROM personal_holdings WHERE user_id IS NULL) THEN
+  RAISE EXCEPTION 'Unclaimed holdings remain';
+ END IF;
+END $$;
+COMMIT;
