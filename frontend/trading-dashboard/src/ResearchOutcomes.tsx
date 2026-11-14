@@ -29,16 +29,16 @@ export default function ResearchOutcomes(){
   return <section className="panel glass">
     <div className="sectionhead"><div><small className="section-kicker">HISTORICAL RESEARCH · OUTCOME REVIEW</small><h2>Broker recommendation follow-through</h2></div><span className="tag">UNVERIFIED DATA</span></div>
     <p className="muted tiny">Compare supplied dated broker reports with supplied dated closing prices. Entry prices must be after publication and evaluation horizons must have elapsed. Returns are illustrative, not verified analyst accuracy.</p>
-    <div className="form-layout">
+    <div className="form-layout atlas-research-form">
       <div className="control-grid control-grid-2">
         <label className="field" htmlFor="outcome-instrument"><span>Instrument identifier</span><input id="outcome-instrument" aria-label="Outcome instrument identifier" value={instrument} onChange={e=>setInstrument(e.target.value)} placeholder="ISIN or stable identifier"/></label>
         <label className="field" htmlFor="outcome-horizon"><span>Evaluation horizon <small>Calendar days</small></span><input id="outcome-horizon" aria-label="Outcome horizon days" type="number" min={5} max={730} value={days} onChange={e=>setDays(Number(e.target.value))}/></label>
       </div>
-      <div className="control-grid control-grid-2">
+      <details className="atlas-advanced"><summary>Advanced · Supply research reports and historical prices JSON</summary><div className="control-grid control-grid-2">
         <label className="field" htmlFor="outcome-reports"><span>Research reports JSON</span><textarea className="editor editor-compact" id="outcome-reports" aria-label="Outcome reports JSON" rows={4} value={reports} onChange={e=>setReports(e.target.value)}/></label>
         <label className="field" htmlFor="outcome-prices"><span>Daily prices JSON</span><textarea className="editor editor-compact" id="outcome-prices" aria-label="Outcome prices JSON" rows={4} value={prices} onChange={e=>setPrices(e.target.value)}/></label>
       </div>
-      <div className="form-actions"><button className="primary" disabled={loading} onClick={run}>{loading?"Reviewing…":"Review historical outcomes"}</button></div>
+      </details><div className="form-actions"><button className="primary" disabled={loading} onClick={run}>{loading?"Reviewing…":"Review historical outcomes"}</button></div>
     </div>
     {error&&<p role="alert" className="error">{error}</p>}
     {result&&<div role="status"><p className="muted tiny">Reports reviewed: {result.reports_reviewed} · Horizon: {result.horizon_days} calendar days</p>
