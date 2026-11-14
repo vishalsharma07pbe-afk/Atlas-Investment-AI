@@ -1,0 +1,58 @@
+package com.trading.api;
+
+import java.util.*;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
+
+@RestController
+@RequestMapping("/api/v1/auth")
+public class AuthController {
+  private final JdbcTemplate jdbc;
+  private final PasswordEncoder encoder;
+  private final AuthSecurity.JwtTokens jwt;
+  @Value("${ALLOW_REGISTRATION:false}") boolean allowRegistration;
+  AuthController(JdbcTemplate jdbc,PasswordEncoder encoder,AuthSecurity.JwtTokens jwt){
+    this.jdbc=jdbc;this.encoder=encoder;this.jwt=jwt;
+  }
+  public record Credentials(String email,String password){}
+  @PostMapping("/register")
+  public Map<String,Object> register(@RequestBody Credentials request){
+    if(!allowRegistration)throw new ResponseStatusException(HttpStatus.FORBIDDEN,"Registration disabled");
+    String email=validEmail(request.email());
+    if(request.password()==null || request.password().length()<12 || request.password().length()>128)
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Password must be 12-128 characters");
+    UUID id=UUID.randomUUID();
+    try {jdbc.update("INSERT INTO atlas_users(id,email,password_hash,role) VALUES (?,?,?,'USER')",
+      id,email,encoder.encode(request.password()));}
+    catch(org.springframework.dao.DuplicateKeyException ex){throw new ResponseStatusException(HttpStatus.CONFLICT,"Email already registered");}
+    return Map.of("id",id,"email",email);
+  }
+  private String validEmail(String raw){
+    if(raw==null)throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
+    String email=raw.trim().toLowerCase(Locale.ROOT);
+    if(email.length()>254 || !email.matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"))
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid email");
+    return email;
+  }
+  @PostMapping("/login")
+  public Map<String,Object> login(@RequestBody Credentials request){
+    String email=validEmail(request.email());
+    var users=jdbc.queryForList("SELECT id,password_hash FROM atlas_users WHERE email=?",email);
+    if(users.size()!=1 || request.password()==null ||
+       !encoder.matches(request.password(),(String)users.get(0).get("password_hash")))
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Invalid credentials");
+    UUID id=(UUID)users.get(0).get("id");
+    return Map.of("access_token",jwt.issue(id),"token_type","Bearer","expires_in",900);
+  }
+  @GetMapping("/me")
+  public Map<String,Object> me(){
+    UUID id=AuthSecurity.currentUser();
+    var rows=jdbc.queryForList("SELECT id,email,role FROM atlas_users WHERE id=?",id);
+    if(rows.isEmpty())throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+    return rows.get(0);
+  }
+}
