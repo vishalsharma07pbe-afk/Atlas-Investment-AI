@@ -12,6 +12,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.containers.PostgreSQLContainer;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import org.springframework.http.MediaType;
@@ -21,13 +22,16 @@ import java.util.Map;
 @SpringBootTest(properties={"ALLOW_REGISTRATION=true","ATLAS_JWT_SECRET=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="})
 @AutoConfigureMockMvc
 class AuthIsolationIntegrationTest {
+  static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine").withInitScript("test-schema.sql");
+  static {if(System.getenv("TEST_DATABASE_URL")==null)POSTGRES.start();}
+  @org.junit.jupiter.api.AfterAll static void stop(){if(POSTGRES.isRunning())POSTGRES.stop();}
   @DynamicPropertySource static void db(DynamicPropertyRegistry registry){
-    registry.add("spring.datasource.url",()->DataFoundationIntegrationTest.EXTERNAL_URL!=null?
-      DataFoundationIntegrationTest.EXTERNAL_URL:DataFoundationIntegrationTest.POSTGRES.getJdbcUrl());
-    registry.add("spring.datasource.username",()->DataFoundationIntegrationTest.EXTERNAL_URL!=null?
-      System.getenv("TEST_DATABASE_USERNAME"):DataFoundationIntegrationTest.POSTGRES.getUsername());
-    registry.add("spring.datasource.password",()->DataFoundationIntegrationTest.EXTERNAL_URL!=null?
-      System.getenv("TEST_DATABASE_PASSWORD"):DataFoundationIntegrationTest.POSTGRES.getPassword());
+    registry.add("spring.datasource.url",()->System.getenv("TEST_DATABASE_URL")!=null?
+      System.getenv("TEST_DATABASE_URL"):POSTGRES.getJdbcUrl());
+    registry.add("spring.datasource.username",()->System.getenv("TEST_DATABASE_URL")!=null?
+      System.getenv("TEST_DATABASE_USERNAME"):POSTGRES.getUsername());
+    registry.add("spring.datasource.password",()->System.getenv("TEST_DATABASE_URL")!=null?
+      System.getenv("TEST_DATABASE_PASSWORD"):POSTGRES.getPassword());
   }
   @Autowired MockMvc mvc;
   @Autowired JdbcTemplate jdbc;
