@@ -17,17 +17,22 @@ public class VaultRotationService {
   }
   @Transactional
   public int rotate(String oldKey,String newKey){
+    return rotateVersioned(oldKey,newKey,1,2);
+  }
+  @Transactional
+  public int rotateVersioned(String oldKey,String newKey,int oldVersion,int newVersion){
+    if(oldVersion<=0 || newVersion<=oldVersion)throw new IllegalArgumentException("Invalid key versions");
     if(currentKey==null || !currentKey.equals(oldKey))
       throw new IllegalStateException("Old key does not match current configured key");
     if(oldKey.equals(newKey))throw new IllegalArgumentException("New key must differ");
     VaultCrypto oldCrypto=new VaultCrypto(oldKey),newCrypto=new VaultCrypto(newKey);
-    var rows=jdbc.query("SELECT id,user_id,broker_name,encrypted_access_token,iv_nonce FROM broker_credentials FOR UPDATE",
+    var rows=jdbc.query("SELECT id,user_id,broker_name,encrypted_access_token,iv_nonce FROM broker_credentials WHERE key_version=? FOR UPDATE",
       (ResultSet rs,int index)->new Row(rs.getLong("id"),rs.getObject("user_id",UUID.class),
-        rs.getString("broker_name"),rs.getBytes("encrypted_access_token"),rs.getBytes("iv_nonce")));
+        rs.getString("broker_name"),rs.getBytes("encrypted_access_token"),rs.getBytes("iv_nonce")),oldVersion);
     for(Row row:rows){
       var next=oldCrypto.rotate(row.user(),row.broker(),new VaultCrypto.Sealed(row.ciphertext(),row.nonce()),newCrypto);
-      jdbc.update("UPDATE broker_credentials SET encrypted_access_token=?,iv_nonce=?,updated_at=now() WHERE id=?",
-        next.ciphertext(),next.nonce(),row.id());
+      jdbc.update("UPDATE broker_credentials SET encrypted_access_token=?,iv_nonce=?,key_version=?,updated_at=now() WHERE id=? AND key_version=?",
+        next.ciphertext(),next.nonce(),newVersion,row.id(),oldVersion);
     }
     return rows.size();
   }
