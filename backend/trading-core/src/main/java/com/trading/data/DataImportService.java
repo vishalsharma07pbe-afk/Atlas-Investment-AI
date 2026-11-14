@@ -179,6 +179,14 @@ public class DataImportService {
           quality(source,instrument,run,action?"INFO":"WARNING",action?"CORPORATE_ACTION_CONTEXT":"SUSPICIOUS_PRICE_DISCONTINUITY",candleTime.toInstant(),Map.of("absoluteReturn",move,"tradeDate",day.toString(),"adjustmentStatus",adjustment)); events++;
         }
       }
+      jdbc.update("""
+        INSERT INTO instrument_source_freshness(instrument_id,source_id,last_synced_at,latest_candle_at,source_revision)
+        VALUES (?,?,now(),?,?)
+        ON CONFLICT(instrument_id,source_id) DO UPDATE SET
+          last_synced_at=now(),
+          latest_candle_at=GREATEST(instrument_source_freshness.latest_candle_at,EXCLUDED.latest_candle_at),
+          source_revision=EXCLUDED.source_revision
+        """,instrument,source,candleTime,revision);
       newest=newest==null||day.isAfter(newest)?day:newest;
     }
     if(newest!=null&&newest.isBefore(LocalDate.now(INDIA).minusDays(10))){ quality(source,null,run,"WARNING","STALE_SOURCE",null,Map.of("latestTradeDate",newest.toString(),"ageDays",Duration.between(newest.atStartOfDay(INDIA),ZonedDateTime.now(INDIA)).toDays())); events++; }
