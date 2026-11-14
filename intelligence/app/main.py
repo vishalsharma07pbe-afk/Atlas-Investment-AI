@@ -974,3 +974,17 @@ def mutual_fund_import_audit(limit: int = 20):
         return import_audit(limit)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+@app.get("/api/v1/intelligence/data-hub/quotes/{symbol}")
+def multi_provider_equity_quote(symbol: str, max_age_seconds: int = 60):
+    """Read-only, fail-closed quotes. No cached value is misrepresented as current."""
+    from .multi_provider_quotes import quote_status
+    try:
+        return quote_status(symbol, max_age_seconds)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+@app.get("/api/v1/intelligence/data-hub/provider-adapters")
+def multi_provider_adapter_status():
+    from .multi_provider_quotes import provider_status
+    return provider_status()
