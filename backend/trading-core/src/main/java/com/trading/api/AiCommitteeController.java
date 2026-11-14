@@ -1,6 +1,10 @@
 package com.trading.api;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.springframework.jdbc.core.JdbcTemplate;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -19,6 +23,8 @@ public class AiCommitteeController {
     private static final Pattern SYMBOL = Pattern.compile("[A-Z0-9._&-]{1,40}");
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
     private final ObjectMapper mapper = new ObjectMapper();
+    private final JdbcTemplate jdbc;
+    public AiCommitteeController(JdbcTemplate jdbc){this.jdbc=jdbc;}
     @Value("${atlas.ai.proxy-enabled:false}")
     private boolean enabled;
     @Value("${atlas.ai.intelligence-url:http://intelligence:8000}")
@@ -56,6 +62,24 @@ public class AiCommitteeController {
             || !symbol.equals(body.path("symbol").asText()))
             return ResponseEntity.unprocessableEntity().build();
         if (body.toString().length()>4096) return ResponseEntity.status(413).build();
-        return proxy("/api/v1/ai/analyze/"+symbol,body.toString());
+        // Only aggregate relative weights; no quantities, prices, cost basis, or user IDs leave Spring.
+        ObjectNode safe=((ObjectNode)body).deepCopy();
+        safe.remove(java.util.List.of("quantity","average_cost","last_price","account_id","user_id"));
+        java.util.List<java.util.Map<String,Object>> positions=jdbc.queryForList(
+          "SELECT symbol,quantity*last_price AS value FROM personal_holdings WHERE user_id=? AND last_price IS NOT NULL",
+          AuthSecurity.currentUser());
+        BigDecimal total=BigDecimal.ZERO,position=BigDecimal.ZERO;
+        for(var row:positions){
+          BigDecimal value=(BigDecimal)row.get("value");
+          total=total.add(value);
+          if(symbol.equals(row.get("symbol")))position=position.add(value);
+        }
+        if(total.signum()>0){
+          String pct=position.multiply(new BigDecimal("100")).divide(total,2,RoundingMode.HALF_UP).toPlainString();
+          String existing=safe.path("technical_summary").asText("");
+          String exposure="Portfolio position weight: "+pct+"% (priced holdings only).";
+          if(existing.length()+exposure.length()+1<=600)safe.put("technical_summary",existing+" "+exposure);
+        }
+        return proxy("/api/v1/ai/analyze/"+symbol,safe.toString());
     }
 }
