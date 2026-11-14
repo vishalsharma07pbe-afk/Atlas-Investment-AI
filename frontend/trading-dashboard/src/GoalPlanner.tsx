@@ -30,13 +30,13 @@ export default function GoalPlanner(){
   return <section className="panel glass" aria-label="Goal-based investment planner">
     <div className="sectionhead"><div><small className="section-kicker">GOAL PLANNING LAB</small><h2>Goal-based investment planner</h2></div><span className="tag">ILLUSTRATIVE ONLY</span></div>
     <p className="muted tiny">Explore a target using a fixed assumed annual return, end-of-month contributions and monthly compounding. No live prices or return predictions.</p>
-    <form onSubmit={calculate}>
+    <form onSubmit={calculate} className="atlas-compact-form atlas-goal-form"><div className="atlas-goal-grid">
       <label>Target amount (INR)<input aria-label="Goal target amount" type="number" min="1" max="1000000000" value={target} onChange={e=>setTarget(e.target.value)}/></label>
       <label>Starting savings (INR)<input aria-label="Starting savings" type="number" min="0" value={initial} onChange={e=>setInitial(e.target.value)}/></label>
       <label>Monthly contribution (INR)<input aria-label="Monthly contribution" type="number" min="0" value={monthly} onChange={e=>setMonthly(e.target.value)}/></label>
       <label>Time horizon (months)<input aria-label="Time horizon in months" type="number" min="1" max="600" value={months} onChange={e=>setMonths(e.target.value)}/></label>
       <label>Assumed annual return (%)<input aria-label="Assumed annual return" type="number" min="-30" max="30" step="0.1" value={rate} onChange={e=>setRate(e.target.value)}/></label>
-      <button className="primary" type="submit" disabled={loading}>{loading?"Calculating…":"Calculate goal"}</button>
+      </div><div className="atlas-form-actions"><button className="primary" type="submit" disabled={loading}>{loading?"Calculating…":"Calculate goal"}</button></div>
     </form>
     {error&&<p role="alert">{error}</p>}
     {result&&<div aria-label="Goal projection results">
