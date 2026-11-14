@@ -24,6 +24,7 @@ import ProviderBatchPreflight from "./ProviderBatchPreflight";
 import UpstoxAuthorization from "./UpstoxAuthorization";
 import MarketReadiness from "./MarketReadiness";
 import DataReadiness from "./DataReadiness";
+import ReliabilityIncidents from "./ReliabilityIncidents";
 import IngestionQualityGate from "./IngestionQualityGate";
 import EntitlementRegistry from "./EntitlementRegistry";
 import ProviderReconciliation from "./ProviderReconciliation";
@@ -202,6 +203,7 @@ export function App() {
           </tbody></table></div></section>
         </> : tab === 1 ? <><NavCatalog/><MutualFundHoldings holdings={holdings}/></> : (tab === 2 || tab === 3 || tab === 4) ? <><MarketIntelligence/><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/></> : tab === 7 ? <StockExplorer/> : tab === 6 ? <>
           <DataReadiness/>
+          <ReliabilityIncidents/>
           <IngestionQualityGate/>
           <EntitlementRegistry/>
           <MarketReadiness/>
