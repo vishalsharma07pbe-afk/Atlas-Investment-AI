@@ -66,10 +66,12 @@ class AiBridgeHttpIntegrationTest {
     String payload="""
       {"symbol":"TCS","market":"NSE","price_change_pct":2.0,"technical_summary":"Trend evidence only"}
       """;
-    mvc.perform(post("/api/v1/ai/analyze/TCS").header("Authorization",token)
-      .contentType(MediaType.APPLICATION_JSON).content(payload)).andExpect(status().isOk())
-      .andExpect(jsonPath("$.symbol").value("TCS"));
+    var analysis=mvc.perform(post("/api/v1/ai/analyze/TCS").header("Authorization",token)
+      .contentType(MediaType.APPLICATION_JSON).content(payload)).andReturn().getResponse();
     String recorded=Files.readString(Path.of(System.getenv("ATLAS_BRIDGE_CAPTURE_FILE")));
+    assertThat(recorded).as("Python received no POST body; status="+analysis.getStatus()).isNotBlank();
+    assertThat(analysis.getStatus()).as("Python response: "+analysis.getContentAsString()).isEqualTo(200);
+    assertThat(json.readTree(analysis.getContentAsString()).path("symbol").asText()).isEqualTo("TCS");
     JsonNode observed=json.readTree(recorded);
     assertThat(observed.path("technical_summary").asText()).contains("75.00%");
     for(String forbidden:List.of("123456","987654","quantity","average_cost","access_token","upstox","user_id","last_price"))
