@@ -879,3 +879,10 @@ def news_ledger_list(limit: int = 50, max_age_hours: int = 72, geography: str | 
         return list_news(limit, max_age_hours, geography)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+from .data_readiness import readiness as get_data_readiness
+
+@app.get("/api/v1/intelligence/data-readiness")
+def data_readiness():
+    """Read-only source readiness. Never asserts live connectivity from local imports."""
+    return get_data_readiness()
