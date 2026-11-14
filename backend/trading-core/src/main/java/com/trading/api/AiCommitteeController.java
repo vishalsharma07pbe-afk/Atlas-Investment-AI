@@ -63,14 +63,23 @@ public class AiCommitteeController {
             return ResponseEntity.unprocessableEntity().build();
         if (body.toString().length()>4096) return ResponseEntity.status(413).build();
         // Only aggregate relative weights; no quantities, prices, cost basis, or user IDs leave Spring.
-        ObjectNode safe=((ObjectNode)body).deepCopy();
-        safe.remove(java.util.List.of("quantity","average_cost","last_price","account_id","user_id"));
+        // Build an allowlisted request. Never forward arbitrary client fields or account data.
+        ObjectNode safe=mapper.createObjectNode();
+        safe.put("symbol",symbol);
+        for(String field:java.util.List.of("market","sector","technical_summary","news_summary"))
+          if(body.hasNonNull(field))safe.set(field,body.get(field));
+        for(String field:java.util.List.of("price_change_pct","volume_change_pct"))
+          if(body.hasNonNull(field))safe.set(field,body.get(field));
+        // Reject forbidden fields instead of silently accepting hidden sensitive values.
+        java.util.Set<String> allowed=java.util.Set.of("symbol","market","sector","technical_summary","news_summary","price_change_pct","volume_change_pct");
+        var names=body.fieldNames();
+        while(names.hasNext())if(!allowed.contains(names.next()))return ResponseEntity.unprocessableEntity().build();
         java.util.List<java.util.Map<String,Object>> positions=jdbc.queryForList(
           "SELECT symbol,quantity*last_price AS value FROM personal_holdings WHERE user_id=? AND last_price IS NOT NULL",
           AuthSecurity.currentUser());
         BigDecimal total=BigDecimal.ZERO,position=BigDecimal.ZERO;
         for(var row:positions){
-          BigDecimal value=(BigDecimal)row.get("value");
+          BigDecimal value=new BigDecimal(row.get("value").toString());
           total=total.add(value);
           if(symbol.equals(row.get("symbol")))position=position.add(value);
         }
