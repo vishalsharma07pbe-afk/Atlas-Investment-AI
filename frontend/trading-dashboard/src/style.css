@@ -483,3 +483,46 @@ footer { padding: 12px 0 25px; color: var(--ink-muted); font-size: 10px; letter-
 .dashboard .panel .sectionhead { flex-wrap: wrap; }
 .dashboard .panel .sectionhead > div { min-width: 0; }
 .dashboard .panel .tablewrap { max-width: 100%; }
+
+/* ATLAS motion layer: GPU-friendly, subtle, and opt-out accessible. */
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+  .dashboard :is(.content,.sidebar,.atlas-notification-panel,.appearance-panel,.tablewrap) {
+    scroll-behavior: smooth;
+  }
+  .dashboard .content > :is(section,article,.panel),
+  .dashboard .content :is(.stat,.panel,.card) {
+    animation: atlas-enter .42s cubic-bezier(.2,.75,.25,1) both;
+  }
+  .dashboard .content :is(.stat,.panel,.card):nth-child(2n) { animation-delay: 45ms; }
+  .dashboard .content :is(.stat,.panel,.card):nth-child(3n) { animation-delay: 85ms; }
+  @keyframes atlas-enter {
+    from { opacity: .55; transform: translate3d(0,9px,0); }
+    to { opacity: 1; transform: translate3d(0,0,0); }
+  }
+  .dashboard :is(.primary,.secondary,.atlas-bell,nav button,.appearance-trigger) {
+    transition: transform .18s ease, box-shadow .22s ease, background-color .22s ease, border-color .22s ease, color .22s ease;
+  }
+  .dashboard :is(.primary,.secondary,.atlas-bell,.appearance-trigger):hover:not(:disabled) {
+    transform: translateY(-2px);
+  }
+  .dashboard :is(.primary,.secondary,.atlas-bell,.appearance-trigger):active:not(:disabled) {
+    transform: translateY(0) scale(.985);
+  }
+  .dashboard :is(.atlas-notification-panel,.appearance-panel) {
+    animation: atlas-drawer-in .24s cubic-bezier(.2,.75,.25,1) both;
+  }
+  @keyframes atlas-drawer-in {
+    from { opacity: 0; transform: translate3d(0,-8px,0); }
+    to { opacity: 1; transform: translate3d(0,0,0); }
+  }
+  .dashboard .canvas { animation: atlas-ambient 32s ease-in-out infinite alternate; }
+  @keyframes atlas-ambient {
+    from { filter: hue-rotate(0deg) brightness(1); }
+    to { filter: hue-rotate(10deg) brightness(1.07); }
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html, .dashboard, .dashboard * { scroll-behavior: auto !important; }
+  .dashboard .canvas { animation: none !important; }
+}
