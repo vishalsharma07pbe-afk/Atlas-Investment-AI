@@ -24,7 +24,6 @@ public class VaultRotationRunner implements ApplicationRunner {
     if(target<2)throw new IllegalArgumentException("Rotation requires key version >=2");
     int count=service.rotateVersioned(old,next,target-1,target);
     System.out.println("Vault rotation completed; rows="+count);
-    // This dedicated process exits after the transaction. Never expose an HTTP listener.
-    System.exit(0);
+    // Run with --spring.main.web-application-type=none; caller exits after runner completes.
   }
 }
