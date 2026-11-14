@@ -18,6 +18,7 @@ import org.springframework.web.server.ResponseStatusException;
 public class BrokerVaultController {
   private final JdbcTemplate jdbc;
   private final VaultCrypto vault;
+  @Value("${ATLAS_VAULT_KEY_VERSION:1}") int keyVersion;
   private final SecureRandom random=new SecureRandom();
   public BrokerVaultController(JdbcTemplate jdbc,@Value("${ATLAS_VAULT_MASTER_KEY:}") String key){
     this.jdbc=jdbc;
@@ -36,11 +37,11 @@ public class BrokerVaultController {
     try {
       VaultCrypto.Sealed sealed=vault.encrypt(user,"UPSTOX",input.accessToken());
       jdbc.update(""" 
-        INSERT INTO broker_credentials(user_id,broker_name,encrypted_access_token,iv_nonce,token_expires_at)
-        VALUES (?,'UPSTOX',?,?,?) ON CONFLICT(user_id,broker_name) DO UPDATE SET
+        INSERT INTO broker_credentials(user_id,broker_name,encrypted_access_token,iv_nonce,token_expires_at,key_version)
+        VALUES (?,'UPSTOX',?,?,?,?) ON CONFLICT(user_id,broker_name) DO UPDATE SET
         encrypted_access_token=EXCLUDED.encrypted_access_token,
-        iv_nonce=EXCLUDED.iv_nonce,token_expires_at=EXCLUDED.token_expires_at,updated_at=now()
-        """,user,sealed.ciphertext(),sealed.nonce(),input.expiresAt());
+        iv_nonce=EXCLUDED.iv_nonce,key_version=EXCLUDED.key_version,token_expires_at=EXCLUDED.token_expires_at,updated_at=now()
+        """,user,sealed.ciphertext(),sealed.nonce(),input.expiresAt(),keyVersion);
       return Map.of("stored",true,"broker","UPSTOX","expires_at",input.expiresAt().toString());
     }catch(Exception ex){
       throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,"Token encryption/storage failed");
