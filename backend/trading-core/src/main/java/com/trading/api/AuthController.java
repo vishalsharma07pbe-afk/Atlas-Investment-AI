@@ -1,6 +1,9 @@
 package com.trading.api;
 
 import java.util.*;
+import java.security.MessageDigest;
+import java.nio.charset.StandardCharsets;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -39,14 +42,29 @@ public class AuthController {
     return email;
   }
   @PostMapping("/login")
-  public Map<String,Object> login(@RequestBody Credentials request){
+  public Map<String,Object> login(@RequestBody Credentials request,HttpServletRequest http){
     String email=validEmail(request.email());
+    String emailHash=hash(email),ipHash=hash(http.getRemoteAddr());
+    Integer failures=jdbc.queryForObject("SELECT count(*) FROM auth_login_failures WHERE (email_hash=? OR ip_hash=?) AND attempted_at>now()-interval '1 minute'",Integer.class,emailHash,ipHash);
+    if(failures!=null && failures>=5)throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,"Try again later");
     var users=jdbc.queryForList("SELECT id,password_hash FROM atlas_users WHERE email=?",email);
     if(users.size()!=1 || request.password()==null ||
-       !encoder.matches(request.password(),(String)users.get(0).get("password_hash")))
+       !encoder.matches(request.password(),(String)users.get(0).get("password_hash"))) {
+      jdbc.update("INSERT INTO auth_login_failures(email_hash,ip_hash) VALUES (?,?)",emailHash,ipHash);
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Invalid credentials");
+    }
     UUID id=(UUID)users.get(0).get("id");
     return Map.of("access_token",jwt.issue(id),"token_type","Bearer","expires_in",900);
+  }
+  private static String hash(String value){
+    try {return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));}
+    catch(Exception ex){throw new IllegalStateException(ex);}
+  }
+  @PostMapping("/logout")
+  public Map<String,Boolean> logout(@org.springframework.web.bind.annotation.RequestHeader("Authorization") String authorization){
+    if(!authorization.startsWith("Bearer "))throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+    jwt.revoke(authorization.substring(7),AuthSecurity.currentUser());
+    return Map.of("logged_out",true);
   }
   @GetMapping("/me")
   public Map<String,Object> me(){
