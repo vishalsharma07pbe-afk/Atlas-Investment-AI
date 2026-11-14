@@ -526,3 +526,76 @@ footer { padding: 12px 0 25px; color: var(--ink-muted); font-size: 10px; letter-
   html, .dashboard, .dashboard * { scroll-behavior: auto !important; }
   .dashboard .canvas { animation: none !important; }
 }
+
+/* Consistent compact, baseline-aligned forms across ATLAS modules. */
+.dashboard {
+  --atlas-control-height: 44px;
+  --atlas-control-radius: 12px;
+  --atlas-form-gap: 14px;
+}
+.dashboard .panel :is(.form,.form-layout,.control-grid,.import-grid,.searchbar) {
+  align-items: end;
+  column-gap: var(--atlas-form-gap);
+  row-gap: var(--atlas-form-gap);
+}
+.dashboard .panel :is(.form,.form-layout,.control-grid,.import-grid,.searchbar) > * {
+  min-width: 0;
+}
+.dashboard .panel :is(.field,label:has(> input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),> select,> textarea)) {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 7px;
+  min-width: 0;
+  margin-block: 0;
+  line-height: 1.35;
+}
+.dashboard .panel :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),select) {
+  height: var(--atlas-control-height);
+  min-height: var(--atlas-control-height);
+  padding-block: 9px;
+  border-radius: var(--atlas-control-radius);
+  background-color: var(--field);
+  border-color: var(--field-border);
+  color: var(--ink);
+}
+.dashboard .panel textarea {
+  min-height: 88px;
+  border-radius: var(--atlas-control-radius);
+  background-color: var(--field);
+  border-color: var(--field-border);
+  color: var(--ink);
+}
+.dashboard .panel :is(.editor,.editor-compact) { min-height: 108px !important; }
+.dashboard .panel .editor-tall { min-height: 176px !important; }
+.dashboard .panel :is(.form-actions,.actions) {
+  align-self: end;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.dashboard .panel :is(.form-actions,.actions) :is(button,.primary,.secondary) {
+  min-height: var(--atlas-control-height);
+  border-radius: var(--atlas-control-radius);
+}
+.dashboard .panel :is(.form,.control-grid,.import-grid,.searchbar) > button {
+  min-height: var(--atlas-control-height);
+  align-self: end;
+  border-radius: var(--atlas-control-radius);
+}
+.dashboard .panel :is(input,select,textarea):disabled {
+  opacity: .62;
+  cursor: not-allowed;
+}
+.dashboard .panel :is(input,select,textarea):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+@media (max-width: 780px) {
+  .dashboard .panel :is(.form,.form-layout,.control-grid,.import-grid,.searchbar) {
+    align-items: stretch;
+  }
+  .dashboard .panel :is(.form-actions,.actions) { align-self: stretch; }
+}
