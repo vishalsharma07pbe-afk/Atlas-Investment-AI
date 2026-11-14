@@ -106,6 +106,12 @@ jobs:
           done
           echo "Python intelligence did not start"
           exit 1
+      - name: Diagnose direct Python POST parsing
+        env:
+          INTERNAL_SERVICE_TOKEN: bridge-integration-secret-at-least-32-chars
+        run: |
+          curl -sS -o /tmp/atlas-direct-response.json -w 'direct_python_status=%{http_code}\n' -X POST http://127.0.0.1:18000/api/v1/ai/analyze/TCS -H 'Content-Type: application/json' -H "X-Atlas-Service-Token: $INTERNAL_SERVICE_TOKEN" --data-binary '{"symbol":"TCS","market":"NSE"}'
+          cat /tmp/atlas-direct-response.json
       - name: Verify real cross-service HTTP boundary and JWT gates
         working-directory: backend/trading-core
         env:
