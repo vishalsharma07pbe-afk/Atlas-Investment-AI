@@ -24,16 +24,31 @@ export function AtlasLiveWorkspace(){
  const [upstoxToken,setUpstoxToken]=useState("");
  const [expiresAt,setExpiresAt]=useState("");
  const [notice,setNotice]=useState("");
+ const [authPending,setAuthPending]=useState(false);
  async function request(path:string,init:RequestInit={}):Promise<any>{
   const response=await fetch(endpoint+path,{...init,headers:{...(init.body?{"Content-Type":"application/json"}:{}),...(token?{Authorization:"Bearer "+token}:{}),...init.headers}});
   if(!response.ok)throw Error("Request failed: "+response.status);
   return response.json();
  }
- async function login(e:React.FormEvent){e.preventDefault();try{
-  if(mode==="register"){await request("/auth/register",{method:"POST",body:JSON.stringify({email,password})});setMode("login");setNotice("Registered. Sign in to continue.");return;}
-  const result:Session=await request("/auth/login",{method:"POST",body:JSON.stringify({email,password})});
-  saveSession(result);setToken(result.access_token);setPassword("");setNotice("Signed in.");
- }catch(e){setNotice(String(e));}}
+ async function login(e:React.FormEvent){
+  e.preventDefault();
+  if(authPending)return;
+  setAuthPending(true);setNotice("");
+  try{
+   if(mode==="register"){
+    await request("/auth/register",{method:"POST",body:JSON.stringify({email,password})});
+   }
+   const result:Session=await request("/auth/login",{method:"POST",body:JSON.stringify({email,password})});
+   if(!result.access_token||!Number.isFinite(result.expires_in)||result.expires_in<=0)throw Error("Invalid login session returned by server.");
+   saveSession(result);setToken(result.access_token);setPassword("");setNotice("");
+  }catch(error){
+   const message=String(error);
+   if(mode==="register"&&message.includes("409"))setNotice("This email is already registered. Sign in with your existing password.");
+   else if(message.includes("401"))setNotice("Email or password is incorrect. Check your credentials and try again.");
+   else if(message.includes("429"))setNotice("Too many login attempts. Wait a minute and try again.");
+   else setNotice(message);
+  }finally{setAuthPending(false);}
+ }
  useEffect(()=>{if(!token){setIdentity(null);setFreshness(null);return;}
   let active=true;
   const headers={Authorization:"Bearer "+token};
@@ -57,8 +72,8 @@ export function AtlasLiveWorkspace(){
    <div className="atlas-auth-intro"><span className="atlas-auth-eyebrow">SECURE ACCOUNT ACCESS</span><h3>{mode==="login"?"Welcome back":"Create your account"}</h3><p>{mode==="login"?"Sign in to explore your private market research workspace.":"Set up your private ATLAS research account."}</p></div>
    <label className="atlas-auth-field" htmlFor="atlas-account-email"><span>Email address</span><input id="atlas-account-email" aria-label="Account email" type="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={e=>setEmail(e.target.value)} required/></label>
    <label className="atlas-auth-field" htmlFor="atlas-account-password"><span>Password</span><input id="atlas-account-password" aria-label="Account password" type="password" autoComplete={mode==="register"?"new-password":"current-password"} placeholder={mode==="register"?"Create a secure password":"Enter your password"} value={password} onChange={e=>setPassword(e.target.value)} required minLength={12}/>{mode==="register"&&<small>Use at least 12 characters.</small>}</label>
-   <button className="primary atlas-auth-submit" type="submit">{mode==="login"?"Sign in":"Create account"}</button>
-   <p className="atlas-auth-switch">{mode==="login"?"New to ATLAS?":"Already have an account?"} <button type="button" onClick={()=>{setMode(mode==="login"?"register":"login");setNotice("");}}>{mode==="login"?"Create an account":"Sign in instead"}</button></p>
+   <button className="primary atlas-auth-submit" type="submit" disabled={authPending}>{authPending?"Please wait…":mode==="login"?"Sign in":"Create account"}</button>
+   <p className="atlas-auth-switch">{mode==="login"?"New to ATLAS?":"Already have an account?"} <button type="button" disabled={authPending} onClick={()=>{setMode(mode==="login"?"register":"login");setNotice("");}}>{mode==="login"?"Create an account":"Sign in instead"}</button></p>
   </form>:<>
    <p>Signed in: {String(identity?.email||"Checking session…")} <button onClick={logout}>Logout</button></p>
    {stale.length>0?<div role="alert" className="notice warning-notice">{stale.length} stale equity or mutual-fund feeds detected. Verify source timestamps before relying on results.</div>:!freshness?<div role="alert" className="notice warning-notice">Freshness unconfigured or unavailable. Do not assume data is live.</div>:<p>Freshness monitored. Data may still be delayed.</p>}
