@@ -5,7 +5,7 @@ import {render,screen,fireEvent,waitFor,cleanup} from "@testing-library/react";
 import {AtlasLiveWorkspace} from "./AtlasLiveWorkspace";
 const json=(data:unknown,status=200)=>({ok:status>=200&&status<300,status,json:async()=>data});
 describe("P0 authenticated UI verification",()=>{
- beforeEach(()=>{vi.stubGlobal("fetch",vi.fn(async (url:string,options?:RequestInit)=>{
+ beforeEach(()=>{sessionStorage.clear();vi.stubGlobal("fetch",vi.fn(async (url:string,options?:RequestInit)=>{
   if(url.endsWith("/auth/login"))return json({access_token:"test.jwt",expires_in:900});
   if(url.endsWith("/auth/me"))return json({email:"owner@example.test"});
   if(url.endsWith("/system/freshness"))return json({instruments:[{alert_id:1}],mutualFunds:[{stale:true}]});

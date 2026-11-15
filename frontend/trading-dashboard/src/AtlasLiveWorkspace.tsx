@@ -2,8 +2,15 @@ import React,{useEffect,useState} from "react";
 type Session={access_token:string;expires_in:number};
 type Row=Record<string,unknown>;
 const endpoint="/api/v1";
+const SESSION_KEY="atlas:auth-session";
+type StoredSession={access_token:string;expires_at:number};
+function readSession():string|null{
+ try{const raw=sessionStorage.getItem(SESSION_KEY);if(!raw)return null;const saved=JSON.parse(raw) as StoredSession;if(typeof saved.access_token!=="string"||!Number.isFinite(saved.expires_at)||saved.expires_at<=Date.now()){sessionStorage.removeItem(SESSION_KEY);return null;}return saved.access_token;}catch{sessionStorage.removeItem(SESSION_KEY);return null;}
+}
+function clearSession(){sessionStorage.removeItem(SESSION_KEY);}
+function saveSession(session:Session){sessionStorage.setItem(SESSION_KEY,JSON.stringify({access_token:session.access_token,expires_at:Date.now()+Math.max(0,session.expires_in-30)*1000}));}
 export function AtlasLiveWorkspace(){
- const [token,setToken]=useState<string|null>(null);
+ const [token,setToken]=useState<string|null>(readSession);
  const [identity,setIdentity]=useState<Row|null>(null);
  const [email,setEmail]=useState("");
  const [password,setPassword]=useState("");
@@ -25,7 +32,7 @@ export function AtlasLiveWorkspace(){
  async function login(e:React.FormEvent){e.preventDefault();try{
   if(mode==="register"){await request("/auth/register",{method:"POST",body:JSON.stringify({email,password})});setMode("login");setNotice("Registered. Sign in to continue.");return;}
   const result:Session=await request("/auth/login",{method:"POST",body:JSON.stringify({email,password})});
-  setToken(result.access_token);setPassword("");setNotice("Signed in.");
+  saveSession(result);setToken(result.access_token);setPassword("");setNotice("Signed in.");
  }catch(e){setNotice(String(e));}}
  useEffect(()=>{if(!token){setIdentity(null);setFreshness(null);return;}
   let active=true;
@@ -33,10 +40,10 @@ export function AtlasLiveWorkspace(){
   Promise.all([fetch(endpoint+"/auth/me",{headers}),fetch(endpoint+"/system/freshness",{headers})]).then(async ([a,b])=>{
    if(!a.ok)throw Error("Session expired");
    if(active){setIdentity(await a.json());if(b.ok)setFreshness(await b.json());}
-  }).catch(()=>{if(active){setToken(null);setNotice("Sign in again.");}});
+  }).catch(()=>{if(active){clearSession();setToken(null);setNotice("Session expired. Sign in again.");}});
   return()=>{active=false;};
  },[token]);
- async function logout(){try{await request("/auth/logout",{method:"POST"});}catch{/* Clear local session even if revoke is unavailable */}setToken(null);setResults([]);setReport(null);}
+ async function logout(){try{await request("/auth/logout",{method:"POST"});}catch{/* Clear local session even if revoke is unavailable */}clearSession();setToken(null);setResults([]);setReport(null);}
  async function search(){try{const path=section==="funds"?"/mutual-funds/search":"/instruments/search";setResults(await request(path+"?q="+encodeURIComponent(query)));setNotice("");}catch(e){setNotice(String(e));}}
  async function analyze(){try{const symbol=query.trim().toUpperCase();if(!/^[A-Z0-9._&-]{1,40}$/.test(symbol))throw Error("Enter a valid symbol");setProviders(await request("/ai/providers/health"));setReport(await request("/ai/analyze/"+encodeURIComponent(symbol),{method:"POST",body:JSON.stringify({symbol,market:"NSE"})}));}catch(e){setNotice(String(e));}}
  async function connect(){try{await request("/broker/upstox/token",{method:"POST",body:JSON.stringify({accessToken:upstoxToken,expiresAt})});setUpstoxToken("");setNotice("Upstox token stored in encrypted vault.");}catch(e){setNotice(String(e));}}
