@@ -635,3 +635,20 @@ footer { padding: 12px 0 25px; color: var(--ink-muted); font-size: 10px; letter-
 .dashboard .atlas-provider-review>.form-actions {grid-column:1/-1}
 .dashboard .atlas-provider-review textarea {min-height:80px!important;max-height:140px}
 @media(max-width:680px){.dashboard .atlas-research-form>.control-grid,.dashboard .atlas-research-form .atlas-advanced .control-grid,.dashboard .atlas-provider-review {grid-template-columns:1fr}}
+
+/* ATLAS authentication is intentionally independent of the shared two-column .form grid. */
+.atlas-auth-form { display: flex; flex-direction: column; gap: 19px; width: min(100%, 440px); margin: 28px auto 12px; padding: 28px; border: 1px solid var(--glass-border); border-radius: 22px; background: rgba(var(--panel-rgb), .42); }
+.atlas-auth-intro { display: grid; gap: 8px; margin-bottom: 3px; }
+.atlas-auth-eyebrow { font-size: 10px; letter-spacing: .2em; font-weight: 800; color: var(--accent); }
+.atlas-auth-intro h3 { margin: 0; font-size: clamp(24px, 3vw, 30px); letter-spacing: -.04em; }
+.atlas-auth-intro p { margin: 0; color: var(--ink-soft); font-size: 13px; line-height: 1.6; }
+.atlas-auth-field { display: flex; flex-direction: column; gap: 8px; color: var(--ink); font-size: 13px; font-weight: 650; }
+.atlas-auth-field input { display: block; width: 100%; min-width: 0; padding: 13px 14px; border: 1px solid var(--field-border); border-radius: 12px; outline: none; background: var(--field); color: var(--ink); font-size: 14px; font-weight: 400; }
+.atlas-auth-field input::placeholder { color: var(--ink-muted); opacity: 1; }
+.atlas-auth-field input:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(83, 217, 190, .15); }
+.atlas-auth-field small { font-size: 12px; color: var(--ink-soft); font-weight: 400; }
+.atlas-auth-submit { width: 100%; min-height: 46px; font-size: 14px; }
+.atlas-auth-switch { margin: 0; text-align: center; font-size: 13px; color: var(--ink-soft); }
+.atlas-auth-switch button { padding: 5px; border: 0; background: none; color: var(--accent); font-size: inherit; font-weight: 750; }
+.atlas-auth-switch button:hover { text-decoration: underline; }
+@media (max-width: 540px) { .atlas-auth-form { padding: 20px; margin: 18px auto 4px; } }

@@ -46,11 +46,12 @@ export function AtlasLiveWorkspace(){
  const stale=[...equity.filter(r=>r.alert_id!=null),...funds.filter(r=>r.stale===true)];
  return <section className="panel glass" aria-label="ATLAS Live Workspace">
   <div className="sectionhead"><div><small className="section-kicker">AUTHENTICATED RESEARCH</small><h2>Live Market &amp; Mutual Fund Explorer</h2></div></div>
-  {!token?<form onSubmit={login} className="form"><h3>{mode==="login"?"Sign in":"Register"}</h3>
-   <input aria-label="Account email" type="email" value={email} onChange={e=>setEmail(e.target.value)} required/>
-   <input aria-label="Account password" type="password" value={password} onChange={e=>setPassword(e.target.value)} required minLength={12}/>
-   <button className="primary" type="submit">{mode==="login"?"Sign in":"Create account"}</button>
-   <button type="button" onClick={()=>setMode(mode==="login"?"register":"login")}>{mode==="login"?"Register":"Back to login"}</button>
+  {!token?<form onSubmit={login} className="atlas-auth-form" aria-label="ATLAS account access">
+   <div className="atlas-auth-intro"><span className="atlas-auth-eyebrow">SECURE ACCOUNT ACCESS</span><h3>{mode==="login"?"Welcome back":"Create your account"}</h3><p>{mode==="login"?"Sign in to explore your private market research workspace.":"Set up your private ATLAS research account."}</p></div>
+   <label className="atlas-auth-field" htmlFor="atlas-account-email"><span>Email address</span><input id="atlas-account-email" aria-label="Account email" type="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={e=>setEmail(e.target.value)} required/></label>
+   <label className="atlas-auth-field" htmlFor="atlas-account-password"><span>Password</span><input id="atlas-account-password" aria-label="Account password" type="password" autoComplete={mode==="register"?"new-password":"current-password"} placeholder={mode==="register"?"Create a secure password":"Enter your password"} value={password} onChange={e=>setPassword(e.target.value)} required minLength={12}/>{mode==="register"&&<small>Use at least 12 characters.</small>}</label>
+   <button className="primary atlas-auth-submit" type="submit">{mode==="login"?"Sign in":"Create account"}</button>
+   <p className="atlas-auth-switch">{mode==="login"?"New to ATLAS?":"Already have an account?"} <button type="button" onClick={()=>{setMode(mode==="login"?"register":"login");setNotice("");}}>{mode==="login"?"Create an account":"Sign in instead"}</button></p>
   </form>:<>
    <p>Signed in: {String(identity?.email||"Checking session…")} <button onClick={logout}>Logout</button></p>
    {stale.length>0?<div role="alert" className="notice warning-notice">{stale.length} stale equity or mutual-fund feeds detected. Verify source timestamps before relying on results.</div>:!freshness?<div role="alert" className="notice warning-notice">Freshness unconfigured or unavailable. Do not assume data is live.</div>:<p>Freshness monitored. Data may still be delayed.</p>}
