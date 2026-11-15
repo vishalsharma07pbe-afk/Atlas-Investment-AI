@@ -19,8 +19,11 @@ CREATE TABLE IF NOT EXISTS broker_credentials (
 -- Do not assign existing holdings to a guessed user. Existing rows require explicit
 -- owner assignment by an administrator before enforcing NOT NULL.
 ALTER TABLE personal_holdings ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES atlas_users(id);
-DROP INDEX IF EXISTS personal_holdings_symbol_asset_type_key;
+-- The original unique key is a table constraint backed by a PostgreSQL index.
+-- Drop the constraint first; dropping its backing index directly raises SQLSTATE 2BP01.
 ALTER TABLE personal_holdings DROP CONSTRAINT IF EXISTS personal_holdings_symbol_asset_type_key;
+-- Also handle databases where the same name was created as a standalone index.
+DROP INDEX IF EXISTS personal_holdings_symbol_asset_type_key;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_holdings_owner_symbol_type
  ON personal_holdings(user_id,symbol,asset_type);
 CREATE INDEX IF NOT EXISTS idx_holdings_user ON personal_holdings(user_id);
