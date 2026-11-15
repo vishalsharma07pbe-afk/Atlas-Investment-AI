@@ -43,7 +43,7 @@ import org.springframework.stereotype.Service;
   JsonNode quote=data.elements().next();BigDecimal ltp=quote.path("last_price").decimalValue();
   if(ltp.signum()<0)throw new IllegalStateException("Invalid price");
   Instant timestamp=Instant.now();
-  jdbc.update("INSERT INTO market_quotes(instrument_key,ltp,source_code,quoted_at) VALUES (?,?,'UPSTOX',?) ON CONFLICT(instrument_key) DO UPDATE SET ltp=EXCLUDED.ltp,quoted_at=EXCLUDED.quoted_at,received_at=now()",key,ltp,java.sql.Timestamp.from(timestamp));
+  jdbc.update("INSERT INTO upstox_market_quotes(instrument_key,ltp,source_code,quoted_at) VALUES (?,?,'UPSTOX',?) ON CONFLICT(instrument_key) DO UPDATE SET ltp=EXCLUDED.ltp,quoted_at=EXCLUDED.quoted_at,received_at=now()",key,ltp,java.sql.Timestamp.from(timestamp));
   return json.createObjectNode().put("instrument_key",key).put("ltp",ltp).put("as_of",timestamp.toString()).put("source","UPSTOX");
  }
  public int intradayCandles(UUID user,String key,String timeframe,LocalDate from,LocalDate to)throws Exception{
