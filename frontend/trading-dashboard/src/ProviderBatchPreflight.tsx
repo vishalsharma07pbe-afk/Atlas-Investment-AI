@@ -1,4 +1,4 @@
-import React,{useState} from "react";
+import {useState} from "react";
 type Report={status:string;ingestion_authorized:boolean;dry_run:boolean;records_examined:number;instruments_examined:number;latest_trade_date:string;blockers:string[];notice:string};
 const example=JSON.stringify({provider:"UPSTOX",source_reference:"Authorized test fixture",rights_confirmed:false,entitlement_confirmed:false,instrument_mapping_confirmed:false,candles:[{instrument_key:"NSE_EQ|123",trade_date:"2026-11-13",open:100,high:110,low:90,close:105,volume:100}]},null,2);
 const secretKey = /^(?:access[_-]?token|refresh[_-]?token|api[_-]?key|api[_-]?secret|client[_-]?secret|authorization|password|bearer[_-]?token)$/i;

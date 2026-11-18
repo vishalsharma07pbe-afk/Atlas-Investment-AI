@@ -1,4 +1,4 @@
-import React,{useState} from "react";
+import {useState} from "react";
 type Scheme={scheme_code:string;scheme_name:string;nav:number;as_of:string;status:string};
 type ImportResult={schemes:Scheme[];missing_scheme_codes:string[];rejected_rows:number;source:{name:string;verification:string};notice:string};
 export default function AmfiNavImport(){

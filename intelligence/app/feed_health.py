@@ -5,6 +5,9 @@ def assess_feed(status: dict, now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     blockers = status.get("blockers") or []
     configured = status.get("configuration_status") == "CONFIGURED"
+    selection = status.get("automatic_selection") or {}
+    waiting = (selection.get("status") == "IDLE_NO_EQUITY_HOLDINGS" or
+               status.get("startup", {}).get("status") == "AWAITING_PORTFOLIO_SELECTION")
     running = status.get("worker_running") is True
     connected = status.get("transport_connected") is True
     frames = status.get("frames_processed", 0)
@@ -15,6 +18,8 @@ def assess_feed(status: dict, now: datetime | None = None) -> dict:
         rejected = 0
     if not configured:
         state, reason = "BLOCKED", "PROVIDER_AUTHORIZATION_NOT_VERIFIED"
+    elif waiting and not running:
+        state, reason = "READY", "WAITING_FOR_EQUITY_HOLDING"
     elif not running:
         state, reason = "STOPPED", "WORKER_NOT_RUNNING"
     elif not connected:
@@ -31,6 +36,8 @@ def assess_feed(status: dict, now: datetime | None = None) -> dict:
         "transport_connected": connected, "worker_running": running,
         "frames_processed": frames, "rejected_entries": rejected,
         "cached_instruments": max(0, int(status.get("cached_instruments", 0))) if isinstance(status.get("cached_instruments", 0), int) else 0,
+        "configuration_ready": configured,
+        "fresh_provider_frames": connected and frames > 0 and rejected < frames,
         "live_prices_verified": False,
         "entitlement_verified": False,
         "automatic_collection_authorized_by_this_check": False,

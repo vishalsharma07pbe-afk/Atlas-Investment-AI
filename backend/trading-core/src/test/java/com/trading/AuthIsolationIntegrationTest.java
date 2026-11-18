@@ -18,6 +18,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import org.springframework.http.MediaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Map;
+import jakarta.servlet.http.Cookie;
 
 @SpringBootTest(properties={"ALLOW_REGISTRATION=true","ATLAS_JWT_SECRET=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="})
 @AutoConfigureMockMvc
@@ -57,5 +58,19 @@ class AuthIsolationIntegrationTest {
       .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
     mvc.perform(get("/api/v1/portfolio/holdings").header("Authorization",a))
       .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
+  }
+  @Test void browserCookieRestoresSessionAndLogoutClearsIt()throws Exception{
+    String input=mapper.writeValueAsString(Map.of("email","cookie-"+UUID.randomUUID()+"@example.test","password","strong-password-12345"));
+    mvc.perform(post("/api/v1/auth/register").contentType(MediaType.APPLICATION_JSON).content(input)).andExpect(status().isOk());
+    MockHttpServletResponse login=mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content(input))
+      .andExpect(status().isOk()).andExpect(header().string("Set-Cookie",org.hamcrest.Matchers.containsString("ATLAS_SESSION=")))
+      .andExpect(header().string("Set-Cookie",org.hamcrest.Matchers.containsString("HttpOnly")))
+      .andExpect(header().string("Set-Cookie",org.hamcrest.Matchers.containsString("Path=/")))
+      .andExpect(header().string("Set-Cookie",org.hamcrest.Matchers.containsString("Max-Age=604800")))
+      .andExpect(header().string("Set-Cookie",org.hamcrest.Matchers.containsString("SameSite=Strict"))).andReturn().getResponse();
+    Cookie cookie=login.getCookie("ATLAS_SESSION");
+    mvc.perform(get("/api/v1/auth/me").cookie(cookie)).andExpect(status().isOk());
+    mvc.perform(post("/api/v1/auth/logout").cookie(cookie)).andExpect(status().isOk())
+      .andExpect(header().string("Set-Cookie",org.hamcrest.Matchers.containsString("Max-Age=0")));
   }
 }

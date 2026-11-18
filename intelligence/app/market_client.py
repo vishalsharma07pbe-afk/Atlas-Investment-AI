@@ -1,12 +1,26 @@
 import json
+import os
 from urllib.request import Request,urlopen
 from urllib.error import HTTPError,URLError
 from fastapi import HTTPException
 from .config import settings
 
+def _internal_path(path:str)->str:
+    if path.startswith("/api/v1/market-data/instruments/"):
+        return "/api/v1/internal/feed/instruments/"+path.removeprefix("/api/v1/market-data/instruments/")
+    if path.startswith("/api/v1/instruments"):
+        return "/api/v1/internal/feed/instruments"+path.removeprefix("/api/v1/instruments")
+    if path == "/api/v1/data-health/summary":
+        return "/api/v1/internal/feed/data-health/summary"
+    raise HTTPException(status_code=500,detail="Unsupported internal market-data route")
+
 def backend_json(path:str):
+    token=os.getenv("INTERNAL_SERVICE_TOKEN","")
+    if not token:
+        raise HTTPException(status_code=503,detail="Internal market-data credential is not configured")
     try:
-        with urlopen(Request(settings.backend_url+path,headers={"Accept":"application/json"}),timeout=10) as response:
+        headers={"Accept":"application/json","X-Atlas-Service-Token":token}
+        with urlopen(Request(settings.backend_url+_internal_path(path),headers=headers),timeout=10) as response:
             payload=response.read(8_000_001)
             if len(payload)>8_000_000:raise ValueError("response too large")
             return json.loads(payload)

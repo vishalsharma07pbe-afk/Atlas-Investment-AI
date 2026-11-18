@@ -1,4 +1,4 @@
-import React,{useState} from "react";
+import {useState} from "react";
 
 type Result={status:string;failures:string[];as_of?:string;observations?:{
   trend:string;rsi_14:number;atr_percent_of_close:number;relative_volume_20:number;warnings:string[];

@@ -1,4 +1,4 @@
-import React,{useEffect,useState} from "react";
+import {useEffect,useState} from "react";
 
 type Dataset={code:string;label:string;records:number;latest_observed_at:string|null;age:number|null;age_unit:string;freshness_threshold:number;status:string;ingestion_mode:string;independently_verified:boolean;automatic_collection_enabled:boolean;usable_as_live_market_data:boolean};
 type Readiness={generated_at:string;status:string;provider_mode:string;live_market_data_connected:boolean;automatic_research_enabled:boolean;actionable_recommendations_enabled:boolean;blockers:string[];datasets:Dataset[];notice:string};
@@ -19,9 +19,9 @@ export default function DataReadiness(){
     return ()=>controller.abort();
   },[refresh]);
   return <section className="panel glass" aria-label="Source readiness">
-    <div className="sectionhead"><div><h2>Data source readiness</h2>
+    <div className="sectionhead"><div className="section-copy"><small className="section-kicker">SOURCE STATUS</small><h2>Data source readiness</h2>
       <p>Independent freshness, provenance and access checks. Local evidence never counts as a licensed live feed.</p></div>
-      <button type="button" onClick={()=>setRefresh(n=>n+1)} disabled={loading}>Refresh status</button></div>
+      <button className="secondary" type="button" onClick={()=>setRefresh(n=>n+1)} disabled={loading}>Refresh status</button></div>
     {error&&<p role="alert">{error}</p>}
     {!data&&!error&&<p role="status">Checking local data readiness…</p>}
     {data&&<>

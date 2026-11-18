@@ -1,7 +1,7 @@
 """Read-only multi-model committee; never treats model consensus as verified evidence."""
 import asyncio
 from collections import Counter
-from .ai_failover import _enabled, _generate, _order, AIProviderError
+from .ai_failover import _enabled, _generate, _order, _record_success, AIProviderError
 from .ai_verdict import VERDICT_PROMPT, parse_verdict
 from .ai_budgets import reserve
 from .sanitizer import build_payload
@@ -15,10 +15,13 @@ async def _ask(provider,prompt):
     try:
         raw=await asyncio.to_thread(_generate,provider,prompt)
         verdict=parse_verdict(raw).model_dump()
+        _record_success(provider)
         verdict["confidence_pct"]=round(verdict.pop("confidence")*100,2)
         return {"provider":provider,"status":"VALID","verdict":verdict}
-    except (AIProviderError,ValueError,KeyError,TypeError,IndexError):
-        return {"provider":provider,"status":"FAILED"}
+    except AIProviderError as exc:
+        return {"provider":provider,"status":"FAILED","reason":str(exc)}
+    except (ValueError,KeyError,TypeError,IndexError):
+        return {"provider":provider,"status":"FAILED","reason":"INVALID_VERDICT_RESPONSE"}
 
 async def committee(symbol,observations):
     clean=build_payload(symbol,observations)

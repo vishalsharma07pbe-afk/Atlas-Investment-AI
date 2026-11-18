@@ -1,4 +1,4 @@
-import React,{useState} from "react";
+import {useState} from "react";
 type Result={target_amount:string;required_monthly_sip:string;additional_monthly_sip:string;current_monthly_sip:string;current_projected_value:string;current_shortfall:string;required_plan:{annual_snapshots:{year:number;contributed:string;projected_value:string}[]};notice:string};
 export default function MutualFundGoals(){
  const [target,setTarget]=useState("1500000"),[years,setYears]=useState("5"),[annual,setAnnual]=useState("10");

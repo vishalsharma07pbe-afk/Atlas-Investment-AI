@@ -1,4 +1,4 @@
-import React,{useState} from "react";
+import {useState} from "react";
 type Entry={source:string;document_id:string;status:string;blockers:string[]};
 type Result={status:string;documents_reviewed:number;entries:Entry[];notice:string};
 export default function ResearchSourceAudit(){

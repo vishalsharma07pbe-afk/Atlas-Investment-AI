@@ -1,4 +1,4 @@
-import React,{useState} from "react";
+import {useState} from "react";
 
 type Row={trade_date:string;market:string;participant:string;net_crore_inr:string;direction:string;source_name:string;verification:string};
 type Result={records:Row[];notice:string;independent_verification:boolean};

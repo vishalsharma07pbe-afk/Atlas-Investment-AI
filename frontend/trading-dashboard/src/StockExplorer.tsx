@@ -1,7 +1,8 @@
-import React,{useEffect,useRef,useState} from "react";
+import {useEffect,useRef,useState} from "react";
 import BacktestPanel from "./BacktestPanel";
 import RiskQualification from "./RiskQualification";
 import ResearchAlerts from "./ResearchAlerts";
+import ExchangePicker from "./ExchangePicker";
 import {CandlestickSeries,HistogramSeries,LineSeries,createChart,createSeriesMarkers,ColorType} from "lightweight-charts";
 
 type Instrument={id:number;exchange:string;symbol:string;series:string|null;isin:string|null;security_name:string|null;listing_status:string;source:string;source_revision:string|null};
@@ -65,7 +66,7 @@ export default function StockExplorer(){
   },[selected?.id,providerResolution?.subscription_ready]);
   function toggle(key:string){const next=new Set(toggles);next.has(key)?next.delete(key):next.add(key);setToggles(next);}
   return <div className="explorer">
-    <section className="panel glass explorer-search"><div className="sectionhead"><div><small className="section-kicker">VALIDATED DAILY DATA</small><h2>Stock Explorer</h2></div><span className="tag">RESEARCH ONLY</span></div><div className="searchbar"><select value={exchange} onChange={e=>setExchange(e.target.value)} aria-label="Exchange"><option value="">NSE + BSE</option><option>NSE</option><option>BSE</option></select><input value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>e.key==="Enter"&&search()} placeholder="Type stock name, ticker or ISIN — searches automatically"/><button className="primary" onClick={search} disabled={loading}>Search</button></div>
+    <section className="panel glass explorer-search"><div className="sectionhead"><div><small className="section-kicker">VALIDATED DAILY DATA</small><h2>Stock Explorer</h2></div><span className="tag">RESEARCH ONLY</span></div><div className="searchbar exchange-searchbar"><ExchangePicker value={exchange} onChange={setExchange}/><input aria-label="Instrument search" value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>e.key==="Enter"&&search()} placeholder="Type stock name, ticker or ISIN — searches automatically"/><button className="primary" onClick={search} disabled={loading}>Search</button></div>
       {loading&&<p className="muted tiny" role="status">Loading validated market records…</p>}{error&&<div className="error">{error}</div>}<div className="instrument-results">{results.map(x=><button key={x.id} onClick={()=>choose(x)} className={selected?.id===x.id?"selected":""}><strong>{x.exchange}:{x.symbol}</strong><span>{x.security_name||x.isin||"Name unavailable"}</span><small>{x.listing_status} · {x.source}</small></button>)}{!results.length&&!loading&&<p className="muted tiny">The production registry is empty until a lawfully sourced instrument file is imported.</p>}</div></section>
     {selected&&liveQuote&&<section className="panel glass"><small className="section-kicker">UPSTOX QUOTE STATUS</small><h3>{liveQuote.status==="LIVE"&&liveQuote.quote?`₹${liveQuote.quote.last_traded_price.toFixed(2)}`:"Live quote unavailable"}</h3><p className="muted tiny">{liveQuote.status==="LIVE"&&liveQuote.quote?`Verified provider trade: ${liveQuote.quote.traded_at}`:liveQuote.reason?.replace(/_/g," ")}</p></section>}
     {selected&&providerResolution&&<section className="panel glass"><small className="section-kicker">UPSTOX INSTRUMENT DISCOVERY</small><h3>{providerResolution.subscription_ready?"Instrument key resolved":"Live subscription unavailable"}</h3><p className="muted tiny">{providerResolution.subscription_ready?`Provider key: ${providerResolution.instrument_key} · Not connected to live feed`:providerResolution.blocker?.replace(/_/g," ")}</p></section>}

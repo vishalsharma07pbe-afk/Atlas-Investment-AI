@@ -4,8 +4,8 @@ from decimal import Decimal, InvalidOperation
 import json
 import os
 import re
+import httpx
 from urllib.parse import quote, urlencode
-from urllib.request import Request, urlopen
 from .provider_router import Quote, ProviderFailure, ReadOnlyRouter
 
 SYMBOL_RE = re.compile(r"^[A-Z0-9._&-]{1,40}$")
@@ -14,15 +14,25 @@ DEFAULT_TIMEOUT = 5
 
 def _request(url, headers):
     try:
-        with urlopen(Request(url, headers=headers), timeout=DEFAULT_TIMEOUT) as response:
-            if response.status != 200:
-                raise ProviderFailure("PROVIDER_HTTP_FAILURE")
-            raw = response.read(262145)
-            if len(raw) > 262144:
-                raise ProviderFailure("PROVIDER_RESPONSE_TOO_LARGE")
-            return json.loads(raw)
-    except (OSError, ValueError, KeyError, TypeError) as exc:
+        safe_headers = {**headers, "User-Agent": "ATLAS-Research/1.0"}
+        response = httpx.get(url, headers=safe_headers, timeout=DEFAULT_TIMEOUT,
+                             follow_redirects=False)
+        if response.status_code in (401, 403):
+            raise ProviderFailure("PROVIDER_ACCESS_REJECTED")
+        if response.status_code == 429:
+            raise ProviderFailure("PROVIDER_RATE_LIMITED")
+        if response.status_code != 200:
+            raise ProviderFailure("PROVIDER_HTTP_FAILURE")
+        raw = response.content
+        if len(raw) > 262144:
+            raise ProviderFailure("PROVIDER_RESPONSE_TOO_LARGE")
+        return json.loads(raw)
+    except httpx.HTTPError as exc:
         raise ProviderFailure("PROVIDER_REQUEST_FAILED") from exc
+    except ProviderFailure:
+        raise
+    except (ValueError, KeyError, TypeError) as exc:
+        raise ProviderFailure("PROVIDER_SCHEMA_INVALID") from exc
 
 def _timestamp(value):
     if isinstance(value, bool):
@@ -33,6 +43,10 @@ def _timestamp(value):
             raise ProviderFailure("INVALID_TIMESTAMP")
         return datetime.fromtimestamp(value / 1000, tz=timezone.utc)
     if isinstance(value, str):
+        if value.isdigit():
+            numeric = int(value)
+            if 1_000_000_000_000 <= numeric <= 9_999_999_999_999:
+                return datetime.fromtimestamp(numeric / 1000, tz=timezone.utc)
         try:
             parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
             if parsed.tzinfo is not None and parsed.utcoffset() is not None:
@@ -51,10 +65,10 @@ def _price(value):
     return str(parsed)
 
 def upstox_quote(symbol, instrument_key, token):
-    """Upstox v2 full quote; requires an explicit, verified NSE/BSE instrument mapping."""
+    """Upstox V3 full quote; requires an explicit, verified NSE/BSE instrument mapping."""
     if not SYMBOL_RE.fullmatch(symbol) or not KEY_RE.fullmatch(instrument_key) or not token:
         raise ProviderFailure("INVALID_UPSTOX_CONFIGURATION")
-    url = "https://api.upstox.com/v2/market-quote/quotes?" + urlencode({"instrument_key": instrument_key})
+    url = "https://api.upstox.com/v3/market-quote/quotes?" + urlencode({"instrument_key": instrument_key})
     body = _request(url, {"Authorization": "Bearer " + token, "Accept": "application/json"})
     data = body.get("data")
     if body.get("status") != "success" or not isinstance(data, dict) or len(data) != 1:

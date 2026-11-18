@@ -41,11 +41,11 @@ public class PortfolioController {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Notes too long");
     jdbc.update("""
       INSERT INTO personal_holdings(user_id,symbol,asset_type,quantity,average_cost,last_price,price_as_of,notes)
-      VALUES (?,?,?,?,?,?,CASE WHEN ? IS NULL THEN NULL ELSE now() END,?)
+      VALUES (?,?,?,?,?,?,CASE WHEN ? THEN now() ELSE NULL END,?)
       ON CONFLICT(user_id,symbol,asset_type) DO UPDATE SET quantity=EXCLUDED.quantity,
       average_cost=EXCLUDED.average_cost,last_price=EXCLUDED.last_price,
       price_as_of=EXCLUDED.price_as_of,notes=EXCLUDED.notes,updated_at=now()
-      """,AuthSecurity.currentUser(),symbol,input.assetType(),input.quantity(),input.averageCost(),input.lastPrice(),input.lastPrice(),input.notes());
+      """,AuthSecurity.currentUser(),symbol,input.assetType(),input.quantity(),input.averageCost(),input.lastPrice(),input.lastPrice()!=null,input.notes());
     return Map.of("saved",true,"symbol",symbol);
   }
 

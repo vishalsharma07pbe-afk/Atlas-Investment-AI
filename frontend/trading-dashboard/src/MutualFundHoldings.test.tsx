@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
-import React from "react";
 import {afterEach,describe,expect,it} from "vitest";
-import {cleanup,render,screen} from "@testing-library/react";
+import {cleanup,fireEvent,render,screen} from "@testing-library/react";
 import MutualFundHoldings from "./MutualFundHoldings";
 
 afterEach(cleanup);
@@ -15,14 +14,16 @@ const stock={...fund,id:2,symbol:"TEST-STOCK",asset_type:"EQUITY",last_price:110
 describe("MutualFundHoldings",()=>{
   it("shows only fund holdings and warns when NAV is missing",()=>{
     render(<MutualFundHoldings holdings={[fund,stock]}/>);
-    expect(screen.getByText("TEST-FUND")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button",{name:/Overview/}));
+    expect(screen.getAllByText("TEST-FUND")).toHaveLength(2);
     expect(screen.queryByText("TEST-STOCK")).toBeNull();
     expect(screen.getByRole("status").textContent).toContain("1 fund position");
     expect(screen.getByText(/Benchmark returns, expense ratios/)).toBeTruthy();
   });
   it("renders empty state without inventing values",()=>{
     render(<MutualFundHoldings holdings={[]}/>);
-    expect(screen.getByText(/No mutual fund holdings saved/)).toBeTruthy();
-    expect(screen.getByText("FUND POSITIONS")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button",{name:/Overview/}));
+    expect(screen.getAllByText(/No mutual fund holdings saved/)).toHaveLength(2);
+    expect(screen.getByText("Funds owned")).toBeTruthy();
   });
 });

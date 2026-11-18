@@ -1,4 +1,4 @@
-import React,{useState} from "react";
+import {useState} from "react";
 import type {FundHolding} from "./MutualFundHoldings";
 type Review={status:string;blockers:string[];snapshot:{schemes:{scheme_code:string;scheme_name:string;nav:number;as_of:string}[];missing_scheme_codes:string[]};reconciliation:{portfolio_estimated_value:string|null;rows:{holding_id:number;scheme_code:string;status:string;estimated_value:string|null}[]}|null;notice:string};
 export default function MutualFundSnapshotReview({holdings}:{holdings:FundHolding[]}){

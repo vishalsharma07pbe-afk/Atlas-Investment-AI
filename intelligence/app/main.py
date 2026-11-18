@@ -97,10 +97,17 @@ def capabilities():
             "evidence-intake", "research-coverage", "preliminary-risk-triage",
             "recommendation-blocking", "daily-technical-indicators",
             "explainable-pattern-detection", "technical-research-summary",
+            "authorized-company-fundamentals", "sector-relative-key-ratios",
+            "financial-statement-summaries", "shareholding-history",
+            "corporate-actions", "sector-competitors", "cited-company-news",
+            "aggregate-fii-dii-cash-activity", "portfolio-concentration-review",
+            "mutual-fund-evidence-gated-ranking", "on-demand-research-alerts",
         ],
         "planned": [
             "licensed-provider-activation", "intraday-features",
-            "fundamental-research", "institutional-flows", "news-entity-resolution",
+            "official-mutual-fund-category-and-portfolio-disclosures",
+            "bulk-block-deal-source", "transaction-ledger-xirr",
+            "persistent-alert-rules-and-delivery", "news-entity-resolution",
             "calibrated-prediction", "backtesting", "portfolio-action-plans",
         ],
         "live_data_connected": False,
@@ -120,6 +127,44 @@ def provider_status():
         entitlement_confirmed=settings.entitlement_confirmed,
         rate_per_second=settings.request_rate_per_second,
     ))
+
+
+# P1: authorized fundamentals, cited news, and aggregate institutional evidence.
+@app.get("/api/v1/intelligence/p1/companies/{isin}")
+def p1_company_research(isin: str, instrument_key: str | None = None):
+    from .p1_research import company_research
+    try:
+        return company_research(isin, instrument_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        from .multi_provider_quotes import ProviderFailure
+        if isinstance(exc, ProviderFailure):
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise
+
+
+@app.get("/api/v1/intelligence/p1/news")
+def p1_company_news(instrument_keys: str, page_size: int = 20):
+    from .p1_research import company_news
+    try:
+        return company_news(instrument_keys.split(","), page_size)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        from .multi_provider_quotes import ProviderFailure
+        if isinstance(exc, ProviderFailure):
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise
+
+
+@app.get("/api/v1/intelligence/p1/institutional-activity")
+def p1_institutional_activity(interval: str = "1D"):
+    from .p1_research import institutional_activity
+    try:
+        return institutional_activity(interval)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 def _technical_payload(instrument_id:int,limit:int=1000):
     raw=backend_json(f"/api/v1/market-data/instruments/{instrument_id}/candles?limit={max(1,min(limit,2000))}")
@@ -684,12 +729,28 @@ def upstox_quote_status():
     """Read-only worker status; never reveal credentials or unverified quotes."""
     gate=authorization_diagnostics(settings.provider,bool(settings.upstox_token),
                                    settings.licensed_data_access,settings.entitlement_confirmed)
+    from .dynamic_feed_selection import dynamic_feed_selection
     return {**feed_supervisor.status(),
+            "automatic_selection":dynamic_feed_selection.last_status,
             "worker_running":quote_worker.running,
             "transport_connected":quote_worker.cache.connected,
             "configuration_status":gate["status"],
             "blockers":gate["blockers"],
             **quote_worker.cache.diagnostics()}
+
+from .upstox_live_quote import current_quote
+
+@app.get("/api/v1/intelligence/providers/upstox/quote")
+def upstox_current_quote(symbol: str, instrument_key: str):
+    """Fetch one read-only quote for an instrument selected from the server registry."""
+    return current_quote(symbol, instrument_key)
+
+from .market_indices import snapshots as market_index_snapshots
+
+@app.get("/api/v1/intelligence/market/indices")
+def market_indices():
+    """Fetch a bounded set of Indian index snapshots in one authorized request."""
+    return market_index_snapshots()
 
 @app.get("/api/v1/intelligence/providers/upstox/quotes/{instrument_id}")
 def upstox_instrument_quote(instrument_id:int):
@@ -704,14 +765,22 @@ def upstox_instrument_quote(instrument_id:int):
     return quote_worker.cache.snapshot(resolution["instrument_key"])
 
 from .upstox_supervisor import feed_supervisor,startup_feed
+from .dynamic_feed_selection import dynamic_feed_selection
 
 @app.on_event("startup")
 async def start_opt_in_upstox_feed():
     await startup_feed()
+    await dynamic_feed_selection.start()
 
 @app.on_event("shutdown")
 async def stop_opt_in_upstox_feed():
+    await dynamic_feed_selection.stop()
     await feed_supervisor.stop()
+
+@app.post("/api/v1/intelligence/providers/upstox/subscriptions/reconcile")
+async def reconcile_upstox_portfolio_subscriptions():
+    """Safe idempotent refresh after a holding changes; never accepts credentials or keys."""
+    return await dynamic_feed_selection.reconcile()
 
 from .mutual_fund_nav import FundNavRequest,analyze_nav
 
@@ -820,13 +889,22 @@ def mutual_fund_snapshot_portfolio_review(request:SnapshotPortfolioRequest):
     """Review supplied NAV snapshot against explicitly mapped fund holdings, without writing."""
     return inspect_snapshot_portfolio(request)
 
-# Local NAV catalog: intentionally no unattended download until source rights are confirmed.
+# Local NAV catalog plus a documented, public daily Upstox instrument snapshot.
 from fastapi import HTTPException, Request as FastAPIRequest
 from .nav_catalog import import_snapshot, search_schemes, catalog_status, MAX_BYTES
 
 @app.get("/api/v1/intelligence/mutual-funds/status")
 def mutual_fund_catalog_status():
-    return catalog_status()
+    from .nav_auto_refresh import scheduler
+    return {**catalog_status(),"scheduler":scheduler.status()}
+
+@app.post("/api/v1/intelligence/mutual-funds/refresh")
+def mutual_fund_catalog_refresh():
+    from .nav_auto_refresh import refresh_once
+    try:
+        return refresh_once()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503,detail=str(exc)) from exc
 
 @app.get("/api/v1/intelligence/mutual-funds/search")
 def mutual_fund_catalog_search(q: str = "", limit: int = 30):
@@ -834,6 +912,23 @@ def mutual_fund_catalog_search(q: str = "", limit: int = 30):
         return search_schemes(q, limit)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+@app.get("/api/v1/intelligence/mutual-funds/details/{fund_identifier}")
+def mutual_fund_catalog_details(fund_identifier: str):
+    from .nav_catalog import fund_details
+    try:
+        return fund_details(fund_identifier)
+    except ValueError as exc:
+        raise HTTPException(status_code=404 if str(exc)=="FUND_NOT_FOUND" else 400,detail=str(exc)) from exc
+
+@app.get("/api/v1/intelligence/mutual-funds/recommendations")
+def mutual_fund_recommendations(category: str = "LARGE_CAP",horizon_months: int = 60,
+                                risk_tolerance: str = "MODERATE"):
+    from .mutual_fund_recommendations import dashboard
+    try:
+        return dashboard(category,horizon_months,risk_tolerance)
+    except ValueError as exc:
+        raise HTTPException(status_code=400,detail=str(exc)) from exc
 
 @app.post("/api/v1/intelligence/mutual-funds/import")
 async def mutual_fund_catalog_import(request: FastAPIRequest):
@@ -927,6 +1022,10 @@ def reliability_observe():
 from .reliability_monitor import monitor as readiness_monitor, observe_once as monitor_observe_once
 app.add_event_handler("startup", readiness_monitor.start)
 app.add_event_handler("shutdown", readiness_monitor.stop)
+
+from .nav_auto_refresh import scheduler as nav_refresh_scheduler
+app.add_event_handler("startup", nav_refresh_scheduler.start)
+app.add_event_handler("shutdown", nav_refresh_scheduler.stop)
 
 @app.get("/api/v1/intelligence/reliability/monitor")
 def reliability_monitor_status():

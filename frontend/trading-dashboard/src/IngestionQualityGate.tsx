@@ -1,4 +1,4 @@
-import React,{useState} from "react";
+import {useState} from "react";
 
 type Dataset="EQUITY_QUOTES"|"EQUITY_DAILY"|"MF_NAV";
 type Mode="MANUAL_IMPORT"|"AUTOMATED_FETCH"|"STREAM";
@@ -32,20 +32,20 @@ export default function IngestionQualityGate(){
     }catch(e){setError(e instanceof Error?e.message:"Preflight unavailable")}
     finally{setBusy(false)}
   }
-  return <section className="panel glass" aria-label="Ingestion quality preflight">
-    <div className="sectionhead"><div><h2>Ingestion batch quality gate</h2>
+  return <section className="panel glass quality-gate-card" aria-label="Ingestion quality preflight">
+    <div className="sectionhead"><div className="section-copy"><small className="section-kicker">PRE-INGESTION VALIDATION</small><h2>Ingestion batch quality gate</h2>
       <p>Inspect candidate observations for freshness and duplicates before any provider integration. This does not authorize, store or publish market data.</p></div></div>
-    <div><label>Dataset <select value={dataset} onChange={e=>setDataset(e.target.value as Dataset)}>
+    <div className="control-grid control-grid-2 quality-controls"><label><span>Dataset</span><select value={dataset} onChange={e=>setDataset(e.target.value as Dataset)}>
       <option value="EQUITY_QUOTES">Equity quotes (120s SLA)</option>
       <option value="EQUITY_DAILY">Equity daily (48h SLA)</option>
       <option value="MF_NAV">Mutual fund NAV (7d SLA)</option>
-    </select></label>{" "}
-    <label>Collection mode <select value={mode} onChange={e=>setMode(e.target.value as Mode)}>
+    </select></label>
+    <label><span>Collection mode</span><select value={mode} onChange={e=>setMode(e.target.value as Mode)}>
       <option value="MANUAL_IMPORT">Manual import</option><option value="AUTOMATED_FETCH">Automated fetch</option><option value="STREAM">Stream</option>
     </select></label></div>
     <p>Paste a JSON array of observations. Each requires <code>instrument</code>, timezone-aware <code>observed_at</code>, positive <code>value</code> and <code>source_id</code>. Do not paste credentials.</p>
-    <textarea aria-label="Candidate observation JSON" rows={5} value={payload} onChange={e=>setPayload(e.target.value)} maxLength={100000} spellCheck={false}/>
-    <p><button type="button" onClick={()=>void inspect()} disabled={busy}>{busy?"Checking…":"Validate batch"}</button></p>
+    <label className="field field-full"><span>Candidate observations</span><textarea className="editor quality-editor" aria-label="Candidate observation JSON" rows={5} value={payload} onChange={e=>setPayload(e.target.value)} maxLength={100000} spellCheck={false}/></label>
+    <div className="compact-form-actions"><button className="primary" type="button" onClick={()=>void inspect()} disabled={busy}>{busy?"Checking…":"Validate batch"}</button></div>
     {error&&<p role="alert">{error}</p>}
     {result&&<div role="status"><p><strong>{result.status.replace(/_/g," ")}</strong> · {result.candidate_count} observations · Quality: {result.quality_passed?"passed":"failed"} · Authorized ingestion: NO · Stored: {result.stored_records}</p>
       <p>Entitlement: {result.entitlement_status.replace(/_/g," ")}. Blockers: {result.authorization_blockers.join(", ")||"Independent authorization still required"}.</p>

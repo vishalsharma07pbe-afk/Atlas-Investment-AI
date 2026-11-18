@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from app import multi_provider_quotes as multi
 
 class MultiProviderTests(unittest.TestCase):
@@ -25,6 +25,16 @@ class MultiProviderTests(unittest.TestCase):
             "bad":{"instrument_token":"NSE_EQ|WRONG","last_price":123,"last_trade_time":1700000000000}}}):
             with self.assertRaises(multi.ProviderFailure):
                 multi.upstox_quote("RELIANCE","NSE_EQ|INE002A01018","dummy")
+    def test_upstox_access_rejection_is_distinguishable(self):
+        denied=Mock(status_code=403)
+        with patch.object(multi.httpx,"get",return_value=denied):
+            with self.assertRaisesRegex(multi.ProviderFailure,"PROVIDER_ACCESS_REJECTED"):
+                multi._request("https://api.upstox.com",{})
+    def test_request_identifies_atlas_to_provider(self):
+        response=Mock(status_code=200,content=b'{"status":"success"}')
+        with patch.object(multi.httpx,"get",return_value=response) as get:
+            multi._request("https://api.upstox.com",{"Accept":"application/json"})
+        self.assertEqual(get.call_args.kwargs["headers"]["User-Agent"],"ATLAS-Research/1.0")
     def test_fallback_after_primary_error(self):
         stamp = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
         def fake_request(url, headers):
@@ -44,5 +54,8 @@ class MultiProviderTests(unittest.TestCase):
     def test_reject_naive_time(self):
         with self.assertRaises(multi.ProviderFailure):
             multi._timestamp("2026-11-14T12:00:00")
+    def test_accepts_provider_epoch_milliseconds_as_string(self):
+        value = str(int(datetime.now(timezone.utc).timestamp() * 1000))
+        self.assertIsNotNone(multi._timestamp(value).tzinfo)
 if __name__ == "__main__":
     unittest.main()

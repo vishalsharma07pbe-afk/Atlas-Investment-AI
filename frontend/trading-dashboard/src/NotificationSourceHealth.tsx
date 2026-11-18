@@ -1,4 +1,4 @@
-import React,{useState} from "react";
+import {useState} from "react";
 import IpoImportHistory from "./IpoImportHistory";
 type Source={source_name:string;enabled:boolean;permission_declared:boolean;alert_count:number;latest_publication_at:string|null;latest_subscription_as_of:string|null;subscription_snapshot_stale:boolean|null;status:string};
 type Health={status:string;configured_sources:number;sources:Source[];live_feed_connected:boolean;notice:string};
@@ -17,7 +17,7 @@ export default function NotificationSourceHealth(){
     }catch(e){setError(String(e));}finally{setLoading(false);}
   }
   return <div className="atlas-source-health">
-    <button type="button" aria-expanded={open} onClick={toggle}>{open?"Hide source health":"Check source health"}</button>
+    <button className="secondary" type="button" aria-expanded={open} onClick={toggle}>{open?"Hide source health":"Check source health"}</button>
     {open&&<div aria-label="Notification source health">
       {loading&&<p role="status">Checking local source health…</p>}
       {error&&<p role="alert">{error}</p>}

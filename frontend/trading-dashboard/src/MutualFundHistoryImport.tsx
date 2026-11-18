@@ -1,4 +1,4 @@
-import React,{useRef,useState} from "react";
+import {useRef,useState} from "react";
 type Result={scheme_name:string;latest_nav:{as_of:string;nav:number;status:string};trailing_returns_pct:Record<string,number|null>;import:{rows_accepted:number;stored:boolean};source:{verification:string}};
 export type SharedNavHistory={schemeCode:string;schemeName:string;sourceName:string;csvText:string;observations:{as_of:string;nav:string}[]};
 export default function MutualFundHistoryImport({onValidated}:{onValidated?:(history:SharedNavHistory|null,schemeCode?:string)=>void}){

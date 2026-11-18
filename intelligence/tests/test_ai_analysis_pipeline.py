@@ -36,5 +36,12 @@ class PipelineTests(unittest.TestCase):
              patch.object(consensus,"reserve",return_value=False):
             result=asyncio.run(consensus.committee("TCS",{"market":"NSE"}))
         self.assertEqual(result["providers"][0]["status"],"BUDGET_EXHAUSTED")
+    def test_provider_failure_has_safe_reason(self):
+        with patch.object(consensus,"_order",return_value=["GROQ"]),\
+             patch.object(consensus,"_enabled",return_value=True),\
+             patch.object(consensus,"reserve",return_value=True),\
+             patch.object(consensus,"_generate",side_effect=consensus.AIProviderError("ACCESS_DENIED")):
+            result=asyncio.run(consensus.committee("TCS",{"market":"NSE"}))
+        self.assertEqual(result["providers"][0]["reason"],"ACCESS_DENIED")
 if __name__=="__main__":
     unittest.main()

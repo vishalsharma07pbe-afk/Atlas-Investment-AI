@@ -36,9 +36,9 @@ export default function PortfolioConcentration({revision}:{revision:number}){
   return <section className="panel glass" aria-label="Portfolio concentration risk limits">
     <div className="sectionhead"><div><small className="section-kicker">RISK LIMITS LAB</small><h2>Portfolio concentration & limits</h2></div><span className="tag">RECORDED PRICES ONLY</span></div>
     <p className="muted tiny">Inspect concentration against your thresholds. Unpriced holdings are excluded; mutual fund underlying exposures are not available.</p>
-    <form onSubmit={inspect}>
+    <form onSubmit={inspect} className="compact-data-form compact-data-form-limits">
       {labels.map(l=><label key={l.key}>{l.label}<input type="number" aria-label={l.label} required min={l.min} max="100" step="0.01" value={limits[l.key]} onChange={e=>setLimits(old=>({...old,[l.key]:e.target.value}))}/></label>)}
-      <button className="primary" type="submit" disabled={loading}>{loading?"Checking…":"Check concentration"}</button>
+      <div className="compact-form-actions"><button className="primary" type="submit" disabled={loading}>{loading?"Checking…":"Check concentration"}</button></div>
     </form>
     {error&&<p role="alert">{error}</p>}
     {report&&<div aria-label="Concentration results">

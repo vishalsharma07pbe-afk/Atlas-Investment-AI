@@ -14,10 +14,10 @@ class LiveFeedsMockHttpTest {
   JdbcTemplate db=mock(JdbcTemplate.class);FeedHttp http=mock(FeedHttp.class);
   UpstoxFeedService svc=new UpstoxFeedService(db,http,mock(VersionedVaultReader.class));
   try{
-   when(http.get(contains("NSE.json.gz"),isNull(),anyInt())).thenReturn("[{\"instrument_key\":\"NSE_EQ|INE002A01018\",\"trading_symbol\":\"RELIANCE\",\"isin\":\"INE002A01018\"}]".getBytes());
-   when(http.get(contains("BSE.json.gz"),isNull(),anyInt())).thenReturn("[{\"instrument_key\":\"BSE_EQ|500325\",\"trading_symbol\":\"RELIANCE\",\"isin\":\"INE002A01018\"}]".getBytes());
+   when(http.get(contains("NSE.json.gz"),isNull(),anyInt())).thenReturn("[{\"instrument_key\":\"NSE_EQ|INE002A01018\",\"trading_symbol\":\"RELIANCE\",\"name\":\"Reliance Industries Limited\",\"isin\":\"INE002A01018\"}]".getBytes());
+   when(http.get(contains("BSE.json.gz"),isNull(),anyInt())).thenReturn("[{\"instrument_key\":\"BSE_EQ|500325\",\"trading_symbol\":\"RELIANCE\",\"name\":\"Reliance Industries Limited\",\"isin\":\"INE002A01018\"}]".getBytes());
    assertThat(svc.syncMaster()).isEqualTo(2);
-   verify(db,times(2)).update(contains("upstox_instrument_map"),any(),any(),any(),any(),any());
+   verify(db,times(2)).update(contains("upstox_instrument_map"),any(),any(),any(),any(),any(),any());
   }catch(Exception e){throw new AssertionError(e);}
  }
  @Test void quoteUsesVaultTokenWithoutPersistingIt()throws Exception{

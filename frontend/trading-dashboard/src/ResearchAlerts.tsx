@@ -1,4 +1,4 @@
-import React,{useState} from "react";
+import {useState} from "react";
 
 type Alert={metric:string;threshold:number;observed:number;triggered:boolean;as_of:string};
 type Result={status:string;failures:string[];alerts:Alert[];triggered_count?:number;notice:string};

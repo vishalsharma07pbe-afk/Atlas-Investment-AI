@@ -1,4 +1,4 @@
-import React,{useState} from "react";
+import {useState} from "react";
 type Outcome={source_name:string;report_id:string;rating:string;published_on:string;horizon_end:string;observed_price_return_pct_unverified:string|null;blockers:string[]};
 type Result={status:string;reports_reviewed:number;horizon_days:number;outcomes:Outcome[];notice:string};
 export default function ResearchOutcomes(){

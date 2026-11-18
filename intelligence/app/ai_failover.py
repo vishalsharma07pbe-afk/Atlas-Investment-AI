@@ -3,6 +3,8 @@ import json
 import math
 import os
 import re
+from datetime import datetime, timezone
+from threading import Lock
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 from pydantic import ValidationError
@@ -12,31 +14,62 @@ from . import ai_budgets
 ALLOWED = ("OLLAMA", "GEMINI", "GROQ", "OPENAI", "XAI")
 FIELDS = {"symbol", "market", "price_change_pct", "volume_change_pct", "sector", "technical_summary", "news_summary"}
 SYMBOL = re.compile(r"^[A-Z0-9._&-]{1,40}$")
-ENDPOINTS = {
+CHAT_ENDPOINTS = {
     "GROQ": ("https://api.groq.com/openai/v1/chat/completions", "GROQ_API_KEY", "ATLAS_GROQ_MODEL"),
-    "OPENAI": ("https://api.openai.com/v1/chat/completions", "OPENAI_API_KEY", "ATLAS_OPENAI_MODEL"),
-    "XAI": ("https://api.x.ai/v1/chat/completions", "XAI_API_KEY", "ATLAS_XAI_MODEL"),
 }
-DEFAULT_MODELS = {"OLLAMA":"llama3.2", "GEMINI":"gemini-2.5-flash",
+RESPONSES_ENDPOINTS = {
+    "OPENAI": ("https://api.openai.com/v1/responses", "OPENAI_API_KEY"),
+    "XAI": ("https://api.x.ai/v1/responses", "XAI_API_KEY"),
+}
+DEFAULT_MODELS = {"OLLAMA":"llama3.2", "GEMINI":"gemini-3.5-flash-lite",
                   "GROQ":"llama-3.3-70b-versatile", "OPENAI":"gpt-4.1-mini",
-                  "XAI":"grok-3-mini"}
+                  "XAI":"grok-4.7"}
 BLOCKED = re.compile(r"(?:bearer\s+\S+|(?:api[_ -]?key|access[_ -]?token|password|account[_ -]?id)\s*[:=]|sk-[a-zA-Z0-9_-]{12,})", re.I)
+_LAST_SUCCESS = {}
+_SUCCESS_LOCK = Lock()
+VERDICT_SCHEMA = {
+    "type":"object",
+    "properties":{
+        "action":{"type":"string","enum":["BUY","SELL","HOLD","AVOID"]},
+        "confidence":{"type":"number","minimum":0,"maximum":1},
+        "target_1":{"type":["number","null"]},
+        "target_2":{"type":["number","null"]},
+        "stop_loss":{"type":["number","null"]},
+        "holding_horizon":{"type":"string","enum":["INTRADAY","SWING","SHORT_TERM","LONG_TERM"]},
+        "pros":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":5},
+        "cons":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":5},
+    },
+    "required":["action","confidence","target_1","target_2","stop_loss","holding_horizon","pros","cons"],
+    "additionalProperties":False,
+}
 
 class AIProviderError(Exception):
     pass
+
+def _record_success(provider):
+    with _SUCCESS_LOCK:
+        _LAST_SUCCESS[provider]=datetime.now(timezone.utc).isoformat()
 
 def _post(url, headers, payload):
     request = Request(url, data=json.dumps(payload).encode(), headers={
         **headers, "Content-Type":"application/json"}, method="POST")
     try:
-        with urlopen(request, timeout=12) as response:
+        with urlopen(request, timeout=25) as response:
             if response.status != 200:
                 raise AIProviderError("PROVIDER_HTTP_FAILURE")
             raw = response.read(262145)
             if len(raw)>262144:
                 raise AIProviderError("RESPONSE_TOO_LARGE")
             return json.loads(raw)
-    except (HTTPError,URLError,OSError,ValueError) as exc:
+    except HTTPError as exc:
+        reason={400:"INVALID_PROVIDER_REQUEST",401:"AUTHENTICATION_FAILED",
+                402:"PAYMENT_REQUIRED",403:"ACCESS_DENIED",404:"MODEL_NOT_FOUND",
+                408:"PROVIDER_TIMEOUT",409:"PROVIDER_CONFLICT",429:"RATE_LIMITED",
+                500:"PROVIDER_BUSY",502:"PROVIDER_BUSY",503:"PROVIDER_BUSY",
+                504:"PROVIDER_TIMEOUT"}.get(
+                    exc.code,"PROVIDER_UNAVAILABLE")
+        raise AIProviderError(reason) from exc
+    except (URLError,OSError,ValueError) as exc:
         raise AIProviderError("PROVIDER_UNAVAILABLE") from exc
 
 def _safe_payload(data):
@@ -64,38 +97,83 @@ def _order():
     return order
 
 def _enabled(provider):
+    return _configuration_status(provider)=="READY_TO_CALL"
+
+def _configuration_status(provider):
+    if os.getenv("ATLAS_"+provider+"_ENABLED","false").lower()!="true":
+        return "DISABLED"
+    try:
+        rpm,rpd=ai_budgets.limits(provider)
+    except ValueError:
+        return "INVALID_BUDGET"
+    if not rpm or not rpd:
+        return "BUDGET_DISABLED"
     if provider=="OLLAMA":
-        return os.getenv("ATLAS_OLLAMA_ENABLED","false").lower()=="true"
+        try:
+            _ollama_url()
+        except AIProviderError:
+            return "INVALID_LOCAL_ENDPOINT"
+        return "READY_TO_CALL"
     if os.getenv("ATLAS_EXTERNAL_AI_ALLOWED","false").lower()!="true":
-        return False
-    if provider=="GEMINI":
-        return bool(os.getenv("GEMINI_API_KEY")) and os.getenv("ATLAS_GEMINI_ENABLED","false").lower()=="true"
-    return (bool(os.getenv(ENDPOINTS[provider][1]))
-            and os.getenv("ATLAS_"+provider+"_ENABLED","false").lower()=="true"
-            and (provider not in ("OPENAI","XAI") or os.getenv("ATLAS_PAID_AI_ALLOWED","false").lower()=="true"))
+        return "EXTERNAL_OPT_IN_REQUIRED"
+    key_var="GEMINI_API_KEY" if provider=="GEMINI" else (CHAT_ENDPOINTS.get(provider) or RESPONSES_ENDPOINTS[provider])[1]
+    if not os.getenv(key_var):
+        return "API_KEY_REQUIRED"
+    if provider in ("OPENAI","XAI") and os.getenv("ATLAS_PAID_AI_ALLOWED","false").lower()!="true":
+        return "PAID_OPT_IN_REQUIRED"
+    return "READY_TO_CALL"
+
+def _ollama_url():
+    url=os.getenv("ATLAS_OLLAMA_URL","http://127.0.0.1:11434").rstrip("/")
+    allowed={"http://127.0.0.1:11434","http://localhost:11434",
+             "http://host.docker.internal:11434","http://ollama:11434"}
+    if url not in allowed:
+        raise AIProviderError("INVALID_LOCAL_ENDPOINT")
+    return url
+
+def _responses_answer(body):
+    fragments=[]
+    for item in body.get("output") or []:
+        if not isinstance(item,dict) or item.get("type")!="message":
+            continue
+        for content in item.get("content") or []:
+            if isinstance(content,dict) and content.get("type")=="output_text" and isinstance(content.get("text"),str):
+                fragments.append(content["text"])
+    return "".join(fragments) or None
 
 def _generate(provider, prompt):
     model=os.getenv("ATLAS_"+provider+"_MODEL",DEFAULT_MODELS[provider])
     if not re.fullmatch(r"[a-zA-Z0-9._:/-]{2,100}",model):
         raise AIProviderError("INVALID_MODEL")
     if provider=="OLLAMA":
-        # Only loopback; never allow arbitrary URL overrides or remote inference by accident.
-        body=_post("http://127.0.0.1:11434/api/generate",{},{
-            "model":model,"prompt":prompt,"stream":False,"options":{"num_predict":350}})
+        # Only an allowlisted local endpoint; never permit arbitrary URL overrides.
+        body=_post(_ollama_url()+"/api/generate",{},{
+            "model":model,"prompt":prompt,"stream":False,"format":VERDICT_SCHEMA,
+            "options":{"num_predict":800}})
         answer=body.get("response")
     elif provider=="GEMINI":
         from urllib.parse import quote
         url="https://generativelanguage.googleapis.com/v1beta/models/"+quote(model,safe="") + ":generateContent"
         body=_post(url,{"x-goog-api-key":os.environ["GEMINI_API_KEY"]},{
-            "contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"maxOutputTokens":500}})
+            "contents":[{"parts":[{"text":prompt}]}],"store":False,
+            "generationConfig":{"maxOutputTokens":1200,"responseMimeType":"application/json",
+                                "responseJsonSchema":VERDICT_SCHEMA}})
         candidates=body.get("candidates") or []
         answer="".join(p.get("text","") for p in candidates[0].get("content",{}).get("parts",[])) if candidates else None
-    else:
-        url,key_var,_=ENDPOINTS[provider]
+    elif provider=="GROQ":
+        url,key_var,_=CHAT_ENDPOINTS[provider]
         body=_post(url,{"Authorization":"Bearer "+os.environ[key_var]},{
-            "model":model,"messages":[{"role":"user","content":prompt}],"max_tokens":500})
+            "model":model,"messages":[{"role":"user","content":prompt}],
+            "max_completion_tokens":1200,"response_format":{"type":"json_object"}})
         choices=body.get("choices") or []
         answer=choices[0].get("message",{}).get("content") if choices else None
+    else:
+        url,key_var=RESPONSES_ENDPOINTS[provider]
+        body=_post(url,{"Authorization":"Bearer "+os.environ[key_var]},{
+            "model":model,"input":prompt,"max_output_tokens":1200,"store":False,
+            "text":{"format":{"type":"json_schema","name":"atlas_verdict",
+                               "strict":True,"schema":VERDICT_SCHEMA}}})
+        answer=_responses_answer(body)
     if not isinstance(answer,str) or not answer.strip() or len(answer)>16000:
         raise AIProviderError("INVALID_MODEL_RESPONSE")
     return answer.strip()
@@ -118,16 +196,30 @@ def analyze_market(data):
                 continue
             answer=_generate(provider,prompt)
             verdict=parse_verdict(answer)
+            _record_success(provider)
             return {"status":"AVAILABLE","provider":provider,"analysis":verdict.model_dump(),
                     "attempts":attempts,"personal_data_forwarded":False,
                     "note":"Model-generated commentary; not verified market data or investment advice."}
-        except (AIProviderError,ValueError,ValidationError,KeyError,TypeError,IndexError):
-            attempts.append({"provider":provider,"status":"FAILED"})
+        except AIProviderError as exc:
+            attempts.append({"provider":provider,"status":"FAILED","reason":str(exc)})
+        except (ValueError,ValidationError,KeyError,TypeError,IndexError):
+            attempts.append({"provider":provider,"status":"FAILED","reason":"INVALID_VERDICT_RESPONSE"})
     return {"status":"UNAVAILABLE","provider":None,"analysis":None,"attempts":attempts,
             "personal_data_forwarded":False}
 
 def provider_health():
-    return {"providers":[{"name":p,"enabled":_enabled(p),
-                          "budget":ai_budgets.usage(p)} for p in ALLOWED],
-            "active_connection_verified":False,"external_calls_opt_in":True,
+    providers=[]
+    for p in ALLOWED:
+        status=_configuration_status(p)
+        last_success=_LAST_SUCCESS.get(p)
+        providers.append({"name":p,"enabled":status=="READY_TO_CALL",
+                          "configuration_status":status,
+                          "connection_verified":last_success is not None,
+                          "last_success_at":last_success,
+                          "model":os.getenv("ATLAS_"+p+"_MODEL",DEFAULT_MODELS[p]),
+                          "budget":ai_budgets.usage(p)})
+    return {"providers":providers,
+            "active_connection_verified":any(_LAST_SUCCESS.values()),
+            "connection_note":"READY_TO_CALL means configured, not that a remote response has been verified.",
+            "external_calls_opt_in":os.getenv("ATLAS_EXTERNAL_AI_ALLOWED","false").lower()=="true",
             "paid_providers_require_separate_opt_in":True}

@@ -1,4 +1,5 @@
-import React,{useState} from "react";
+import {useState} from "react";
+import ExchangePicker from "./ExchangePicker";
 
 type Row={id:number;symbol:string;exchange:string;as_of:string;close:number;change_1d_percent:number;momentum_20d_percent:number;relative_volume_20:number|null;rsi_14:number;trend:string;atr_percent_of_close:number;flags:string[]};
 type Overview={status:string;universe_size:number;eligible_count:number;skipped:Record<string,number>;breadth:{advancing:number;declining:number;unchanged:number};top_gainers:Row[];top_losers:Row[];momentum_leaders:Row[];volume_leaders:Row[];anomaly_watch:Row[];notice:string};
@@ -30,7 +31,7 @@ export default function MarketIntelligence(){
   return <div>
     <section className="panel glass"><div className="sectionhead"><div><small className="section-kicker">ON-DEMAND · MARKET INTELLIGENCE</small><h2>Market overview</h2></div><span className="tag">RESEARCH ONLY</span></div>
       <p className="muted tiny">Sampled daily breadth, momentum, relative volume, and potential failed-breakout observations. At most 20 instruments per request; requires 50 daily candles and recent, consistent adjustments. Not live, exchange-wide, or a trade recommendation.</p>
-      <div className="searchbar"><select aria-label="Market exchange" value={exchange} onChange={e=>setExchange(e.target.value)}><option value="">NSE + BSE</option><option>NSE</option><option>BSE</option></select><button className="primary" disabled={loading} onClick={run}>{loading?"Analyzing…":"Analyze daily market"}</button></div>
+      <div className="market-actionbar"><ExchangePicker label="Market exchange" value={exchange} onChange={setExchange}/><button className="primary" disabled={loading} onClick={run}>{loading?"Analyzing…":"Analyze daily market"}</button></div>
       {error&&<p role="alert" className="error">{error}</p>}
       {result&&<div role="status" className="muted tiny"><p>Eligible: {result.eligible_count}/{result.universe_size}. Advancing: {result.breadth.advancing} · Declining: {result.breadth.declining} · Unchanged: {result.breadth.unchanged}.</p><p>Excluded: {Object.entries(result.skipped).map(([k,v])=>k.replace(/_/g," ")+": "+v).join(" · ")}.</p><p>{result.notice}</p></div>}
     </section>

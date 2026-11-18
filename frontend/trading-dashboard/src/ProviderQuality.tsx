@@ -1,4 +1,4 @@
-import React,{useState} from "react";
+import {useState} from "react";
 type Row={instrument_key:string;status:string;candle_count:number;latest_trade_date:string|null;age_calendar_days:number|null;quality_flags:string[]};
 type Result={status:string;requested:number;succeeded:number;failed:number;results:Row[];notice:string};
 export default function ProviderQuality(){

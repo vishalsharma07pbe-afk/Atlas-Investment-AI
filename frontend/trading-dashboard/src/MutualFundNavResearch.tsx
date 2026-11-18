@@ -1,4 +1,4 @@
-import React,{useState} from "react";
+import {useState} from "react";
 
 type Result={scheme_name:string;source:{name:string;verification:string};latest_nav:{as_of:string;nav:number;status:string;age_days:number};trailing_returns_pct:Record<string,number|null>;caveats:string[];ratings:null};
 const sample='{"scheme_code":"12345","scheme_name":"Your fund name","source_name":"Your NAV export","navs":[]}';

@@ -2,6 +2,7 @@
 .env.*
 !.env.example
 backups/
+*.backup
 *.dump
 *.sql.gz
 frontend/trading-dashboard/node_modules/

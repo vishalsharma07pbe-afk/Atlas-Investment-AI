@@ -1,4 +1,4 @@
-import React,{useState} from "react";
+import {useState} from "react";
 type Scheme={scheme_code:string;scheme_name:string;nav:number;as_of:string;status:string};
 type Result={schemes:Scheme[];matches_total:number;truncated:boolean;source:{verification:string};notice:string};
 export default function MutualFundSchemeSearch(){
