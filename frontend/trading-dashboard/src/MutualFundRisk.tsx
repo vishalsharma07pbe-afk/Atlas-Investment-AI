@@ -1,4 +1,4 @@
-import React,{useState} from "react";
+import {useState} from "react";
 import type {FundHolding} from "./MutualFundHoldings";
 type RiskResult={status:string;total_positions:number;priced_positions:number;unpriced_positions:number;
  largest_weight_pct:string|null;top_three_weight_pct:string|null;hhi:string|null;effective_holdings:string|null;

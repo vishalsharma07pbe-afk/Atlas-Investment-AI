@@ -1,7 +1,8 @@
 import React, {useEffect, useState} from "react";
 import {createRoot} from "react-dom/client";
 import "./style.css";
-import {AtlasLiveWorkspace} from "./AtlasLiveWorkspace";
+import ResearchHome from "./ResearchHome";
+import {AuthGate,type AuthIdentity} from "./AuthGate";
 import StockExplorer from "./StockExplorer";
 import PortfolioStress from "./PortfolioStress";
 import PortfolioAllocation from "./PortfolioAllocation";
@@ -11,7 +12,6 @@ import ResearchJournal from "./ResearchJournal";
 import FeeImpact from "./FeeImpact";
 import PortfolioConcentration from "./PortfolioConcentration";
 import MutualFundHoldings from "./MutualFundHoldings";
-import NavCatalog from "./NavCatalog";
 import MarketIntelligence from "./MarketIntelligence";
 import BrokerResearch from "./BrokerResearch";
 import ResearchOutcomes from "./ResearchOutcomes";
@@ -32,9 +32,13 @@ import IngestionQualityGate from "./IngestionQualityGate";
 import EntitlementRegistry from "./EntitlementRegistry";
 import ProviderReconciliation from "./ProviderReconciliation";
 import NotificationCenter from "./NotificationCenter";
+import HoldingEditor,{type HoldingDraft} from "./HoldingEditor";
+import MarketIndexStrip from "./MarketIndexStrip";
+import PortfolioIntelligence from "./PortfolioIntelligence";
+import EquityResearchDashboard from "./EquityResearchDashboard";
 
 type Holding = {id:number;symbol:string;asset_type:string;quantity:number;average_cost:number;last_price:number|null;invested:number;market_value:number|null;unrealized_pnl:number|null;price_as_of:string|null};
-type Analysis = {holdingCount:number;invested:number;pricedMarketValue:number;pricedUnrealizedPnl:number;unpricedHoldings:number;valuationComplete:boolean;riskFlags:string[]};
+type Analysis = {holdingCount:number;invested:number;pricedMarketValue:number;pricedCostBasis:number;pricedUnrealizedPnl:number;unpricedHoldings:number;valuationComplete:boolean;riskFlags:string[]};
 type Theme = "system" | "dark" | "light";
 type Appearance = {theme:Theme;opacity:number;blur:number;border:boolean};
 type Coverage = {exchange:string;instruments:number;candle_count:number;first_date:string|null;latest_date:string|null};
@@ -42,9 +46,10 @@ type HealthSource = {source_code:string;display_name:string;access_mode:string;l
 type HealthRun = {id:string;job_name:string;status:string;artifact_name:string;started_at:string;records_seen:number;records_written:number;failure_count:number;error_message:string|null};
 type HealthIssue = {id:number;severity:string;event_type:string;observed_at:string;exchange:string|null;symbol:string|null;details:Record<string,unknown>};
 type DataHealth = {generatedAt:string;providerMode:string;liveMarketDataConnected:boolean;instrumentCount:number;candleCount:number;unresolvedIssueCount:number;coverage:Coverage[];sources:HealthSource[];recentRuns:HealthRun[];issues:HealthIssue[]};
+type FeedState = {transport_connected?:boolean;selected_instruments?:number;automatic_selection?:{status?:string;resolved_count?:number;missing_symbols?:string[]}};
 
 const API = "/api/v1/portfolio";
-const categories = ["My Portfolio", "Mutual Funds", "Intraday", "Swing Trading", "Short-Term Equity", "Long-Term Stocks"];
+const categories = ["Research Home", "Mutual Funds", "Intraday", "Swing Trading", "Short-Term Equity", "Long-Term Stocks"];
 const tabIcons = ["▦", "◈", "ϟ", "↗", "◷", "◇"];
 const TAB_STORAGE_KEY = "atlas:selected-tab";
 const APPEARANCE_STORAGE_KEY = "atlas:appearance";
@@ -67,8 +72,10 @@ const getSavedAppearance = ():Appearance => {
 
 export function AppearanceControls({value, onChange, open, onOpenChange}:{value:Appearance;onChange:(next:Appearance)=>void;open:boolean;onOpenChange:(open:boolean)=>void}) {
   const update = <K extends keyof Appearance>(key:K, next:Appearance[K]) => onChange({...value, [key]:next});
+  useEffect(()=>{const close=()=>onOpenChange(false);window.addEventListener("atlas:close-appearance",close);return()=>window.removeEventListener("atlas:close-appearance",close);},[onOpenChange]);
+  const toggle=()=>{const next=!open;if(next)window.dispatchEvent(new Event("atlas:close-notifications"));onOpenChange(next);};
   return <div className="appearance-shell">
-    <button className="appearance-trigger" type="button" aria-label="Open appearance settings" aria-expanded={open} onClick={() => onOpenChange(!open)}><span className="appearance-spark">✦</span><span>Appearance</span></button>
+    <button className="appearance-trigger" type="button" aria-label="Open appearance settings" aria-expanded={open} onClick={toggle}><span className="appearance-spark">✦</span><span>Appearance</span></button>
     {open && <><button className="appearance-scrim" type="button" aria-label="Close appearance settings" onClick={() => onOpenChange(false)}/><section className="appearance-panel" aria-label="Appearance settings">
       <div className="appearance-title"><div><small>DISPLAY</small><strong>Liquid Glass</strong></div><button type="button" aria-label="Close appearance settings" onClick={() => onOpenChange(false)}>×</button></div>
       <div className="setting-group"><label>Theme</label><div className="theme-picker" role="group" aria-label="Theme">
@@ -81,7 +88,7 @@ export function AppearanceControls({value, onChange, open, onOpenChange}:{value:
   </div>;
 }
 
-export function App() {
+export function App({identity={id:"preview",email:"Local preview",role:"USER"},onLogout=async()=>{}}:{identity?:AuthIdentity;onLogout?:()=>Promise<void>}) {
   const [tab, setTab] = useState(getSavedTab);
   const [appearance, setAppearance] = useState(getSavedAppearance);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
@@ -91,7 +98,7 @@ export function App() {
   const [loading, setLoading] = useState(false);
   const [health, setHealth] = useState<DataHealth|null>(null);
   const [portfolioRevision, setPortfolioRevision] = useState(0);
-  const [form, setForm] = useState({symbol:"", assetType:"EQUITY", quantity:"", averageCost:"", lastPrice:""});
+  const [feedState,setFeedState] = useState<FeedState|null>(null);
 
   async function load() {
     try {
@@ -106,7 +113,18 @@ export function App() {
     catch(e){ setError(String(e)); }
   }
 
+  async function refreshFeedState(){
+    try{const response=await fetch("/intelligence/api/v1/intelligence/providers/upstox/quote-status");if(response.ok)setFeedState(await response.json());}
+    catch{/* Background feed status must not interrupt portfolio use. */}
+  }
+
+  async function reconcileFeed(){
+    try{await fetch("/intelligence/api/v1/intelligence/providers/upstox/subscriptions/reconcile",{method:"POST"});await refreshFeedState();}
+    catch{/* The ten-second background reconciler remains the fallback. */}
+  }
+
   useEffect(() => { load(); }, []);
+  useEffect(()=>{void refreshFeedState();const timer=window.setInterval(()=>void refreshFeedState(),10000);return()=>window.clearInterval(timer);},[]);
   useEffect(() => { if(tab === 6) loadHealth(); }, [tab]);
   useEffect(() => { try { localStorage.setItem(TAB_STORAGE_KEY, String(tab)); } catch { /* Storage may be blocked. */ } }, [tab]);
   useEffect(() => { try { localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify(appearance)); } catch { /* Storage may be blocked. */ } }, [appearance]);
@@ -116,15 +134,15 @@ export function App() {
     if (!response.ok) throw Error((await response.text()).slice(0, 250));
   }
 
-  async function submit(e:React.FormEvent) {
-    e.preventDefault(); setLoading(true);
-    try { await save({symbol:form.symbol.trim(), assetType:form.assetType, quantity:Number(form.quantity), averageCost:Number(form.averageCost), lastPrice:form.lastPrice === "" ? null : Number(form.lastPrice)}); setForm({symbol:"", assetType:"EQUITY", quantity:"", averageCost:"", lastPrice:""}); await load(); }
-    catch (e) { setError(String(e)); } finally { setLoading(false); }
+  async function submitHolding(draft:HoldingDraft) {
+    setLoading(true);
+    try { await save(draft); await load();await reconcileFeed(); }
+    catch (e) { setError(String(e)); throw e; } finally { setLoading(false); }
   }
 
   async function remove(id:number) {
     if (!confirm("Delete this holding?")) return;
-    try { const response = await fetch(API + "/holdings/" + id, {method:"DELETE"}); if (!response.ok) throw Error("Delete failed"); await load(); }
+    try { const response = await fetch(API + "/holdings/" + id, {method:"DELETE"}); if (!response.ok) throw Error("Delete failed"); await load();await reconcileFeed(); }
     catch (e) { setError(String(e)); }
   }
 
@@ -146,7 +164,7 @@ export function App() {
         if (!obj.symbol || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(cost) || cost < 0 || (price !== null && (!Number.isFinite(price) || price < 0))) throw Error("Invalid row: " + line);
         await save({symbol:obj.symbol, assetType:obj.asset_type, quantity, averageCost:cost, lastPrice:price}); count++;
       }
-      await load(); alert(`Imported ${count} holdings. Existing matching symbols were updated.`);
+      await load();await reconcileFeed(); alert(`Imported ${count} holdings. Existing matching symbols were updated.`);
     } catch (e) { setError(String(e)); } finally { setLoading(false); }
   }
 
@@ -172,40 +190,30 @@ export function App() {
       </aside>
 
       <main className="content">
-        <header><div><div className="eyebrow"><span/> YOUR PRIVATE RESEARCH TERMINAL</div><h1>{activeTitle}</h1><p>{tab === 0 ? "Your holdings, performance and portfolio risk — all stored locally." : "Strict research gates. No invented prices or recommendations."}</p></div><div className="header-actions"><NotificationCenter/><div className="headerbadge"><span/> MARKET FEED NOT CONNECTED</div><AppearanceControls value={appearance} onChange={setAppearance} open={appearanceOpen} onOpenChange={setAppearanceOpen}/></div></header>
-        <AtlasLiveWorkspace/>
+        <header><div><div className="eyebrow"><span/> YOUR PRIVATE RESEARCH TERMINAL</div><h1>{activeTitle}</h1><p>{tab === 0 ? "Your holdings, performance and portfolio risk — all stored locally." : "Strict research gates. No invented prices or recommendations."}</p></div><div className="header-actions"><NotificationCenter/><div className={`headerbadge ${feedState?.transport_connected?"feed-live":""}`} title={feedState?.automatic_selection?.missing_symbols?.length?`Unresolved: ${feedState.automatic_selection.missing_symbols.join(", ")}`:undefined}><span/> {feedState?.transport_connected?`LIVE · ${feedState.selected_instruments||0} STOCKS`:feedState?.automatic_selection?.status==="IDLE_NO_EQUITY_HOLDINGS"?"FEED READY · ADD A STOCK":feedState?.automatic_selection?.status==="STARTING"?"MARKET FEED CONNECTING":"MARKET FEED NOT CONNECTED"}</div><div className="account-chip"><span>{identity.email.slice(0,1).toUpperCase()}</span><div><small>SIGNED IN</small><strong>{identity.email}</strong></div><button type="button" onClick={()=>void onLogout()}>Logout</button></div><AppearanceControls value={appearance} onChange={setAppearance} open={appearanceOpen} onOpenChange={setAppearanceOpen}/></div></header>
+        <MarketIndexStrip/>
         {error && <div className="error glass">{error} <button onClick={() => tab === 6 ? loadHealth() : load()}>Retry</button></div>}
 
         {tab === 0 ? <>
-          <div className="stats">
-            <div className="stat glass"><small>INVESTED CAPITAL</small><strong>{fmt(analysis?.invested)}</strong><span>Cost basis of all holdings</span><b aria-hidden="true">₹</b></div>
-            <div className="stat glass"><small>VALUED HOLDINGS</small><strong>{fmt(analysis?.pricedMarketValue)}</strong><span>Only holdings with entered prices</span><b aria-hidden="true">◈</b></div>
-            <div className="stat glass"><small>UNREALISED P&amp;L*</small><strong className={(analysis?.pricedUnrealizedPnl || 0) >= 0 ? "positive" : "negative"}>{fmt(analysis?.pricedUnrealizedPnl)}</strong><span>Priced holdings only</span><b aria-hidden="true">↗</b></div>
-            <div className="stat glass"><small>POSITIONS</small><strong>{analysis?.holdingCount ?? "—"}</strong><span>{analysis?.unpricedHoldings ?? "—"} missing prices</span><b aria-hidden="true">◎</b></div>
-          </div>
+          <ResearchHome holdings={holdings} onReviewHoldings={()=>document.getElementById("portfolio-overview")?.scrollIntoView({behavior:"smooth",block:"start"})} onOpenExplorer={()=>setTab(7)} onOpenDataHealth={()=>setTab(6)}/>
           <div className="two">
-            <section className="panel glass"><div className="sectionhead"><div><small className="section-kicker">PORTFOLIO INTELLIGENCE</small><h2>Risk checks</h2></div><span className="tag">RULE-BASED</span></div>{!analysis ? <p>Waiting for local API...</p> : analysis.riskFlags.length ? <ul className="flags">{analysis.riskFlags.map((flag, index) => <li key={index}><span>!</span>{flag}</li>)}</ul> : <p>{analysis.holdingCount === 0 ? "Add holdings to begin risk checks." : "No basic concentration flags detected. This does not establish investment safety."}</p>}<p className="muted tiny">*P&amp;L is based on manually entered prices, not a live market feed. This is not a buy/sell recommendation.</p></section>
-            <section className="panel glass"><div className="sectionhead"><div><small className="section-kicker">POSITION MANAGER</small><h2>Add or update holding</h2></div><span className="tag">LOCAL DATABASE</span></div><form onSubmit={submit} className="form">
-              <input aria-label="Symbol" placeholder="Symbol or fund code" required maxLength={50} value={form.symbol} onChange={e => setForm({...form, symbol:e.target.value})}/>
-              <select aria-label="Asset type" value={form.assetType} onChange={e => setForm({...form, assetType:e.target.value})}><option value="EQUITY">Equity</option><option value="MUTUAL_FUND">Mutual Fund</option></select>
-              <input aria-label="Quantity" type="number" min="0.000001" step="any" required placeholder="Quantity / units" value={form.quantity} onChange={e => setForm({...form, quantity:e.target.value})}/>
-              <input aria-label="Average cost" type="number" min="0" step="any" required placeholder="Average buy price (₹)" value={form.averageCost} onChange={e => setForm({...form, averageCost:e.target.value})}/>
-              <input aria-label="Last price" type="number" min="0" step="any" placeholder="Latest price / NAV (optional)" value={form.lastPrice} onChange={e => setForm({...form, lastPrice:e.target.value})}/>
-              <button className="primary" disabled={loading}>Save holding <span>→</span></button>
-            </form></section>
+            <PortfolioIntelligence holdings={holdings} analysis={analysis}/>
+            <section className="panel glass"><div className="sectionhead"><div><small className="section-kicker">POSITION MANAGER</small><h2>Add or update holding</h2></div><span className="tag">AUTO PRICE</span></div><HoldingEditor busy={loading} onSave={submitHolding}/></section>
           </div>
-          <PortfolioStress revision={portfolioRevision}/>
-          <PortfolioAllocation revision={portfolioRevision}/>
-          <GoalPlanner/>
-          <GoalComparison/>
-          <ResearchJournal/>
-          <FeeImpact/>
-          <PortfolioConcentration revision={portfolioRevision}/>
-          <section className="panel glass holdings-panel"><div className="sectionhead"><div><small className="section-kicker">LIVE WORKSPACE</small><h2>Your holdings</h2></div><label className="upload">Import CSV <input type="file" accept=".csv,text/csv" hidden disabled={loading} onChange={e => { const file = e.target.files?.[0]; if (file) importCsv(file); e.target.value = ""; }}/></label></div><p className="muted tiny">CSV format: symbol,asset_type,quantity,average_cost,last_price. Use EQUITY or MUTUAL_FUND. Imports update matching holdings; they do not add transactions. Avoid commas inside fields.</p><div className="tablewrap"><table><thead><tr><th>SYMBOL</th><th>TYPE</th><th>QTY</th><th>AVG COST</th><th>LAST PRICE*</th><th>INVESTED</th><th>VALUE*</th><th>P&amp;L*</th><th/></tr></thead><tbody>
+          <details className="advanced-tools glass"><summary><span><strong>Advanced portfolio tools</strong><small>Stress tests, allocation, goals, journal, fees and concentration</small></span><b>Open tools</b></summary><div className="advanced-tools-content">
+            <PortfolioStress revision={portfolioRevision}/>
+            <PortfolioAllocation revision={portfolioRevision}/>
+            <GoalPlanner/>
+            <GoalComparison/>
+            <ResearchJournal/>
+            <FeeImpact/>
+            <PortfolioConcentration revision={portfolioRevision}/>
+          </div></details>
+          <section className="panel glass holdings-panel"><div className="sectionhead"><div><small className="section-kicker">POSITION RECORDS</small><h2>Positions</h2></div><label className="upload">Import CSV <input type="file" accept=".csv,text/csv" hidden disabled={loading} onChange={e => { const file = e.target.files?.[0]; if (file) importCsv(file); e.target.value = ""; }}/></label></div><p className="muted tiny">This table is your editable position record. CSV format: symbol,asset_type,quantity,average_cost,last_price. Imports update matching positions; they do not add transactions.</p><div className="tablewrap"><table><thead><tr><th>SYMBOL</th><th>TYPE</th><th>QTY</th><th>AVG COST</th><th>LAST PRICE*</th><th>INVESTED</th><th>VALUE*</th><th>P&amp;L*</th><th/></tr></thead><tbody>
             {holdings.map(holding => <tr key={holding.id}><td className="symbol">{holding.symbol}</td><td><span className="asset-pill">{holding.asset_type}</span></td><td>{holding.quantity}</td><td>{fmt(holding.average_cost)}</td><td>{fmt(holding.last_price)}</td><td>{fmt(holding.invested)}</td><td>{fmt(holding.market_value)}</td><td className={(holding.unrealized_pnl || 0) >= 0 ? "positive" : "negative"}>{fmt(holding.unrealized_pnl)}</td><td><button className="danger" onClick={() => remove(holding.id)}>Delete</button></td></tr>)}
             {!holdings.length && <tr><td colSpan={9} className="empty">No holdings yet. Add your first position above or import a CSV.</td></tr>}
           </tbody></table></div></section>
-        </> : tab === 1 ? <><NavCatalog/><MutualFundHoldings holdings={holdings}/></> : (tab === 2 || tab === 3 || tab === 4) ? <><MarketIntelligence/><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/></> : tab === 7 ? <StockExplorer/> : tab === 6 ? <>
+        </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : tab === 5 ? <EquityResearchDashboard/> : (tab === 2 || tab === 3 || tab === 4) ? <><MarketIntelligence/><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/></> : tab === 7 ? <StockExplorer/> : tab === 6 ? <>
           <DataReadiness/><MultiProviderHub/>
           <FeedHealth/>
           <ReliabilityIncidents/>
@@ -247,4 +255,4 @@ export function App() {
 }
 
 const root=document.getElementById("root");
-if(root)createRoot(root).render(<React.StrictMode><App/></React.StrictMode>);
+if(root)createRoot(root).render(<React.StrictMode><AuthGate>{session=><App identity={session.identity} onLogout={session.logout}/>}</AuthGate></React.StrictMode>);

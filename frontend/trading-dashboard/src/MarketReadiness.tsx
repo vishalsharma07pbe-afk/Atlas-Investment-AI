@@ -1,4 +1,4 @@
-import React,{useState} from "react";
+import {useState} from "react";
 type Report={status:"READY"|"BLOCKED";research_signals_enabled:boolean;blockers:string[];latest_source_date:string|null;source_age_calendar_days:number|null;instrument_count:number|null;candle_count:number|null;notice:string};
 export default function MarketReadiness(){
   const [report,setReport]=useState<Report|null>(null);

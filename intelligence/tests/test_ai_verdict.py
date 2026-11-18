@@ -30,5 +30,8 @@ class VerdictContractTests(unittest.TestCase):
     def test_reject_sensitive_reason(self):
         with self.assertRaises(ValidationError):
             parse_verdict(json.dumps({**valid(),"pros":["access_token=secret"]}))
+    def test_rejects_semantic_null_reasons(self):
+        with self.assertRaises(ValidationError):
+            parse_verdict(json.dumps({**valid(),"pros":["null"],"cons":["None"]}))
 if __name__=="__main__":
     unittest.main()

@@ -1,4 +1,4 @@
-import React,{useEffect,useState} from "react";
+import {useEffect,useState} from "react";
 type Entry={source_id:string;dataset:string;mode:string;purpose:string;valid_until:string;reviewed_at:string;expired:boolean;independently_verified:boolean};
 type Summary={status:string;manifest_error:string|null;sources:Entry[];automatic_collection_enabled:boolean;notice:string};
 type Preflight={status:string;blockers:string[];matching_declarations:number;unexpired_declarations:number;automatic_collection_enabled:boolean;notice:string};
@@ -19,8 +19,8 @@ export default function EntitlementRegistry(){
  .then(setPreflight).catch(e=>{if(e.name!=="AbortError")setError(String(e.message))});
  return ()=>controller.abort()},[dataset,mode,refresh]);
  return <section className="panel glass" aria-label="Provider entitlement review">
- <div className="sectionhead"><div><h2>Provider entitlement preflight</h2><p>Review local permission declarations before planning an ingestion adapter. Declarations do not activate feeds.</p></div>
- <button type="button" onClick={()=>setRefresh(n=>n+1)}>Recheck</button></div>
+ <div className="sectionhead"><div className="section-copy"><small className="section-kicker">ACCESS REVIEW</small><h2>Provider entitlement preflight</h2><p>Review local permission declarations before planning an ingestion adapter. Declarations do not activate feeds.</p></div>
+ <button className="secondary" type="button" onClick={()=>setRefresh(n=>n+1)}>Recheck</button></div>
  {error&&<p role="alert">Entitlement review unavailable: {error}</p>}
  <p role="status"><strong>Automated collection: blocked</strong> · {data?.manifest_error??"Declaration review only"}</p>
  <div style={{display:"flex",gap:"12px",flexWrap:"wrap"}}>

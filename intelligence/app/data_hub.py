@@ -10,7 +10,7 @@ class Source(BaseModel):
     datasets: list[str]
     transport: Literal["LOCAL", "REMOTE"]
     authorized: bool
-    state: Literal["AVAILABLE_LOCAL", "BLOCKED_AUTHORIZATION", "NOT_CONFIGURED"]
+    state: Literal["AVAILABLE_LOCAL", "AVAILABLE_REMOTE", "BLOCKED_AUTHORIZATION", "NOT_CONFIGURED"]
     live: bool = False
 
 class Observation(BaseModel):
@@ -27,7 +27,7 @@ def sources():
     return [
         Source(code="AMFI_MANUAL",datasets=["MUTUAL_FUND_NAV"],transport="LOCAL",authorized=True,state="AVAILABLE_LOCAL"),
         Source(code="UPSTOX",datasets=["EQUITY_QUOTE","EQUITY_CANDLE"],transport="REMOTE",
-               authorized=remote_authorized,state="NOT_CONFIGURED" if remote_authorized else "BLOCKED_AUTHORIZATION"),
+               authorized=remote_authorized,state="AVAILABLE_REMOTE" if remote_authorized else "NOT_CONFIGURED"),
         Source(code="ALTERNATIVE_EQUITY",datasets=["EQUITY_QUOTE","EQUITY_CANDLE"],transport="REMOTE",
                authorized=False,state="BLOCKED_AUTHORIZATION"),
     ]
@@ -56,6 +56,9 @@ def lookup(query: str, asset_type: str):
     raise ValueError("UNSUPPORTED_ASSET_TYPE")
 
 def health():
+    configured=bool(settings.provider=="UPSTOX" and settings.licensed_data_access and
+                    settings.entitlement_confirmed and settings.upstox_token)
     return {"checked_at":datetime.now(timezone.utc).isoformat(),"sources":[s.model_dump() for s in sources()],
             "automatic_failover_enabled":False,"live_feed_verified":False,
-            "notice":"Only local manual NAV snapshots are queried. Remote adapters are intentionally blocked pending authorization."}
+            "notice":("Upstox is configured for read-only equity quotes. A quote is verified only after the provider returns a fresh timestamp."
+                      if configured else "Remote equity quotes remain unavailable until provider access is configured.")}

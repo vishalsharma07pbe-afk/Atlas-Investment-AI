@@ -1,10 +1,10 @@
-import React,{useEffect,useState} from "react";
+import {useEffect,useState} from "react";
 
 type Health={
  generated_at:string;provider:string;state:string;reason:string;
  transport_connected:boolean;worker_running:boolean;frames_processed:number;
  rejected_entries:number;cached_instruments:number;live_prices_verified:boolean;
- entitlement_verified:boolean;blocker_codes:string[];note:string;
+ entitlement_verified:boolean;configuration_ready:boolean;fresh_provider_frames:boolean;blocker_codes:string[];note:string;
 };
 export default function FeedHealth(){
  const [health,setHealth]=useState<Health|null>(null);
@@ -18,21 +18,20 @@ export default function FeedHealth(){
     .catch(e=>{if(e.name!=="AbortError"){setHealth(null);setError("Unable to read feed health")}});
    return ()=>controller.abort();
  },[refresh]);
- return <section className="panel glass" aria-label="Provider feed health">
-  <div className="sectionhead"><div><h2>Provider feed health</h2>
+ return <section className="panel glass health-card" aria-label="Provider feed health">
+  <div className="sectionhead"><div className="section-copy"><small className="section-kicker">READ-ONLY DIAGNOSTICS</small><h2>Provider feed health</h2>
    <p>Read-only Upstox transport diagnostics. Connection alone never verifies live prices or data rights.</p></div>
-   <button type="button" onClick={()=>setRefresh(n=>n+1)}>Refresh diagnostics</button></div>
+   <button className="secondary" type="button" onClick={()=>setRefresh(n=>n+1)}>Refresh diagnostics</button></div>
   {error&&<p role="alert">{error}</p>}
   {health&&<>
-   <p role="status"><strong>{health.state.replace(/_/g," ")}</strong> · {health.reason.replace(/_/g," ")}</p>
-   <p>Observed: {new Date(health.generated_at).toLocaleString("en-IN")}</p>
-   <div className="stats">
+   <div className="health-status" role="status"><strong>{health.state.replace(/_/g," ")}</strong><span>{health.reason.replace(/_/g," ")}</span><small>Observed {new Date(health.generated_at).toLocaleString("en-IN")}</small></div>
+   <div className="stats health-metrics">
     <div className="stat glass"><small>TRANSPORT</small><strong>{health.transport_connected?"Connected":"Disconnected"}</strong></div>
     <div className="stat glass"><small>FRAMES</small><strong>{health.frames_processed}</strong></div>
     <div className="stat glass"><small>REJECTED</small><strong>{health.rejected_entries}</strong></div>
     <div className="stat glass"><small>CACHED KEYS</small><strong>{health.cached_instruments}</strong></div>
    </div>
-   <p>Verified live prices: No · Independently verified entitlement: No</p>
+   <p>Provider configuration: {health.configuration_ready?"Ready":"Incomplete"} · Fresh validated frames: {health.fresh_provider_frames?"Yes":"No"}</p>
    {health.blocker_codes.length>0&&<p>Blockers: {health.blocker_codes.join(", ")}</p>}
    <p>{health.note}</p>
   </>}

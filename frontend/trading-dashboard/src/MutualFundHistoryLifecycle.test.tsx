@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-import React from "react";
 import {afterEach,describe,expect,it,vi} from "vitest";
 import {cleanup,fireEvent,render,screen,waitFor} from "@testing-library/react";
 import MutualFundHoldings from "./MutualFundHoldings";
@@ -16,6 +15,7 @@ describe("NAV import validation lifecycle",()=>{
  it("removes a validated scheme when its source or CSV is edited",async()=>{
   vi.stubGlobal("fetch",vi.fn().mockResolvedValue(success));
   render(<MutualFundHoldings holdings={[]}/>);
+  fireEvent.click(screen.getByRole("button",{name:/Compare funds/}));
   fill();fireEvent.click(screen.getByRole("button",{name:"Import and analyze history"}));
   await waitFor(()=>expect(screen.getByText("Validated NAV histories in this session (1/5)")).toBeTruthy());
   fireEvent.change(screen.getByLabelText("Source attribution"),{target:{value:"Changed source"}});
@@ -27,6 +27,7 @@ describe("NAV import validation lifecycle",()=>{
   const fetchMock=vi.fn().mockImplementation(()=>new Promise<typeof success>(done=>{resolve=done;}));
   vi.stubGlobal("fetch",fetchMock);
   render(<MutualFundHoldings holdings={[]}/>);
+  fireEvent.click(screen.getByRole("button",{name:/Compare funds/}));
   fill();fireEvent.click(screen.getByRole("button",{name:"Import and analyze history"}));
   fireEvent.change(screen.getByLabelText("Historical NAV CSV"),{target:{value:"scheme_code,as_of,nav\n12345,2025-01-01,12"}});
   resolve(success);

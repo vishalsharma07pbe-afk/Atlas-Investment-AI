@@ -1,4 +1,4 @@
-import React,{useState} from "react";
+import {useState} from "react";
 type Attempt={attempted_at:string|null;mode:string;outcome:string;error_category:string|null;added:number|null;updated:number|null;skipped_older_or_equal:number|null;retained:number|null;input_sha256:string|null};
 type Freshness={status:string;last_successful_apply_at:string|null;last_successful_dry_run_at:string|null;hours_since_successful_apply:number|null;stale_after_hours:number;notice:string};
 type History={status:string;attempts:Attempt[];total:number;notice:string;freshness?:Freshness};
@@ -17,7 +17,7 @@ export default function IpoImportHistory(){
     }catch(e){setError(String(e));}finally{setLoading(false);}
   }
   return <div className="atlas-source-health">
-    <button type="button" aria-expanded={open} onClick={toggle}>{open?"Hide import history":"Check provider import history"}</button>
+    <button className="secondary" type="button" aria-expanded={open} onClick={toggle}>{open?"Hide import history":"Check provider import history"}</button>
     {open&&<div aria-label="IPO provider import history">
       {loading&&<p role="status">Loading local import history…</p>}
       {error&&<p role="alert">{error}</p>}

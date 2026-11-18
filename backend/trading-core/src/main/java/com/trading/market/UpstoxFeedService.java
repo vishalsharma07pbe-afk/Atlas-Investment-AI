@@ -16,22 +16,45 @@ import org.springframework.stereotype.Service;
  public int syncMaster()throws Exception{
   int count=0;
   for(String exchange:List.of("NSE","BSE")){
-   JsonNode root=json.readTree(http.get(MASTER+exchange+".json.gz",null,40_000_000));
+   // NSE's valid decompressed BOD JSON is currently larger than 40 MB. Keep a
+   // strict ceiling, then retain only cash-equity identifiers used by holdings.
+   JsonNode root=json.readTree(http.get(MASTER+exchange+".json.gz",null,60_000_000));
    if(!root.isArray())throw new IllegalStateException("Invalid instrument master");
    for(JsonNode item:root){
     String key=item.path("instrument_key").asText(""),symbol=item.path("trading_symbol").asText("");
-    if(key.isBlank()||symbol.isBlank())continue;
+    if(key.isBlank()||symbol.isBlank()||!key.startsWith(exchange+"_EQ|"))continue;
+    String displayName=item.path("name").asText(item.path("short_name").asText(""));
+    if(displayName.isBlank())displayName=null;
+    else if(displayName.length()>240)displayName=displayName.substring(0,240);
     String isin=item.path("isin").asText(null);
     if(isin!=null&&!isin.matches("[A-Z]{2}[A-Z0-9]{9}[0-9]"))isin=null;
-    jdbc.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,isin,trading_symbol,instrument_type) VALUES (?,?,?,?,?) ON CONFLICT(instrument_key) DO UPDATE SET exchange_code=EXCLUDED.exchange_code,isin=EXCLUDED.isin,trading_symbol=EXCLUDED.trading_symbol,instrument_type=EXCLUDED.instrument_type,updated_at=now()",key,exchange,isin,symbol,item.path("instrument_type").asText(null));
+    jdbc.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,isin,trading_symbol,instrument_type,display_name) VALUES (?,?,?,?,?,?) ON CONFLICT(instrument_key) DO UPDATE SET exchange_code=EXCLUDED.exchange_code,isin=EXCLUDED.isin,trading_symbol=EXCLUDED.trading_symbol,instrument_type=EXCLUDED.instrument_type,display_name=EXCLUDED.display_name,updated_at=now()",key,exchange,isin,symbol,item.path("instrument_type").asText(null),displayName);
     count++;
    }
   }
   return count;
  }
  public List<Map<String,Object>> search(String q){
-  String term=q.trim();if(term.length()<2||term.length()>100)throw new IllegalArgumentException("Search must be 2..100 characters");
-  return jdbc.queryForList("SELECT instrument_key,exchange_code,isin,trading_symbol,instrument_type,updated_at FROM upstox_instrument_map WHERE trading_symbol ILIKE ? OR isin ILIKE ? ORDER BY CASE WHEN lower(trading_symbol)=lower(?) THEN 0 ELSE 1 END,trading_symbol LIMIT 50","%"+term+"%","%"+term+"%",term);
+  String term=q.trim();if(term.length()<1||term.length()>100)throw new IllegalArgumentException("Search must be 1..100 characters");
+  return jdbc.queryForList("""
+    WITH matches AS (
+      SELECT instrument_key,exchange_code,isin,trading_symbol,instrument_type,display_name,updated_at,
+        row_number() OVER (PARTITION BY lower(trading_symbol) ORDER BY
+          CASE WHEN exchange_code='NSE' THEN 0 ELSE 1 END,instrument_key) exchange_preference
+      FROM upstox_instrument_map
+      WHERE trading_symbol ILIKE ? OR isin ILIKE ? OR display_name ILIKE ?
+    )
+    SELECT instrument_key,exchange_code,isin,trading_symbol,instrument_type,display_name,updated_at
+    FROM matches WHERE exchange_preference=1
+    ORDER BY CASE
+      WHEN lower(trading_symbol)=lower(?) THEN 0
+      WHEN lower(trading_symbol) LIKE lower(?) THEN 1
+      WHEN lower(display_name) LIKE lower(?) THEN 2
+      ELSE 3 END,
+      CASE WHEN exchange_code='NSE' THEN 0 ELSE 1 END,
+      length(trading_symbol),trading_symbol
+    LIMIT 20
+    ""","%"+term+"%","%"+term+"%","%"+term+"%",term,term+"%",term+"%");
  }
  private String token(UUID user){String t=vault.decrypt(user,"UPSTOX");if(t==null||t.isBlank())throw new IllegalStateException("Upstox credential unavailable");return t;}
  public JsonNode quote(UUID user,String key)throws Exception{

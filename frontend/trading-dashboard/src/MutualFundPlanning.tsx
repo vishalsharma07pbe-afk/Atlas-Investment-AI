@@ -1,4 +1,4 @@
-import React,{useState} from "react";
+import {useState} from "react";
 import type {FundHolding} from "./MutualFundHoldings";
 type Snapshot={year:number;contributed:string;projected_value:string};
 type Allocation={holding_id:number;label:string;recorded_value:string;weight_pct:string|null};

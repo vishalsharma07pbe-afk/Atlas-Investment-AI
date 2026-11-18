@@ -1,4 +1,5 @@
-import React,{useState} from "react";
+import {useState} from "react";
+import ExchangePicker from "./ExchangePicker";
 
 type Row={id:number;symbol:string;exchange:string;as_of:string;close:number;change_1d_percent:number;momentum_20d_percent:number|null;relative_volume_20:number|null;rsi_14:number|null};
 type Result={universe_size:number;eligible_count:number;skipped:Record<string,number>;top_gainers:Row[];top_losers:Row[];momentum_leaders:Row[];notice:string};
@@ -28,7 +29,7 @@ export default function DailyScreener(){
   return <div>
     <section className="panel glass"><div className="sectionhead"><div><small className="section-kicker">ON-DEMAND · VALIDATED DAILY DATA</small><h2>Market screener</h2></div><span className="tag">RESEARCH ONLY</span></div>
       <p className="muted tiny">Screens at most 20 registry instruments per request. Data older than seven calendar days, insufficient histories and mixed corporate-action adjustments are excluded. Not live or a whole-market ranking.</p>
-      <div className="searchbar"><select aria-label="Screener exchange" value={exchange} onChange={e=>setExchange(e.target.value)}><option value="">NSE + BSE</option><option>NSE</option><option>BSE</option></select><button className="primary" disabled={loading} onClick={run}>{loading?"Screening…":"Run daily screener"}</button></div>
+      <div className="market-actionbar"><ExchangePicker label="Screener exchange" value={exchange} onChange={setExchange}/><button className="primary" disabled={loading} onClick={run}>{loading?"Screening…":"Run daily screener"}</button></div>
       {error&&<p role="alert" className="error">{error}</p>}
       {result&&<p role="status" className="muted tiny">Eligible: {result.eligible_count} of {result.universe_size} sampled instruments. Excluded: {Object.entries(result.skipped).map(([k,v])=>k.replace(/_/g," ")+": "+v).join(" · ")}. {result.notice}</p>}
     </section>

@@ -1,5 +1,5 @@
 import type {SharedNavHistory} from "./MutualFundHistoryImport";
-import React,{useState} from "react";
+import {useState} from "react";
 type Fund={scheme_code:string;scheme_name:string;source:{name:string;verification:string};latest_nav:{as_of:string;nav:number;status:string};trailing_returns_pct:Record<string,number|null>};
 type Result={funds:Fund[];same_latest_nav_date:boolean;comparison_status:string;notice:string};
 const example=JSON.stringify({funds:[{scheme_code:"12345",scheme_name:"Fund A",source_name:"Authorized local CSV A",csv_text:"scheme_code,as_of,nav\n12345,2025-01-01,10\n12345,2025-01-31,11"},{scheme_code:"67890",scheme_name:"Fund B",source_name:"Authorized local CSV B",csv_text:"scheme_code,as_of,nav\n67890,2025-01-01,10\n67890,2025-01-31,10.5"}]},null,2);

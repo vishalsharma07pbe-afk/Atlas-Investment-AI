@@ -1,0 +1,51 @@
+import unittest
+from unittest.mock import patch
+
+from app import p1_research as p1
+
+
+class P1ResearchTests(unittest.TestCase):
+    def test_company_research_normalizes_ratios_and_keeps_partial_failures(self):
+        def fake_get(path, params=None):
+            if path.endswith("key-ratios"):
+                return [{"name": "P/E", "company_value": "20", "sector_value": "10"}]
+            if path.endswith("competitors"):
+                raise p1.ProviderFailure("PROVIDER_HTTP_FAILURE")
+            return [] if path.endswith(("share-holdings", "corporate-actions")) else {}
+        with patch.object(p1, "_get", side_effect=fake_get):
+            result = p1.company_research("INE002A01018", "NSE_EQ|INE002A01018")
+        ratio = result["sections"]["ratios"]["data"][0]
+        self.assertEqual(ratio["relative_difference_percent"], 100.0)
+        self.assertEqual(result["sections"]["competitors"]["status"], "UNAVAILABLE")
+        self.assertIsNone(result["recommendation"])
+
+    def test_company_research_rejects_bad_identifiers(self):
+        with self.assertRaisesRegex(ValueError, "INVALID_ISIN"):
+            p1.company_research("bad")
+        with self.assertRaisesRegex(ValueError, "INVALID_INSTRUMENT_KEY"):
+            p1.company_research("INE002A01018", "bad key")
+
+    def test_news_deduplicates_and_does_not_invent_sentiment(self):
+        stamp = 1793471400000
+        row = {"heading": "Result", "summary": "Summary", "article_link": "https://example.test/a",
+               "thumbnail": None, "published_time": stamp}
+        with patch.object(p1, "_get", return_value={"NSE_EQ|INE002A01018": [row, row]}):
+            result = p1.company_news(["NSE_EQ|INE002A01018"])
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["articles"][0]["sentiment"], "NOT_ANALYZED")
+
+    def test_institutional_activity_computes_net_amount(self):
+        with patch.object(p1, "_get", return_value={"NSE_EQ|CASH": [{
+            "time_stamp": 1793471400000, "buy_amount": 150.5, "sell_amount": 100.25
+        }]}):
+            result = p1.institutional_activity("1d")
+        self.assertEqual(result["participants"]["fii"]["data"][0]["net_amount"], 50.25)
+        self.assertEqual(result["participants"]["dii"]["status"], "AVAILABLE")
+
+    def test_institutional_activity_rejects_unknown_interval(self):
+        with self.assertRaisesRegex(ValueError, "INVALID_INTERVAL"):
+            p1.institutional_activity("weekly")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -9,6 +9,14 @@ import org.springframework.stereotype.Service;
  @Value("${atlas.market.feeds.enabled:false}") boolean enabled;
  public FeedRefreshScheduler(JdbcTemplate jdbc,UpstoxFeedService stocks,AmfiFeedService funds,MarketCalendarService calendar){this.jdbc=jdbc;this.stocks=stocks;this.funds=funds;this.calendar=calendar;}
  @Scheduled(cron="0 10 8 * * MON-FRI",zone="Asia/Kolkata") public void master(){if(enabled&&calendar.isTradingDay("NSE",LocalDate.now(MarketCalendarService.IST)))run("UPSTOX","MASTER",()->stocks.syncMaster());}
+ @Scheduled(initialDelayString="${atlas.market.feeds.master-initial-delay-ms:5000}",fixedDelayString="${atlas.market.feeds.master-check-ms:3600000}")
+ public synchronized void ensureMaster(){
+  if(!enabled)return;
+  Integer count=jdbc.queryForObject("SELECT count(*) FROM upstox_instrument_map",Integer.class);
+  Boolean stale=jdbc.queryForObject("SELECT coalesce(max(updated_at)<now()-interval '36 hours',true) FROM upstox_instrument_map",Boolean.class);
+  Integer unnamed=jdbc.queryForObject("SELECT count(*) FROM upstox_instrument_map WHERE display_name IS NULL",Integer.class);
+  if(count==null||count==0||Boolean.TRUE.equals(stale)||(unnamed!=null&&unnamed>0))run("UPSTOX","MASTER_AUTO",()->stocks.syncMaster());
+ }
  @Scheduled(cron="0 0 22 * * MON-FRI",zone="Asia/Kolkata") public void amfi(){if(enabled)run("AMFI","NAV",()->funds.refresh());}
  private void run(String provider,String job,Checked task){
   long id=jdbc.queryForObject("INSERT INTO market_provider_runs(provider,job_name,status) VALUES (?,?,'RUNNING') RETURNING id",Long.class,provider,job);

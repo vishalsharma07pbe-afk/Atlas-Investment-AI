@@ -4,6 +4,9 @@ import java.util.*;
 import java.security.MessageDigest;
 import java.nio.charset.StandardCharsets;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.Cookie;
+import org.springframework.http.ResponseCookie;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -18,6 +21,7 @@ public class AuthController {
   private final PasswordEncoder encoder;
   private final AuthSecurity.JwtTokens jwt;
   @Value("${ALLOW_REGISTRATION:false}") boolean allowRegistration;
+  @Value("${ATLAS_SESSION_TTL_SECONDS:604800}") long configuredSessionTtlSeconds;
   AuthController(JdbcTemplate jdbc,PasswordEncoder encoder,AuthSecurity.JwtTokens jwt){
     this.jdbc=jdbc;this.encoder=encoder;this.jwt=jwt;
   }
@@ -42,7 +46,7 @@ public class AuthController {
     return email;
   }
   @PostMapping("/login")
-  public Map<String,Object> login(@RequestBody Credentials request,HttpServletRequest http){
+  public Map<String,Object> login(@RequestBody Credentials request,HttpServletRequest http,HttpServletResponse response){
     String email=validEmail(request.email());
     String emailHash=hash(email),ipHash=hash(http.getRemoteAddr());
     Integer failures=jdbc.queryForObject("SELECT count(*) FROM auth_login_failures WHERE (email_hash=? OR ip_hash=?) AND attempted_at>now()-interval '1 minute'",Integer.class,emailHash,ipHash);
@@ -54,17 +58,32 @@ public class AuthController {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Invalid credentials");
     }
     UUID id=(UUID)users.get(0).get("id");
-    return Map.of("access_token",jwt.issue(id),"token_type","Bearer","expires_in",900);
+    long sessionTtlSeconds=Math.max(900,Math.min(configuredSessionTtlSeconds,2_592_000));
+    String token=jwt.issue(id,sessionTtlSeconds);
+    response.addHeader("Set-Cookie",sessionCookie(token,sessionTtlSeconds,http.isSecure()).toString());
+    return Map.of("access_token",token,"token_type","Bearer","expires_in",sessionTtlSeconds);
   }
   private static String hash(String value){
     try {return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));}
     catch(Exception ex){throw new IllegalStateException(ex);}
   }
   @PostMapping("/logout")
-  public Map<String,Boolean> logout(@org.springframework.web.bind.annotation.RequestHeader("Authorization") String authorization){
-    if(!authorization.startsWith("Bearer "))throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
-    jwt.revoke(authorization.substring(7),AuthSecurity.currentUser());
+  public Map<String,Boolean> logout(@org.springframework.web.bind.annotation.RequestHeader(value="Authorization",required=false) String authorization,
+                                    HttpServletRequest request,HttpServletResponse response){
+    String token=authorization!=null && authorization.startsWith("Bearer ") ? authorization.substring(7) : cookieToken(request);
+    if(token==null)throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+    jwt.revoke(token,AuthSecurity.currentUser());
+    response.addHeader("Set-Cookie",sessionCookie("",0,request.isSecure()).toString());
     return Map.of("logged_out",true);
+  }
+  private static String cookieToken(HttpServletRequest request){
+    Cookie[] cookies=request.getCookies();if(cookies==null)return null;
+    for(Cookie cookie:cookies)if("ATLAS_SESSION".equals(cookie.getName()))return cookie.getValue();
+    return null;
+  }
+  private static ResponseCookie sessionCookie(String token,long maxAge,boolean secure){
+    return ResponseCookie.from("ATLAS_SESSION",token).httpOnly(true).secure(secure).sameSite("Strict")
+      .path("/").maxAge(maxAge).build();
   }
   @GetMapping("/me")
   public Map<String,Object> me(){

@@ -1,4 +1,4 @@
-import React,{useState} from "react";
+import {useState} from "react";
 type Diagnostics={status:"CONFIGURED"|"BLOCKED";authorization_request_performed:boolean;live_stream_connected:boolean;blockers:string[];notice:string};
 type FeedStatus={worker_running:boolean;transport_connected:boolean;selected_instruments:number;cached_instruments:number;startup?:{status:string;blockers?:string[]}};
 export default function UpstoxAuthorization(){

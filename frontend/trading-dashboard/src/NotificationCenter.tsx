@@ -1,4 +1,4 @@
-import React,{useEffect,useState} from "react";
+import {useEffect,useState} from "react";
 import NotificationSourceHealth from "./NotificationSourceHealth";
 import {indiaDateToday,upcomingIpoEvents} from "./ipoCalendar";
 type Alert={id:string;revision_key?:string;freshness?:"STALE"|"RECENT"|"NOT_APPLICABLE";category:string;title:string;description:string;event_date:string|null;published_at:string;source_name:string;source_url:string;subscription_total_x:string|null;subscription_as_of:string|null};
@@ -44,10 +44,12 @@ export default function NotificationCenter(){
       document.removeEventListener("visibilitychange",onVisibility);
     };
   },[]);
+  useEffect(()=>{const close=()=>setOpen(false);window.addEventListener("atlas:close-notifications",close);return()=>window.removeEventListener("atlas:close-notifications",close);},[]);
   const count=ids.filter(id=>!seen.includes(id)).length;
   const upcoming=alerts?upcomingIpoEvents(alerts,indiaDateToday()):[];
   async function toggle(){
     if(open){setOpen(false);return;}
+    window.dispatchEvent(new Event("atlas:close-appearance"));
     setOpen(true);setLoading(true);setError("");
     try{
       const response=await fetch(BASE,{cache:"no-store"});

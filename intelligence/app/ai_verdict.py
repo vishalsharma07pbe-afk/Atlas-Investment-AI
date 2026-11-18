@@ -40,9 +40,15 @@ class Verdict(BaseModel):
             raise ValueError("INVALID_PRICE_LEVEL")
         return value
 
-    @field_validator("pros","cons")
+    @field_validator("pros","cons", mode="before")
     @classmethod
     def short_safe_reasons(cls, value):
+        if not isinstance(value,list):
+            raise ValueError("INVALID_REASONS")
+        value=[reason for reason in value if isinstance(reason,str)
+               and reason.strip().lower() not in {"null","none","n/a","na","unknown"}]
+        if not value:
+            raise ValueError("EMPTY_REASONS")
         if any(not reason.strip() or len(reason)>280 or SAFE_TEXT.search(reason) for reason in value):
             raise ValueError("UNSAFE_REASON")
         return value
@@ -73,5 +79,7 @@ target_1 (positive number or null), target_2 (positive number or null),
 stop_loss (positive number or null), holding_horizon
 (INTRADAY|SWING|SHORT_TERM|LONG_TERM), pros (1..5 short strings),
 cons (1..5 short strings). Use null levels for HOLD or AVOID.
+Every pro and con must cite a supplied observation or an explicit missing-data
+limitation. Never emit the strings "null", "none", or "unknown" as reasons.
 Do not invent missing market observations. When uncertain choose AVOID.
 """

@@ -1,4 +1,4 @@
-import React,{useState} from "react";
+import {useState} from "react";
 
 type Backtest={status:string;as_of?:string;candle_count?:number;required_candles?:number;observed_candles?:number;strategy_total_return_percent?:number;buy_hold_return_percent?:number;max_drawdown_percent?:number;closed_trade_count?:number;open_position_at_end?:boolean;notice?:string;trades?:{entry_date:string;exit_date:string;return_percent:number}[]};
 

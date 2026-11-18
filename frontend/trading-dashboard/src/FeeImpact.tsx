@@ -34,9 +34,9 @@ export default function FeeImpact(){
   return <section className="panel glass" aria-label="Investment fee impact calculator">
     <div className="sectionhead"><div><small className="section-kicker">COST ANALYSIS LAB</small><h2>Investment fees & compounding</h2></div><span className="tag">HYPOTHETICAL</span></div>
     <p className="muted tiny">Compare a no-fee scenario with user-supplied expense ratios and charges. No actual product pricing is implied.</p>
-    <form onSubmit={calculate}>
+    <form onSubmit={calculate} className="compact-data-form compact-data-form-fees">
       {fields.map(f=><label key={f.key}>{f.label}<input aria-label={f.label} type="number" required min={f.min} max={f.max} step={f.step} value={form[f.key]} onChange={e=>setForm(old=>({...old,[f.key]:e.target.value}))}/></label>)}
-      <button type="submit" className="primary" disabled={loading}>{loading?"Calculating…":"Calculate fee impact"}</button>
+      <div className="compact-form-actions"><button type="submit" className="primary" disabled={loading}>{loading?"Calculating…":"Calculate fee impact"}</button></div>
     </form>
     {error&&<p role="alert">{error}</p>}
     {result&&<div aria-label="Fee impact results">

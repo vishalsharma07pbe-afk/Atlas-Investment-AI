@@ -1,4 +1,4 @@
-import React,{useState} from "react";
+import {useState} from "react";
 type Details={missing_scheme_codes:string[];unexpected_scheme_codes:string[];duplicate_scheme_codes:string[];future_scheme_codes:string[];stale_scheme_codes:string[];matched_as_of_dates:string[];expected_count:number;received_count:number};
 type Result={status:"BLOCKED"|"READY_FOR_MANUAL_REVIEW";blockers:string[];details:Details;source:{verification:string};stored:boolean;refresh_executed:boolean;notice:string};
 export default function NavRefreshPreflight(){

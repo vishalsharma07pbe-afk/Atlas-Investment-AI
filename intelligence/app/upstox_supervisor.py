@@ -63,6 +63,9 @@ async def startup_feed():
             settings.licensed_data_access and settings.entitlement_confirmed):
         feed_supervisor.startup_result={"status":"BLOCKED","blockers":["PROVIDER_CONFIGURATION_INCOMPLETE"]}
         return feed_supervisor.startup_result
+    if not raw_ids.strip() and not raw_keys.strip():
+        feed_supervisor.startup_result={"status":"AWAITING_PORTFOLIO_SELECTION"}
+        return feed_supervisor.startup_result
     try:
         if raw_ids.strip():
             ids=parse_ids(raw_ids)

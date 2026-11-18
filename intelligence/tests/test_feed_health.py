@@ -17,7 +17,15 @@ class FeedHealthTests(unittest.TestCase):
         self.assertEqual(result["state"],"CONNECTED_UNVERIFIED")
         self.assertFalse(result["live_prices_verified"])
         self.assertFalse(result["entitlement_verified"])
+        self.assertTrue(result["configuration_ready"])
+        self.assertTrue(result["fresh_provider_frames"])
         self.assertFalse(result["automatic_collection_authorized_by_this_check"])
+
+    def test_configured_idle_portfolio_is_ready_not_stopped(self):
+        result=self.base(worker_running=False,transport_connected=False,frames_processed=0,
+            automatic_selection={"status":"IDLE_NO_EQUITY_HOLDINGS"})
+        self.assertEqual(result["state"],"READY")
+        self.assertEqual(result["reason"],"WAITING_FOR_EQUITY_HOLDING")
 
     def test_blocked_even_if_transport_connected(self):
         result=self.base(configuration_status="NOT_READY",blockers=["MISSING_ACCESS_TOKEN"])

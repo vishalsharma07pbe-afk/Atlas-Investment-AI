@@ -1,4 +1,4 @@
-import React,{useState} from "react";
+import {useState} from "react";
 type Research={source:string;source_name:string;rating:string;target_price:string|null;published_on:string;report_title:string;report_url:string;evidence_status:string};
 type Result={status:string;fresh_provider_count:number;fresh_records:number;excluded_stale_or_superseded:number;rating_counts:Record<string,number>;targets:{median:string|null;minimum:string|null;maximum:string|null;count:number};research:Research[];notice:string;blockers:string[]};
 export default function BrokerResearch(){

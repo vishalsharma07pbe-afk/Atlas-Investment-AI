@@ -1,4 +1,4 @@
-import React,{useEffect,useState} from "react";
+import {useEffect,useState} from "react";
 
 type Incident={dataset:string;code:string;first_seen:string;last_seen:string;occurrences:number;state:"OPEN"|"RESOLVED"};
 type MonitorStatus={enabled:boolean;running:boolean;interval_seconds:number|null;blocker:string|null;completed_runs:number;last_success_at:string|null;last_error_code:string|null};
@@ -31,10 +31,10 @@ export default function ReliabilityIncidents(){
     }catch(e){setError(e instanceof Error?e.message:"Observation failed")}
     finally{setBusy(false)}
   }
-  return <section className="panel glass" aria-label="Reliability incident history">
-    <div className="sectionhead"><div><h2>Data reliability incidents</h2>
+  return <section className="panel glass health-card" aria-label="Reliability incident history">
+    <div className="sectionhead"><div className="section-copy"><small className="section-kicker">LOCAL OBSERVATION HISTORY</small><h2>Data reliability incidents</h2>
       <p>Persistent, deduplicated observations of local source readiness. No automatic provider or live market connection.</p></div>
-      <button type="button" onClick={()=>void observe()} disabled={busy}>{busy?"Observing…":"Record current readiness"}</button>
+      <button className="primary" type="button" onClick={()=>void observe()} disabled={busy}>{busy?"Observing…":"Record current readiness"}</button>
     </div>
     {error&&<p role="alert">{error}</p>}
     <p>Scheduled local monitoring: <strong>{monitor?.running?"Running":monitor?.enabled?"Starting or unavailable":"Disabled"}</strong> · Interval: {monitor?.interval_seconds??"—"} seconds · Completed: {monitor?.completed_runs??"—"} · Last success: {monitor?.last_success_at?new Date(monitor.last_success_at).toLocaleString("en-IN"):"Never"}{monitor?.last_error_code?" · Error: "+monitor.last_error_code:""}</p>

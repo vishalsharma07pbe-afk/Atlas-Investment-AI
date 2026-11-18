@@ -1,4 +1,4 @@
-import React,{useEffect,useState} from "react";
+import {useEffect,useState} from "react";
 
 type Row={trade_date:string;market:string;participant:string;buy_crore_inr:string;sell_crore_inr:string;net_crore_inr:string;source_name:string;source_url:string|null;verification:string;freshness:string;age_days:number};
 type Ledger={records:Row[];total:number;notice:string;live_feed_connected:boolean};

@@ -40,6 +40,8 @@ public class AuthSecurity {
       .authorizeHttpRequests(a->a
         .requestMatchers(HttpMethod.POST,"/api/v1/auth/register","/api/v1/auth/login").permitAll()
         .requestMatchers("/api/v1/health","/actuator/health/**").permitAll()
+        // Internal endpoints perform their own constant-time service-token check.
+        .requestMatchers("/api/v1/internal/**").permitAll()
         .requestMatchers("/api/v1/**").authenticated()
         .anyRequest().denyAll())
       .addFilterBefore(new JwtFilter(tokens),BasicAuthenticationFilter.class).build();
@@ -56,17 +58,17 @@ public class AuthSecurity {
     private final ObjectMapper json=new ObjectMapper();
     JwtTokens(String secret,JdbcTemplate jdbc){
       this.jdbc=jdbc;
-      if(secret==null || secret.isBlank()){key=null;return;}
+      if(secret==null || secret.isBlank())throw new IllegalStateException("ATLAS_JWT_SECRET is required");
       byte[] decoded;
       try {decoded=Base64.getDecoder().decode(secret);}catch(IllegalArgumentException ex){throw new IllegalStateException("ATLAS_JWT_SECRET must be base64",ex);}
       if(decoded.length<32)throw new IllegalStateException("ATLAS_JWT_SECRET must decode to >=32 bytes");
       key=decoded;
     }
-    public String issue(UUID user){
-      if(key==null)throw new IllegalStateException("JWT signing secret not configured");
+    public String issue(UUID user,long ttlSeconds){
       try {
         String head=enc("{\"alg\":\"HS256\",\"typ\":\"JWT\"}");
-        String body=enc(json.writeValueAsString(java.util.Map.of("sub",user.toString(),"exp",Instant.now().plusSeconds(900).getEpochSecond(),"iss","atlas-local")));
+        if(ttlSeconds<900 || ttlSeconds>2_592_000)throw new IllegalArgumentException("INVALID_SESSION_TTL");
+        String body=enc(json.writeValueAsString(java.util.Map.of("sub",user.toString(),"exp",Instant.now().plusSeconds(ttlSeconds).getEpochSecond(),"iss","atlas-local")));
         String data=head+"."+body;
         return data+"."+Base64.getUrlEncoder().withoutPadding().encodeToString(sign(data));
       }catch(Exception ex){throw new IllegalStateException("JWT signing failed",ex);}
@@ -110,8 +112,11 @@ public class AuthSecurity {
     @Override protected void doFilterInternal(HttpServletRequest req,HttpServletResponse res,FilterChain chain)
         throws ServletException,IOException{
       String header=req.getHeader("Authorization");
-      if(header!=null && header.startsWith("Bearer ")){
-        UUID id=tokens.verify(header.substring(7));
+      String token=header!=null && header.startsWith("Bearer ") ? header.substring(7) : null;
+      if(token==null && req.getCookies()!=null)for(var cookie:req.getCookies())
+        if("ATLAS_SESSION".equals(cookie.getName())){token=cookie.getValue();break;}
+      if(token!=null){
+        UUID id=tokens.verify(token);
         if(id!=null)SecurityContextHolder.getContext().setAuthentication(
           new UsernamePasswordAuthenticationToken(id,null,java.util.List.of()));
       }

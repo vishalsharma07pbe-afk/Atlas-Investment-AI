@@ -1,5 +1,5 @@
 import type {SharedNavHistory} from "./MutualFundHistoryImport";
-import React,{useState} from "react";
+import {useState} from "react";
 type Risk={observations:number;first_date:string;last_date:string;cumulative_return_pct:number;annualized_return_pct:number;maximum_drawdown_pct:number;annualized_volatility_pct:number|null;volatility_status:string;notice:string};
 export default function MutualFundHistoricalRisk({validatedHistory}:{validatedHistory?:SharedNavHistory|null}){
  const [code,setCode]=useState(""),[source,setSource]=useState(""),[csv,setCsv]=useState("as_of,nav\n");
