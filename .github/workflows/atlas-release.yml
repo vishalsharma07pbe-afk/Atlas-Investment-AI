@@ -1,0 +1,87 @@
+name: ATLAS release images
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Immutable release tag to publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+concurrency:
+  group: atlas-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    uses: ./.github/workflows/atlas-checks.yml
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: atlas-backend
+            context: backend/trading-core
+            file: backend/trading-core/Dockerfile.production
+          - image: atlas-intelligence
+            context: intelligence
+            file: intelligence/Dockerfile.production
+          - image: atlas-frontend
+            context: frontend/trading-dashboard
+            file: frontend/trading-dashboard/Dockerfile.production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve immutable image tag
+        id: release
+        shell: bash
+        run: |
+          value="${{ inputs.tag || github.ref_name }}"
+          if [[ ! "$value" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]; then
+            echo "Release tag must be SemVer-like and begin with v" >&2
+            exit 1
+          fi
+          echo "tag=$value" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ steps.release.outputs.tag }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+  release-contract:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate production Compose using non-secret placeholders
+        env:
+          ATLAS_IMAGE_NAMESPACE: ${{ github.repository_owner }}
+          ATLAS_RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          POSTGRES_DB: atlas
+          POSTGRES_USER: atlas
+          POSTGRES_PASSWORD: ci-placeholder-not-a-production-secret
+          ATLAS_JWT_SECRET: ci-placeholder-jwt-secret-at-least-32-characters
+          ATLAS_VAULT_MASTER_KEY: Y2ktcGxhY2Vob2xkZXIta2V5LW11c3QtYmUtcm90YXRlZA==
+          INTERNAL_SERVICE_TOKEN: ci-placeholder-internal-token-at-least-32-chars
+        run: docker compose -f docker-compose.production.yml config --quiet
+

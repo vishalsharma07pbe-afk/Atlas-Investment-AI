@@ -1,6 +1,7 @@
 name: ATLAS checks
 
 on:
+  workflow_call:
   push:
     branches: [main]
   pull_request:
@@ -72,7 +73,20 @@ jobs:
           POSTGRES_PASSWORD: ci-placeholder-not-a-secret
         run: docker compose config --quiet
       - name: Check Python source syntax
-        run: python3 -m compileall -q intelligence/app intelligence/tests
+        run: python3 -m compileall -q intelligence/app intelligence/tests scripts tests
+      - name: Test production operations safeguards
+        run: python3 -m unittest tests.test_p3_operations -v
+      - name: Validate production Compose without real credentials
+        env:
+          ATLAS_IMAGE_NAMESPACE: example
+          ATLAS_RELEASE_TAG: v0.0.0-ci
+          POSTGRES_DB: atlas
+          POSTGRES_USER: atlas
+          POSTGRES_PASSWORD: ci-placeholder-not-a-production-secret
+          ATLAS_JWT_SECRET: ci-placeholder-jwt-secret-at-least-32-characters
+          ATLAS_VAULT_MASTER_KEY: Y2ktcGxhY2Vob2xkZXIta2V5LW11c3QtYmUtcm90YXRlZA==
+          INTERNAL_SERVICE_TOKEN: ci-placeholder-internal-token-at-least-32-chars
+        run: docker compose -f docker-compose.production.yml config --quiet
 
   ai-bridge-integration:
     name: Real Spring-to-Python AI security integration

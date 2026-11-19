@@ -4,6 +4,8 @@
 
 **P2 Research Lab:** See [docs/P2_IMPLEMENTATION_STATUS.md](docs/P2_IMPLEMENTATION_STATUS.md) for grounded AI research, leakage-controlled walk-forward evaluation, multi-factor screening, and assumption-driven personal planning.
 
+**P3 release foundation:** See [docs/P3_IMPLEMENTATION_STATUS.md](docs/P3_IMPLEMENTATION_STATUS.md) for hardened production images, release automation, backup verification, bounded load smoke tests, responsive accessibility improvements, onboarding and launch gates. Production topology and trust boundaries are documented in [docs/architecture/PRODUCTION_TOPOLOGY.md](docs/architecture/PRODUCTION_TOPOLOGY.md).
+
 A local-first investment research dashboard. This is a **functional portfolio alpha**, not a complete live trading intelligence system. It does not produce stock tips without verified feeds.
 
 The market-data foundation now supports a validated NSE/BSE instrument registry and strict manual CSV ingestion of daily OHLCV data. See [docs/M1_DATA_INGESTION.md](docs/M1_DATA_INGESTION.md) for source/legal boundaries, templates, validation, migrations and security.
@@ -21,7 +23,7 @@ If upgrading an existing installation, apply `infrastructure/postgres/init/002_p
 `docker compose exec -T postgres psql -U trading -d trading < infrastructure/postgres/init/002_portfolio.sql` (PowerShell input redirection may not work; use `Get-Content infrastructure/postgres/init/002_portfolio.sql | docker compose exec -T postgres psql -U trading -d trading` instead). New installations automatically run both SQL init files.
 
 ## Portfolio
-Use the My Portfolio tab to add holdings manually or import a simple CSV with columns `symbol,asset_type,quantity,average_cost,last_price`. `asset_type` must be `EQUITY` or `MUTUAL_FUND`. `last_price` is optional. Prices are **manually entered**, not live. CSV imports upsert positions by symbol and asset type, and do not track transaction history. Do not import an untrusted CSV. The parser is intentionally basic and does not handle quoted commas. The empty `sample-holdings.csv` shows the header.
+Use the My Portfolio tab to add holdings manually or import a simple CSV with columns `symbol,asset_type,quantity,average_cost,last_price`. `asset_type` must be `EQUITY` or `MUTUAL_FUND`. `last_price` is optional. Without an authorized provider, prices remain manually supplied. When the opt-in Upstox feed and required entitlements are configured, validated stock and index ticks are delivered to the signed-in dashboard by server push. CSV imports upsert positions by symbol and asset type, and do not track transaction history. Do not import an untrusted CSV. The parser is intentionally basic and does not handle quoted commas. The empty `sample-holdings.csv` shows the header.
 
 ### API
 - `GET /api/v1/portfolio/holdings`
@@ -31,4 +33,4 @@ Use the My Portfolio tab to add holdings manually or import a simple CSV with co
 - `GET /api/v1/health`
 
 ## Security and limits
-Only run on your trusted local computer. Docker services are bound to `127.0.0.1` by default. There is **no login authentication yet**, so do not expose ports, reverse-proxy it to the internet, or use on a shared computer. Portfolio holdings are stored in a local Docker-managed PostgreSQL volume, **not encrypted at rest** in this alpha. Set a strong database password in `.env`. Back up the volume before upgrades. There is no broker connection, no live market provider, no external AI API, and no trade execution. Market and recommendation tabs are intentionally inactive until validated inputs exist. Basic concentration flags are not investment advice.
+ATLAS now has JWT-based user authentication, encrypted provider-token storage and a production deployment foundation, but it is **not automatically a public hosted service**. Local Docker ports remain bound to `127.0.0.1`. A production operator must provide TLS, a secret manager, encrypted off-host backups, monitoring delivery, licensed data-provider access and legal approval before launch. Never commit `.env`; use strong unique secrets and rotate them through the documented procedure. There is no trade execution. Research and concentration outputs are not investment advice, and provider-backed features remain unavailable when their source, entitlement or freshness checks fail. See [docs/PRODUCTION_DEPLOYMENT_RUNBOOK.md](docs/PRODUCTION_DEPLOYMENT_RUNBOOK.md), [docs/LEGAL_AND_RISK_DISCLOSURES.md](docs/LEGAL_AND_RISK_DISCLOSURES.md) and [docs/LAUNCH_ACCEPTANCE.md](docs/LAUNCH_ACCEPTANCE.md).

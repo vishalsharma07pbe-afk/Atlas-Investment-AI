@@ -1,0 +1,15 @@
+.env
+.env.*
+.git
+.github
+.idea
+.vscode
+__pycache__
+*.pyc
+.pytest_cache
+tests
+*.sqlite3
+*.json
+*.log
+*.dump
+*.backup

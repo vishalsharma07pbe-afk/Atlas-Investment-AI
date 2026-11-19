@@ -1,0 +1,159 @@
+name: atlas-production
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  postgres:
+    image: ${ATLAS_POSTGRES_IMAGE:-timescale/timescaledb:2.17.2-pg16@sha256:4e459e217f00cbb09920c34d245501e63427e6767a495de57ce76823ff280f12}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    shm_size: 256m
+    stop_grace_period: 60s
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [data]
+    deploy:
+      resources:
+        limits: {cpus: "2.0", memory: 2048M}
+
+  backend:
+    image: ghcr.io/${ATLAS_IMAGE_NAMESPACE:?Set ATLAS_IMAGE_NAMESPACE}/atlas-backend:${ATLAS_RELEASE_TAG:?Set ATLAS_RELEASE_TAG}
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    stop_grace_period: 30s
+    logging: *default-logging
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:?Set POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      ATLAS_JWT_SECRET: ${ATLAS_JWT_SECRET:?Set ATLAS_JWT_SECRET}
+      ATLAS_VAULT_MASTER_KEY: ${ATLAS_VAULT_MASTER_KEY:?Set ATLAS_VAULT_MASTER_KEY}
+      ATLAS_VAULT_KEY_VERSION: ${ATLAS_VAULT_KEY_VERSION:-1}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN}
+      ALLOW_REGISTRATION: "false"
+      ATLAS_AI_PROXY_ENABLED: ${ATLAS_AI_PROXY_ENABLED:-false}
+      ATLAS_MARKET_FEEDS_ENABLED: ${ATLAS_MARKET_FEEDS_ENABLED:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8080/actuator/health/readiness | grep -q '\"status\":\"UP\"'"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+    networks: [data, app, egress]
+    deploy:
+      resources:
+        limits: {cpus: "2.0", memory: 1536M}
+
+  intelligence:
+    image: ghcr.io/${ATLAS_IMAGE_NAMESPACE:?Set ATLAS_IMAGE_NAMESPACE}/atlas-intelligence:${ATLAS_RELEASE_TAG:?Set ATLAS_RELEASE_TAG}
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    stop_grace_period: 30s
+    logging: *default-logging
+    environment:
+      ATLAS_BACKEND_URL: http://backend:8080
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN}
+      MARKET_DATA_PROVIDER: ${MARKET_DATA_PROVIDER:-MANUAL_CSV}
+      MARKET_DATA_AUTO_REFRESH: ${MARKET_DATA_AUTO_REFRESH:-false}
+      MARKET_DATA_USAGE_RIGHTS_CONFIRMED: ${MARKET_DATA_USAGE_RIGHTS_CONFIRMED:-false}
+      MARKET_DATA_ENTITLEMENT_CONFIRMED: ${MARKET_DATA_ENTITLEMENT_CONFIRMED:-false}
+      UPSTOX_ACCESS_TOKEN: ${UPSTOX_ACCESS_TOKEN:-}
+      ATLAS_UPSTOX_FEED_ENABLED: ${ATLAS_UPSTOX_FEED_ENABLED:-false}
+      ATLAS_UPSTOX_INSTRUMENT_IDS: ${ATLAS_UPSTOX_INSTRUMENT_IDS:-}
+      ATLAS_UPSTOX_INSTRUMENT_KEYS: ${ATLAS_UPSTOX_INSTRUMENT_KEYS:-}
+      ATLAS_EXTERNAL_AI_ALLOWED: ${ATLAS_EXTERNAL_AI_ALLOWED:-false}
+      ATLAS_PAID_AI_ALLOWED: ${ATLAS_PAID_AI_ALLOWED:-false}
+      ATLAS_NAV_DB_PATH: /app/nav-data/catalog.sqlite3
+      ATLAS_INGESTION_DB_PATH: /app/ingestion-data/jobs.sqlite3
+      ATLAS_OHLCV_DB_PATH: /app/ingestion-data/ohlcv.sqlite3
+      ATLAS_AI_BUDGET_DB_PATH: /app/ingestion-data/ai_budgets.sqlite3
+      ATLAS_FLOW_DB_PATH: /app/flow-data/flows.sqlite3
+      ATLAS_NEWS_DB_PATH: /app/news-data/events.sqlite3
+      ATLAS_RELIABILITY_DB_PATH: /app/reliability-data/incidents.sqlite3
+      ATLAS_RESEARCH_JOURNAL_FILE: /app/journal/entries.json
+    volumes:
+      - navcatalog:/app/nav-data
+      - ingestionledger:/app/ingestion-data
+      - flowledger:/app/flow-data
+      - newsledger:/app/news-data
+      - reliabilityledger:/app/reliability-data
+      - journal:/app/journal
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health\", timeout=3)'"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+    networks: [app, egress]
+    deploy:
+      resources:
+        limits: {cpus: "2.0", memory: 1024M}
+
+  frontend:
+    image: ghcr.io/${ATLAS_IMAGE_NAMESPACE:?Set ATLAS_IMAGE_NAMESPACE}/atlas-frontend:${ATLAS_RELEASE_TAG:?Set ATLAS_RELEASE_TAG}
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs: [/tmp, /var/cache/nginx]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    stop_grace_period: 15s
+    logging: *default-logging
+    ports:
+      - "127.0.0.1:${ATLAS_HTTP_PORT:-8088}:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+      intelligence:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz | grep -q UP"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+    networks: [app]
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 256M}
+
+networks:
+  app:
+    internal: true
+  data:
+    internal: true
+  egress:
+    driver: bridge
+
+volumes:
+  pgdata:
+  navcatalog:
+  ingestionledger:
+  flowledger:
+  newsledger:
+  reliabilityledger:
+  journal:

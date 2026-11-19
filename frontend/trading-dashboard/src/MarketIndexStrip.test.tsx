@@ -3,7 +3,7 @@ import {cleanup,fireEvent,render,screen,waitFor} from "@testing-library/react";
 import {afterEach,describe,expect,it,vi} from "vitest";
 import MarketIndexStrip from "./MarketIndexStrip";
 
-afterEach(()=>{cleanup();vi.restoreAllMocks();});
+afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();});
 
 describe("MarketIndexStrip",()=>{
  it("renders verified provider values and refreshes on demand",async()=>{
@@ -28,5 +28,33 @@ describe("MarketIndexStrip",()=>{
   render(<MarketIndexStrip/>);
   expect(await screen.findByText("Upstox authorization expired")).toBeTruthy();
   expect(screen.getByText(/Daily Upstox sign-in is required/)).toBeTruthy();
+ });
+
+ it("replaces the snapshot immediately when a pushed quote arrives",async()=>{
+  class FakeEventSource{
+   static latest:FakeEventSource;
+   onopen:(()=>void)|null=null;
+   onerror:(()=>void)|null=null;
+   listeners=new Map<string,(event:Event)=>void>();
+   constructor(public url:string){FakeEventSource.latest=this;}
+   addEventListener(name:string,listener:EventListener){this.listeners.set(name,listener);}
+   removeEventListener(name:string){this.listeners.delete(name);}
+   close(){}
+   emit(name:string,value:unknown){this.listeners.get(name)?.({data:JSON.stringify(value)} as MessageEvent<string>);}
+  }
+  vi.stubGlobal("EventSource",FakeEventSource);
+  vi.spyOn(globalThis,"fetch").mockResolvedValue({ok:true,json:async()=>({
+   status:"UNAVAILABLE",source:"UPSTOX",items:[],notice:"Waiting"
+  })} as Response);
+  render(<MarketIndexStrip/>);
+  await waitFor(()=>expect(FakeEventSource.latest.url).toBe("/api/v1/live/market-indices"));
+  FakeEventSource.latest.emit("quote",{
+   status:"AVAILABLE",source:"UPSTOX_V3_STREAM",notice:"Push",items:[{
+    label:"NIFTY 50",price:25123.45,change:10,change_percent:.04,
+    as_of:"2026-11-19T04:30:00Z",freshness:"LIVE"
+   }]
+  });
+  expect(await screen.findByText("25,123.45")).toBeTruthy();
+  expect(screen.getByText("UPSTOX_V3_STREAM · live push")).toBeTruthy();
  });
 });

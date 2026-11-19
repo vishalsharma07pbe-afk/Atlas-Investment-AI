@@ -61,8 +61,13 @@ export default function StockExplorer(){
     if(!selected||!providerResolution?.subscription_ready)return;
     let cancelled=false;
     const refresh=async()=>{try{const response=await fetch(`/intelligence/api/v1/intelligence/providers/upstox/quotes/${selected.id}`);if(response.ok&&!cancelled)setLiveQuote(await response.json());}catch{if(!cancelled)setLiveQuote({status:"UNAVAILABLE",quote:null,reason:"QUOTE_API_UNAVAILABLE"});}};
-    void refresh();const interval=setInterval(()=>void refresh(),5000);
-    return()=>{cancelled=true;clearInterval(interval);};
+    void refresh();
+    if(typeof EventSource==="undefined")return()=>{cancelled=true;};
+    const source=new EventSource(`/api/v1/live/instruments/${selected.id}`);
+    const receive=(event:Event)=>{try{if(!cancelled)setLiveQuote(JSON.parse((event as MessageEvent<string>).data));}catch{if(!cancelled)setLiveQuote({status:"UNAVAILABLE",quote:null,reason:"INVALID_STREAM_EVENT"});}};
+    source.addEventListener("quote",receive);
+    source.onerror=()=>{if(!cancelled)setLiveQuote(previous=>previous?.status==="LIVE"?previous:{status:"UNAVAILABLE",quote:null,reason:"LIVE_STREAM_RECONNECTING"});};
+    return()=>{cancelled=true;source.removeEventListener("quote",receive);source.close();};
   },[selected?.id,providerResolution?.subscription_ready]);
   function toggle(key:string){const next=new Set(toggles);next.has(key)?next.delete(key):next.add(key);setToggles(next);}
   return <div className="explorer">

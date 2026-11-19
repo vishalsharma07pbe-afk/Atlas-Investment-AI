@@ -52,9 +52,15 @@ def normalize_tick(instrument_key: str, ltpc: dict, policy: StreamPolicy, now_ms
         raise ValueError("Future-dated trade")
     if age > policy.max_tick_age_seconds*1000:
         raise ValueError("Stale trade")
-    return {"instrument_key":instrument_key,"last_traded_price":float(ltp),
+    result={"instrument_key":instrument_key,"last_traded_price":float(ltp),
             "traded_at":datetime.fromtimestamp(ts/1000,timezone.utc).isoformat(),
             "age_ms":age,"status":"FRESH","source":"UPSTOX_V3"}
+    close=ltpc.get("cp")
+    if not isinstance(close,bool) and isinstance(close,(int,float)) and isfinite(close) and close>0:
+        result["previous_close"]=float(close)
+        result["change"]=float(ltp-close)
+        result["change_percent"]=float((ltp-close)/close*100)
+    return result
 
 def stream_readiness(configured: bool, authorized: bool, decoder_verified: bool, connected: bool) -> dict:
     blockers=[]

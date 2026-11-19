@@ -2,6 +2,7 @@ import asyncio
 import json
 import unittest
 from app.upstox_transport import receive_session,reconnecting_stream,TransportPolicy,TransportUnavailable
+from app.upstox_authorization import AuthorizationError
 
 class FakeWebSocket:
     def __init__(self,frames):self.frames=frames;self.sent=[]
@@ -58,7 +59,19 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
             session=failed_session,sleep=no_sleep)
         self.assertEqual(len(attempts),3)
         self.assertEqual(result["status"],"DISCONNECTED")
+        self.assertEqual(result["last_failure"],"FEED_NETWORK_UNAVAILABLE")
         self.assertNotIn("secret",str(result))
+        self.assertNotIn("token and URL must not leak",str(result))
+
+    async def test_authorization_failure_is_safely_classified(self):
+        async def failed_session(*args,**kwargs):
+            raise AuthorizationError("sensitive provider detail")
+        async def no_sleep(delay):pass
+        result=await reconnecting_stream("secret",["NSE_EQ|INE002A01018"],
+            lambda x:None,stop=asyncio.Event(),policy=TransportPolicy(max_retries=0),
+            session=failed_session,sleep=no_sleep)
+        self.assertEqual(result["last_failure"],"FEED_AUTHORIZATION_UNAVAILABLE")
+        self.assertNotIn("sensitive",str(result))
 
     async def test_stop(self):
         stop=asyncio.Event()

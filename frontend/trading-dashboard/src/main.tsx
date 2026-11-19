@@ -37,6 +37,7 @@ import MarketIndexStrip from "./MarketIndexStrip";
 import PortfolioIntelligence from "./PortfolioIntelligence";
 import EquityResearchDashboard from "./EquityResearchDashboard";
 import P2ResearchWorkspace from "./P2ResearchWorkspace";
+import OnboardingGuide from "./OnboardingGuide";
 
 type Holding = {id:number;symbol:string;asset_type:string;quantity:number;average_cost:number;last_price:number|null;invested:number;market_value:number|null;unrealized_pnl:number|null;price_as_of:string|null};
 type Analysis = {holdingCount:number;invested:number;pricedMarketValue:number;pricedCostBasis:number;pricedUnrealizedPnl:number;unpricedHoldings:number;valuationComplete:boolean;riskFlags:string[]};
@@ -74,10 +75,11 @@ const getSavedAppearance = ():Appearance => {
 export function AppearanceControls({value, onChange, open, onOpenChange}:{value:Appearance;onChange:(next:Appearance)=>void;open:boolean;onOpenChange:(open:boolean)=>void}) {
   const update = <K extends keyof Appearance>(key:K, next:Appearance[K]) => onChange({...value, [key]:next});
   useEffect(()=>{const close=()=>onOpenChange(false);window.addEventListener("atlas:close-appearance",close);return()=>window.removeEventListener("atlas:close-appearance",close);},[onOpenChange]);
+  useEffect(()=>{if(!open)return;const close=(event:KeyboardEvent)=>{if(event.key==="Escape")onOpenChange(false);};window.addEventListener("keydown",close);return()=>window.removeEventListener("keydown",close);},[open,onOpenChange]);
   const toggle=()=>{const next=!open;if(next)window.dispatchEvent(new Event("atlas:close-notifications"));onOpenChange(next);};
   return <div className="appearance-shell">
     <button className="appearance-trigger" type="button" aria-label="Open appearance settings" aria-expanded={open} onClick={toggle}><span className="appearance-spark">✦</span><span>Appearance</span></button>
-    {open && <><button className="appearance-scrim" type="button" aria-label="Close appearance settings" onClick={() => onOpenChange(false)}/><section className="appearance-panel" aria-label="Appearance settings">
+    {open && <><button className="appearance-scrim" type="button" aria-label="Close appearance settings" onClick={() => onOpenChange(false)}/><section className="appearance-panel" role="dialog" aria-modal="true" aria-label="Appearance settings">
       <div className="appearance-title"><div><small>DISPLAY</small><strong>Liquid Glass</strong></div><button type="button" aria-label="Close appearance settings" onClick={() => onOpenChange(false)}>×</button></div>
       <div className="setting-group"><label>Theme</label><div className="theme-picker" role="group" aria-label="Theme">
         {(["system", "dark", "light"] as Theme[]).map(theme => <button type="button" key={theme} className={value.theme === theme ? "selected" : ""} aria-pressed={value.theme === theme} onClick={() => update("theme", theme)}>{theme === "system" ? "◐" : theme === "dark" ? "☾" : "☀"}<span>{theme === "system" ? "Auto" : theme}</span></button>)}
@@ -179,21 +181,24 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
   const activeTitle = tab===6?"Market & Data Health":tab===7?"Stock Explorer":tab===8?"P2 Research Lab":categories[tab];
 
   return <div className="dashboard" data-theme={appearance.theme} data-panel-clear={appearance.opacity === 0 ? "true" : undefined} data-blur-zero={appearance.opacity === 0 || appearance.blur === 0 ? "true" : undefined} data-appearance-open={appearanceOpen ? "true" : undefined} style={style}>
+    <a className="skip-link" href="#main-content">Skip to main content</a>
     <div className="canvas" aria-hidden="true"><i/><i/><i/><i/></div>
     <div className="layout">
       <aside className="sidebar glass">
         <div className="brand"><span className="brandicon">◆</span><div><strong>ATLAS</strong><small>INVESTMENT INTELLIGENCE</small></div></div>
         <div className="navlabel">WORKSPACE</div>
-        <nav>{categories.map((category, index) => <button key={category} aria-current={tab === index ? "page" : undefined} className={tab === index ? "active" : ""} onClick={() => setTab(index)}><span className="navdot">{tabIcons[index]}</span><span>{category}</span><span className="navarrow">›</span></button>)}</nav>
+        <nav aria-label="Workspace">{categories.map((category, index) => <button type="button" key={category} aria-current={tab === index ? "page" : undefined} className={tab === index ? "active" : ""} onClick={() => setTab(index)}><span className="navdot" aria-hidden="true">{tabIcons[index]}</span><span>{category}</span><span className="navarrow" aria-hidden="true">›</span></button>)}</nav>
         <div className="navlabel">INTELLIGENCE</div>
-        <nav><button onClick={() => setTab(8)} aria-current={tab === 8 ? "page" : undefined} className={tab === 8 ? "active" : ""}><span className="navdot">✦</span><span>P2 Research Lab</span><span className="navarrow">›</span></button><button onClick={() => setTab(7)} aria-current={tab === 7 ? "page" : undefined} className={tab === 7 ? "active" : ""}><span className="navdot">⌁</span><span>Stock Explorer</span><span className="navarrow">›</span></button><button onClick={() => setTab(6)} aria-current={tab === 6 ? "page" : undefined} className={tab === 6 ? "active" : ""}><span className="navdot">◉</span><span>Market &amp; Data Health</span><span className="navarrow">›</span></button></nav>
+        <nav aria-label="Intelligence"><button type="button" onClick={() => setTab(8)} aria-current={tab === 8 ? "page" : undefined} className={tab === 8 ? "active" : ""}><span className="navdot" aria-hidden="true">✦</span><span>P2 Research Lab</span><span className="navarrow" aria-hidden="true">›</span></button><button type="button" onClick={() => setTab(7)} aria-current={tab === 7 ? "page" : undefined} className={tab === 7 ? "active" : ""}><span className="navdot" aria-hidden="true">⌁</span><span>Stock Explorer</span><span className="navarrow" aria-hidden="true">›</span></button><button type="button" onClick={() => setTab(6)} aria-current={tab === 6 ? "page" : undefined} className={tab === 6 ? "active" : ""}><span className="navdot" aria-hidden="true">◉</span><span>Market &amp; Data Health</span><span className="navarrow" aria-hidden="true">›</span></button></nav>
         <div className="sidebottom"><span className="statusdot"/> PRIVATE · LOCAL MODE<br/><small>Research only · No order execution</small></div>
       </aside>
 
-      <main className="content">
-        <header><div><div className="eyebrow"><span/> YOUR PRIVATE RESEARCH TERMINAL</div><h1>{activeTitle}</h1><p>{tab === 0 ? "Your holdings, performance and portfolio risk — all stored locally." : "Strict research gates. No invented prices or recommendations."}</p></div><div className="header-actions"><NotificationCenter/><div className={`headerbadge ${feedState?.transport_connected?"feed-live":""}`} title={feedState?.automatic_selection?.missing_symbols?.length?`Unresolved: ${feedState.automatic_selection.missing_symbols.join(", ")}`:undefined}><span/> {feedState?.transport_connected?`LIVE · ${feedState.selected_instruments||0} STOCKS`:feedState?.automatic_selection?.status==="IDLE_NO_EQUITY_HOLDINGS"?"FEED READY · ADD A STOCK":feedState?.automatic_selection?.status==="STARTING"?"MARKET FEED CONNECTING":"MARKET FEED NOT CONNECTED"}</div><div className="account-chip"><span>{identity.email.slice(0,1).toUpperCase()}</span><div><small>SIGNED IN</small><strong>{identity.email}</strong></div><button type="button" onClick={()=>void onLogout()}>Logout</button></div><AppearanceControls value={appearance} onChange={setAppearance} open={appearanceOpen} onOpenChange={setAppearanceOpen}/></div></header>
+      <main className="content" id="main-content" tabIndex={-1}>
+        <header><div><div className="eyebrow"><span/> YOUR PRIVATE RESEARCH TERMINAL</div><h1>{activeTitle}</h1><p>{tab === 0 ? "Your holdings, performance and portfolio risk — all stored locally." : "Strict research gates. No invented prices or recommendations."}</p></div><div className="header-actions"><button type="button" className="help-trigger" onClick={()=>window.dispatchEvent(new Event("atlas:open-onboarding"))}>Help</button><NotificationCenter/><div className={`headerbadge ${feedState?.transport_connected?"feed-live":""}`} role="status" aria-live="polite" title={feedState?.automatic_selection?.missing_symbols?.length?`Unresolved: ${feedState.automatic_selection.missing_symbols.join(", ")}`:undefined}><span/> {feedState?.transport_connected?`LIVE · ${feedState.selected_instruments||0} STOCKS`:feedState?.automatic_selection?.status==="IDLE_NO_EQUITY_HOLDINGS"?"FEED READY · ADD A STOCK":feedState?.automatic_selection?.status==="STARTING"?"MARKET FEED CONNECTING":"MARKET FEED NOT CONNECTED"}</div><div className="account-chip"><span>{identity.email.slice(0,1).toUpperCase()}</span><div><small>SIGNED IN</small><strong>{identity.email}</strong></div><button type="button" onClick={()=>void onLogout()}>Logout</button></div><AppearanceControls value={appearance} onChange={setAppearance} open={appearanceOpen} onOpenChange={setAppearanceOpen}/></div></header>
         <MarketIndexStrip/>
-        {error && <div className="error glass">{error} <button onClick={() => tab === 6 ? loadHealth() : load()}>Retry</button></div>}
+        <OnboardingGuide onNavigate={setTab}/>
+        {loading&&<div className="global-loading" role="status" aria-live="polite"><span/>Saving your changes…</div>}
+        {error && <div className="error glass" role="alert">{error} <button type="button" onClick={() => tab === 6 ? loadHealth() : load()}>Retry</button></div>}
 
         {tab === 0 ? <>
           <ResearchHome holdings={holdings} onReviewHoldings={()=>document.getElementById("portfolio-overview")?.scrollIntoView({behavior:"smooth",block:"start"})} onOpenExplorer={()=>setTab(7)} onOpenDataHealth={()=>setTab(6)}/>
