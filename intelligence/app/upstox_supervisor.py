@@ -5,6 +5,7 @@ from .upstox_quote_worker import quote_worker
 from .upstox_stream import StreamPolicy,subscription_request
 from .config import settings
 from .upstox_feed_selection import parse_ids,resolve_ids,FeedSelectionError
+from .market_indices import INDEXES
 
 class FeedSupervisor:
     def __init__(self,worker=quote_worker):
@@ -72,6 +73,7 @@ async def startup_feed():
             keys=await asyncio.to_thread(resolve_ids,ids)
         else:
             keys=[x.strip() for x in raw_keys.split(",") if x.strip()]
+        keys=sorted(set(keys)|{key for _,key in INDEXES})
     except FeedSelectionError:
         feed_supervisor.startup_result={"status":"BLOCKED","blockers":["INSTRUMENT_REGISTRY_RESOLUTION_FAILED"]}
         return feed_supervisor.startup_result

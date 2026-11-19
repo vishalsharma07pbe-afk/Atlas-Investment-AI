@@ -7,7 +7,8 @@ from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Literal
 
-from fastapi import FastAPI
+from fastapi import FastAPI,HTTPException,Request as FastAPIRequest
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, model_validator
 from .config import settings
 from .market_client import backend_json
@@ -768,6 +769,34 @@ def upstox_instrument_quote(instrument_id:int):
     if not (settings.provider=="UPSTOX" and settings.licensed_data_access and settings.entitlement_confirmed):
         return {"status":"UNAVAILABLE","quote":None,"reason":"PROVIDER_RIGHTS_NOT_VERIFIED"}
     return quote_worker.cache.snapshot(resolution["instrument_key"])
+
+@app.get("/api/v1/internal/live/market-indices")
+async def internal_live_market_indices(request: FastAPIRequest):
+    """Internal push stream; Spring authenticates the browser before relaying it."""
+    _require_internal_service(request)
+    from .live_events import changed_events,index_snapshot
+    return StreamingResponse(changed_events(index_snapshot),media_type="text/event-stream",
+        headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
+
+@app.get("/api/v1/internal/live/instruments/{instrument_id}")
+async def internal_live_instrument(instrument_id:int,request:FastAPIRequest):
+    _require_internal_service(request)
+    if instrument_id<=0:raise HTTPException(status_code=422,detail="Invalid instrument ID")
+    record=backend_json(f"/api/v1/instruments/{instrument_id}")
+    resolution=resolve_upstox_instrument(record)
+    if not resolution["subscription_ready"]:
+        raise HTTPException(status_code=422,detail=resolution["blocker"])
+    key=resolution["instrument_key"]
+    from .live_events import changed_events,instrument_snapshot
+    await dynamic_feed_selection.subscribe(key)
+    async def events():
+        try:
+            async for event in changed_events(lambda:instrument_snapshot(key)):
+                yield event
+        finally:
+            await dynamic_feed_selection.unsubscribe(key)
+    return StreamingResponse(events(),media_type="text/event-stream",
+        headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
 
 from .upstox_supervisor import feed_supervisor,startup_feed
 from .dynamic_feed_selection import dynamic_feed_selection

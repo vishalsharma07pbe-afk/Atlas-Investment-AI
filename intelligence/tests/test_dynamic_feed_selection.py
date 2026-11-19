@@ -29,6 +29,7 @@ def configured(monkeypatch):
         backend_url="http://backend:8080"))
     monkeypatch.delenv("ATLAS_UPSTOX_INSTRUMENT_IDS",raising=False)
     monkeypatch.delenv("ATLAS_UPSTOX_INSTRUMENT_KEYS",raising=False)
+    monkeypatch.setenv("ATLAS_UPSTOX_FEED_ENABLED","true")
 
 
 def test_reconcile_subscribes_to_resolved_portfolio_symbols(monkeypatch):
@@ -43,11 +44,12 @@ def test_reconcile_subscribes_to_resolved_portfolio_symbols(monkeypatch):
     })
     result=asyncio.run(selector.reconcile())
     assert result["status"]=="STARTING"
-    assert supervisor.starts==[["NSE_EQ|INE002A01018"]]
+    assert len(supervisor.starts)==1
+    assert set(supervisor.starts[0])==module.INDEX_KEYS|{"NSE_EQ|INE002A01018"}
     assert result["resolved_count"]==1
 
 
-def test_reconcile_unsubscribes_when_last_equity_is_removed(monkeypatch):
+def test_reconcile_keeps_index_stream_when_last_equity_is_removed(monkeypatch):
     configured(monkeypatch)
     supervisor=FakeSupervisor(["NSE_EQ|INE002A01018"])
     monkeypatch.setattr(module,"feed_supervisor",supervisor)
@@ -55,9 +57,10 @@ def test_reconcile_unsubscribes_when_last_equity_is_removed(monkeypatch):
     monkeypatch.setattr(selector,"_fetch",lambda:{
         "holding_symbol_count":0,"subscriptions":[],"missing_symbols":[]})
     result=asyncio.run(selector.reconcile())
-    assert result["status"]=="IDLE_NO_EQUITY_HOLDINGS"
+    assert result["status"]=="STARTING"
     assert supervisor.stops==1
-    assert supervisor.starts==[]
+    assert len(supervisor.starts)==1
+    assert set(supervisor.starts[0])==module.INDEX_KEYS
 
 
 def test_explicit_environment_selection_remains_a_fallback(monkeypatch):
@@ -67,4 +70,5 @@ def test_explicit_environment_selection_remains_a_fallback(monkeypatch):
     monkeypatch.setattr(module,"feed_supervisor",supervisor)
     result=asyncio.run(module.DynamicFeedSelection().reconcile())
     assert result["mode"]=="EXPLICIT_ENV_FALLBACK"
-    assert supervisor.stops==0
+    assert supervisor.stops==1
+    assert set(supervisor.starts[0])==module.INDEX_KEYS|{"NSE_EQ|INE002A01018"}

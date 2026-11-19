@@ -45,4 +45,14 @@ class UpstoxAuthorizationTests(unittest.TestCase):
         with self.assertRaises(AuthorizationError):
             authorize_feed("")
 
+    def test_http_credential_rejection_has_safe_code(self):
+        error=HTTPError(AUTHORIZE_URL,401,"secret provider response",{},None)
+        class RejectedOpener:
+            def open(self,*args,**kwargs):raise error
+        with self.assertRaises(AuthorizationError) as context:
+            authorize_feed("private-token",RejectedOpener())
+        self.assertEqual(context.exception.code,"FEED_CREDENTIAL_REJECTED")
+        self.assertNotIn("private-token",str(context.exception))
+        self.assertNotIn("secret provider response",str(context.exception))
+
 if __name__=="__main__":unittest.main()

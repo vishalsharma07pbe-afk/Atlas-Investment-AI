@@ -9,7 +9,7 @@ import random
 import uuid
 from dataclasses import dataclass
 from typing import Awaitable, Callable
-from .upstox_authorization import authorize_feed
+from .upstox_authorization import AuthorizationError, authorize_feed
 from .upstox_stream import StreamPolicy,subscription_request
 
 @dataclass(frozen=True)
@@ -22,6 +22,24 @@ class TransportPolicy:
 
 class TransportUnavailable(RuntimeError):
     pass
+
+def _safe_failure_code(exc: Exception) -> str:
+    """Classify failures without returning provider URLs, tokens, or messages."""
+    if isinstance(exc, AuthorizationError):
+        return exc.code
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+        return "FEED_CONNECTION_TIMEOUT"
+    if isinstance(exc, TransportUnavailable):
+        return "FEED_TRANSPORT_UNAVAILABLE"
+    # Keep this list based on public exception class names so importing the
+    # optional WebSocket package is not required just to expose diagnostics.
+    if exc.__class__.__name__ in {"InvalidStatus", "InvalidStatusCode"}:
+        return "FEED_HANDSHAKE_REJECTED"
+    if exc.__class__.__name__ in {"ConnectionClosed", "ConnectionClosedError", "ConnectionClosedOK"}:
+        return "FEED_CONNECTION_CLOSED"
+    if isinstance(exc, OSError):
+        return "FEED_NETWORK_UNAVAILABLE"
+    return "FEED_CONNECTION_FAILED"
 
 async def receive_session(
     token: str,
@@ -83,6 +101,7 @@ async def reconnecting_stream(
         raise ValueError("Invalid retry policy")
     attempts=0
     sessions=0
+    last_failure=None
     while not stop.is_set():
         try:
             if on_connection_change is None:
@@ -95,14 +114,15 @@ async def reconnecting_stream(
             attempts+=1
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
+            last_failure=_safe_failure_code(exc)
             attempts+=1
         finally:
             if on_connection_change is not None:
                 await on_connection_change(False)
         if attempts>policy.max_retries:
             return {"status":"DISCONNECTED","sessions":sessions,"retries":attempts-1,
-                    "reason":"RETRY_BUDGET_EXHAUSTED"}
+                    "reason":"RETRY_BUDGET_EXHAUSTED","last_failure":last_failure}
         delay=min(policy.max_delay_seconds,policy.base_delay_seconds*(2**(attempts-1)))
         # Small jitter avoids synchronized reconnect storms.
         await sleep(delay*(0.8+random.random()*0.2))

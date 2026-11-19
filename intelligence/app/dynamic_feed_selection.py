@@ -10,6 +10,9 @@ from urllib.request import Request, urlopen
 from .config import settings
 from .upstox_stream import StreamPolicy, subscription_request
 from .upstox_supervisor import feed_supervisor
+from .market_indices import INDEXES
+
+INDEX_KEYS={key for _,key in INDEXES}
 
 
 class DynamicFeedSelection:
@@ -23,11 +26,17 @@ class DynamicFeedSelection:
             "missing_symbols": [],
         }
         self._lock = asyncio.Lock()
+        self._requested_keys: dict[str,int] = {}
+        self._explicit_base_keys: set[str] | None = None
 
     @property
     def explicit_selection(self) -> bool:
         return bool((os.getenv("ATLAS_UPSTOX_INSTRUMENT_IDS") or "").strip() or
                     (os.getenv("ATLAS_UPSTOX_INSTRUMENT_KEYS") or "").strip())
+
+    @property
+    def feed_enabled(self) -> bool:
+        return os.getenv("ATLAS_UPSTOX_FEED_ENABLED", "false").lower() == "true"
 
     def _fetch(self) -> dict:
         token=os.getenv("INTERNAL_SERVICE_TOKEN","")
@@ -49,9 +58,25 @@ class DynamicFeedSelection:
 
     async def reconcile(self) -> dict:
         async with self._lock:
+            if not self.feed_enabled:
+                self.last_status={"mode":"PORTFOLIO_AUTOMATIC","status":"DISABLED",
+                                  "resolved_count":0,"missing_symbols":[]}
+                return self.last_status
             if self.explicit_selection:
-                self.last_status={"mode":"EXPLICIT_ENV_FALLBACK","status":"MANAGED_AT_STARTUP",
-                                  "resolved_count":feed_supervisor.selected_count,"missing_symbols":[]}
+                current=set(feed_supervisor.worker.active_keys)
+                if self._explicit_base_keys is None:
+                    self._explicit_base_keys=current-set(self._requested_keys)
+                desired=self._explicit_base_keys|INDEX_KEYS|set(self._requested_keys)
+                if desired!=current and settings.provider=="UPSTOX" and settings.upstox_token and settings.licensed_data_access and settings.entitlement_confirmed:
+                    await feed_supervisor.stop()
+                    result=await feed_supervisor.start(enabled=True,keys=sorted(desired),
+                        token=settings.upstox_token,provider=settings.provider,
+                        rights=settings.licensed_data_access,entitlement=settings.entitlement_confirmed)
+                    status=result["status"]
+                else:status="MANAGED_AT_STARTUP"
+                self.last_status={"mode":"EXPLICIT_ENV_FALLBACK","status":status,
+                                  "resolved_count":len(self._explicit_base_keys),
+                                  "stream_subscription_count":len(desired),"missing_symbols":[]}
                 return self.last_status
             if not (settings.provider=="UPSTOX" and settings.upstox_token and
                     settings.licensed_data_access and settings.entitlement_confirmed):
@@ -66,12 +91,12 @@ class DynamicFeedSelection:
                     raise RuntimeError("PORTFOLIO_SELECTION_INVALID")
                 if keys:
                     subscription_request(keys,StreamPolicy(),"dynamic-selection-validation")
-                desired=set(keys)
+                desired=set(keys)|INDEX_KEYS|set(self._requested_keys)
                 current=set(feed_supervisor.worker.active_keys)
                 if desired!=current:
                     await feed_supervisor.stop()
-                    if keys:
-                        result=await feed_supervisor.start(enabled=True,keys=keys,
+                    if desired:
+                        result=await feed_supervisor.start(enabled=True,keys=sorted(desired),
                             token=settings.upstox_token,provider=settings.provider,
                             rights=settings.licensed_data_access,
                             entitlement=settings.entitlement_confirmed)
@@ -85,6 +110,7 @@ class DynamicFeedSelection:
                     "status":result["status"],
                     "holding_symbol_count":int(selection.get("holding_symbol_count",0)),
                     "resolved_count":len(keys),
+                    "stream_subscription_count":len(desired),
                     "missing_symbols":[str(x) for x in selection.get("missing_symbols",[])][:100],
                     "poll_seconds":self.interval_seconds,
                 }
@@ -92,6 +118,17 @@ class DynamicFeedSelection:
                 self.last_status={"mode":"PORTFOLIO_AUTOMATIC","status":"RECONCILE_FAILED",
                                   "reason":str(exc),"resolved_count":0,"missing_symbols":[]}
             return self.last_status
+
+    async def subscribe(self,key:str) -> None:
+        subscription_request([key],StreamPolicy(),"ui-live-subscription")
+        self._requested_keys[key]=self._requested_keys.get(key,0)+1
+        await self.reconcile()
+
+    async def unsubscribe(self,key:str) -> None:
+        count=self._requested_keys.get(key,0)
+        if count<=1:self._requested_keys.pop(key,None)
+        else:self._requested_keys[key]=count-1
+        await self.reconcile()
 
     async def _run(self):
         while True:

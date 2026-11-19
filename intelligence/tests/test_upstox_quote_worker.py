@@ -12,8 +12,8 @@ def f(n,v,wire=2):
     if wire==2:return varint(n*8+2)+varint(len(v))+v
     if wire==0:return varint(n*8)+varint(v)
     return varint(n*8+1)+v
-def frame(price=100.0,timestamp=1000000):
-    ltpc=f(1,struct.pack("<d",price),1)+f(2,timestamp,0)
+def frame(price=100.0,timestamp=1000000,previous_close=98.0):
+    ltpc=f(1,struct.pack("<d",price),1)+f(2,timestamp,0)+f(4,struct.pack("<d",previous_close),1)
     return f(1,1,0)+f(2,f(1,KEY.encode())+f(2,f(1,ltpc)))
 
 class QuoteCacheTests(unittest.TestCase):
@@ -22,7 +22,10 @@ class QuoteCacheTests(unittest.TestCase):
         cache.ingest(frame(),{KEY},now_ms=1001000)
         self.assertEqual(cache.snapshot(KEY,now_ms=1001000)["status"],"UNAVAILABLE")
         cache.connected=True
-        self.assertEqual(cache.snapshot(KEY,now_ms=1001000)["status"],"LIVE")
+        live=cache.snapshot(KEY,now_ms=1001000)
+        self.assertEqual(live["status"],"LIVE")
+        self.assertEqual(live["quote"]["previous_close"],98.0)
+        self.assertAlmostEqual(live["quote"]["change_percent"],2.0408163265)
         self.assertEqual(cache.snapshot(KEY,now_ms=2000000)["status"],"STALE")
         cache.connected=False
         self.assertEqual(cache.snapshot(KEY,now_ms=1001000)["status"],"UNAVAILABLE")
