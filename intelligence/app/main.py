@@ -102,13 +102,18 @@ def capabilities():
             "corporate-actions", "sector-competitors", "cited-company-news",
             "aggregate-fii-dii-cash-activity", "portfolio-concentration-review",
             "mutual-fund-evidence-gated-ranking", "on-demand-research-alerts",
+            "grounded-natural-language-research", "source-cited-ai-explanations",
+            "walk-forward-signal-evaluation", "leakage-controlled-backtesting",
+            "calibration-and-model-monitoring", "multi-factor-screening",
+            "risk-profiled-goal-scenarios", "inflation-and-tax-drag-planning",
         ],
         "planned": [
             "licensed-provider-activation", "intraday-features",
             "official-mutual-fund-category-and-portfolio-disclosures",
             "bulk-block-deal-source", "transaction-ledger-xirr",
             "persistent-alert-rules-and-delivery", "news-entity-resolution",
-            "calibrated-prediction", "backtesting", "portfolio-action-plans",
+            "persisted-user-screeners-and-watchlists", "regulated-tax-lot-optimization",
+            "portfolio-action-plans",
         ],
         "live_data_connected": False,
         "provider_mode": settings.provider,
@@ -1096,6 +1101,47 @@ def ohlcv_history(market: str, symbol: str, limit: int = 365):
         return history(symbol, market, limit)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+# P2: grounded research, leakage-controlled evaluation, explainable screening,
+# and assumption-driven planning. None of these endpoints execute orders.
+from .p2_research import (AdvancedScreenRequest, GroundedResearchRequest,
+                          advanced_screen, grounded_answer)
+from .p2_planning import PlanningRequest, personalized_plan
+
+
+@app.post("/api/v1/intelligence/p2/research/answer")
+def p2_grounded_research(request: GroundedResearchRequest):
+    from .ai_failover import grounded_research
+    try:
+        return grounded_answer(request, grounded_research if request.use_ai else None)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/intelligence/p2/backtest/{instrument_id}")
+def p2_walk_forward_backtest(instrument_id: int,
+                             lookback: int = Query(default=20, ge=5, le=100),
+                             train_size: int = Query(default=120, ge=60, le=1000),
+                             test_size: int = Query(default=20, ge=5, le=250),
+                             fee_bps: int = Query(default=10, ge=0, le=100)):
+    from .p2_backtesting import walk_forward
+    raw = backend_json(f"/api/v1/market-data/instruments/{instrument_id}/candles?limit=2000")
+    try:
+        return walk_forward(raw, lookback=lookback, train_size=train_size,
+                            test_size=test_size, fee_bps=fee_bps)
+    except (ValueError, KeyError, TypeError, OverflowError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/intelligence/p2/screener/evaluate")
+def p2_advanced_screener(request: AdvancedScreenRequest):
+    return advanced_screen(request)
+
+
+@app.post("/api/v1/intelligence/p2/planning")
+def p2_personalized_planning(request: PlanningRequest):
+    return personalized_plan(request)
 
 # Research-only AI committee endpoints. Internal caller authentication required.
 import os
