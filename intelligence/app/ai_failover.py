@@ -141,14 +141,14 @@ def _responses_answer(body):
                 fragments.append(content["text"])
     return "".join(fragments) or None
 
-def _generate(provider, prompt):
+def _generate(provider, prompt, schema=VERDICT_SCHEMA, schema_name="atlas_verdict"):
     model=os.getenv("ATLAS_"+provider+"_MODEL",DEFAULT_MODELS[provider])
     if not re.fullmatch(r"[a-zA-Z0-9._:/-]{2,100}",model):
         raise AIProviderError("INVALID_MODEL")
     if provider=="OLLAMA":
         # Only an allowlisted local endpoint; never permit arbitrary URL overrides.
         body=_post(_ollama_url()+"/api/generate",{},{
-            "model":model,"prompt":prompt,"stream":False,"format":VERDICT_SCHEMA,
+            "model":model,"prompt":prompt,"stream":False,"format":schema,
             "options":{"num_predict":800}})
         answer=body.get("response")
     elif provider=="GEMINI":
@@ -157,7 +157,7 @@ def _generate(provider, prompt):
         body=_post(url,{"x-goog-api-key":os.environ["GEMINI_API_KEY"]},{
             "contents":[{"parts":[{"text":prompt}]}],"store":False,
             "generationConfig":{"maxOutputTokens":1200,"responseMimeType":"application/json",
-                                "responseJsonSchema":VERDICT_SCHEMA}})
+                                "responseJsonSchema":schema}})
         candidates=body.get("candidates") or []
         answer="".join(p.get("text","") for p in candidates[0].get("content",{}).get("parts",[])) if candidates else None
     elif provider=="GROQ":
@@ -171,8 +171,8 @@ def _generate(provider, prompt):
         url,key_var=RESPONSES_ENDPOINTS[provider]
         body=_post(url,{"Authorization":"Bearer "+os.environ[key_var]},{
             "model":model,"input":prompt,"max_output_tokens":1200,"store":False,
-            "text":{"format":{"type":"json_schema","name":"atlas_verdict",
-                               "strict":True,"schema":VERDICT_SCHEMA}}})
+            "text":{"format":{"type":"json_schema","name":schema_name,
+                               "strict":True,"schema":schema}}})
         answer=_responses_answer(body)
     if not isinstance(answer,str) or not answer.strip() or len(answer)>16000:
         raise AIProviderError("INVALID_MODEL_RESPONSE")
@@ -206,6 +206,62 @@ def analyze_market(data):
             attempts.append({"provider":provider,"status":"FAILED","reason":"INVALID_VERDICT_RESPONSE"})
     return {"status":"UNAVAILABLE","provider":None,"analysis":None,"attempts":attempts,
             "personal_data_forwarded":False}
+
+
+RESEARCH_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "answer": {"type": "string", "minLength": 1, "maxLength": 2400},
+        "findings": {"type": "array", "minItems": 1, "maxItems": 8, "items": {
+            "type": "object", "properties": {
+                "statement": {"type": "string", "minLength": 1, "maxLength": 500},
+                "evidence_ids": {"type": "array", "minItems": 1, "maxItems": 5,
+                                 "items": {"type": "string"}},
+            }, "required": ["statement", "evidence_ids"], "additionalProperties": False}},
+        "uncertainties": {"type": "array", "maxItems": 8,
+                          "items": {"type": "string", "maxLength": 500}},
+        "follow_up_questions": {"type": "array", "maxItems": 4,
+                                "items": {"type": "string", "maxLength": 300}},
+    },
+    "required": ["answer", "findings", "uncertainties", "follow_up_questions"],
+    "additionalProperties": False,
+}
+
+
+def grounded_research(prompt, evidence_ids):
+    """Call configured models and reject any finding without a supplied citation."""
+    if not isinstance(prompt, str) or not prompt or len(prompt) > 12000 or BLOCKED.search(prompt):
+        raise ValueError("SENSITIVE_OR_OVERSIZED_RESEARCH_PROMPT")
+    allowed = set(evidence_ids)
+    attempts = []
+    for provider in _order():
+        if not _enabled(provider):
+            attempts.append({"provider": provider, "status": "DISABLED"})
+            continue
+        try:
+            if not ai_budgets.reserve(provider):
+                attempts.append({"provider": provider, "status": "BUDGET_EXHAUSTED"})
+                continue
+            answer = _generate(provider, prompt, RESEARCH_SCHEMA, "atlas_grounded_research")
+            parsed = json.loads(answer)
+            if set(parsed) != {"answer", "findings", "uncertainties", "follow_up_questions"}:
+                raise AIProviderError("INVALID_RESEARCH_RESPONSE")
+            if not isinstance(parsed["findings"], list) or not parsed["findings"]:
+                raise AIProviderError("INVALID_RESEARCH_RESPONSE")
+            for finding in parsed["findings"]:
+                cited = finding.get("evidence_ids") if isinstance(finding, dict) else None
+                if not cited or not isinstance(cited, list) or any(item not in allowed for item in cited):
+                    raise AIProviderError("UNSUPPORTED_CITATION")
+            _record_success(provider)
+            return {"status": "MODEL_GROUNDED", "provider": provider,
+                    "response": parsed, "attempts": attempts,
+                    "personal_data_forwarded": False}
+        except AIProviderError as exc:
+            attempts.append({"provider": provider, "status": "FAILED", "reason": str(exc)})
+        except (ValueError, KeyError, TypeError, json.JSONDecodeError):
+            attempts.append({"provider": provider, "status": "FAILED", "reason": "INVALID_RESEARCH_RESPONSE"})
+    return {"status": "MODEL_UNAVAILABLE", "provider": None, "response": None,
+            "attempts": attempts, "personal_data_forwarded": False}
 
 def provider_health():
     providers=[]

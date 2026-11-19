@@ -36,6 +36,7 @@ import HoldingEditor,{type HoldingDraft} from "./HoldingEditor";
 import MarketIndexStrip from "./MarketIndexStrip";
 import PortfolioIntelligence from "./PortfolioIntelligence";
 import EquityResearchDashboard from "./EquityResearchDashboard";
+import P2ResearchWorkspace from "./P2ResearchWorkspace";
 
 type Holding = {id:number;symbol:string;asset_type:string;quantity:number;average_cost:number;last_price:number|null;invested:number;market_value:number|null;unrealized_pnl:number|null;price_as_of:string|null};
 type Analysis = {holdingCount:number;invested:number;pricedMarketValue:number;pricedCostBasis:number;pricedUnrealizedPnl:number;unpricedHoldings:number;valuationComplete:boolean;riskFlags:string[]};
@@ -58,7 +59,7 @@ const fmt = (n:number|null|undefined) => n == null ? "—" : new Intl.NumberForm
 const clamp = (value:unknown, min:number, max:number, fallback:number) => { const n = Number(value); return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback; };
 
 const getSavedTab = () => {
-  try { const saved = Number(localStorage.getItem(TAB_STORAGE_KEY)); return Number.isInteger(saved) && saved >= 0 && saved <= 7 ? saved : 0; }
+  try { const saved = Number(localStorage.getItem(TAB_STORAGE_KEY)); return Number.isInteger(saved) && saved >= 0 && saved <= 8 ? saved : 0; }
   catch { return 0; }
 };
 
@@ -175,7 +176,7 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
   }
 
   const style = {"--panel-alpha":(appearance.opacity / 100).toFixed(2), "--panel-blur":`${appearance.opacity === 0 ? 0 : appearance.blur}px`, "--panel-border-color":appearance.border ? "var(--glass-border)" : "transparent"} as React.CSSProperties;
-  const activeTitle = tab===6?"Market & Data Health":tab===7?"Stock Explorer":categories[tab];
+  const activeTitle = tab===6?"Market & Data Health":tab===7?"Stock Explorer":tab===8?"P2 Research Lab":categories[tab];
 
   return <div className="dashboard" data-theme={appearance.theme} data-panel-clear={appearance.opacity === 0 ? "true" : undefined} data-blur-zero={appearance.opacity === 0 || appearance.blur === 0 ? "true" : undefined} data-appearance-open={appearanceOpen ? "true" : undefined} style={style}>
     <div className="canvas" aria-hidden="true"><i/><i/><i/><i/></div>
@@ -185,7 +186,7 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
         <div className="navlabel">WORKSPACE</div>
         <nav>{categories.map((category, index) => <button key={category} aria-current={tab === index ? "page" : undefined} className={tab === index ? "active" : ""} onClick={() => setTab(index)}><span className="navdot">{tabIcons[index]}</span><span>{category}</span><span className="navarrow">›</span></button>)}</nav>
         <div className="navlabel">INTELLIGENCE</div>
-        <nav><button onClick={() => setTab(7)} aria-current={tab === 7 ? "page" : undefined} className={tab === 7 ? "active" : ""}><span className="navdot">⌁</span><span>Stock Explorer</span><span className="navarrow">›</span></button><button onClick={() => setTab(6)} aria-current={tab === 6 ? "page" : undefined} className={tab === 6 ? "active" : ""}><span className="navdot">◉</span><span>Market &amp; Data Health</span><span className="navarrow">›</span></button></nav>
+        <nav><button onClick={() => setTab(8)} aria-current={tab === 8 ? "page" : undefined} className={tab === 8 ? "active" : ""}><span className="navdot">✦</span><span>P2 Research Lab</span><span className="navarrow">›</span></button><button onClick={() => setTab(7)} aria-current={tab === 7 ? "page" : undefined} className={tab === 7 ? "active" : ""}><span className="navdot">⌁</span><span>Stock Explorer</span><span className="navarrow">›</span></button><button onClick={() => setTab(6)} aria-current={tab === 6 ? "page" : undefined} className={tab === 6 ? "active" : ""}><span className="navdot">◉</span><span>Market &amp; Data Health</span><span className="navarrow">›</span></button></nav>
         <div className="sidebottom"><span className="statusdot"/> PRIVATE · LOCAL MODE<br/><small>Research only · No order execution</small></div>
       </aside>
 
@@ -213,7 +214,7 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
             {holdings.map(holding => <tr key={holding.id}><td className="symbol">{holding.symbol}</td><td><span className="asset-pill">{holding.asset_type}</span></td><td>{holding.quantity}</td><td>{fmt(holding.average_cost)}</td><td>{fmt(holding.last_price)}</td><td>{fmt(holding.invested)}</td><td>{fmt(holding.market_value)}</td><td className={(holding.unrealized_pnl || 0) >= 0 ? "positive" : "negative"}>{fmt(holding.unrealized_pnl)}</td><td><button className="danger" onClick={() => remove(holding.id)}>Delete</button></td></tr>)}
             {!holdings.length && <tr><td colSpan={9} className="empty">No holdings yet. Add your first position above or import a CSV.</td></tr>}
           </tbody></table></div></section>
-        </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : tab === 5 ? <EquityResearchDashboard/> : (tab === 2 || tab === 3 || tab === 4) ? <><MarketIntelligence/><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/></> : tab === 7 ? <StockExplorer/> : tab === 6 ? <>
+        </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : tab === 5 ? <EquityResearchDashboard/> : (tab === 2 || tab === 3 || tab === 4) ? <><MarketIntelligence/><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/></> : tab === 8 ? <P2ResearchWorkspace/> : tab === 7 ? <StockExplorer/> : tab === 6 ? <>
           <DataReadiness/><MultiProviderHub/>
           <FeedHealth/>
           <ReliabilityIncidents/>
