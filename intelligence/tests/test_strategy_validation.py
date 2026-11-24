@@ -32,6 +32,11 @@ class StrategyValidationTests(unittest.TestCase):
         self.assertGreater(swing["cost_scenarios"][0]["net_return_percent"],swing["cost_scenarios"][-1]["net_return_percent"])
         self.assertEqual(result["horizons"]["LONG_TERM"]["trades"],1)
 
+    def test_actual_long_term_rule_is_reused(self):
+        result=replay(history(),TODAY)
+        self.assertEqual(result['horizons']['LONG_TERM']['status'],'REPLAY_OBSERVED')
+        self.assertEqual(result['horizons']['LONG_TERM']['trades'],1)
+
     def test_unadjusted_mixed_source_stale_or_gapped_history_fails_closed(self):
         for field,value in (("adjustment_status","RAW_UNADJUSTED"),("source_code","OTHER"),("quality_status","UNKNOWN")):
             data=history()
