@@ -6,6 +6,10 @@ from fastapi import HTTPException
 from .config import settings
 
 def _internal_path(path:str)->str:
+    if path.startswith("/api/v1/market-data/discovery-universe?"):
+        return "/api/v1/internal/feed/discovery-universe?"+path.split("?",1)[1]
+    if path.startswith("/api/v1/market-data/discovery-candles?"):
+        return "/api/v1/internal/feed/discovery-candles?"+path.split("?",1)[1]
     if path.startswith("/api/v1/market-data/instruments/"):
         return "/api/v1/internal/feed/instruments/"+path.removeprefix("/api/v1/market-data/instruments/")
     if path.startswith("/api/v1/instruments"):
