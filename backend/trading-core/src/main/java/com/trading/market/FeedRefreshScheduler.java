@@ -18,6 +18,16 @@ import org.springframework.stereotype.Service;
   if(count==null||count==0||Boolean.TRUE.equals(stale)||(unnamed!=null&&unnamed>0))run("UPSTOX","MASTER_AUTO",()->stocks.syncMaster());
  }
  @Scheduled(cron="0 0 22 * * MON-FRI",zone="Asia/Kolkata") public void amfi(){if(enabled)run("AMFI","NAV",()->funds.refresh());}
+ @Scheduled(initialDelayString="${atlas.market.feeds.nav-initial-delay-ms:10000}",fixedDelayString="${atlas.market.feeds.nav-check-ms:3600000}")
+ public synchronized void ensureNav(){
+  if(!enabled)return;
+  Integer count=jdbc.queryForObject("SELECT count(*) FROM mutual_fund_nav",Integer.class);
+  LocalDate latest=jdbc.query("SELECT max(nav_date) latest FROM mutual_fund_nav",rs->{if(!rs.next())return null;java.sql.Date value=rs.getDate("latest");return value==null?null:value.toLocalDate();});
+  // AMFI is end-of-day data. Refresh an empty catalog immediately and retry a
+  // stale catalog hourly; the run ledger provides bounded retry/backoff.
+  if(count==null||count==0||latest==null||latest.isBefore(LocalDate.now(MarketCalendarService.IST).minusDays(3)))
+    run("AMFI","NAV_AUTO",()->funds.refresh());
+ }
  private void run(String provider,String job,Checked task){
   long id=jdbc.queryForObject("INSERT INTO market_provider_runs(provider,job_name,status) VALUES (?,?,'RUNNING') RETURNING id",Long.class,provider,job);
   try{task.execute();jdbc.update("UPDATE market_provider_runs SET status='SUCCESS',finished_at=now() WHERE id=?",id);}

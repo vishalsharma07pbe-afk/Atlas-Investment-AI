@@ -29,6 +29,20 @@ import org.springframework.stereotype.Service;
     String isin=item.path("isin").asText(null);
     if(isin!=null&&!isin.matches("[A-Z]{2}[A-Z0-9]{9}[0-9]"))isin=null;
     jdbc.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,isin,trading_symbol,instrument_type,display_name) VALUES (?,?,?,?,?,?) ON CONFLICT(instrument_key) DO UPDATE SET exchange_code=EXCLUDED.exchange_code,isin=EXCLUDED.isin,trading_symbol=EXCLUDED.trading_symbol,instrument_type=EXCLUDED.instrument_type,display_name=EXCLUDED.display_name,updated_at=now()",key,exchange,isin,symbol,item.path("instrument_type").asText(null),displayName);
+    // Keep the canonical registry in sync with the documented provider master.
+    // This makes search results immediately usable by historical ingestion and
+    // research instead of requiring a separate manual registry import.
+    jdbc.update("""
+      INSERT INTO instruments(exchange_id,symbol,series,isin,security_name,instrument_type,
+        listing_status,active,source,source_revision,updated_at)
+      VALUES ((SELECT id FROM exchanges WHERE code=?),?,'EQ',?,?,?,'ACTIVE',true,
+        'UPSTOX','UPSTOX_INSTRUMENT_MASTER',now())
+      ON CONFLICT(exchange_id,symbol,series) DO UPDATE SET
+        isin=COALESCE(EXCLUDED.isin,instruments.isin),
+        security_name=COALESCE(EXCLUDED.security_name,instruments.security_name),
+        instrument_type=EXCLUDED.instrument_type,listing_status='ACTIVE',active=true,
+        source='UPSTOX',source_revision='UPSTOX_INSTRUMENT_MASTER',updated_at=now()
+      """,exchange,symbol,isin,displayName,item.path("instrument_type").asText("EQUITY"));
     count++;
    }
   }
@@ -65,9 +79,14 @@ import org.springframework.stereotype.Service;
   JsonNode data=body.path("data");if(!data.isObject()||data.isEmpty())throw new IllegalStateException("Empty quote");
   JsonNode quote=data.elements().next();BigDecimal ltp=quote.path("last_price").decimalValue();
   if(ltp.signum()<0)throw new IllegalStateException("Invalid price");
+  BigDecimal previousClose=quote.path("ohlc").path("close").isNumber()
+    ?quote.path("ohlc").path("close").decimalValue():null;
+  if(previousClose!=null&&previousClose.signum()<0)previousClose=null;
   Instant timestamp=Instant.now();
   jdbc.update("INSERT INTO upstox_market_quotes(instrument_key,ltp,source_code,quoted_at) VALUES (?,?,'UPSTOX',?) ON CONFLICT(instrument_key) DO UPDATE SET ltp=EXCLUDED.ltp,quoted_at=EXCLUDED.quoted_at,received_at=now()",key,ltp,java.sql.Timestamp.from(timestamp));
-  return json.createObjectNode().put("instrument_key",key).put("ltp",ltp).put("as_of",timestamp.toString()).put("source","UPSTOX");
+  var result=json.createObjectNode().put("instrument_key",key).put("ltp",ltp).put("as_of",timestamp.toString()).put("source","UPSTOX");
+  if(previousClose!=null)result.put("previous_close",previousClose);
+  return result;
  }
  public int intradayCandles(UUID user,String key,String timeframe,LocalDate from,LocalDate to)throws Exception{
   if(!Set.of("1minute","15minute").contains(timeframe))throw new IllegalArgumentException("Unsupported timeframe");

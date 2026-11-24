@@ -1,6 +1,8 @@
 package com.trading.api;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -15,6 +17,65 @@ public class ResearchWorkspaceController {
 
   public record ScreenerInput(String name,JsonNode definition){}
   public record AlertInput(String name,String alertType,String targetIdentifier,JsonNode condition,Boolean enabled){}
+  public record SipPlanInput(Long schemeCode,String schemeName,BigDecimal monthlyAmount,
+                             LocalDate startDate,LocalDate nextInstallmentDate,
+                             Boolean active,String notes){}
+
+  @GetMapping("/sip-plans")
+  public List<Map<String,Object>> sipPlans(){
+    return jdbc.queryForList("""
+      SELECT id,scheme_code,scheme_name,monthly_amount,start_date,
+        next_installment_date,active,notes,created_at,updated_at
+      FROM mutual_fund_sip_plans WHERE user_id=?
+      ORDER BY active DESC,next_installment_date,scheme_name
+      """,AuthSecurity.currentUser());
+  }
+
+  @PostMapping("/sip-plans")
+  public Map<String,Object> saveSipPlan(@RequestBody SipPlanInput input){
+    if(input==null||input.schemeCode()==null||input.schemeCode()<=0)
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Choose a valid mutual fund scheme");
+    String schemeName=bounded(input.schemeName(),300,"Invalid scheme name");
+    if(input.monthlyAmount()==null||input.monthlyAmount().signum()<=0||
+       input.monthlyAmount().compareTo(new BigDecimal("100000000"))>0)
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid monthly SIP amount");
+    LocalDate start=input.startDate()==null?LocalDate.now():input.startDate();
+    LocalDate next=input.nextInstallmentDate()==null?start:input.nextInstallmentDate();
+    if(next.isBefore(start)||start.isBefore(LocalDate.now().minusYears(1))||
+       start.isAfter(LocalDate.now().plusYears(10)))
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid SIP dates");
+    String notes=input.notes()==null?null:input.notes().trim();
+    if(notes!=null&&notes.length()>300)
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"SIP notes are too long");
+    boolean active=input.active()==null||input.active();
+    UUID id=jdbc.queryForObject("""
+      INSERT INTO mutual_fund_sip_plans(user_id,scheme_code,scheme_name,monthly_amount,
+        start_date,next_installment_date,active,notes)
+      VALUES (?,?,?,?,?,?,?,?)
+      ON CONFLICT(user_id,scheme_code) DO UPDATE SET
+        scheme_name=EXCLUDED.scheme_name,monthly_amount=EXCLUDED.monthly_amount,
+        start_date=EXCLUDED.start_date,next_installment_date=EXCLUDED.next_installment_date,
+        active=EXCLUDED.active,notes=EXCLUDED.notes,updated_at=now()
+      RETURNING id
+      """,UUID.class,AuthSecurity.currentUser(),input.schemeCode(),schemeName,
+      input.monthlyAmount(),start,next,active,notes);
+    return Map.of("saved",true,"id",id,"scheme_code",input.schemeCode());
+  }
+
+  @PatchMapping("/sip-plans/{id}/active")
+  public Map<String,Boolean> setSipActive(@PathVariable UUID id,@RequestBody Map<String,Boolean> body){
+    if(body==null||body.get("active")==null)
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Active state is required");
+    requireDeleted(jdbc.update("UPDATE mutual_fund_sip_plans SET active=?,updated_at=now() WHERE id=? AND user_id=?",
+      body.get("active"),id,AuthSecurity.currentUser()));
+    return Map.of("saved",true);
+  }
+
+  @DeleteMapping("/sip-plans/{id}")
+  public Map<String,Boolean> deleteSipPlan(@PathVariable UUID id){
+    requireDeleted(jdbc.update("DELETE FROM mutual_fund_sip_plans WHERE id=? AND user_id=?",id,AuthSecurity.currentUser()));
+    return Map.of("deleted",true);
+  }
 
   @GetMapping("/screeners")
   public List<Map<String,Object>> screeners(){
