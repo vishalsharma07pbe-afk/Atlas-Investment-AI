@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import closing
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import json
 import os
 from pathlib import Path
@@ -72,8 +73,15 @@ def market_snapshot(exchange):
     instruments = [row for row in instruments if row.get("active", True)
                    and row.get("listing_status", "ACTIVE") == "ACTIVE"
                    and row.get("instrument_type", "EQUITY") in ("EQUITY", "EQ", "STOCK")]
-    result = screen(instruments, lambda instrument_id: backend_json(
-        f"/api/v1/market-data/instruments/{instrument_id}/candles?limit=250"), universe_limit=60)
+    today = now().astimezone(ZoneInfo("Asia/Kolkata")).date()
+    # This pipeline deliberately excludes the current session, which may still
+    # be forming. Retain the real underlying candle dates in every observation.
+    def completed_history(instrument_id):
+        payload = backend_json(f"/api/v1/market-data/instruments/{instrument_id}/candles?limit=250")
+        return {**payload, "candles": [row for row in payload["candles"]
+                if str(row["trade_date"]) < today.isoformat()]}
+    result = screen(instruments, completed_history, as_of=today,
+                    universe_limit=60, max_age_days=4, include_horizons=True)
     result["notice"] = ("Automatically refreshed daily observations from a bounded registry sample. "
                         "Not live intraday signals, full-exchange rankings, or recommendations.")
     return result

@@ -3,15 +3,17 @@ from datetime import date, timedelta
 from math import isfinite
 
 from .technical import Candle, compute
+from .horizon_research import evaluate, summarize
 
 MIN_HISTORY = 21
 MAX_INSTRUMENTS = 20
 MAX_CANDLES = 250
 
-def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit=MAX_INSTRUMENTS):
+def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit=MAX_INSTRUMENTS, include_horizons=False):
     limit = max(1, min(60, universe_limit))
     today = as_of or date.today()
     rows = []
+    horizon_evaluations = []
     skipped = {"NO_HISTORY": 0, "STALE": 0, "INVALID": 0, "MIXED_ADJUSTMENT": 0}
     for instrument in instruments[:limit]:
         try:
@@ -47,7 +49,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
             momentum = ind["momentum_20d"][-1]
             volume = ind["relative_volume_20"][-1]
             rsi = ind["rsi_14"][-1]
-            rows.append({
+            row = {
                 "id": instrument["id"], "symbol": instrument["symbol"],
                 "exchange": instrument["exchange"], "as_of": candles[-1].date,
                 "close": round(close, 4), "change_1d_percent": round(change, 3),
@@ -56,11 +58,14 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                 "rsi_14": round(rsi, 2) if rsi is not None else None,
                 "adjustment_status": candles[-1].adjustment_status,
                 "data_age_calendar_days": age,
-            })
+            }
+            if include_horizons:
+                horizon_evaluations.append(evaluate(candles, ind, row))
+            rows.append(row)
         except (KeyError, TypeError, ValueError, OverflowError, ZeroDivisionError):
             skipped["INVALID"] += 1
     rows.sort(key=lambda x: (-x["change_1d_percent"], x["exchange"], x["symbol"]))
-    return {
+    result = {
         "status": "RESEARCH_ONLY",
         "timeframe": "1d",
         "universe_size": min(len(instruments), limit),
@@ -74,3 +79,6 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
         )[:5],
         "notice": f"Bounded daily sample of up to {limit} registry instruments; not a full-market top-five ranking, live feed, intraday signal or recommendation.",
     }
+    if include_horizons:
+        result["horizons"] = summarize(horizon_evaluations)
+    return result

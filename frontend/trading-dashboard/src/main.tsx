@@ -16,6 +16,7 @@ import PortfolioPerformanceHistory from "./PortfolioPerformanceHistory";
 import PersonalAlerts from "./PersonalAlerts";
 import MutualFundHoldings from "./MutualFundHoldings";
 import MarketIntelligence from "./MarketIntelligence";
+import HorizonResearch from "./HorizonResearch";
 import BrokerResearch from "./BrokerResearch";
 import ResearchOutcomes from "./ResearchOutcomes";
 import ResearchSourceAudit from "./ResearchSourceAudit";
@@ -256,7 +257,7 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
             {!holdings.length && <tr><td colSpan={9} className="empty">No active holdings yet. Add a stock or mutual fund above.</td></tr>}
           </tbody></table></div></section>
           <HistoricalInvestments activeHoldings={holdings}/>
-        </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : tab === 5 ? <EquityResearchDashboard/> : (tab === 2 || tab === 3 || tab === 4) ? <><MarketIntelligence/><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/></> : tab === 8 ? <P2ResearchWorkspace/> : tab === 7 ? <StockExplorer/> : tab === 6 ? <>
+        </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : (tab === 2 || tab === 3 || tab === 4 || tab === 5) ? <HorizonResearch key={tab} horizon={tab===2?"INTRADAY":tab===3?"SWING":tab===4?"SHORT_TERM":"LONG_TERM"} onSettings={()=>setTab(6)}>{tab===5?<EquityResearchDashboard/>:<><MarketIntelligence/><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/></>}</HorizonResearch> : tab === 8 ? <P2ResearchWorkspace/> : tab === 7 ? <StockExplorer/> : tab === 6 ? <>
           <UpstoxVaultCard onConnected={()=>refreshPortfolioPrices(true)}/><DataReadiness/><MultiProviderHub/>
           <FeedHealth/>
           <ReliabilityIncidents/>
