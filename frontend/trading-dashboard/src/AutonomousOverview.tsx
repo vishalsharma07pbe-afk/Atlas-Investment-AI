@@ -1,3 +1,4 @@
+import {visiblePolling} from "./visiblePolling";
 import {useEffect,useState,type ReactNode} from "react";
 import AutomaticInstitutionalActivity,{type InstitutionalActivity} from "./AutomaticInstitutionalActivity";
 import {RecentCompanyNews,type Article} from "./AutomaticCompanyNews";
@@ -15,16 +16,14 @@ export default function AutonomousOverview({children,onPortfolio,onFunds,onSetti
  const [data,setData]=useState<Snapshot|null>(null);
  const [error,setError]=useState(false);
  const [manual,setManual]=useState(false);
- useEffect(()=>{
-   let active=true;let pending=false;const controller=new AbortController();
-   async function load(){
-     if(pending)return;pending=true;
-     try{const response=await fetch("/intelligence/api/v1/intelligence/research/overview",{cache:"no-store",signal:controller.signal});if(!response.ok)throw Error();const body:Snapshot=await response.json();if(!Array.isArray(body.sections))throw Error();if(active){setData(body);setError(false);}}
-     catch{if(active)setError(true);}finally{pending=false;}
-   }
-   void load();const timer=window.setInterval(load,30000);
-   return()=>{active=false;controller.abort();window.clearInterval(timer);};
- },[]);
+ useEffect(()=>visiblePolling(async signal=>{
+  try{
+   const response=await fetch("/intelligence/api/v1/intelligence/research/overview",{cache:"no-store",signal});
+   if(!response.ok)throw Error();
+   const body:Snapshot=await response.json();if(!Array.isArray(body.sections))throw Error();
+   if(!signal.aborted){setData(body);setError(false);}
+  }catch{if(!signal.aborted)setError(true);}
+ },30000),[]);
  const market=data?.sections.filter(row=>row.section==="NSE"||row.section==="BSE")||[];
  const funds=data?.sections.filter(row=>row.section!=="NSE"&&row.section!=="BSE")||[];
  const current=!!data?.enabled&&!error;
