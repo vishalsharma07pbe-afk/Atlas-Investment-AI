@@ -70,3 +70,35 @@ class AutonomousResearchTests(unittest.TestCase):
         research.refresh_once(lambda exchange: {"exchange": exchange}, lambda category: {"category": category})
         with patch.dict(os.environ, {"ATLAS_AUTONOMOUS_RESEARCH_ENABLED": "false"}):
             self.assertTrue(all(r["status"] == "DISABLED" for r in research.read_snapshot(False)["sections"]))
+
+    def test_expanded_discovery_uses_bounded_batches_and_existing_screener(self):
+        from urllib.parse import parse_qs, urlsplit
+        from datetime import date, timedelta
+        instruments=[{"id":i,"exchange":"NSE","symbol":f"T{i}","active":True,
+                      "listing_status":"ACTIVE","series":"EQ","instrument_type":"EQ",
+                      "recent_registry_count":230} for i in range(1,201)]
+        calls=[]
+        def load(path):
+            calls.append(path)
+            if "discovery-universe?" in path:
+                return instruments
+            ids=[int(i) for i in parse_qs(urlsplit(path).query)["ids"]]
+            self.assertLessEqual(len(ids),20)
+            return [{"instrument_id":i,"trade_date":(date(2026,10,31)+timedelta(days=d)).isoformat(),
+                     "open":100+d,"high":102+d,"low":99+d,"close":101+d,"volume":100000,
+                     "adjustment_status":"RAW_UNADJUSTED"} for i in ids for d in range(24)]
+        with patch.object(research,"now",return_value=datetime(2026,11,24,12,tzinfo=timezone.utc)), \
+             patch.object(research,"backend_json",side_effect=load):
+            result=research.market_snapshot("NSE")
+        self.assertEqual(result["eligible_count"],200)
+        self.assertEqual(result["universe_size"],200)
+        self.assertEqual(result["discovery_coverage"]["recent_registry_count"],230)
+        self.assertEqual(len(calls),11)
+        self.assertEqual(len(result["top_gainers"]),5)
+
+    def test_batch_rejects_unrequested_history(self):
+        row={"id":1,"exchange":"NSE","symbol":"TEST","active":True,"listing_status":"ACTIVE",
+             "series":"EQ","instrument_type":"EQ","recent_registry_count":1}
+        with patch.object(research,"backend_json",side_effect=[[row],[{"instrument_id":2}]]):
+            with self.assertRaisesRegex(ValueError,"IDENTITY_MISMATCH"):
+                research.market_snapshot("NSE")
