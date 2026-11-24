@@ -2,6 +2,7 @@ import React, {useEffect, useRef, useState} from "react";
 import {createRoot} from "react-dom/client";
 import "./style.css";
 import ResearchHome from "./ResearchHome";
+import AutonomousOverview from "./AutonomousOverview";
 import {AuthGate,type AuthIdentity} from "./AuthGate";
 import StockExplorer from "./StockExplorer";
 import PortfolioStress from "./PortfolioStress";
@@ -234,7 +235,7 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
         {error && <div className="error glass" role="alert">{error} <button type="button" onClick={() => tab === 6 ? loadHealth() : load()}>Retry</button></div>}
 
         {tab === 0 ? <>
-          <ResearchHome holdings={holdings} revision={portfolioRevision} onReviewHoldings={()=>document.getElementById("portfolio-overview")?.scrollIntoView({behavior:"smooth",block:"start"})} onOpenExplorer={()=>setTab(7)} onOpenDataHealth={()=>setTab(6)}/>
+          <AutonomousOverview onPortfolio={()=>document.getElementById("portfolio-overview")?.scrollIntoView({behavior:"smooth",block:"start"})} onFunds={()=>setTab(1)} onSettings={()=>setTab(6)}><ResearchHome holdings={holdings} revision={portfolioRevision} onReviewHoldings={()=>document.getElementById("portfolio-overview")?.scrollIntoView({behavior:"smooth",block:"start"})} onOpenExplorer={()=>setTab(7)} onOpenDataHealth={()=>setTab(6)}/></AutonomousOverview>
           <div className="two">
             <PortfolioIntelligence holdings={holdings} analysis={analysis}/>
             <section className="panel glass"><div className="sectionhead"><div><small className="section-kicker">POSITION MANAGER</small><h2>Add an investment</h2></div><span className="tag">AUTO PRICE</span></div><HoldingEditor busy={loading} onSave={submitHolding} onSaveSip={submitSip}/></section>

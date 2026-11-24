@@ -88,6 +88,9 @@ services:
       ATLAS_EXTERNAL_AI_ALLOWED: ${ATLAS_EXTERNAL_AI_ALLOWED:-false}
       ATLAS_PAID_AI_ALLOWED: ${ATLAS_PAID_AI_ALLOWED:-false}
       ATLAS_NAV_DB_PATH: /app/nav-data/catalog.sqlite3
+      ATLAS_AUTONOMOUS_RESEARCH_ENABLED: ${ATLAS_AUTONOMOUS_RESEARCH_ENABLED:-true}
+      ATLAS_AUTONOMOUS_RESEARCH_INTERVAL_SECONDS: ${ATLAS_AUTONOMOUS_RESEARCH_INTERVAL_SECONDS:-900}
+      ATLAS_RESEARCH_SNAPSHOT_DB: /app/ingestion-data/research_snapshots.sqlite3
       ATLAS_INGESTION_DB_PATH: /app/ingestion-data/jobs.sqlite3
       ATLAS_OHLCV_DB_PATH: /app/ingestion-data/ohlcv.sqlite3
       ATLAS_AI_BUDGET_DB_PATH: /app/ingestion-data/ai_budgets.sqlite3
