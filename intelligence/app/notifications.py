@@ -1,5 +1,5 @@
 """Local, provenance-aware notification feed; no background external market polling."""
-import json,os
+import json,os,sqlite3
 from datetime import date,datetime,timezone
 from pathlib import Path
 from decimal import Decimal
@@ -45,17 +45,33 @@ def _load():
         # Never substitute invented alerts when local data is missing or invalid.
         raise RuntimeError("Notification source invalid or unavailable") from exc
 
+def _combined():
+    local = _load()
+    from . import automatic_news
+    from .autonomous_research import config, _connect
+    if not config()[0] or not automatic_news.permitted():
+        return local, False
+    try:
+        news = [Alert.model_validate(item) for item in automatic_news.alerts(_connect)]
+    except (OSError, ValueError, RuntimeError, TypeError):
+        # Manual and IPO alerts remain available if optional news is unavailable.
+        return local, False
+    except sqlite3.Error:
+        return local, False
+    known={a.id for a in local}
+    return sorted(local+[a for a in news if a.id not in known],key=lambda a:a.published_at,reverse=True), bool(news)
+
 def summary():
-    alerts=_load()
-    return {"status":"LOCAL_SOURCE_ONLY","ids":[a.id for a in alerts],
+    alerts,has_news=_combined()
+    return {"status":"LOCAL_AND_PROVIDER_NEWS" if has_news else "LOCAL_SOURCE_ONLY","ids":[a.id for a in alerts],
             "revision_keys":[a.id+"@"+a.published_at.isoformat() for a in alerts],
             "total":len(alerts),"live_feed_connected":False}
 
 def details():
-    alerts=_load()
-    return {"status":"LOCAL_SOURCE_ONLY","alerts":[{**a.model_dump(mode="json"),
+    alerts,has_news=_combined()
+    return {"status":"LOCAL_AND_PROVIDER_NEWS" if has_news else "LOCAL_SOURCE_ONLY","alerts":[{**a.model_dump(mode="json"),
         "revision_key":a.id+"@"+a.published_at.isoformat(),
         "freshness":("STALE" if (datetime.now(timezone.utc)-a.subscription_as_of).total_seconds()>3600*24 else "RECENT") if a.category=="IPO_SUBSCRIPTION" and a.subscription_as_of else "NOT_APPLICABLE",
         "subscription_total_x":str(a.subscription_total_x) if a.subscription_total_x is not None else None}
         for a in alerts],"total":len(alerts),"live_feed_connected":False,
-        "notice":"Local, attributed alerts only. IPO dates and subscription rates are not independently verified or automatically refreshed."}
+        "notice":"Local and authorized provider-news alerts where available. Headline topics are not confirmed events. IPO dates and subscription rates are not independently verified or automatically refreshed."}

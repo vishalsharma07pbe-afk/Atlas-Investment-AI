@@ -157,11 +157,13 @@ def company_news(instrument_keys: list[str], page_size: int = 20) -> dict:
     })
     if not isinstance(data, dict):
         raise ProviderFailure("UPSTOX_NEWS_SCHEMA_INVALID")
-    seen: set[tuple[str, int]] = set()
+    seen: set[tuple[str, str, str]] = set()
+    returned_keys = []
     articles = []
     for instrument_key, rows in data.items():
-        if not isinstance(rows, list):
+        if instrument_key not in keys or not isinstance(rows, list):
             continue
+        returned_keys.append(instrument_key)
         for row in rows:
             if not isinstance(row, dict):
                 continue
@@ -173,7 +175,7 @@ def company_news(instrument_keys: list[str], page_size: int = 20) -> dict:
                 published = _timestamp(stamp).isoformat()
             except ProviderFailure:
                 continue
-            dedupe = (link, int(stamp))
+            dedupe = (instrument_key, link, published)
             if dedupe in seen:
                 continue
             seen.add(dedupe)
@@ -189,7 +191,7 @@ def company_news(instrument_keys: list[str], page_size: int = 20) -> dict:
             })
     articles.sort(key=lambda item: item["published_at"], reverse=True)
     return {"generated_at": datetime.now(timezone.utc).isoformat(), "articles": articles,
-            "count": len(articles), "source": _source("/v2/news"),
+            "count": len(articles), "returned_keys": returned_keys, "source": _source("/v2/news"),
             "notice": "Provider headlines and summaries with citations. Sentiment is not inferred."}
 
 

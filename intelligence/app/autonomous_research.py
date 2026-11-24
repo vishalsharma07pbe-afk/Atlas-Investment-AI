@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from .market_client import backend_json
 from .screener import screen
 from .mutual_fund_recommendations import CATEGORIES, dashboard
-from . import automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional
+from . import automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news
 
 SECTIONS = ("NSE", "BSE", *CATEGORIES)
 DEFAULT_INTERVAL = 900
@@ -148,6 +148,10 @@ def read_snapshot(include_ai=True):
         except (ValueError, OSError, sqlite3.Error):
             snapshot["automatic_company_status"] = "UNAVAILABLE"
         try:
+            automatic_news.attach(snapshot, _connect)
+        except (ValueError, OSError, sqlite3.Error):
+            snapshot["automatic_news_status"] = "UNAVAILABLE"
+        try:
             return automatic_ai_review.attach(snapshot, _connect)
         except (ValueError, OSError, sqlite3.Error):
             snapshot["automatic_ai_status"] = "UNAVAILABLE"
@@ -182,6 +186,10 @@ class ResearchScheduler:
                     await asyncio.to_thread(automatic_company_evidence.refresh, snapshot, _connect)
                 except Exception:
                     pass  # Company evidence must not block the existing research engine.
+                try:
+                    await asyncio.to_thread(automatic_news.refresh, snapshot, _connect)
+                except Exception:
+                    pass  # Provider news failure must not block research.
                 await asyncio.to_thread(automatic_ai_review.refresh, snapshot, _connect)
             except Exception:
                 # Storage failures must not terminate future attempts.
