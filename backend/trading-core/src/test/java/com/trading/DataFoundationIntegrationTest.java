@@ -54,7 +54,12 @@ class DataFoundationIntegrationTest {
     mvc.perform(get("/api/v1/instruments").param("q","REL").param("exchange","nse")).andExpect(status().isOk()).andExpect(jsonPath("$[0].exchange").value("NSE"));
     assertThat(jdbc.queryForObject("select count(*) from market_candles",Long.class)).isEqualTo(2);
     assertThat(jdbc.queryForObject("select count(*) from data_quality_events where event_type='SUSPICIOUS_PRICE_DISCONTINUITY'",Long.class)).isEqualTo(1);
-    mvc.perform(get("/api/v1/data-health/summary")).andExpect(status().isOk()).andExpect(jsonPath("$.instrumentCount").value(1)).andExpect(jsonPath("$.candleCount").value(2)).andExpect(jsonPath("$.providerMode").value("MANUAL_CSV_ONLY"));
+    mvc.perform(get("/api/v1/data-health/summary")).andExpect(status().isOk()).andExpect(jsonPath("$.instrumentCount").value(1)).andExpect(jsonPath("$.candleCount").value(2)).andExpect(jsonPath("$.providerMode").value("MANUAL_OR_NOT_YET_SYNCED"))
+      .andExpect(jsonPath("$.liveMarketDataConnected").value(false))
+      .andExpect(jsonPath("$.liveConnectionScope").value("NOT_OBSERVED_BY_BACKEND"))
+      .andExpect(jsonPath("$.upstoxRegistry.records").value(0))
+      .andExpect(jsonPath("$.upstoxDailyHistory.records").value(0))
+      .andExpect(jsonPath("$.officialAmfiNav.records").value(0));
     mvc.perform(get("/api/v1/market-data/instruments/1/candles")).andExpect(status().isOk()).andExpect(jsonPath("$.timeframe").value("1d")).andExpect(jsonPath("$.count").value(2)).andExpect(jsonPath("$.candles[0].adjustment_status").value("RAW_UNADJUSTED"));
   }
 

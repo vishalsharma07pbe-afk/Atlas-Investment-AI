@@ -9,12 +9,30 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/v1/data-health")
 public class DataHealthController {
   private final JdbcTemplate jdbc;
+  @org.springframework.beans.factory.annotation.Value("${atlas.market.feeds.enabled:false}") boolean scheduledFeeds;
   public DataHealthController(JdbcTemplate jdbc){this.jdbc=jdbc;}
 
   @GetMapping("/summary")
   public Map<String,Object> summary(){
     Map<String,Object> out=new LinkedHashMap<>();
-    out.put("generatedAt",Instant.now()); out.put("providerMode","MANUAL_CSV_ONLY"); out.put("liveMarketDataConnected",false);
+    out.put("generatedAt",Instant.now());
+    // Stored provider evidence is not a verified live websocket connection.
+    var registry=jdbc.queryForMap("SELECT count(*) AS records,max(updated_at) AS latest FROM upstox_instrument_map");
+    var nav=jdbc.queryForMap("""
+      SELECT count(*) AS records,count(DISTINCT scheme_code) AS schemes,max(nav_date) AS latest
+      FROM mutual_fund_nav WHERE source_code='AMFI' AND nav_date<=(now() AT TIME ZONE 'Asia/Kolkata')::date
+      """);
+    var daily=jdbc.queryForMap("""
+      SELECT count(*) AS records,max((c.candle_time AT TIME ZONE 'Asia/Kolkata')::date) AS latest
+      FROM market_candles c JOIN data_sources ds ON ds.id=c.source_id
+      WHERE c.timeframe='1d' AND c.is_complete AND c.quality_status='PROVIDER_VALIDATED'
+        AND ds.source_code='UPSTOX' AND (c.candle_time AT TIME ZONE 'Asia/Kolkata')::date<(now() AT TIME ZONE 'Asia/Kolkata')::date
+      """);
+    out.put("providerMode",((Number)registry.get("records")).longValue()>0||((Number)daily.get("records")).longValue()>0?"UPSTOX_DATA_PRESENT":"MANUAL_OR_NOT_YET_SYNCED");
+    out.put("liveMarketDataConnected",false);
+    out.put("liveConnectionScope","NOT_OBSERVED_BY_BACKEND");
+    out.put("scheduledFeedsEnabled",scheduledFeeds);
+    out.put("upstoxRegistry",registry);out.put("officialAmfiNav",nav);out.put("upstoxDailyHistory",daily);
     out.put("instrumentCount",jdbc.queryForObject("SELECT count(*) FROM instruments",Long.class));
     out.put("candleCount",jdbc.queryForObject("SELECT count(*) FROM market_candles WHERE timeframe='1d'",Long.class));
     out.put("unresolvedIssueCount",jdbc.queryForObject("SELECT count(*) FROM data_quality_events WHERE resolved_at IS NULL",Long.class));
@@ -25,9 +43,14 @@ public class DataHealthController {
       GROUP BY e.code ORDER BY e.code
       """));
     out.put("sources",jdbc.queryForList("""
-      SELECT ds.source_code,ds.display_name,ds.access_mode,ds.license_scope,ds.verified_at,count(DISTINCT i.id) AS instruments,count(DISTINCT c.instrument_id) AS instruments_with_candles,max(c.candle_time) AS latest_candle
-      FROM data_sources ds LEFT JOIN instruments i ON i.source_id=ds.id LEFT JOIN market_candles c ON c.source_id=ds.id
-      WHERE ds.enabled GROUP BY ds.id ORDER BY ds.source_code
+      SELECT ds.source_code,ds.display_name,ds.access_mode,ds.license_scope,ds.verified_at,
+        coalesce(i.instruments,0) AS instruments,coalesce(c.instruments_with_candles,0) AS instruments_with_candles,c.latest_candle
+      FROM data_sources ds
+      LEFT JOIN (SELECT source_id,count(*) AS instruments FROM instruments GROUP BY source_id) i ON i.source_id=ds.id
+      LEFT JOIN (SELECT source_id,count(DISTINCT instrument_id) AS instruments_with_candles,max(candle_time) AS latest_candle
+        FROM market_candles WHERE timeframe='1d' AND is_complete
+          AND quality_status IN ('VALIDATED_MANUAL','PROVIDER_VALIDATED') GROUP BY source_id) c ON c.source_id=ds.id
+      WHERE ds.enabled ORDER BY ds.source_code
       """));
     out.put("recentRuns",jdbc.queryForList("""
       SELECT r.id,r.job_name,r.status,r.artifact_name,r.started_at,r.finished_at,r.records_seen,r.records_written,r.failure_count,r.error_message

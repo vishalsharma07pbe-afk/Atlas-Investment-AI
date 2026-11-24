@@ -2,7 +2,7 @@
 
 ## First use
 
-Sign in, follow the three-step onboarding card, and use Help to reopen it. Add holdings from Research Home by selecting the exact listed instrument, entering quantity and average cost, and checking the dated provider price. Import CSV only when you understand its update semantics.
+Sign in, follow the three-step onboarding card, and use Help to reopen it. Open My Portfolio, then Add or update an investment by selecting the exact listed instrument, entering quantity and average cost, and checking the dated provider price. Import CSV only when you understand its update semantics.
 
 ## Understand the labels
 
@@ -14,9 +14,9 @@ Sign in, follow the three-step onboarding card, and use Help to reopen it. Add h
 
 ## Research workflow
 
-1. Check Market & Data Health for source, freshness, failures, and quality events.
-2. Review portfolio concentration and unpriced positions.
-3. Use Stock Explorer or the P2 lab to inspect dated evidence and uncertainty.
+1. Check Settings for source, freshness, failures, and quality events.
+2. Review Overview and My Portfolio for automatic attention items, recorded concentration and unpriced positions.
+3. Use Stock Explorer or AI Research to inspect dated evidence and uncertainty.
 4. Treat screener matches and backtests as research filters, not recommendations.
 5. Verify important facts against the cited primary source before acting elsewhere.
 

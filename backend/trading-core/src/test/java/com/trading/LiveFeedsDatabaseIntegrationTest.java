@@ -193,4 +193,16 @@ class LiveFeedsDatabaseIntegrationTest {
   assertThat(db.queryForObject("SELECT nav FROM mutual_fund_nav WHERE scheme_code=? AND nav_date=?",BigDecimal.class,code,today)).isEqualByComparingTo("120");
  }
 
+
+ @Test void healthReportsStoredUpstoxAndAmfiEvidenceWithoutClaimingLiveConnection(){
+  seedStock();
+  long code=987654111L;
+  LocalDate today=LocalDate.now(MarketCalendarService.IST);
+  db.update("INSERT INTO mutual_fund_schemes(scheme_code,scheme_name) VALUES (?,'Health Test Direct Growth')",code);
+  db.update("INSERT INTO mutual_fund_nav(scheme_code,nav_date,nav,source_code) VALUES (?,?,100,'AMFI')",code,today);
+  var health=new DataHealthController(db).summary();
+  assertThat(health).containsEntry("providerMode","UPSTOX_DATA_PRESENT").containsEntry("liveMarketDataConnected",false);
+  assertThat(((Number)((Map<?,?>)health.get("officialAmfiNav")).get("records")).longValue()).isGreaterThanOrEqualTo(1);
+  assertThat(((Number)((Map<?,?>)health.get("upstoxRegistry")).get("records")).longValue()).isGreaterThanOrEqualTo(1);
+ }
 }
