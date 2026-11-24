@@ -9,12 +9,15 @@ MIN_HISTORY = 21
 MAX_INSTRUMENTS = 20
 MAX_CANDLES = 250
 
-def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit=MAX_INSTRUMENTS, include_horizons=False, *, batch_loaded=False):
+def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit=MAX_INSTRUMENTS, include_horizons=False, *, batch_loaded=False, expected_session=None):
     limit = max(1, min(200 if batch_loaded else 60, universe_limit))
     today = as_of or date.today()
     rows = []
     horizon_evaluations = []
     skipped = {"NO_HISTORY": 0, "STALE": 0, "INVALID": 0, "MIXED_ADJUSTMENT": 0}
+    if batch_loaded:
+        skipped["RAW_CORPORATE_ACTION"] = 0
+        skipped["SESSION_MISMATCH"] = 0
     for instrument in instruments[:limit]:
         try:
             payload = load_candles(instrument["id"])
@@ -42,6 +45,16 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
             if age < 0 or age > max_age_days:
                 skipped["STALE"] += 1
                 continue
+            if batch_loaded:
+                last_day=date.fromisoformat(candles[-1].date)
+                if expected_session is not None and last_day!=expected_session:
+                    skipped["SESSION_MISMATCH"] += 1
+                    continue
+                event=instrument.get("latest_action_date")
+                if (event is not None and candles[-1].adjustment_status=="RAW_UNADJUSTED"
+                    and date.fromisoformat(candles[0].date)<date.fromisoformat(event)<=last_day):
+                    skipped["RAW_CORPORATE_ACTION"] += 1
+                    continue
             ind = compute(candles)
             close = candles[-1].close
             previous = candles[-2].close
