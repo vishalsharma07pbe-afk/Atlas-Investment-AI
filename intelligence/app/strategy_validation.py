@@ -44,6 +44,7 @@ def _metrics(trades, cost_bps):
     for entry,exit_price,closes in trades:
         start=equity
         shares=equity*(1-cost)/entry
+        drawdown=min(drawdown,(shares*entry)/peak-1)
         for close in closes:
             marked=shares*close
             peak=max(peak,marked)
