@@ -11,6 +11,7 @@ import os
 import re
 
 from .p1_research import company_research
+from .financial_trends import summarize as financial_trends
 
 ISIN = re.compile(r"^IN[A-Z0-9]{10}$")
 HORIZONS = ("LONG_TERM", "SHORT_TERM", "SWING")
@@ -188,5 +189,7 @@ def attach(snapshot,connect,instant=None):
     for item,isin in identify(snapshot):
         row=rows.get(isin)
         if row and row["payload"]:
-            item["company_evidence"]=json.loads(row["payload"])
+            report=json.loads(row["payload"])
+            report["financial_trends"]=financial_trends(report,instant.year)
+            item["company_evidence"]=report
     return snapshot

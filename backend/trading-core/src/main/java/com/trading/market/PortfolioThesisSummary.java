@@ -49,6 +49,30 @@ final class PortfolioThesisSummary {
     else add(observations,statement+" Not evidence of fair value or future growth.",source);
    }
    if(comparisons==0)gaps.add("No unambiguous, unit-matched company/sector ratio comparison.");
+   JsonNode trends=company.path("financial_trends");
+   int trendCount=0;
+   for(JsonNode trend:trends.path("items")){
+    String metric=trend.path("metric").asText();
+    String label=switch(metric){case "REVENUE"->"Revenue";case "NET_PROFIT"->"Net profit";
+      case "OPERATING_CASH_FLOW"->"Operating cash flow";case "TOTAL_ASSETS"->"Total assets";
+      case "TOTAL_LIABILITIES"->"Total liabilities";default->null;};
+    Double previous=number(trend,"previous_value"),latest=number(trend,"latest_value");
+    int start=trend.path("previous_year").asInt(),end=trend.path("latest_year").asInt();
+    String unit=trend.path("unit").asText();
+    if(label==null||previous==null||latest==null||start<2000||end-start!=1||unit.isBlank())continue;
+    if(trend.path("latest_period_may_be_stale").asBoolean(true))continue;
+    trendCount++;
+    String statement=label+" FY"+start+" "+fmt(previous)+" to FY"+end+" "+fmt(latest)+" ("+unit+").";
+    Double change=number(trend,"change_percent");
+    if(change!=null)statement+=" Reported annual change "+fmt(change)+"%.";
+    boolean operating=Set.of("REVENUE","NET_PROFIT","OPERATING_CASH_FLOW").contains(metric);
+    if(operating&&(latest<previous||latest<0))
+      add(review,statement+" Investigate the reported deterioration or negative value.","Upstox consolidated yearly statements; filings unverified");
+    else add(observations,statement+" Historical observation only.","Upstox consolidated yearly statements; filings unverified");
+   }
+   if(trendCount==0)gaps.add("Recent, consecutive annual financial statement comparisons unavailable.");
+   else if(!"AVAILABLE".equals(trends.path("status").asText())||trendCount<trends.path("items").size())
+     gaps.add("Annual financial statement coverage is partial; some metrics or recent periods are unavailable.");
    JsonNode news=thesis.path("news_evidence");
    SortedSet<String> topics=new TreeSet<>();
    for(JsonNode article:news.path("articles"))for(JsonNode topic:article.path("topics"))

@@ -40,6 +40,16 @@ class PortfolioThesisSummaryTest {
   assertTrue(result.get("review_prompts").toString().contains("-25.00%"));
   assertTrue(result.get("gaps").toString().contains("Riskometer"));
  }
+ @Test void annualDeclineIsReviewPromptButStalePeriodsAreNot(){
+  var recent=Map.<String,Object>of("metric","NET_PROFIT","previous_year",2024,"latest_year",2025,"previous_value",100,"latest_value",75,"unit","crore","change_percent",-25,"latest_period_may_be_stale",false);
+  var stale=Map.<String,Object>of("metric","REVENUE","previous_year",2021,"latest_year",2022,"previous_value",100,"latest_value",50,"unit","crore","latest_period_may_be_stale",true);
+  var holding=Map.<String,Object>of("asset_type","EQUITY","thesis_evidence",Map.of("company_evidence",Map.of("financial_trends",Map.of("status","PARTIAL","items",List.of(recent,stale)))));
+  var result=PortfolioThesisSummary.summarize(holding,json);
+  assertEquals("REVIEW_EVIDENCE",result.get("status"));
+  assertTrue(result.get("review_prompts").toString().contains("Net profit FY2024"));
+  assertFalse(result.get("review_prompts").toString().contains("FY2021"));
+  assertTrue(result.get("gaps").toString().contains("Annual financial statement coverage is partial"));
+ }
  @Test void missingEvidenceNeverProducesPositiveVerdict(){
   var result=PortfolioThesisSummary.summarize(Map.of("asset_type","EQUITY"),json);
   assertEquals("INSUFFICIENT_FOR_VERDICT",result.get("status"));
