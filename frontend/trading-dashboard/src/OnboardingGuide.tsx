@@ -2,9 +2,9 @@ import {useEffect,useState} from "react";
 
 const STORAGE_KEY="atlas:onboarding-complete:v1";
 const steps=[
- {title:"Add what you own",body:"Start in Research Home. Search by company or symbol, enter quantity and average cost, then verify the dated price before saving.",tab:0},
- {title:"Check the evidence",body:"Use Market & Data Health to confirm provider status, freshness and quality issues before relying on any research output.",tab:6},
- {title:"Research, do not trade blindly",body:"The P2 Research Lab explains cited evidence, tests historical signals and keeps uncertainty visible. It never places an order.",tab:8},
+ {title:"Add what you own",body:"Start in My Portfolio and open Add or update an investment. Search by company or symbol, enter quantity and average cost, then verify the dated price before saving.",tab:9},
+ {title:"Check the evidence",body:"Use Settings to confirm provider status, freshness and quality issues before relying on any research output.",tab:6},
+ {title:"Research, do not trade blindly",body:"AI Research explains cited evidence, tests historical signals and keeps uncertainty visible. It never places an order.",tab:8},
 ];
 
 export default function OnboardingGuide({onNavigate}:{onNavigate:(tab:number)=>void}){
