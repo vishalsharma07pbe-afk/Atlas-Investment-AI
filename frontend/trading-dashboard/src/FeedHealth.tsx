@@ -1,7 +1,7 @@
 import {useEffect,useState} from "react";
 
 type Health={
- generated_at:string;provider:string;state:string;reason:string;
+ generated_at:string;provider:string;state:string;reason:string;retry_after_seconds?:number;
  transport_connected:boolean;worker_running:boolean;frames_processed:number;
  rejected_entries:number;cached_instruments:number;live_prices_verified:boolean;
  entitlement_verified:boolean;configuration_ready:boolean;fresh_provider_frames:boolean;blocker_codes:string[];note:string;
@@ -25,6 +25,8 @@ export default function FeedHealth(){
   {error&&<p role="alert">{error}</p>}
   {health&&<>
    <div className="health-status" role="status"><strong>{health.state.replace(/_/g," ")}</strong><span>{health.reason.replace(/_/g," ")}</span><small>Observed {new Date(health.generated_at).toLocaleString("en-IN")}</small></div>
+   {health.reason==="FEED_CREDENTIAL_REJECTED"&&<p role="alert">Upstox rejected the configured credential. Renew it using your authorized Upstox sign-in, update local configuration and restart the affected services. Never paste a token into a support message.</p>}
+   {!!health.retry_after_seconds&&<p>Automatic reconnect cooldown: about {Math.ceil(health.retry_after_seconds/60)} minute(s) remaining at the last check.</p>}
    <div className="stats health-metrics">
     <div className="stat glass"><small>TRANSPORT</small><strong>{health.transport_connected?"Connected":"Disconnected"}</strong></div>
     <div className="stat glass"><small>FRAMES</small><strong>{health.frames_processed}</strong></div>

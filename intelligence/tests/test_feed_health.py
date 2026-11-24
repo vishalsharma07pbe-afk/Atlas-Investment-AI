@@ -46,5 +46,13 @@ class FeedHealthTests(unittest.TestCase):
         self.assertEqual(result["cached_instruments"],0)
         self.assertEqual(result["state"],"NO_DATA")
 
+    def test_rejected_credentials_have_explicit_recovery_status(self):
+        result=self.base(worker_running=False,transport_connected=False,retry_after_seconds=900,
+                         last_result={"last_failure":"FEED_CREDENTIAL_REJECTED"})
+        self.assertEqual(result["state"],"BLOCKED")
+        self.assertEqual(result["reason"],"FEED_CREDENTIAL_REJECTED")
+        self.assertEqual(result["retry_after_seconds"],900)
+        self.assertFalse(result["live_prices_verified"])
+
 if __name__=="__main__":
     unittest.main()

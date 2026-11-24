@@ -65,7 +65,7 @@ class DynamicFeedSelection:
             if self.explicit_selection:
                 current=set(feed_supervisor.worker.active_keys)
                 if self._explicit_base_keys is None:
-                    self._explicit_base_keys=current-set(self._requested_keys)
+                    self._explicit_base_keys=set(getattr(feed_supervisor,"requested_keys",current))-set(self._requested_keys)
                 desired=self._explicit_base_keys|INDEX_KEYS|set(self._requested_keys)
                 if desired!=current and settings.provider=="UPSTOX" and settings.upstox_token and settings.licensed_data_access and settings.entitlement_confirmed:
                     await feed_supervisor.stop()

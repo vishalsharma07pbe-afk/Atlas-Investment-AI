@@ -81,4 +81,16 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"],"STOPPED")
         self.assertEqual(result["sessions"],1)
 
+    async def test_rejected_credentials_stop_immediately(self):
+        attempts=[]
+        async def session(*args,**kwargs):
+            attempts.append(1)
+            raise AuthorizationError("private detail",code="FEED_CREDENTIAL_REJECTED")
+        async def no_sleep(delay):self.fail("Should not retry rejected credentials")
+        result=await reconnecting_stream("secret",["NSE_EQ|INE002A01018"],lambda x:None,
+            stop=asyncio.Event(),session=session,sleep=no_sleep)
+        self.assertEqual(len(attempts),1)
+        self.assertEqual(result["last_failure"],"FEED_CREDENTIAL_REJECTED")
+        self.assertNotIn("private detail",str(result))
+
 if __name__=="__main__":unittest.main()

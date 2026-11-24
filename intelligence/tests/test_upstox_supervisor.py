@@ -21,4 +21,21 @@ class SupervisorTests(unittest.IsolatedAsyncioTestCase):
         await supervisor.stop()
         self.assertFalse(supervisor.worker.cache.connected)
 
+    async def test_credential_rejection_cooldown_survives_stop(self):
+        class Worker(QuoteWorker):
+            async def run(self,*args,**kwargs):
+                return {"status":"DISCONNECTED","last_failure":"FEED_CREDENTIAL_REJECTED"}
+        ticks=[0]
+        supervisor=FeedSupervisor(Worker(),clock=lambda:ticks[0])
+        config=dict(enabled=True,keys=[KEY],token="secret",provider="UPSTOX",rights=True,entitlement=True)
+        self.assertEqual((await supervisor.start(**config))["status"],"STARTING")
+        await supervisor.task
+        self.assertEqual(supervisor.status()["retry_after_seconds"],900)
+        await supervisor.stop()
+        self.assertEqual((await supervisor.start(**config))["status"],"RECOVERY_COOLDOWN")
+        self.assertEqual(supervisor.requested_keys,{KEY})
+        ticks[0]=901
+        self.assertEqual((await supervisor.start(**config))["status"],"STARTING")
+        await supervisor.stop()
+
 if __name__=="__main__":unittest.main()

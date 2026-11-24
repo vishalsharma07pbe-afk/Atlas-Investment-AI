@@ -6,11 +6,13 @@ import os
 import re
 import httpx
 from urllib.parse import quote, urlencode
-from .provider_router import Quote, ProviderFailure, ReadOnlyRouter
+from .provider_router import Quote, ProviderFailure, ReadOnlyRouter, CircuitBreaker
 
 SYMBOL_RE = re.compile(r"^[A-Z0-9._&-]{1,40}$")
 KEY_RE = re.compile(r"^[A-Z0-9_|.-]{3,120}$")
 DEFAULT_TIMEOUT = 5
+# Circuit state survives separate HTTP requests within this process.
+quote_breaker = CircuitBreaker()
 
 def _request(url, headers):
     try:
@@ -132,12 +134,16 @@ def configured_router():
     # Route eligibility is checked per requested symbol, not merely per provider.
     class SymbolScopedRouter(ReadOnlyRouter):
         def quote(self, symbol, max_age_seconds=60):
+            if symbol in mapping and symbol in us_symbols:
+                # The legacy symbol-only endpoint cannot distinguish venues.
+                return {"status":"UNAVAILABLE","live":False,"quote":None,"attempts":[],
+                        "notice":"Ambiguous Indian/US symbol mapping; use an unambiguous instrument identity.","reason":"AMBIGUOUS_MARKET_IDENTITY"}
             self.adapters = [
                 ("UPSTOX", adapters[0][1], upstox_allowed and symbol in mapping),
                 ("POLYGON", adapters[1][1], polygon_allowed and symbol in us_symbols),
             ]
             return super().quote(symbol, max_age_seconds)
-    return SymbolScopedRouter(adapters)
+    return SymbolScopedRouter(adapters, breaker=quote_breaker)
 
 def quote_status(symbol, max_age_seconds=60):
     result = configured_router().quote(symbol, max_age_seconds)
@@ -152,5 +158,6 @@ def provider_status():
          "authorization_gate":os.getenv("ATLAS_UPSTOX_QUOTES_AUTHORIZED", "false").lower()=="true"},
         {"code":"POLYGON","configured":bool(os.getenv("ATLAS_POLYGON_API_KEY")),
          "authorization_gate":os.getenv("ATLAS_POLYGON_QUOTES_AUTHORIZED", "false").lower()=="true"}],
-        "automatic_fallback_available": True, "streaming_verified": False,
-        "notice":"Quote requests require independently authorized credentials; configured does not prove entitlement."}
+        "automatic_fallback_available": False, "streaming_verified": False,
+        "circuits":[quote_breaker.status(name) for name in ("UPSTOX","POLYGON")],
+        "notice":"Quote requests require independently authorized credentials. Indian and US instruments cannot substitute for one another; a same-market backup is not configured."}

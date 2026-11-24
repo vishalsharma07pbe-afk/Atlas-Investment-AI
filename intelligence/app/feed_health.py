@@ -16,8 +16,15 @@ def assess_feed(status: dict, now: datetime | None = None) -> dict:
         frames = 0
     if not isinstance(rejected, int) or isinstance(rejected, bool) or rejected < 0:
         rejected = 0
+    last_result=status.get("last_result") or {}
+    retry_after=status.get("retry_after_seconds",0)
+    retry_after=retry_after if type(retry_after) is int and retry_after>0 else 0
     if not configured:
         state, reason = "BLOCKED", "PROVIDER_AUTHORIZATION_NOT_VERIFIED"
+    elif not running and retry_after and last_result.get("last_failure")=="FEED_CREDENTIAL_REJECTED":
+        state, reason = "BLOCKED", "FEED_CREDENTIAL_REJECTED"
+    elif not running and retry_after:
+        state, reason = "DISCONNECTED", "RECOVERY_COOLDOWN"
     elif waiting and not running:
         state, reason = "READY", "WAITING_FOR_EQUITY_HOLDING"
     elif not running:
@@ -37,6 +44,7 @@ def assess_feed(status: dict, now: datetime | None = None) -> dict:
         "frames_processed": frames, "rejected_entries": rejected,
         "cached_instruments": max(0, int(status.get("cached_instruments", 0))) if isinstance(status.get("cached_instruments", 0), int) else 0,
         "configuration_ready": configured,
+        "retry_after_seconds":retry_after,
         "fresh_provider_frames": connected and frames > 0 and rejected < frames,
         "live_prices_verified": False,
         "entitlement_verified": False,
