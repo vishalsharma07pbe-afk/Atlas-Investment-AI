@@ -56,3 +56,20 @@ class ResearchReliabilityTests(unittest.TestCase):
         self.assertIn("REGULATORY_HEADLINE_REVIEW",result["warnings"])
         self.assertIn("STRATEGY_BACKTEST_NOT_VERIFIED",result["blockers"])
         self.assertIn("ADJUSTED_PRICE_HISTORY_REQUIRED",result["blockers"])
+
+    def test_conclusion_preserves_blockers_and_surfaces_negative_replay(self):
+        from app.research_reliability import attach_conclusions
+        item={"as_of":"2026-11-23","research_reliability":{"warnings":[],"blockers":["VALUATION_NOT_VERIFIED"]},
+              "matched_strategy_replay":{"as_of":"2026-11-23","status":"REPLAY_OBSERVED","small_sample":True,
+                   "cost_scenarios":[{"net_return_percent":-1}]},
+              "ai_review":{"reviews":[{"provider":"OLLAMA"}]}}
+        snapshot={"enabled":True,"sections":[{"section":"NSE","status":"READY","result":{"horizons":{
+            "SWING":{"status":"TECHNICAL_WATCH_ONLY","blockers":["EVENT_RISK_NOT_VERIFIED"],"candidates":[item]}}}}]}
+        attach_conclusions(snapshot)
+        result=item["research_conclusion"]
+        self.assertEqual(result["status"],"REVIEW_REQUIRED")
+        self.assertIn("MATCHED_REPLAY_NONPOSITIVE_AFTER_COSTS",result["warnings"])
+        self.assertIn("EVENT_RISK_NOT_VERIFIED",result["blockers"])
+        self.assertIn("VALUATION_NOT_VERIFIED",result["blockers"])
+        self.assertEqual(result["evidence"]["valuation"],"NOT_VERIFIED")
+        self.assertEqual(result["evidence"]["ai"],"COMMENTARY_AVAILABLE")
