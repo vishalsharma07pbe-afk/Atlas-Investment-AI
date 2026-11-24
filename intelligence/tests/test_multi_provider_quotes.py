@@ -4,6 +4,10 @@ from unittest.mock import Mock, patch
 from app import multi_provider_quotes as multi
 
 class MultiProviderTests(unittest.TestCase):
+    def setUp(self):
+        stub=patch.object(multi,"quote_breaker",multi.CircuitBreaker())
+        stub.start()
+        self.addCleanup(stub.stop)
     def test_offline_fails_closed(self):
         with patch.dict("os.environ", {"UPSTOX_ACCESS_TOKEN":"", "ATLAS_POLYGON_API_KEY":"",
                                      "ATLAS_UPSTOX_QUOTES_AUTHORIZED":"false",
@@ -35,22 +39,31 @@ class MultiProviderTests(unittest.TestCase):
         with patch.object(multi.httpx,"get",return_value=response) as get:
             multi._request("https://api.upstox.com",{"Accept":"application/json"})
         self.assertEqual(get.call_args.kwargs["headers"]["User-Agent"],"ATLAS-Research/1.0")
-    def test_fallback_after_primary_error(self):
+    def test_ambiguous_cross_market_identity_never_routes(self):
         stamp = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
         def fake_request(url, headers):
             if "upstox.com" in url:
                 raise multi.ProviderFailure("UNAVAILABLE")
             return {"status":"OK","results":{"T":"AAPL","p":180.25,"t":stamp}}
-        with patch.object(multi,"_request",side_effect=fake_request), patch.dict("os.environ",{
+        with patch.object(multi,"_request",side_effect=fake_request) as request, patch.dict("os.environ",{
             "UPSTOX_ACCESS_TOKEN":"dummy","ATLAS_POLYGON_API_KEY":"dummy",
             "ATLAS_UPSTOX_SYMBOL_MAP":'{"AAPL":"NSE_EQ|TEST"}',
             "ATLAS_UPSTOX_QUOTES_AUTHORIZED":"true",
             "ATLAS_POLYGON_QUOTES_AUTHORIZED":"true",
             "ATLAS_POLYGON_US_SYMBOLS":"AAPL"},clear=False):
             result = multi.quote_status("AAPL")
-            self.assertEqual(result["status"],"VALIDATED")
-            self.assertEqual(result["quote"]["source"],"POLYGON")
-            self.assertFalse(result["live_feed_verified"])
+            self.assertEqual(result["status"],"UNAVAILABLE")
+            self.assertEqual(result["reason"],"AMBIGUOUS_MARKET_IDENTITY")
+            request.assert_not_called()
+    def test_access_rejection_opens_shared_circuit_across_requests(self):
+        with patch.dict("os.environ",{"UPSTOX_ACCESS_TOKEN":"dummy","ATLAS_UPSTOX_SYMBOL_MAP":'{"RELIANCE":"NSE_EQ|INE002A01018"}',
+                                     "ATLAS_UPSTOX_QUOTES_AUTHORIZED":"true","ATLAS_POLYGON_US_SYMBOLS":""}), \
+             patch.object(multi,"_request",side_effect=multi.ProviderFailure("PROVIDER_ACCESS_REJECTED")) as request:
+            first=multi.quote_status("RELIANCE")
+            second=multi.quote_status("RELIANCE")
+            self.assertEqual(first["attempts"][0]["reason"],"PROVIDER_ACCESS_REJECTED")
+            self.assertEqual(second["attempts"][0]["status"],"CIRCUIT_OPEN")
+            request.assert_called_once()
     def test_reject_naive_time(self):
         with self.assertRaises(multi.ProviderFailure):
             multi._timestamp("2026-11-14T12:00:00")
