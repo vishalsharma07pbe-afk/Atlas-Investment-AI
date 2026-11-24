@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from .market_client import backend_json
 from .screener import screen
 from .mutual_fund_recommendations import CATEGORIES, dashboard
-from . import automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation
+from . import automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
 
 SECTIONS = ("NSE", "BSE", *CATEGORIES)
 DEFAULT_INTERVAL = 900
@@ -155,6 +155,11 @@ def read_snapshot(include_ai=True):
             automatic_news.attach(snapshot, _connect)
         except (ValueError, OSError, sqlite3.Error):
             snapshot["automatic_news_status"] = "UNAVAILABLE"
+        try:
+            snapshot["research_reliability"] = research_reliability.read(_connect,current) if enabled else {"status":"DISABLED"}
+        except (ValueError, OSError, sqlite3.Error):
+            snapshot["research_reliability"] = {"status":"UNAVAILABLE"}
+        research_reliability.attach(snapshot,snapshot["research_reliability"],current.astimezone(ZoneInfo("Asia/Kolkata")).date())
         try:
             return automatic_ai_review.attach(snapshot, _connect)
         except (ValueError, OSError, sqlite3.Error):
