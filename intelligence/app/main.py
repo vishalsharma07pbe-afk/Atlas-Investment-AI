@@ -1212,3 +1212,12 @@ def autonomous_research_overview():
         return research_snapshot()
     except (OSError, ValueError, sqlite3.Error) as exc:
         raise HTTPException(status_code=503, detail="Research snapshot storage unavailable") from exc
+
+@app.get("/api/v1/intelligence/research/watch-outcomes")
+def automatic_watch_outcomes(horizon: Literal["SWING", "SHORT_TERM", "LONG_TERM"] = "SWING"):
+    from .watch_outcomes import summary
+    from .autonomous_research import _connect
+    try:
+        return summary(_connect, horizon)
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        raise HTTPException(status_code=503, detail="Watch outcome history unavailable") from exc

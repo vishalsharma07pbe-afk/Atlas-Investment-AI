@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from .market_client import backend_json
 from .screener import screen
 from .mutual_fund_recommendations import CATEGORIES, dashboard
-from . import automatic_ai_review
+from . import automatic_ai_review, watch_outcomes
 
 SECTIONS = ("NSE", "BSE", *CATEGORIES)
 DEFAULT_INTERVAL = 900
@@ -153,7 +153,12 @@ class ResearchScheduler:
         while not self.stopping.is_set():
             try:
                 await asyncio.to_thread(refresh_once)
-                await asyncio.to_thread(automatic_ai_review.refresh, read_snapshot(include_ai=False), _connect)
+                snapshot = await asyncio.to_thread(read_snapshot, False)
+                try:
+                    await asyncio.to_thread(watch_outcomes.refresh, snapshot, _connect)
+                except Exception:
+                    pass  # Outcome collection cannot block AI or deterministic research.
+                await asyncio.to_thread(automatic_ai_review.refresh, snapshot, _connect)
             except Exception:
                 # Storage failures must not terminate future attempts.
                 pass
