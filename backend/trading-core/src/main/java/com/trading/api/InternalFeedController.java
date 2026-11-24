@@ -53,6 +53,64 @@ public class InternalFeedController {
     return marketData.candles(id,limit);
   }
 
+  /** Public instrument identities with recent completed daily evidence; no holdings. */
+  @GetMapping("/discovery-universe")
+  public List<Map<String,Object>> discoveryUniverse(HttpServletRequest request,@RequestParam String exchange) {
+    requireServiceToken(request.getHeader("X-Atlas-Service-Token"));
+    requireExchange(exchange);
+    return jdbc.queryForList("""
+      SELECT i.id,e.code AS exchange,i.symbol,i.series,i.isin,i.instrument_type,i.listing_status,i.active,
+             count(*) OVER () AS recent_registry_count
+      FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
+      JOIN LATERAL (
+        SELECT c.close,c.volume,c.candle_time FROM market_candles c
+        WHERE c.instrument_id=i.id AND c.timeframe='1d' AND c.is_complete
+          AND c.quality_status IN ('VALIDATED_MANUAL','PROVIDER_VALIDATED')
+          AND c.candle_time < (now() AT TIME ZONE 'Asia/Kolkata')::date::timestamp AT TIME ZONE 'Asia/Kolkata'
+          AND c.candle_time >= ((now() AT TIME ZONE 'Asia/Kolkata')::date-4)::timestamp AT TIME ZONE 'Asia/Kolkata'
+        ORDER BY c.candle_time DESC LIMIT 1
+      ) latest ON true
+      WHERE e.code=? AND i.active AND i.listing_status='ACTIVE' AND i.series='EQ'
+        AND i.instrument_type IN ('EQ','EQUITY','STOCK')
+      ORDER BY latest.close*latest.volume DESC NULLS LAST,i.id LIMIT 200
+      """,exchange);
+  }
+
+  /** Batch reads the same validated history used by the existing single-instrument route. */
+  @GetMapping("/discovery-candles")
+  public List<Map<String,Object>> discoveryCandles(HttpServletRequest request,@RequestParam String exchange,
+      @RequestParam List<Long> ids) {
+    requireServiceToken(request.getHeader("X-Atlas-Service-Token"));
+    requireExchange(exchange);
+    if(ids==null||ids.isEmpty()||ids.size()>20||new HashSet<>(ids).size()!=ids.size()
+        ||ids.stream().anyMatch(id->id==null||id<=0))
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Expected 1-20 distinct positive instrument IDs");
+    List<Object> args=new ArrayList<>();
+    args.add(exchange);
+    args.addAll(ids);
+    // Only the placeholder count varies; all values remain bound SQL parameters.
+    String placeholders=String.join(",",Collections.nCopies(ids.size(),"?"));
+    return jdbc.queryForList("""
+      SELECT i.id AS instrument_id,c.* FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
+      CROSS JOIN LATERAL (
+        SELECT (b.candle_time AT TIME ZONE e.timezone)::date trade_date,b.open,b.high,b.low,b.close,b.volume,
+          b.adjustment_status,b.revision,b.quality_status,ds.source_code
+        FROM market_candles b LEFT JOIN data_sources ds ON ds.id=b.source_id
+        WHERE b.instrument_id=i.id AND b.timeframe='1d' AND b.is_complete
+          AND b.quality_status IN ('VALIDATED_MANUAL','PROVIDER_VALIDATED')
+          AND b.candle_time < (now() AT TIME ZONE 'Asia/Kolkata')::date::timestamp AT TIME ZONE 'Asia/Kolkata'
+        ORDER BY b.candle_time DESC LIMIT 250
+      ) c
+      WHERE e.code=? AND i.active AND i.listing_status='ACTIVE' AND i.series='EQ'
+        AND i.instrument_type IN ('EQ','EQUITY','STOCK') AND i.id IN (
+      """+placeholders+") ORDER BY i.id,c.trade_date",args.toArray());
+  }
+
+  private void requireExchange(String exchange) {
+    if(!Set.of("NSE","BSE").contains(exchange))
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Unsupported exchange");
+  }
+
   @GetMapping("/data-health/summary")
   public Map<String,Object> dataHealth(HttpServletRequest request) {
     requireServiceToken(request.getHeader("X-Atlas-Service-Token"));
