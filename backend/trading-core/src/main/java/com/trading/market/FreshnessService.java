@@ -7,9 +7,10 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 @Service public class FreshnessService {
  private final JdbcTemplate jdbc;private final MarketCalendarService calendar;
+ @Value("${atlas.market.freshness.enabled:true}") boolean enabled;
  @Value("${atlas.market.freshness.max-age-minutes:30}") long threshold;
  public FreshnessService(JdbcTemplate jdbc,MarketCalendarService calendar){this.jdbc=jdbc;this.calendar=calendar;}
- @Scheduled(fixedDelayString="${atlas.market.freshness.poll-ms:60000}") public void scan(){scan(Instant.now());}
+ @Scheduled(fixedDelayString="${atlas.market.freshness.poll-ms:60000}") public void scan(){if(enabled)scan(Instant.now());}
  public void scan(Instant now){
   scanFunds(now);
   for(String exchange:List.of("NSE","BSE")){

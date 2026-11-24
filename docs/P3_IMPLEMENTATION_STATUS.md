@@ -1,6 +1,6 @@
 # ATLAS P3 implementation status
 
-Updated: 2026-11-19
+Updated: 2026-11-24
 
 P3 adds a production **deployment contract**, release automation, operational safety tools, accessibility improvements, onboarding, and launch documentation. It does not claim that a public production environment exists.
 
@@ -8,6 +8,9 @@ P3 adds a production **deployment contract**, release automation, operational sa
 
 - Multi-stage production frontend image serving static assets through Nginx rather than Vite's development server.
 - Same-origin reverse proxy for Spring and FastAPI, security headers, bounded request sizes, health checks, non-root host exposure, restart policies, private service networks, read-only application filesystems, and resource ceilings.
+- The production intelligence proxy is protected by an application-session subrequest; direct anonymous access through the production gateway is denied.
+- Production sessions can be forced onto Secure cookies, while unsafe cookie-authenticated mutations are protected by same-origin checks.
+- Pull-request dependency review and CodeQL scanning cover the supported Java, JavaScript/TypeScript, and Python sources.
 - Tag-triggered GitHub release workflow that first runs the full CI workflow, then publishes immutable backend, intelligence, and frontend images to GHCR with SBOM and provenance attestations.
 - Quiesced PostgreSQL and intelligence-state backup script, checksum manifest, path-safe offline verifier, and restore-drill procedure.
 - Bounded HTTP smoke/load tool with latency and error-rate gates. Remote targets require an explicit flag.
@@ -27,17 +30,21 @@ P3 adds a production **deployment contract**, release automation, operational sa
 
 See `docs/LAUNCH_ACCEPTANCE.md`. A launch stays blocked until every required gate has an owner, dated evidence, and approval.
 
-Repository validation completed on 2026-11-19:
+Latest repository validation evidence:
 
-- frontend: 47 test files and 85 tests passed; production TypeScript/Vite build passed;
-- intelligence: 381 tests passed inside the Python 3.12 production image;
-- operations safeguards: 6 tests passed;
-- backend production image compiled and packaged successfully;
-- all three production images built successfully as non-root runtimes;
+- frontend rerun on 2026-11-24: 48 test files and 86 tests passed; production TypeScript/Vite build passed;
+- operations rerun on 2026-11-24: 7 safeguards passed and production Compose rendered with non-secret placeholders;
+- backend validation on 2026-11-19: the Spring/Testcontainers suite passed and the production image compiled and packaged successfully;
+- intelligence validation on 2026-11-19: 383 tests passed inside the Python 3.12 production image;
+- image validation on 2026-11-19: all three production images built successfully as non-root runtimes;
 - production Compose rendered successfully with non-secret placeholders; and
 - the built Nginx configuration passed `nginx -t`.
 - an isolated read-only frontend runtime passed 100/100 bounded health requests
   with 0% errors and 20.8 ms p95 on the local validation host.
+
+An image rebuild was attempted on 2026-11-24, but Docker Desktop was not running.
+The source build and static production configuration checks still passed; image
+revalidation must be repeated after the local Docker daemon is started.
 
 These checks are release evidence, not proof of a deployed environment, licensed
 provider access, disaster-recovery success, or production capacity.

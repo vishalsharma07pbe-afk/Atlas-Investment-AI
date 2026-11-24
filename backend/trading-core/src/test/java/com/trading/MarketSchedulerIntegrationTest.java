@@ -9,7 +9,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import com.trading.market.*;
-@SpringBootTest
+@SpringBootTest(properties={"ATLAS_JWT_SECRET=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","atlas.market.freshness.enabled=false","atlas.alerts.scheduler.enabled=false"})
 class MarketSchedulerIntegrationTest {
  static final String EXTERNAL=System.getenv("TEST_DATABASE_URL");
  static final PostgreSQLContainer<?> PG=EXTERNAL==null?new PostgreSQLContainer<>("postgres:16-alpine").withInitScript("test-schema.sql"):null;
@@ -61,10 +61,10 @@ class MarketSchedulerIntegrationTest {
   jdbc.update("INSERT INTO instruments(exchange_id,symbol,series,source) VALUES ((SELECT id FROM exchanges WHERE code='NSE'),'FRESHTEST','EQ','MANUAL_CSV') ON CONFLICT DO NOTHING");
   long id=jdbc.queryForObject("SELECT id FROM instruments WHERE symbol='FRESHTEST'",Long.class);
   long src=jdbc.queryForObject("SELECT id FROM data_sources WHERE source_code='SCHED_TEST'",Long.class);
-  jdbc.update("INSERT INTO instrument_source_freshness(instrument_id,source_id,last_synced_at) VALUES (?,?,now()-interval '2 days') ON CONFLICT(instrument_id,source_id) DO UPDATE SET last_synced_at=EXCLUDED.last_synced_at",id,src);
   // A seeded REGULAR session is needed for a deterministic market-open scan.
   jdbc.update("INSERT INTO market_sessions(exchange_id,session_date,session_type,is_trading_day) VALUES ((SELECT id FROM exchanges WHERE code='NSE'),'2026-11-16','REGULAR',true) ON CONFLICT DO NOTHING");
   Instant now=ZonedDateTime.of(2026,11,16,10,0,0,0,MarketCalendarService.IST).toInstant();
+  jdbc.update("INSERT INTO instrument_source_freshness(instrument_id,source_id,last_synced_at) VALUES (?,?,?) ON CONFLICT(instrument_id,source_id) DO UPDATE SET last_synced_at=EXCLUDED.last_synced_at",id,src,java.sql.Timestamp.from(now.minus(Duration.ofDays(2))));
   freshness.scan(now);freshness.scan(now);
   assertThat(jdbc.queryForObject("SELECT count(*) FROM data_quality_events WHERE instrument_id=? AND source_id=? AND event_type='SOURCE_STALE' AND resolved_at IS NULL",Long.class,id,src)).isEqualTo(1);
  }

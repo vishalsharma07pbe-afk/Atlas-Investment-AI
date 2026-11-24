@@ -46,7 +46,7 @@ jobs:
       - run: python -m unittest discover -s tests -v
 
   backend:
-    name: Spring Boot compile and package
+    name: Spring Boot unit and database integration tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -59,9 +59,10 @@ jobs:
           java-version: '21'
           cache: maven
           cache-dependency-path: backend/trading-core/pom.xml
-      # Integration tests require PostgreSQL and the project's initialized schema.
-      # Compile them here; execute database integration tests in the Docker-enabled environment.
-      - run: mvn -B -ntp -DskipTests package
+      # GitHub-hosted runners provide Docker. Testcontainers creates disposable
+      # PostgreSQL instances and Flyway applies the real migration chain.
+      # The cross-service HTTP test has its own job below.
+      - run: mvn -B -ntp -Dtest='*Test,!AiBridgeHttpIntegrationTest' test
 
   deployment-contract:
     name: Compose config and Python syntax

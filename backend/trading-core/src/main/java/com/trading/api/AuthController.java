@@ -22,6 +22,7 @@ public class AuthController {
   private final AuthSecurity.JwtTokens jwt;
   @Value("${ALLOW_REGISTRATION:false}") boolean allowRegistration;
   @Value("${ATLAS_SESSION_TTL_SECONDS:604800}") long configuredSessionTtlSeconds;
+  @Value("${ATLAS_SESSION_COOKIE_SECURE:false}") boolean forceSecureCookie;
   AuthController(JdbcTemplate jdbc,PasswordEncoder encoder,AuthSecurity.JwtTokens jwt){
     this.jdbc=jdbc;this.encoder=encoder;this.jwt=jwt;
   }
@@ -60,7 +61,7 @@ public class AuthController {
     UUID id=(UUID)users.get(0).get("id");
     long sessionTtlSeconds=Math.max(900,Math.min(configuredSessionTtlSeconds,2_592_000));
     String token=jwt.issue(id,sessionTtlSeconds);
-    response.addHeader("Set-Cookie",sessionCookie(token,sessionTtlSeconds,http.isSecure()).toString());
+    response.addHeader("Set-Cookie",sessionCookie(token,sessionTtlSeconds,forceSecureCookie||http.isSecure()).toString());
     return Map.of("access_token",token,"token_type","Bearer","expires_in",sessionTtlSeconds);
   }
   private static String hash(String value){
@@ -73,7 +74,7 @@ public class AuthController {
     String token=authorization!=null && authorization.startsWith("Bearer ") ? authorization.substring(7) : cookieToken(request);
     if(token==null)throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
     jwt.revoke(token,AuthSecurity.currentUser());
-    response.addHeader("Set-Cookie",sessionCookie("",0,request.isSecure()).toString());
+    response.addHeader("Set-Cookie",sessionCookie("",0,forceSecureCookie||request.isSecure()).toString());
     return Map.of("logged_out",true);
   }
   private static String cookieToken(HttpServletRequest request){

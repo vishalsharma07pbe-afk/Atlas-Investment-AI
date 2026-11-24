@@ -86,37 +86,65 @@ import org.springframework.stereotype.Service;
   JsonNode body=json.readTree(http.text(url,token(user),8_000_000));JsonNode candles=body.path("data").path("candles");
   if(!candles.isArray())throw new IllegalStateException("Invalid candle response");
   long source=jdbc.queryForObject("SELECT id FROM data_sources WHERE source_code='UPSTOX'",Long.class);
-  int count=0;
+  UUID run=jdbc.queryForObject("""
+    INSERT INTO ingestion_runs(source_id,job_name,status,started_at,source_revision)
+    VALUES (?,'upstox-historical-candles','RUNNING',now(),?) RETURNING id
+    """,UUID.class,source,"UPSTOX_API:"+key+":"+timeframe+":"+from+":"+to);
+  int count=0,rejected=0;
   for(JsonNode row:candles){
-   if(!row.isArray()||row.size()<6)continue;
-   OffsetDateTime timestamp=OffsetDateTime.parse(row.get(0).asText());
-   BigDecimal open=row.get(1).decimalValue(),high=row.get(2).decimalValue(),low=row.get(3).decimalValue(),close=row.get(4).decimalValue();
-   long volume=row.get(5).asLong();
-   jdbc.update("""
-     INSERT INTO market_candles(instrument_id,timeframe,candle_time,source_id,open,high,low,close,volume,is_complete,quality_status,adjustment_status)
-     VALUES (?,?,?,?,?,?,?,?,?,true,'PROVIDER','RAW_UNADJUSTED')
-     ON CONFLICT(instrument_id,timeframe,candle_time) DO UPDATE SET open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,volume=EXCLUDED.volume,source_id=EXCLUDED.source_id,received_at=now()
-     """,instrument,timeframe,java.sql.Timestamp.from(timestamp.toInstant()),source,open,high,low,close,volume);
-   count++;
+   try{
+    if(!row.isArray()||row.size()<6)throw new IllegalArgumentException("INVALID_CANDLE_SHAPE");
+    OffsetDateTime timestamp=OffsetDateTime.parse(row.get(0).asText());
+    BigDecimal open=row.get(1).decimalValue(),high=row.get(2).decimalValue(),low=row.get(3).decimalValue(),close=row.get(4).decimalValue();
+    if(open.signum()<=0||high.signum()<=0||low.signum()<=0||close.signum()<=0||
+       high.compareTo(open)<0||high.compareTo(close)<0||high.compareTo(low)<0||
+       low.compareTo(open)>0||low.compareTo(close)>0)throw new IllegalArgumentException("INVALID_OHLC");
+    if(!row.get(5).canConvertToLong())throw new IllegalArgumentException("INVALID_VOLUME");
+    long volume=row.get(5).asLong();if(volume<0)throw new IllegalArgumentException("INVALID_VOLUME");
+    LocalDate tradeDate=timestamp.atZoneSameInstant(MarketCalendarService.IST).toLocalDate();
+    if(tradeDate.isBefore(from)||tradeDate.isAfter(to))throw new IllegalArgumentException("CANDLE_OUTSIDE_REQUESTED_RANGE");
+    jdbc.update("""
+      INSERT INTO market_candles(instrument_id,timeframe,candle_time,source_id,ingestion_run_id,open,high,low,close,volume,is_complete,quality_status,adjustment_status)
+      VALUES (?,?,?,?,?,?,?,?,?,?,true,'PROVIDER_VALIDATED','RAW_UNADJUSTED')
+      ON CONFLICT(instrument_id,timeframe,candle_time) DO UPDATE SET open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,volume=EXCLUDED.volume,source_id=EXCLUDED.source_id,ingestion_run_id=EXCLUDED.ingestion_run_id,quality_status=EXCLUDED.quality_status,received_at=now()
+      """,instrument,timeframe,java.sql.Timestamp.from(timestamp.toInstant()),source,run,open,high,low,close,volume);
+    count++;
+   }catch(RuntimeException ex){
+    rejected++;
+    jdbc.update("""
+      INSERT INTO data_quality_events(instrument_id,source_id,ingestion_run_id,severity,event_type,details)
+      VALUES (?,?,?,'ERROR','PROVIDER_CANDLE_REJECTED',jsonb_build_object('reason',?,'timeframe',?))
+      """,instrument,source,run,ex.getMessage(),timeframe);
+   }
   }
-  jdbc.update("INSERT INTO instrument_source_freshness(instrument_id,source_id,last_synced_at,latest_candle_at) VALUES (?,?,now(),(SELECT max(candle_time) FROM market_candles WHERE instrument_id=? AND timeframe= ?)) ON CONFLICT(instrument_id,source_id) DO UPDATE SET last_synced_at=now(),latest_candle_at=EXCLUDED.latest_candle_at",instrument,source,instrument);
+  jdbc.update("UPDATE ingestion_runs SET status=?,finished_at=now(),records_seen=?,records_written=?,failure_count=? WHERE id=?",
+    count>0?"SUCCESS":"FAILED",candles.size(),count,rejected,run);
+  if(count==0)throw new IllegalStateException("Provider returned no valid candles");
+  jdbc.update("INSERT INTO instrument_source_freshness(instrument_id,source_id,last_synced_at,latest_candle_at) VALUES (?,?,now(),(SELECT max(candle_time) FROM market_candles WHERE instrument_id=? AND timeframe=?)) ON CONFLICT(instrument_id,source_id) DO UPDATE SET last_synced_at=now(),latest_candle_at=EXCLUDED.latest_candle_at",instrument,source,instrument,timeframe);
   return count;
  }
  public int syncHoldings(UUID user)throws Exception{
   JsonNode root=json.readTree(http.text("https://api.upstox.com/v2/portfolio/long-term-holdings",token(user),3_000_000));
   JsonNode rows=root.path("data");if(!rows.isArray())throw new IllegalStateException("Invalid holdings response");
-  int count=0;
+  int count=0;Set<String> received=new HashSet<>();
   for(JsonNode item:rows){
    String symbol=item.path("trading_symbol").asText("");
    if(!symbol.matches("[A-Za-z0-9._&-]{1,50}"))continue;
    BigDecimal quantity=item.path("quantity").decimalValue(),avg=item.path("average_price").decimalValue();
    if(quantity.signum()<=0||avg.signum()<0)continue;
+   String normalized=symbol.toUpperCase(Locale.ROOT);received.add(normalized);
    jdbc.update("""
      INSERT INTO personal_holdings(user_id,symbol,asset_type,quantity,average_cost,notes)
      VALUES (?,?,'EQUITY',?,?,'UPSTOX_SYNC')
      ON CONFLICT(user_id,symbol,asset_type) DO UPDATE SET quantity=EXCLUDED.quantity,average_cost=EXCLUDED.average_cost,notes=EXCLUDED.notes,updated_at=now()
-     """,user,symbol.toUpperCase(Locale.ROOT),quantity,avg);count++;
+     """,user,normalized,quantity,avg);count++;
   }
+  // Remove only positions previously created by this broker sync. Manually
+  // maintained holdings remain untouched.
+  if(received.isEmpty())jdbc.update("DELETE FROM personal_holdings WHERE user_id=? AND notes='UPSTOX_SYNC'",user);
+  else jdbc.update("DELETE FROM personal_holdings WHERE user_id=? AND notes='UPSTOX_SYNC' AND symbol NOT IN ("+
+    String.join(",",Collections.nCopies(received.size(),"?"))+ ")",
+    java.util.stream.Stream.concat(java.util.stream.Stream.of(user),received.stream()).toArray());
   return count;
  }
 }

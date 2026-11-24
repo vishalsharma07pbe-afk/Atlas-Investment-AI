@@ -11,6 +11,8 @@ import GoalComparison from "./GoalComparison";
 import ResearchJournal from "./ResearchJournal";
 import FeeImpact from "./FeeImpact";
 import PortfolioConcentration from "./PortfolioConcentration";
+import PortfolioPerformanceHistory from "./PortfolioPerformanceHistory";
+import PersonalAlerts from "./PersonalAlerts";
 import MutualFundHoldings from "./MutualFundHoldings";
 import MarketIntelligence from "./MarketIntelligence";
 import BrokerResearch from "./BrokerResearch";
@@ -214,6 +216,8 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
             <ResearchJournal/>
             <FeeImpact/>
             <PortfolioConcentration revision={portfolioRevision}/>
+            <PortfolioPerformanceHistory revision={portfolioRevision}/>
+            <PersonalAlerts/>
           </div></details>
           <section className="panel glass holdings-panel"><div className="sectionhead"><div><small className="section-kicker">POSITION RECORDS</small><h2>Positions</h2></div><label className="upload">Import CSV <input type="file" accept=".csv,text/csv" hidden disabled={loading} onChange={e => { const file = e.target.files?.[0]; if (file) importCsv(file); e.target.value = ""; }}/></label></div><p className="muted tiny">This table is your editable position record. CSV format: symbol,asset_type,quantity,average_cost,last_price. Imports update matching positions; they do not add transactions.</p><div className="tablewrap"><table><thead><tr><th>SYMBOL</th><th>TYPE</th><th>QTY</th><th>AVG COST</th><th>LAST PRICE*</th><th>INVESTED</th><th>VALUE*</th><th>P&amp;L*</th><th/></tr></thead><tbody>
             {holdings.map(holding => <tr key={holding.id}><td className="symbol">{holding.symbol}</td><td><span className="asset-pill">{holding.asset_type}</span></td><td>{holding.quantity}</td><td>{fmt(holding.average_cost)}</td><td>{fmt(holding.last_price)}</td><td>{fmt(holding.invested)}</td><td>{fmt(holding.market_value)}</td><td className={(holding.unrealized_pnl || 0) >= 0 ? "positive" : "negative"}>{fmt(holding.unrealized_pnl)}</td><td><button className="danger" onClick={() => remove(holding.id)}>Delete</button></td></tr>)}

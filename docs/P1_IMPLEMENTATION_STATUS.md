@@ -1,6 +1,6 @@
 # ATLAS P1 Intelligence — implementation status
 
-Updated: 2026-11-18
+Updated: 2026-11-19
 
 ATLAS treats provider observations as evidence, not as automatic investment advice. Missing or unauthorized inputs remain visibly unavailable.
 
@@ -16,14 +16,15 @@ ATLAS treats provider observations as evidence, not as automatic investment advi
 - Existing portfolio valuation, allocation, concentration, stress scenarios, and evidence-gated research views.
 - Existing mutual-fund discovery and fail-closed ranking methodology.
 - Existing on-demand daily price/RSI/volume threshold checks.
+- User-scoped external cash-flow ledger and dated portfolio valuation snapshots, with XIRR and maximum-drawdown calculations that stay unavailable until enough history exists.
+- User-scoped price/NAV alert rules, scheduled evaluation against stored sourced observations, deduplicated in-app history, and read state.
 
 ## Blocked by missing evidence or product infrastructure
 
 - Mutual-fund Sharpe/Sortino, benchmark-relative returns, portfolio overlap, official expense ratios, riskometer, and category rankings need dated NAV history plus official AMC/AMFI/SEBI disclosures. The daily discovery catalog alone is not sufficient.
 - Bulk/block deals and promoter transactions need an authorized, documented source and revision policy.
-- Portfolio XIRR requires a transaction/cash-flow ledger; current holdings and average costs cannot reconstruct historical cash flows safely.
-- Portfolio drawdown requires dated portfolio valuation history, not only the current snapshot.
-- Persistent alert rules, background evaluation, delivery channels, preferences, and delivery history need user-scoped storage and a scheduler. Current threshold checks are explicitly on demand.
+- XIRR and drawdown require truthful user-entered/imported cash flows and multiple dated valuations; current holdings alone still cannot reconstruct history.
+- Email/push delivery and licensed news-trigger evaluation require separately configured providers. The implemented channel is in-app delivery.
 - Fair value is not derived from a P/E or P/B comparison. A defensible valuation model needs forecast assumptions, point-in-time filing data, and a versioned methodology.
 
 ## Provider and safety boundaries
@@ -36,7 +37,7 @@ ATLAS treats provider observations as evidence, not as automatic investment advi
 
 ## Verification
 
-- Intelligence unit suite: 364 tests passing.
-- Frontend suite: 80 tests passing.
+- Intelligence unit suite: 383 tests passing.
+- Frontend suite: see `P0_P3_COMPLETION_AUDIT.md` for the release-branch result.
 - Frontend production build: passing.
 - Live configured-provider validation: 8/8 company sections, 7 key ratios, FII/DII daily records, and cited recent news returned for the validation instrument.
