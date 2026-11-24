@@ -41,6 +41,23 @@ class FundHistoryResearchServiceTest {
   service.scheduled();
   verify(jdbc).update(contains("SET status='FAILED'"),eq(123456L));
  }
+ @Test void sampledHistoriesUsesOneBoundedQueryAndKeepsSchemesSeparate(){
+  JdbcTemplate jdbc=mock(JdbcTemplate.class);
+  var service=new FundHistoryResearchService(jdbc,mock(AmfiFeedService.class));
+  LocalDate today=LocalDate.of(2026,11,24);
+  var first=Map.<String,Object>of("scheme_code",123L,"nav_date",today.minusDays(1),"nav",BigDecimal.TEN,"source_code","AMFI");
+  var second=Map.<String,Object>of("scheme_code",123L,"nav_date",today,"nav",BigDecimal.ONE,"source_code","AMFI");
+  var other=Map.<String,Object>of("scheme_code",456L,"nav_date",today,"nav",BigDecimal.TEN,"source_code","AMFI");
+  when(jdbc.queryForList(contains("scheme_code IN (?,?)"),eq(123L),eq(456L),eq(today),eq(today)))
+   .thenReturn(List.of(first,second,other));
+  assertTrue(service.sampledHistories(List.of(),today).isEmpty());
+  verifyNoInteractions(jdbc);
+  var result=service.sampledHistories(List.of(Map.of("scheme_code",123L),Map.of("scheme_code",456L)),today);
+  assertEquals(List.of(first,second),result.get(123L));
+  assertEquals(List.of(other),result.get(456L));
+  verify(jdbc,times(1)).queryForList(contains("scheme_code IN (?,?)"),eq(123L),eq(456L),eq(today),eq(today));
+  assertThrows(IllegalArgumentException.class,()->service.sampledHistories(Collections.nCopies(41,Map.of("scheme_code",123L)),today));
+ }
  @Test void datedHistoryWithAmfiAnchorProducesObservedReturns(){
   LocalDate end=LocalDate.of(2026,11,24);
   List<Map<String,Object>> rows=new ArrayList<>();
