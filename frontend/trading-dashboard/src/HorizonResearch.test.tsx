@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import {afterEach,describe,expect,it,vi} from "vitest";
-import {cleanup,render,screen} from "@testing-library/react";
+import {cleanup,fireEvent,render,screen} from "@testing-library/react";
 import HorizonResearch from "./HorizonResearch";
 
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
@@ -23,4 +23,17 @@ describe("horizon research",()=>{
   expect(await screen.findByText("failed")).toBeTruthy();
   expect(screen.queryByText("TEST")).toBeNull();
  });
+
+ it("shows independent cited reviews without changing technical qualification",async()=>{
+  const reviewed={...candidate,ai_review:{reviews:[{provider:"OLLAMA",findings:[{statement:"Historical volatility requires review.",evidence_ids:["OBS"]}]},{provider:"GEMINI",findings:[{statement:"Current company evidence is incomplete.",evidence_ids:["LIMITS"]}]}],reviewed_at:"2026-11-24T10:00:00Z",notice:"Unverified model commentary."}};
+  const enriched={...section,result:{...section.result,horizons:{...section.result.horizons,SWING:{...section.result.horizons.SWING,candidates:[reviewed]}}}};
+  vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,automatic_ai_status:"ENABLED",sections:[enriched]})})));
+  render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+  fireEvent.click(await screen.findByText("Automatic AI evidence review (2 providers)"));
+  expect(screen.getByText("OLLAMA")).toBeTruthy();
+  expect(screen.getByText("GEMINI")).toBeTruthy();
+  expect(screen.getByText(/event risk not verified/)).toBeTruthy();
+  expect(screen.getByText("Technical watch candidates")).toBeTruthy();
+ });
+
 });
