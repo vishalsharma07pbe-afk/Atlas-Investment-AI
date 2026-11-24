@@ -18,6 +18,7 @@ from urllib.parse import urlencode
 from .market_client import backend_json
 from .screener import screen
 from .mutual_fund_recommendations import CATEGORIES, dashboard
+from . import automatic_ai_review
 
 SECTIONS = ("NSE", "BSE", *CATEGORIES)
 DEFAULT_INTERVAL = 900
@@ -107,7 +108,7 @@ def refresh_once(market_loader=market_snapshot, fund_loader=fund_snapshot):
             _save(section)
 
 
-def read_snapshot():
+def read_snapshot(include_ai=True):
     enabled, interval = config()
     current = now()
     with closing(_connect()) as db:
@@ -126,9 +127,15 @@ def read_snapshot():
                          "generated_at": row["generated_at"], "attempted_at": row["attempted_at"],
                          "result": json.loads(row["payload"]) if row["payload"] else None,
                          "error_code": row["error_code"]})
-    return {"enabled": enabled, "interval_seconds": interval, "sections": sections,
+    snapshot = {"enabled": enabled, "interval_seconds": interval, "sections": sections,
             "scope": "PUBLIC_MARKET_RESEARCH_ONLY",
             "notice": "Snapshot time is not the underlying observation time. Missing evidence never becomes a recommendation."}
+    if include_ai:
+        try:
+            return automatic_ai_review.attach(snapshot, _connect)
+        except (ValueError, OSError, sqlite3.Error):
+            snapshot["automatic_ai_status"] = "UNAVAILABLE"
+    return snapshot
 
 
 class ResearchScheduler:
@@ -146,6 +153,7 @@ class ResearchScheduler:
         while not self.stopping.is_set():
             try:
                 await asyncio.to_thread(refresh_once)
+                await asyncio.to_thread(automatic_ai_review.refresh, read_snapshot(include_ai=False), _connect)
             except Exception:
                 # Storage failures must not terminate future attempts.
                 pass

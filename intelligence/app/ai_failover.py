@@ -228,13 +228,14 @@ RESEARCH_SCHEMA = {
 }
 
 
-def grounded_research(prompt, evidence_ids):
+def grounded_research(prompt, evidence_ids, providers=None):
     """Call configured models and reject any finding without a supplied citation."""
     if not isinstance(prompt, str) or not prompt or len(prompt) > 12000 or BLOCKED.search(prompt):
         raise ValueError("SENSITIVE_OR_OVERSIZED_RESEARCH_PROMPT")
     allowed = set(evidence_ids)
     attempts = []
-    for provider in _order():
+    order = _order() if providers is None else [p for p in _order() if p in providers]
+    for provider in order:
         if not _enabled(provider):
             attempts.append({"provider": provider, "status": "DISABLED"})
             continue
