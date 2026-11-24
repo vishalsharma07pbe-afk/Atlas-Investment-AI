@@ -197,6 +197,14 @@ jobs:
           python3 -m playwright install --with-deps chromium
       - name: Verify actual browser workflows at desktop and mobile widths
         run: python3 scripts/browser_release_smoke.py --disposable-ci-stack
+      - name: Save disposable browser failure screenshot
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-failure
+          path: browser-failure/
+          if-no-files-found: ignore
+          retention-days: 3
       - name: Report service status and startup logs on failure
         if: failure()
         run: |
@@ -215,6 +223,7 @@ jobs:
       COMPOSE_PROJECT_NAME: atlas-ci-production
       ATLAS_IMAGE_NAMESPACE: atlas-ci
       ATLAS_RELEASE_TAG: v0.0.0-ci
+      ATLAS_HTTP_PORT: '8088'
       POSTGRES_DB: atlas
       POSTGRES_USER: atlas
       ATLAS_AUTONOMOUS_RESEARCH_ENABLED: 'true'
@@ -245,6 +254,15 @@ jobs:
           done
       - name: Build and start production image stack
         run: docker compose -f docker-compose.production.yml -f infrastructure/ci/production-smoke.yml up --build -d --wait --wait-timeout 300
+      - name: Verify published loopback gateway before HTTP contracts
+        run: |
+          binding=$(docker compose -f docker-compose.production.yml -f infrastructure/ci/production-smoke.yml port frontend 8080)
+          test "$binding" = "127.0.0.1:8088"
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --max-time 3 http://127.0.0.1:8088/healthz > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          exit 1
       - name: Verify production gateway and internal service authorization
         run: python3 scripts/production_gateway_smoke.py --disposable-ci-stack
       - name: Diagnose failed production containers
