@@ -60,3 +60,16 @@ it("automatically displays partial diversification coverage and missing adjusted
  expect(screen.getByText("Partial classification or pricing coverage.")).toBeTruthy();
  expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+it("shows portfolio research context without promoting historical watches into recommendations",async()=>{
+ const holding={id:1,symbol:"HELD",asset_type:"EQUITY",exchange:"NSE",status:"MONITOR",weight_percent:100,recorded_return_percent:1,evidence_date:null,history_count:0,change_20_observations_percent:null,recent_peak_change_percent:null,findings:[],missing_evidence:[]};
+ const opportunity_context={status:"WATCH_CONTEXT_AVAILABLE",held_excluded_count:1,ready_sections:["NSE","LARGE_CAP"],blocked_sections:["BSE"],notice:"Research only.",equities:[{isin:"INE009A01021",symbol:"WATCH",exchange:"NSE",horizon:"LONG_TERM",as_of:"2026-11-23",sector:"energy",sector_weight_percent:55,context:"EXISTING_SECTOR_CONCENTRATION",identity_status:"NO_EXACT_HELD_IDENTITY_MATCH",adjustment_status:"RAW_UNADJUSTED",blockers:["FUNDAMENTALS_NOT_VERIFIED"]}],funds:[{scheme_code:"123456",name:"Example fund",category:"LARGE_CAP",as_of:"2026-11-23",cagr_3y_percent:12,drawdown_3y_percent:-20,context:"EXISTING_FUND_CATEGORY",identity_status:"NO_EXACT_HELD_IDENTITY_MATCH"}]};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-24T10:00:00Z",holding_count:1,attention_count:0,data_gap_count:0,notice:"Research only",holdings:[holding],opportunity_context})})));
+ render(<PortfolioDoctor revision={0} onSettings={()=>{}}/>);
+ expect(await screen.findByRole("heading",{name:"Research beyond your recorded holdings"})).toBeTruthy();
+ expect(screen.getByText("WATCH · NSE")).toBeTruthy();
+ expect(screen.getByText("Example fund")).toBeTruthy();
+ expect(screen.getByText(/Not buy recommendations/)).toBeTruthy();
+ expect(screen.getByText(/fundamentals not verified/)).toBeTruthy();
+ expect(fetch).toHaveBeenCalledTimes(1);
+});
