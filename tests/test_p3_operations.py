@@ -24,6 +24,13 @@ ops_snapshot = load("ops_snapshot", "intelligence/app/ops_snapshot.py")
 
 
 class P3SmokeTests(unittest.TestCase):
+    def test_production_intelligence_route_requires_application_session(self):
+        nginx = (ROOT / "frontend/trading-dashboard/nginx.production.conf").read_text(
+            encoding="utf-8")
+        self.assertIn("location /intelligence/ {\n    auth_request /_atlas_auth;", nginx)
+        self.assertIn("location = /_atlas_auth {", nginx)
+        self.assertIn("proxy_pass http://backend:8080/api/v1/auth/me;", nginx)
+
     def test_remote_target_requires_explicit_operator_consent(self):
         with self.assertRaisesRegex(ValueError, "REMOTE_TARGET"):
             smoke.validate_base_url("https://example.com")

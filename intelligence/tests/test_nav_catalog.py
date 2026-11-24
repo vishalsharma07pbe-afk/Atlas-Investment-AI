@@ -33,7 +33,8 @@ class NavCatalogTests(unittest.TestCase):
 
     def test_persistent_search_and_old_snapshot_not_overwritten(self):
         with tempfile.TemporaryDirectory() as folder:
-            with patch.object(nav_catalog, "DB_PATH", nav_catalog.Path(folder) / "nav.sqlite3"):
+            with patch.object(nav_catalog, "DB_PATH", nav_catalog.Path(folder) / "nav.sqlite3"), \
+                 patch.dict(os.environ, {"ATLAS_MF_NAV_AUTO_REFRESH_ENABLED": "false"}):
                 result = nav_catalog.import_snapshot(SAMPLE)
                 self.assertEqual(result["parsed"], 2)
                 found = nav_catalog.search_schemes("Example")

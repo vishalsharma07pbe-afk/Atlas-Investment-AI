@@ -8,6 +8,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
 import java.sql.ResultSet;
 
+@SuppressWarnings("unchecked")
 class VersionedVaultReaderTest {
   @Test void currentAndPreviousKeysDecryptByVersionAndUnknownVersionFails() throws Exception {
     String current=key(),previous=key();

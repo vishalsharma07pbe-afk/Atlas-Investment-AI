@@ -1109,6 +1109,33 @@ html:has(.appearance-panel),html:has(.atlas-notification-panel),body:has(.appear
   .dashboard .market-actionbar > .primary { width: 100%; }
 }
 
+.dashboard .portfolio-history { display: grid; gap: 14px; padding: 18px; border: 1px solid var(--row-line); border-radius: 18px; background: rgba(7,14,39,.12); }
+.dashboard .portfolio-history .sectionhead { margin: 0; }
+.dashboard .portfolio-history-metrics { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.dashboard .portfolio-history-metrics>div { display: grid; gap: 5px; padding: 14px; border: 1px solid var(--row-line); border-radius: 14px; }
+.dashboard .portfolio-history-metrics small,.dashboard .portfolio-history-metrics span { color: var(--ink-muted); font-size: 9px; }
+.dashboard .portfolio-history-metrics strong { color: var(--ink); font-size: 18px; }
+.dashboard .portfolio-cashflow-form { display: grid; grid-template-columns: 1.15fr .9fr .9fr auto; align-items: end; gap: 12px; }
+.dashboard .portfolio-cashflow-form label { display: grid; gap: 6px; color: var(--ink-muted); font-size: 10px; font-weight: 700; }
+.dashboard .portfolio-cashflow-form input,.dashboard .portfolio-cashflow-form select { width: 100%; min-height: 42px; }
+.dashboard .portfolio-cashflow-form button { min-height: 42px; }
+@media (max-width: 820px) { .dashboard .portfolio-cashflow-form { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 560px) { .dashboard .portfolio-history-metrics,.dashboard .portfolio-cashflow-form { grid-template-columns: 1fr; } }
+.dashboard .personal-alerts { display: grid; gap: 14px; padding: 18px; border: 1px solid var(--row-line); border-radius: 18px; background: rgba(7,14,39,.12); }
+.dashboard .personal-alerts h2,.dashboard .personal-alerts h3 { margin: 0; }
+.dashboard .personal-alert-form { display: grid; grid-template-columns: 1fr .75fr 1fr .8fr .7fr auto; align-items: end; gap: 10px; }
+.dashboard .personal-alert-form label { display: grid; gap: 6px; color: var(--ink-muted); font-size: 9px; font-weight: 700; }
+.dashboard .personal-alert-form input,.dashboard .personal-alert-form select,.dashboard .personal-alert-form button { min-height: 42px; width: 100%; }
+.dashboard .personal-alert-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.dashboard .personal-alert-columns>div { display: grid; align-content: start; gap: 8px; padding: 14px; border: 1px solid var(--row-line); border-radius: 14px; }
+.dashboard .personal-alert-columns article { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--row-line); }
+.dashboard .personal-alert-columns article:last-of-type { border: 0; }
+.dashboard .personal-alert-columns article>div { display: grid; gap: 4px; }
+.dashboard .personal-alert-columns small { color: var(--ink-muted); font-size: 9px; }
+.dashboard .personal-alert-columns .read { opacity: .72; }
+@media (max-width: 1050px) { .dashboard .personal-alert-form { grid-template-columns: repeat(3,1fr); } }
+@media (max-width: 700px) { .dashboard .personal-alert-form,.dashboard .personal-alert-columns { grid-template-columns: 1fr; } }
+
 /* P1 company research: dense evidence cards with truthful missing-data states. */
 .dashboard .p1-research { display:grid; gap:18px; }
 .dashboard .p1-hero { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:20px; align-items:start; }

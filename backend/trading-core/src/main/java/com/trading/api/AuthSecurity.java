@@ -9,6 +9,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.Locale;
 import org.springframework.jdbc.core.JdbcTemplate;
 import java.time.Instant;
 import java.util.Base64;
@@ -44,7 +45,42 @@ public class AuthSecurity {
         .requestMatchers("/api/v1/internal/**").permitAll()
         .requestMatchers("/api/v1/**").authenticated()
         .anyRequest().denyAll())
+      .addFilterBefore(new SameOriginCookieFilter(),BasicAuthenticationFilter.class)
       .addFilterBefore(new JwtFilter(tokens),BasicAuthenticationFilter.class).build();
+  }
+  /**
+   * Cookie sessions are convenient for the same-origin dashboard, but disabling
+   * Spring's form CSRF token must not make state-changing endpoints callable by
+   * another website. Bearer-token clients remain usable across origins; this
+   * guard applies only when the browser session cookie is present.
+   */
+  static class SameOriginCookieFilter extends OncePerRequestFilter {
+    private static final java.util.Set<String> SAFE=java.util.Set.of("GET","HEAD","OPTIONS","TRACE");
+    @Override protected void doFilterInternal(HttpServletRequest req,HttpServletResponse res,FilterChain chain)
+        throws ServletException,IOException{
+      if(!SAFE.contains(req.getMethod()) && hasSessionCookie(req)){
+        String fetchSite=req.getHeader("Sec-Fetch-Site");
+        String origin=req.getHeader("Origin");
+        if("cross-site".equalsIgnoreCase(fetchSite) || (origin!=null && !origin.equalsIgnoreCase(requestOrigin(req)))){
+          res.sendError(HttpServletResponse.SC_FORBIDDEN,"Cross-origin cookie request rejected");
+          return;
+        }
+      }
+      chain.doFilter(req,res);
+    }
+    private static boolean hasSessionCookie(HttpServletRequest req){
+      if(req.getCookies()==null)return false;
+      for(var cookie:req.getCookies())if("ATLAS_SESSION".equals(cookie.getName()))return true;
+      return false;
+    }
+    private static String requestOrigin(HttpServletRequest req){
+      String proto=req.getHeader("X-Forwarded-Proto");
+      if(proto==null||proto.isBlank())proto=req.getScheme();
+      else proto=proto.split(",",2)[0].trim();
+      String host=req.getHeader("Host");
+      if(host==null||host.isBlank())host=req.getServerName()+((req.getServerPort()==80||req.getServerPort()==443)?"":":"+req.getServerPort());
+      return proto.toLowerCase(Locale.ROOT)+"://"+host.toLowerCase(Locale.ROOT);
+    }
   }
   public static UUID currentUser(){
     var auth=SecurityContextHolder.getContext().getAuthentication();

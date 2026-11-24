@@ -28,7 +28,7 @@ P2 extends the existing evidence-first research stack. It does not enable order 
 - Combined technical, volatility, fundamental, leverage, and institutional filter contract.
 - Missing required factors exclude a candidate instead of being treated as zero.
 - Each match lists its passed factors and evidence date.
-- Screener definitions and watchlist choices persist locally in the browser; they contain no broker credentials.
+- Screener definitions and watchlist choices synchronize to user-scoped server storage, with a browser cache as an offline fallback; they contain no broker credentials.
 
 ### Personalized planning
 
@@ -51,7 +51,7 @@ P2 extends the existing evidence-first research stack. It does not enable order 
 - The UI builds stock evidence from validated daily OHLCV calculations and mutual-fund evidence from stored dated NAV history. Fundamental, valuation, news, ownership, fund-cost, rating, and holdings gaps remain visible until dated provider evidence is connected.
 - Advanced fundamental and institutional filters are operational but deliberately produce no matches when those factors are absent.
 - AI provider calls remain opt-in, quota-limited, and configured through local environment variables. When unavailable, ATLAS returns an evidence-only synthesis rather than pretending a model ran.
-- Screeners and watchlists are device-local in this release. Server-side, user-scoped synchronization remains future work.
+- Screeners and watchlists are isolated by authenticated user on the server. The local cache is only a resilience fallback.
 - Tax drag is a user assumption, not a jurisdiction-specific tax calculation.
 
 ## Safety statement

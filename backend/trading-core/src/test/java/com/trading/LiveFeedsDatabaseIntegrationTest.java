@@ -7,23 +7,23 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.trading.api.*;
 import com.trading.market.*;
 import java.math.BigDecimal;
-import java.sql.Date;
 import java.time.*;
 import java.util.*;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.PostgreSQLContainer;
 
-@SpringBootTest @AutoConfigureMockMvc(addFilters=false)
+@SpringBootTest(properties={"ATLAS_JWT_SECRET=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","atlas.market.freshness.enabled=false","atlas.alerts.scheduler.enabled=false"})
+@AutoConfigureMockMvc(addFilters=false)
 class LiveFeedsDatabaseIntegrationTest {
  static final String EXTERNAL=System.getenv("TEST_DATABASE_URL");
  static final PostgreSQLContainer<?> PG=EXTERNAL==null?new PostgreSQLContainer<>("postgres:16-alpine").withInitScript("test-schema.sql"):null;
@@ -38,8 +38,8 @@ class LiveFeedsDatabaseIntegrationTest {
  @Autowired UpstoxFeedService stocks;
  @Autowired AmfiFeedService funds;
  @Autowired MockMvc mvc;
- @MockBean FeedHttp http;
- @MockBean VersionedVaultReader vault;
+ @MockitoBean FeedHttp http;
+ @MockitoBean VersionedVaultReader vault;
  @AfterEach void clear(){SecurityContextHolder.clearContext();reset(http,vault);}
  private void user(UUID id){
   SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(id,null,List.of()));
@@ -65,6 +65,25 @@ class LiveFeedsDatabaseIntegrationTest {
   assertThat(db.queryForObject("SELECT count(DISTINCT timeframe) FROM market_candles WHERE instrument_id=?",Long.class,instrument)).isEqualTo(3);
   assertThat(db.queryForObject("SELECT count(*) FROM instrument_source_freshness WHERE instrument_id=?",Long.class,instrument)).isEqualTo(1);
  }
+ @Test void invalidProviderCandlesAreRejectedAndAudited()throws Exception{
+  long instrument=seedStock();UUID owner=UUID.randomUUID();
+  when(vault.decrypt(owner,"UPSTOX")).thenReturn("only-in-memory");
+  when(http.text(contains("historical-candle"),eq("only-in-memory"),anyInt()))
+   .thenReturn("{\"data\":{\"candles\":[[\"2026-11-13T09:15:00+05:30\",100,90,99,102,-1]]}}");
+  LocalDate day=LocalDate.of(2026,11,13);
+  long before=db.queryForObject("SELECT count(*) FROM market_candles WHERE instrument_id=?",Long.class,instrument);
+
+  assertThatThrownBy(()->stocks.dailyCandles(owner,"NSE_EQ|FEEDTEST",day,day))
+   .isInstanceOf(IllegalStateException.class)
+   .hasMessage("Provider returned no valid candles");
+  assertThat(db.queryForObject("SELECT count(*) FROM market_candles WHERE instrument_id=?",Long.class,instrument)).isEqualTo(before);
+  assertThat(db.queryForObject("SELECT count(*) FROM data_quality_events WHERE instrument_id=? AND event_type='PROVIDER_CANDLE_REJECTED'",Long.class,instrument)).isGreaterThanOrEqualTo(1);
+  Map<String,Object> run=db.queryForMap("SELECT status,records_seen,records_written,failure_count FROM ingestion_runs WHERE source_revision=? ORDER BY started_at DESC LIMIT 1","UPSTOX_API:NSE_EQ|FEEDTEST:1d:2026-11-13:2026-11-13");
+  assertThat(run).containsEntry("status","FAILED");
+  assertThat(((Number)run.get("records_seen")).longValue()).isEqualTo(1);
+  assertThat(((Number)run.get("records_written")).longValue()).isZero();
+  assertThat(((Number)run.get("failure_count")).longValue()).isEqualTo(1);
+ }
  @Test void postHoldingsSyncIsScopedToAuthenticatedOwner()throws Exception{
   UUID a=UUID.randomUUID(),b=UUID.randomUUID();
   db.update("INSERT INTO atlas_users(id,email,password_hash) VALUES (?,'feed-owner-a@example.test','test'),(?,'feed-owner-b@example.test','test') ON CONFLICT DO NOTHING",a,b);
@@ -77,6 +96,19 @@ class LiveFeedsDatabaseIntegrationTest {
   user(b);
   mvc.perform(get("/api/v1/portfolio/holdings")).andExpect(status().isOk()).andExpect(content().json("[]"));
   assertThat(db.queryForObject("SELECT count(*) FROM personal_holdings WHERE user_id=? AND symbol='OWNERTEST'",Long.class,b)).isZero();
+ }
+ @Test void holdingsSyncRemovesOnlyStaleBrokerPositions()throws Exception{
+  UUID owner=UUID.randomUUID();
+  db.update("INSERT INTO atlas_users(id,email,password_hash) VALUES (?,'reconcile-owner@example.test','test')",owner);
+  db.update("INSERT INTO personal_holdings(user_id,symbol,asset_type,quantity,average_cost,notes) VALUES (?,'KEEP','EQUITY',1,10,'UPSTOX_SYNC'),(?,'STALE','EQUITY',2,20,'UPSTOX_SYNC'),(?,'MANUAL','EQUITY',3,30,'user note')",owner,owner,owner);
+  when(vault.decrypt(owner,"UPSTOX")).thenReturn("owner-secret");
+  when(http.text(contains("long-term-holdings"),eq("owner-secret"),anyInt()))
+   .thenReturn("{\"data\":[{\"trading_symbol\":\"KEEP\",\"quantity\":5,\"average_price\":11}]}");
+
+  assertThat(stocks.syncHoldings(owner)).isEqualTo(1);
+  assertThat(db.queryForObject("SELECT quantity FROM personal_holdings WHERE user_id=? AND symbol='KEEP'",BigDecimal.class,owner)).isEqualByComparingTo("5");
+  assertThat(db.queryForObject("SELECT count(*) FROM personal_holdings WHERE user_id=? AND symbol='STALE'",Long.class,owner)).isZero();
+  assertThat(db.queryForObject("SELECT count(*) FROM personal_holdings WHERE user_id=? AND symbol='MANUAL'",Long.class,owner)).isEqualTo(1);
  }
  @Test void historicalNavCalculatesCagrRollingAndDrawdown()throws Exception{
   long code=987654321L;
