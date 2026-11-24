@@ -24,13 +24,41 @@ class DiscoveryHistorySchedulerTest {
     DiscoveryHistoryScheduler scheduler=new DiscoveryHistoryScheduler(db,stocks,mock(MarketCalendarService.class));
     scheduler.accessToken="test-only";
     LocalDate end=LocalDate.of(2026,11,20);
-    when(db.queryForList(contains("LIMIT 2"),eq("NSE"),eq(end))).thenReturn(List.of(
+    when(db.queryForList(contains("LIMIT 2"),eq("NSE"),eq(200),eq(end))).thenReturn(List.of(
       Map.of("id",7L,"instrument_key","NSE_EQ|TEST","candle_count",0L)));
     when(db.update(contains("INSERT INTO discovery_history_attempts"),eq(7L))).thenReturn(1);
-    when(stocks.discoveryDailyCandles("test-only","NSE_EQ|TEST",end.minusMonths(6),end)).thenReturn(100);
+    when(stocks.discoveryDailyCandles("test-only","NSE_EQ|TEST",end.minusMonths(12),end)).thenReturn(100);
     scheduler.refreshExchange("NSE",end);
-    verify(stocks).discoveryDailyCandles("test-only","NSE_EQ|TEST",end.minusMonths(6),end);
+    verify(stocks).discoveryDailyCandles("test-only","NSE_EQ|TEST",end.minusMonths(12),end);
     verify(db).update(contains("status='SUCCESS'"),eq(100),eq(7L));
+  }
+
+  @Test void existingShortHistoryIsBackfilledForLongTermResearch()throws Exception{
+    JdbcTemplate db=mock(JdbcTemplate.class);
+    UpstoxFeedService stocks=mock(UpstoxFeedService.class);
+    DiscoveryHistoryScheduler scheduler=new DiscoveryHistoryScheduler(db,stocks,mock(MarketCalendarService.class));
+    scheduler.accessToken="test-only";
+    LocalDate end=LocalDate.of(2026,11,20);
+    when(db.queryForList(contains("h.candle_count<?"),eq("NSE"),eq(200),eq(end))).thenReturn(List.of(
+      Map.of("id",7L,"instrument_key","NSE_EQ|TEST","candle_count",120L,"latest_date",end)));
+    when(db.update(contains("INSERT INTO discovery_history_attempts"),eq(7L))).thenReturn(1);
+    when(stocks.discoveryDailyCandles("test-only","NSE_EQ|TEST",end.minusMonths(12),end)).thenReturn(230);
+    scheduler.refreshExchange("NSE",end);
+    verify(stocks).discoveryDailyCandles("test-only","NSE_EQ|TEST",end.minusMonths(12),end);
+  }
+
+  @Test void sufficientHistoryUsesIncrementalRefresh()throws Exception{
+    JdbcTemplate db=mock(JdbcTemplate.class);
+    UpstoxFeedService stocks=mock(UpstoxFeedService.class);
+    DiscoveryHistoryScheduler scheduler=new DiscoveryHistoryScheduler(db,stocks,mock(MarketCalendarService.class));
+    scheduler.accessToken="test-only";
+    LocalDate end=LocalDate.of(2026,11,20);
+    when(db.queryForList(contains("LIMIT 2"),eq("NSE"),eq(200),eq(end))).thenReturn(List.of(
+      Map.of("id",7L,"instrument_key","NSE_EQ|TEST","candle_count",220L,"latest_date",end.minusDays(2))));
+    when(db.update(contains("INSERT INTO discovery_history_attempts"),eq(7L))).thenReturn(1);
+    when(stocks.discoveryDailyCandles("test-only","NSE_EQ|TEST",end.minusDays(1),end)).thenReturn(2);
+    scheduler.refreshExchange("NSE",end);
+    verify(stocks).discoveryDailyCandles("test-only","NSE_EQ|TEST",end.minusDays(1),end);
   }
 
   @Test void anotherWorkerClaimPreventsDuplicateRequest(){
@@ -38,7 +66,7 @@ class DiscoveryHistorySchedulerTest {
     UpstoxFeedService stocks=mock(UpstoxFeedService.class);
     DiscoveryHistoryScheduler scheduler=new DiscoveryHistoryScheduler(db,stocks,mock(MarketCalendarService.class));
     LocalDate end=LocalDate.of(2026,11,20);
-    when(db.queryForList(contains("LIMIT 2"),eq("BSE"),eq(end))).thenReturn(List.of(
+    when(db.queryForList(contains("LIMIT 2"),eq("BSE"),eq(200),eq(end))).thenReturn(List.of(
       Map.of("id",7L,"instrument_key","BSE_EQ|TEST","candle_count",0L)));
     scheduler.refreshExchange("BSE",end);
     verifyNoInteractions(stocks);
