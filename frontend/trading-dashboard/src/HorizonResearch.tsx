@@ -7,17 +7,32 @@ import AutomaticCompanyNews,{type NewsEvidence} from "./AutomaticCompanyNews";
 
 export type Horizon="INTRADAY"|"SWING"|"SHORT_TERM"|"LONG_TERM";
 type AiReview={reviews:{provider:string;findings:{statement:string;evidence_ids:string[]}[]}[];reviewed_at:string;notice:string};
-type Candidate={news_evidence?:NewsEvidence;company_evidence?:CompanyEvidence;ai_review?:AiReview;id:number;symbol:string;exchange:string;as_of:string;close:number;rank_score:number;review_horizon:string;history_count:number;atr_percent:number;median_daily_traded_value:number;reasons:string[];warnings:string[]};
+type CandidateReliability={status:string;blockers:string[];warnings:string[];prospective_status:string;notice:string};
+type Candidate={research_reliability?:CandidateReliability;news_evidence?:NewsEvidence;company_evidence?:CompanyEvidence;ai_review?:AiReview;id:number;symbol:string;exchange:string;as_of:string;close:number;rank_score:number;review_horizon:string;history_count:number;atr_percent:number;median_daily_traded_value:number;reasons:string[];warnings:string[]};
 type HorizonResult={status:string;candidates:Candidate[];matched_count:number;evaluated_count:number;blockers:string[];exclusions:Record<string,number>};
 type Section={section:string;status:string;generated_at:string|null;result:{universe_size:number;eligible_count:number;horizons?:Partial<Record<Horizon,HorizonResult>>}|null};
 type ReplayCost={cost_bps_per_side:number;net_return_percent:number;matched_gross_exposure_return_percent:number;max_drawdown_percent:number;win_rate_percent:number|null;wins:number;losses:number;flat:number};
 type ReplayItem={exchange:string;symbol:string;as_of:string;trades:number;holding_sessions:number;test_start:string;test_end:string;gross_buy_hold_percent:number;small_sample:boolean;cost_scenarios:ReplayCost[]};
 type Validation={status?:string;sample_count?:number;horizons?:Partial<Record<Horizon,{counts:Record<string,number>;observed_instruments:number;items:ReplayItem[]}>>;notice?:string};
-type Snapshot={strategy_validation?:Validation;enabled:boolean;sections:Section[];automatic_ai_status?:string;automatic_company_status?:string;automatic_news_status?:string};
+type ReliabilityCohort={status:string;selected_mature_watches:number;observed_outcomes:number;distinct_observed_isins:number;coverage_percent:number;overlap_excluded:number;immature_excluded:number;incompatible_excluded:number;invalid_excluded:number;blockers:string[];cost_scenarios:{cost_bps_per_side:number;mean_net_change_percent:number;median_net_change_percent:number;positive_count:number;negative_count:number;flat_count:number}[];notice:string};
+type Snapshot={research_reliability?:{status?:string;horizons?:Partial<Record<Horizon,ReliabilityCohort>>;notice?:string};strategy_validation?:Validation;enabled:boolean;sections:Section[];automatic_ai_status?:string;automatic_company_status?:string;automatic_news_status?:string};
 const titles:Record<Horizon,string>={INTRADAY:"Intraday research",SWING:"Swing trading research",SHORT_TERM:"Short-term equity research",LONG_TERM:"Long-term investment research"};
 const descriptions:Record<Horizon,string>={INTRADAY:"Completed current-session candle research. Live liquidity and event risk are not independently verified.",SWING:"Daily trend, relative volume and volatility checks for potential multi-session setups.",SHORT_TERM:"Medium-term trend and 60-session momentum. Fundamental and event research must still confirm each watch candidate.",LONG_TERM:"200-session price trend and longer-term momentum. A technical watch is not a business-quality or fair-value assessment."};
 const words=(value:string)=>value.toLowerCase().replace(/_/g," ");
 const money=(value:number)=>new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",maximumFractionDigits:2}).format(value);
+
+function ProspectiveReliability({report}:{report?:ReliabilityCohort}){
+ return <section className="panel glass" aria-label="Prospective research reliability">
+  <div className="sectionhead"><div><h3>Prospective watch reliability</h3><p className="muted tiny">Outcomes measured after original watch publication, not historical replay.</p></div><span className="tag">NOT CALIBRATED</span></div>
+  {!report?<p>Prospective evidence unavailable.</p>:<>
+   <p>{words(report.status)} · {report.observed_outcomes}/{report.selected_mature_watches} mature watches observed · {report.distinct_observed_isins} distinct ISINs · {report.coverage_percent}% coverage</p>
+   <p className="muted tiny">Excluded: {report.overlap_excluded} overlapping, {report.immature_excluded} immature, {report.incompatible_excluded} incompatible, {report.invalid_excluded} invalid.</p>
+   {report.blockers.length>0&&<p>Evidence gaps: {report.blockers.map(words).join(" · ")}.</p>}
+   {report.cost_scenarios.length>0&&<details><summary>Illustrative friction sensitivity</summary><div className="tablewrap"><table><thead><tr><th>Cost per side</th><th>Mean net change</th><th>Median net change</th><th>Positive / negative / flat</th></tr></thead><tbody>{report.cost_scenarios.map(row=><tr key={row.cost_bps_per_side}><td>{row.cost_bps_per_side} bps</td><td>{row.mean_net_change_percent}%</td><td>{row.median_net_change_percent}%</td><td>{row.positive_count} / {row.negative_count} / {row.flat_count}</td></tr>)}</tbody></table></div></details>}
+   <p className="muted tiny">{report.notice}</p>
+  </>}
+ </section>;
+}
 
 function StrategyValidation({data,horizon}:{data:Validation;horizon:Horizon}){
  const result=data.horizons?.[horizon];
@@ -75,6 +90,11 @@ export default function HorizonResearch({horizon,children,onSettings}:{horizon:H
     <p className="muted tiny">Daily close · {candidate.as_of}</p><p>{candidate.review_horizon}</p>
     <dl><div><dt>ATR / price</dt><dd>{candidate.atr_percent.toFixed(2)}%</dd></div><div><dt>History</dt><dd>{candidate.history_count} sessions</dd></div></dl>
     <details><summary>Why this appears &amp; risks</summary><ul>{candidate.reasons.map(reason=><li key={reason}>{reason}</li>)}</ul><p>{candidate.warnings.join(" ")}</p><p className="muted tiny">Median historical daily traded value: {money(candidate.median_daily_traded_value)}</p></details>
+    {candidate.research_reliability&&<details><summary>{candidate.research_reliability.status==="REVIEW_CONFLICTING_EVIDENCE"?"Conflicting evidence · review needed":"Evidence reliability · watch only"}</summary>
+     {candidate.research_reliability.warnings.length>0&&<ul>{candidate.research_reliability.warnings.map(w=><li key={w}>{words(w)}</li>)}</ul>}
+     <p>Unresolved requirements: {candidate.research_reliability.blockers.map(words).join(" · ")||"Full strategy validation still required"}.</p>
+     <p className="muted tiny">{candidate.research_reliability.notice}</p>
+    </details>}
     <CompanyEvidenceCard evidence={candidate.company_evidence} status={data?.automatic_company_status}/>
     <AutomaticCompanyNews evidence={candidate.news_evidence} status={data?.automatic_news_status}/>
     {candidate.ai_review?.reviews.length?<details><summary>Automatic AI evidence review ({candidate.ai_review.reviews.length} provider{candidate.ai_review.reviews.length===1?"":"s"})</summary>{candidate.ai_review.reviews.map(review=><div key={review.provider}><strong>{review.provider}</strong><ul>{review.findings.map((finding,i)=><li key={i}>{finding.statement} <small>[{finding.evidence_ids.join(", ")}]</small></li>)}</ul></div>)}<p className="muted tiny">OBS = dated technical observations above; LIMITS = missing research evidence. {candidate.ai_review.notice}</p></details>:<p className="muted tiny">{data?.automatic_ai_status==="ENABLED"?"AI review pending or unavailable.":data?.automatic_ai_status==="NO_CONFIGURED_PROVIDER"?"No permitted AI provider configured.":"Automatic AI review unavailable or disabled."}</p>}
@@ -83,6 +103,7 @@ export default function HorizonResearch({horizon,children,onSettings}:{horizon:H
    <button type="button" className="secondary" onClick={onSettings}>Check data connections</button>
   </section>
   }
+  {horizon!=="INTRADAY"&&data?.enabled&&!error&&data.research_reliability&&<ProspectiveReliability report={data.research_reliability.horizons?.[horizon]}/>}
   {horizon!=="INTRADAY"&&data?.enabled&&!error&&data.strategy_validation&&<StrategyValidation data={data.strategy_validation} horizon={horizon}/>}
   {horizon!=="INTRADAY"&&<AdvancedSection title="Research history and outcomes" description="Automatically tracked dated technical watches"><WatchOutcomeHistory horizon={horizon}/></AdvancedSection>}
   <details className="advanced-tools glass" key={horizon}><summary><span><strong>Advanced research tools</strong><small>Optional detailed analysis and evidence review</small></span><b>Open tools</b></summary>{/* Closed tools stay available without loading their workflows. */}<DeferredTools>{children}</DeferredTools></details>
