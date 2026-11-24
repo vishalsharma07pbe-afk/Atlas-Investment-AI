@@ -1,11 +1,12 @@
 import {useEffect,useState,type ReactNode} from "react";
 import AutomaticInstitutionalActivity,{type InstitutionalActivity} from "./AutomaticInstitutionalActivity";
+import {RecentCompanyNews,type Article} from "./AutomaticCompanyNews";
 
 type Candidate={id:number;symbol:string;exchange:string;as_of:string;change_1d_percent:number;momentum_20d_percent:number|null};
 type FundPick={fund:{identifier:string;name:string};score:number};
 type HistoricalFund={scheme_code:number;scheme_name:string;cagr_3y_percent:number;nav_date:string};
 type Result={historical_coverage?:{items?:HistoricalFund[]};eligible_count?:number;universe_size?:number;top_gainers?:Candidate[];momentum_leaders?:Candidate[];top_performers?:FundPick[];growth_outlook?:FundPick[];coverage?:{name_matched_schemes:number};blockers?:string[];notice?:string};
-type Snapshot={institutional_activity?:InstitutionalActivity;enabled:boolean;interval_seconds:number;sections:{section:string;status:string;generated_at:string|null;attempted_at:string|null;result:Result|null}[]};
+type Snapshot={recent_company_news?:Article[];institutional_activity?:InstitutionalActivity;enabled:boolean;interval_seconds:number;sections:{section:string;status:string;generated_at:string|null;attempted_at:string|null;result:Result|null}[]};
 const labels:Record<string,string>={NSE:"NSE",BSE:"BSE",LARGE_CAP:"Large cap",MID_CAP:"Mid cap",SMALL_CAP:"Small cap",FLEXI_CAP:"Flexi cap",INDEX:"Index funds"};
 const percent=(value:number|null)=>value==null?"—":(value>0?"+":"")+value.toFixed(2)+"%";
 const stamp=(value:string|null)=>value?new Date(value).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",dateStyle:"medium",timeStyle:"short"})+" IST":"Not yet refreshed";
@@ -40,6 +41,7 @@ export default function AutonomousOverview({children,onPortfolio,onFunds,onSetti
       <button type="button" className="secondary" onClick={onFunds}>View fund research</button>
     </div>
    </div>
+   {data?.enabled&&!error&&!!data.recent_company_news?.length&&<RecentCompanyNews articles={data.recent_company_news}/>}
    <div className="autonomous-footer"><button type="button" className="primary" onClick={onPortfolio}>Review my portfolio</button><button type="button" className="secondary" onClick={onSettings}>Data and connections</button><button type="button" className="secondary" aria-expanded={manual} onClick={()=>setManual(!manual)}>{manual?"Hide research tools":"Open research tools"}</button></div>
    {manual&&children}
  </section>;
