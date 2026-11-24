@@ -39,6 +39,7 @@ import NotificationCenter from "./NotificationCenter";
 import HoldingEditor,{type HoldingDraft,type SipDraft} from "./HoldingEditor";
 import MarketIndexStrip from "./MarketIndexStrip";
 import PortfolioIntelligence from "./PortfolioIntelligence";
+import PortfolioDoctor from "./PortfolioDoctor";
 import EquityResearchDashboard from "./EquityResearchDashboard";
 import P2ResearchWorkspace from "./P2ResearchWorkspace";
 import OnboardingGuide from "./OnboardingGuide";
@@ -237,6 +238,7 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
 
         {tab === 0 ? <>
           <AutonomousOverview onPortfolio={()=>document.getElementById("portfolio-overview")?.scrollIntoView({behavior:"smooth",block:"start"})} onFunds={()=>setTab(1)} onSettings={()=>setTab(6)}><ResearchHome holdings={holdings} revision={portfolioRevision} onReviewHoldings={()=>document.getElementById("portfolio-overview")?.scrollIntoView({behavior:"smooth",block:"start"})} onOpenExplorer={()=>setTab(7)} onOpenDataHealth={()=>setTab(6)}/></AutonomousOverview>
+          <PortfolioDoctor revision={portfolioRevision} onSettings={()=>setTab(6)}/>
           <div className="two">
             <PortfolioIntelligence holdings={holdings} analysis={analysis}/>
             <section className="panel glass"><div className="sectionhead"><div><small className="section-kicker">POSITION MANAGER</small><h2>Add an investment</h2></div><span className="tag">AUTO PRICE</span></div><HoldingEditor busy={loading} onSave={submitHolding} onSaveSip={submitSip}/></section>

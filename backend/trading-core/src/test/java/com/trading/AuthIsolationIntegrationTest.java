@@ -145,4 +145,24 @@ class AuthIsolationIntegrationTest {
       .andExpect(status().isOk()).andExpect(jsonPath("$.transaction_count").value(0))
       .andExpect(jsonPath("$.xirr_status").value("UNAVAILABLE_REQUIRES_EXTERNAL_CASH_FLOWS_AND_VALUATION"));
   }
+
+  @Test void automaticPortfolioReviewIsOwnerScopedAndUpdatesAfterDeletion()throws Exception{
+    String a=create("doctor-a-"+UUID.randomUUID()+"@example.test");
+    String b=create("doctor-b-"+UUID.randomUUID()+"@example.test");
+    mvc.perform(get("/api/v1/portfolio/review")).andExpect(status().isUnauthorized());
+    mvc.perform(post("/api/v1/portfolio/holdings").header("Authorization",a)
+      .contentType(MediaType.APPLICATION_JSON).content("{\"symbol\":\"DOCTORTEST\",\"assetType\":\"EQUITY\",\"quantity\":2,\"averageCost\":100,\"lastPrice\":80}"))
+      .andExpect(status().isOk());
+    mvc.perform(get("/api/v1/portfolio/review").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.holding_count").value(1))
+      .andExpect(jsonPath("$.holdings[0].symbol").value("DOCTORTEST"))
+      .andExpect(jsonPath("$.attention_count").value(1));
+    mvc.perform(get("/api/v1/portfolio/review").header("Authorization",b))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.holding_count").value(0));
+    long id=jdbc.queryForObject("SELECT id FROM personal_holdings WHERE symbol='DOCTORTEST'",Long.class);
+    mvc.perform(delete("/api/v1/portfolio/holdings/"+id).header("Authorization",a)).andExpect(status().isOk());
+    mvc.perform(get("/api/v1/portfolio/review").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.holding_count").value(0));
+  }
+
 }
