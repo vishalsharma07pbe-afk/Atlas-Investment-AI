@@ -10,6 +10,10 @@ def _internal_path(path:str)->str:
         return "/api/v1/internal/feed/instruments/"+path.removeprefix("/api/v1/market-data/instruments/")
     if path.startswith("/api/v1/instruments"):
         return "/api/v1/internal/feed/instruments"+path.removeprefix("/api/v1/instruments")
+    if path.startswith("/api/v1/mutual-funds/historical-watch?category="):
+        category = path.removeprefix("/api/v1/mutual-funds/historical-watch?category=")
+        if category in ("LARGE_CAP","MID_CAP","SMALL_CAP","FLEXI_CAP","INDEX"):
+            return "/api/v1/internal/feed/fund-history?category="+category
     if path == "/api/v1/data-health/summary":
         return "/api/v1/internal/feed/data-health/summary"
     raise HTTPException(status_code=500,detail="Unsupported internal market-data route")

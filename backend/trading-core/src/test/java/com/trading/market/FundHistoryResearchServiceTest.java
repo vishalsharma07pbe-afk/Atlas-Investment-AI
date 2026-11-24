@@ -23,4 +23,16 @@ class FundHistoryResearchServiceTest {
   assertNull(FundHistoryResearchService.metrics(rows,end.plusDays(8)));
   assertNull(FundHistoryResearchService.metrics(rows.subList(0,100),end));
  }
+
+ @Test void weeklyRiskUsesBoundedAnchorsAndRejectsMissingWeeks(){
+  LocalDate end=LocalDate.of(2026,11,24);
+  List<Map<String,Object>> rows=new ArrayList<>();
+  for(int i=156;i>=0;i--)rows.add(Map.of("nav_date",end.minusWeeks(i),"nav",BigDecimal.valueOf(100+(156-i)*.2)));
+  var risk=FundHistoryResearchService.weeklyRisk(rows,end);
+  assertEquals(156,risk.get("weekly_intervals"));
+  assertEquals(105,risk.get("rolling_windows"));
+  assertEquals(100.0,risk.get("positive_rolling_52w_percent"));
+  assertTrue((Double)risk.get("weekly_volatility_percent")>=0);
+  rows.remove(50);assertTrue(FundHistoryResearchService.weeklyRisk(rows,end).isEmpty());
+ }
 }

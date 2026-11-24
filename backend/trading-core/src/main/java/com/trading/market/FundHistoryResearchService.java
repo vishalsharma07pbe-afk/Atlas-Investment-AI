@@ -73,6 +73,9 @@ public class FundHistoryResearchService {
     String pattern=categoryPattern(category);
     LocalDate today=LocalDate.now(MarketCalendarService.IST);
     int universe=jdbc.queryForObject("SELECT count(*) "+UNIVERSE,Integer.class,pattern);
+    // A shared official NAV date prevents comparing different trailing windows.
+    LocalDate commonEnd=jdbc.query("SELECT max((SELECT max(n.nav_date) FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code AND n.source_code='AMFI' AND n.nav_date BETWEEN ?::date-7 AND ?::date)) "+UNIVERSE,
+      rs->{if(!rs.next())return null;var d=rs.getDate(1);return d==null?null:d.toLocalDate();},today,today,pattern);
     var sample=jdbc.queryForList("SELECT s.scheme_code,s.scheme_name,s.category "+UNIVERSE+"""
       AND EXISTS(SELECT 1 FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code
         AND n.source_code='AMFI' AND n.nav_date BETWEEN ?::date-7 AND ?::date)
@@ -87,15 +90,34 @@ public class FundHistoryResearchService {
           AND source_code IN ('AMFI','MFAPI') ORDER BY nav_date
         """,fund.get("scheme_code"),today,today);
       var metrics=metrics(rows,today);
-      if(metrics==null)continue;
+      if(metrics==null||commonEnd==null||!commonEnd.toString().equals(metrics.get("nav_date")))continue;
       metrics.putAll(fund);observations.add(metrics);
     }
     observations.sort(Comparator.comparingDouble((Map<String,Object> row)->((Number)row.get("cagr_3y_percent")).doubleValue()).reversed()
       .thenComparingLong(row->((Number)row.get("scheme_code")).longValue()));
-    return Map.of("category",category,"status",observations.isEmpty()?"COLLECTING_HISTORY":"HISTORICAL_WATCH_ONLY",
-      "universe_count",universe,"sample_count",sample.size(),"eligible_count",observations.size(),
-      "items",observations.stream().limit(5).toList(),"automatic_collection_enabled",enabled&&permitted,
-      "notice","Bounded AMFI-category Direct Growth sample ranked by trailing three-year CAGR, not a recommendation. Expense ratios, benchmarks, riskometer and holdings evidence remain unverified.");
+    // Index funds can track entirely different assets/benchmarks, so do not give
+    // them a cross-index risk-adjusted rank or category peer percentile.
+    boolean comparable=!"INDEX".equals(category);
+    if(comparable&&observations.size()>=5){
+      for(var row:observations){
+        double value=((Number)row.get("cagr_3y_percent")).doubleValue();
+        long below=observations.stream().filter(r->((Number)r.get("cagr_3y_percent")).doubleValue()<value).count();
+        long equal=observations.stream().filter(r->((Number)r.get("cagr_3y_percent")).doubleValue()==value).count();
+        row.put("sample_peer_percentile",round(100.0*(below+(equal-1)/2.0)/(observations.size()-1)));
+      }
+    }
+    var riskRank=observations.stream().filter(row->comparable&&row.get("return_to_drawdown") instanceof Number)
+      .sorted(Comparator.comparingDouble((Map<String,Object> row)->((Number)row.get("return_to_drawdown")).doubleValue()).reversed()
+        .thenComparingLong(row->((Number)row.get("scheme_code")).longValue())).limit(5).toList();
+    Map<String,Object> result=new LinkedHashMap<>();
+    result.put("category",category);result.put("status",observations.isEmpty()?"COLLECTING_HISTORY":"HISTORICAL_WATCH_ONLY");
+    result.put("universe_count",universe);result.put("sample_count",sample.size());result.put("eligible_count",observations.size());
+    result.put("comparison_date",commonEnd==null?null:commonEnd.toString());
+    result.put("items",observations.stream().limit(5).toList());result.put("risk_adjusted_items",riskRank);
+    result.put("weekly_risk_eligible_count",observations.stream().filter(r->r.get("weekly_volatility_percent")!=null).count());
+    result.put("automatic_collection_enabled",enabled&&permitted);
+    result.put("notice","Historical observations only, from a bounded same-date AMFI category sample. Return-to-drawdown is CAGR divided by absolute observed maximum drawdown, not Sharpe or a forward forecast. Index funds may track different assets. Official benchmark TRI, TER, Riskometer and holdings evidence are still required.");
+    return result;
   }
 
   static Map<String,Object> metrics(List<Map<String,Object>> rows,LocalDate today){
@@ -125,8 +147,46 @@ public class FundHistoryResearchService {
     result.put("cagr_3y_percent",round(100*(Math.pow(current/base3,365.2425/ChronoUnit.DAYS.between(start3,end))-1)));
     result.put("cagr_1y_percent",round(100*(Math.pow(current/base1,365.2425/ChronoUnit.DAYS.between(start1,end))-1)));
     result.put("drawdown_3y_percent",round(drawdown*100));result.put("observations",count);
+    result.putAll(weeklyRisk(rows,end));
+    double annual=((Number)result.get("cagr_3y_percent")).doubleValue();
+    // No infinite ratio, and no ratio for effectively flat/no-drawdown histories.
+    result.put("return_to_drawdown",annual>0&&drawdown<=-0.01?round(annual/(-100*drawdown)):null);
     result.put("sources",rows.stream().map(r->String.valueOf(r.get("source_code"))).distinct().sorted().toList());
     return result;
+  }
+  /** Fixed seven-day target dates, using a NAV at most three days earlier.
+   * Returns are weekly close proxies (not equally spaced daily returns).
+   * No interpolation; any missing/duplicate anchor makes risk unavailable.
+   */
+  static Map<String,Object> weeklyRisk(List<Map<String,Object>> rows,LocalDate end){
+    NavigableMap<LocalDate,Double> series=new TreeMap<>();
+    for(var row:rows){
+      LocalDate d=date(row.get("nav_date"));Object value=row.get("nav");
+      if(d==null||!(value instanceof Number n)||!Double.isFinite(n.doubleValue())||n.doubleValue()<=0||series.putIfAbsent(d,n.doubleValue())!=null)return Map.of();
+    }
+    List<Double> anchors=new ArrayList<>();LocalDate prior=null;
+    for(int i=156;i>=0;i--){
+      LocalDate target=end.minusWeeks(i);
+      var point=series.floorEntry(target);
+      if(point==null||point.getKey().isBefore(target.minusDays(3))||prior!=null&&!point.getKey().isAfter(prior))return Map.of();
+      anchors.add(point.getValue());prior=point.getKey();
+    }
+    double sum=0,sumSq=0,worst=Double.POSITIVE_INFINITY;int positive=0,rolling=0;
+    for(int i=1;i<anchors.size();i++){
+      double r=anchors.get(i)/anchors.get(i-1)-1;sum+=r;sumSq+=r*r;
+      if(i>=52){
+        double annual=100*(Math.pow(anchors.get(i)/anchors.get(i-52),365.2425/364)-1);
+        if(!Double.isFinite(annual))return Map.of();
+        worst=Math.min(worst,annual);if(annual>0)positive++;rolling++;
+      }
+    }
+    int n=anchors.size()-1;double variance=Math.max(0,(sumSq-sum*sum/n)/(n-1));
+    double volatility=100*Math.sqrt(variance*52);
+    if(!Double.isFinite(volatility))return Map.of();
+    return Map.of("weekly_volatility_percent",round(volatility),
+      "worst_rolling_52w_annualized_percent",round(worst),
+      "positive_rolling_52w_percent",round(100.0*positive/rolling),
+      "rolling_windows",rolling,"weekly_intervals",n);
   }
   private static LocalDate date(Object d){return d instanceof java.sql.Date x?x.toLocalDate():d instanceof LocalDate x?x:null;}
   private static double round(double n){return Math.round(n*10000d)/10000d;}
