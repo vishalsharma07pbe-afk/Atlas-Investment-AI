@@ -67,13 +67,13 @@ public class PortfolioReviewService {
         ORDER BY CASE WHEN candidate.exchange='NSE' THEN 0 ELSE 1 END,candidate.id LIMIT 1
       ) i ON true
       LEFT JOIN LATERAL (
-        SELECT count(*) n,count(DISTINCT day) distinct_dates,
+        SELECT count(*) n,count(DISTINCT trade_date) distinct_dates,
           count(DISTINCT adjustment_status) adjustments,
           count(*) FILTER(WHERE adjustment_status='RAW_UNADJUSTED') raw_count,
-          max(day) latest_date,max(close) FILTER(WHERE rn=1) latest,
+          max(trade_date) latest_date,max(close) FILTER(WHERE rn=1) latest,
           max(close) FILTER(WHERE rn=21) prior,max(close) peak,avg(close) average
         FROM (
-          SELECT (c.candle_time AT TIME ZONE 'Asia/Kolkata')::date day,c.close,c.adjustment_status,
+          SELECT (c.candle_time AT TIME ZONE 'Asia/Kolkata')::date AS trade_date,c.close,c.adjustment_status,
             row_number() OVER(ORDER BY c.candle_time DESC) rn
           FROM market_candles c
           WHERE c.instrument_id=i.id AND c.timeframe='1d' AND c.is_complete
