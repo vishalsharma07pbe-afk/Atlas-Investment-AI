@@ -73,3 +73,16 @@ it("shows portfolio research context without promoting historical watches into r
  expect(screen.getByText(/fundamentals not verified/)).toBeTruthy();
  expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+it("shows a compact risk-first summary without loading detailed research panels",async()=>{
+ const base={asset_type:"EQUITY",exchange:"NSE",weight_percent:10,recorded_return_percent:2,evidence_date:null,history_count:0,change_20_observations_percent:null,recent_peak_change_percent:null,missing_evidence:[]};
+ const holdings=[{...base,id:1,symbol:"MONITOR",status:"MONITOR",findings:[]},{...base,id:2,symbol:"RISK",status:"REVIEW_REQUIRED",findings:["Review recorded loss."]}];
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({holding_count:2,attention_count:1,data_gap_count:0,generated_at:"2026-11-24T10:00:00Z",holdings})})));
+ render(<PortfolioDoctor compact revision={0} onSettings={()=>{}} onOpenPortfolio={()=>{}}/>);
+ expect(await screen.findByText("Review recorded loss.")).toBeTruthy();
+ expect(screen.getByText("RISK")).toBeTruthy();
+ expect(screen.queryByText("MONITOR")).toBeNull();
+ expect(screen.getByRole("button",{name:"Open full review"})).toBeTruthy();
+ expect(screen.queryByText("Company thesis & local AI review")).toBeNull();
+ expect(fetch).toHaveBeenCalledTimes(1);
+});
