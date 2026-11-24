@@ -1244,3 +1244,14 @@ def internal_portfolio_thesis(request: FastAPIRequest, body: PortfolioThesisRead
         return read([item.model_dump() for item in body.identities])
     except (ValueError, OSError, sqlite3.Error) as exc:
         raise HTTPException(status_code=503,detail="Portfolio evidence unavailable") from exc
+
+
+@app.get("/api/v1/internal/portfolio-opportunities")
+def internal_portfolio_opportunities(request: FastAPIRequest):
+    """Read a bounded public-only shortlist for the authenticated Spring service."""
+    _require_internal_service(request)
+    from .portfolio_opportunities import read
+    try:
+        return read()
+    except (ValueError, OSError, sqlite3.Error) as exc:
+        raise HTTPException(status_code=503, detail="Public opportunity evidence unavailable") from exc

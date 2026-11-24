@@ -1,0 +1,9 @@
+# Portfolio opportunity research context
+
+The authenticated portfolio review now compares the existing public technical and fund historical watches with the owner's saved holdings. An internal token-protected GET serves a bounded public-only projection. Spring performs identity exclusion and context comparison locally; no owner data is sent to the projection, provider or AI. Existing company cache permissions remain in place.
+
+Only READY sections and recent underlying observation dates qualify: completed equity observations within four calendar days and fund NAVs within seven days, matching the historical comparison date. The projection uses the existing technical watch gate and historical fund watch status. It never promotes historical observations to Top Performer or Growth Outlook recommendations. Duplicate equity ISINs and exact AMFI scheme codes are deduplicated. Existing holdings are excluded by exact resolved identity, regardless of recorded valuation or exchange. Unresolved holdings are explicitly disclosed.
+
+Direct-equity sector exposure is taken from the existing diversification report; more than 40% is labeled existing sector concentration. The absence of a recorded sector match does not imply a diversification benefit. Fund category comparison uses the AMFI catalog classification, not underlying holdings. No allocation changes, correlation estimates for candidates, individualized suitability assessment, execution, predictive ranking or buy/sell instructions are generated. Full recommendation gates and strategy validation remain outstanding.
+
+The dashboard loads the new context automatically with the existing portfolio review and shows the original evidence type, observation dates, blockers, coverage gaps and held exclusions. Unavailable public data produces no new watches. No additional external requests, paid providers or migrations are introduced. Live data acceptance and CI verification are required.
