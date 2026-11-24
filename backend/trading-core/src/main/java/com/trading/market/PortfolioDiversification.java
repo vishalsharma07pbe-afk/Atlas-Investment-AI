@@ -52,10 +52,9 @@ final class PortfolioDiversification {
    }else if("MUTUAL_FUND".equals(type)){
     fundValue=fundValue.add(value);
     String category=UNKNOWN;
-    if(symbol.matches("[0-9]{1,18}")){
+    if(symbol.matches("[0-9]{1,18}")&&symbol.equals(h.path("exact_scheme_code").asText())){
      identity="AMFI:"+symbol;
-     JsonNode fund=h.path("fund_history_evidence");
-     if(symbol.equals(fund.path("scheme_code").asText()))category=label(fund.path("category"));
+     category=label(h.path("scheme_category"));
     }
     if(!UNKNOWN.equals(category))knownFund=knownFund.add(value);
     categories.merge(category,value,BigDecimal::add);
