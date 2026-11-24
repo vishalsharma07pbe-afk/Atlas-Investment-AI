@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -39,6 +39,15 @@ class MarketIndexTests(unittest.TestCase):
         self.assertEqual(result["items"][0]["change_percent"], 0.2)
         self.assertEqual(result["items"][0]["freshness"], "LIVE")
 
+    def test_future_timestamp_is_not_a_live_quote(self):
+        timestamp = int((datetime.now(timezone.utc)+timedelta(minutes=10)).timestamp()*1000)
+        payload = {"status":"success","data":{"nifty":{
+            "instrument_token":"NSE_INDEX|Nifty 50","last_price":25050,
+            "prev_close_price":25000,"net_change":50,"last_trade_time":str(timestamp)}}}
+        with patch.object(market_indices,"settings",self.configured), patch.object(market_indices,"_request",return_value=payload):
+            result=market_indices.snapshots()
+        self.assertEqual(result["status"],"UNAVAILABLE")
+        self.assertEqual(result["items"],[])
 
 if __name__ == "__main__":
     unittest.main()
