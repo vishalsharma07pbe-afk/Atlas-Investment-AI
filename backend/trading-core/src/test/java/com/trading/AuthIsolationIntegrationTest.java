@@ -40,6 +40,7 @@ class AuthIsolationIntegrationTest {
   @Autowired JdbcTemplate jdbc;
   @Autowired ObjectMapper mapper;
   @Autowired UserAlertEvaluator alertEvaluator;
+  @Autowired com.trading.market.PortfolioRiskNotifications riskNotifications;
   String create(String email)throws Exception{
     String input=mapper.writeValueAsString(Map.of("email",email,"password","strong-password-12345"));
     mvc.perform(post("/api/v1/auth/register").contentType(MediaType.APPLICATION_JSON).content(input))
@@ -163,6 +164,30 @@ class AuthIsolationIntegrationTest {
     mvc.perform(delete("/api/v1/portfolio/holdings/"+id).header("Authorization",a)).andExpect(status().isOk());
     mvc.perform(get("/api/v1/portfolio/review").header("Authorization",a))
       .andExpect(status().isOk()).andExpect(jsonPath("$.holding_count").value(0));
+  }
+
+
+  @Test void portfolioDigestIsDeduplicatedAndOwnerScoped()throws Exception{
+    String a=create("digest-a-"+UUID.randomUUID()+"@example.test");
+    String b=create("digest-b-"+UUID.randomUUID()+"@example.test");
+    mvc.perform(post("/api/v1/portfolio/holdings").header("Authorization",a)
+      .contentType(MediaType.APPLICATION_JSON).content("{\"symbol\":\"DIGESTTEST\",\"assetType\":\"EQUITY\",\"quantity\":2,\"averageCost\":100,\"lastPrice\":80}"))
+      .andExpect(status().isOk());
+    mvc.perform(get("/api/v1/portfolio/review").header("Authorization",a)).andExpect(status().isOk());
+    riskNotifications.evaluate();riskNotifications.evaluate();
+    mvc.perform(get("/api/v1/research-workspace/notifications/summary").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.unread_count").value(1));
+    mvc.perform(get("/api/v1/research-workspace/notifications/summary").header("Authorization",b))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.unread_count").value(0));
+    String result=mvc.perform(get("/api/v1/research-workspace/notifications").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1))
+      .andExpect(jsonPath("$[0].event_type").value("PORTFOLIO_RISK")).andReturn().getResponse().getContentAsString();
+    String id=mapper.readTree(result).get(0).path("id").asText();
+    mvc.perform(patch("/api/v1/research-workspace/notifications/"+id+"/read").header("Authorization",b)).andExpect(status().isNotFound());
+    mvc.perform(patch("/api/v1/research-workspace/notifications/"+id+"/read").header("Authorization",a)).andExpect(status().isOk());
+    riskNotifications.evaluate();
+    mvc.perform(get("/api/v1/research-workspace/notifications/summary").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.unread_count").value(0));
   }
 
 }

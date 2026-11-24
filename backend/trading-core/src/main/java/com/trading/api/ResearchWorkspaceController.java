@@ -146,6 +146,12 @@ public class ResearchWorkspaceController {
     return Map.of("deleted",true);
   }
 
+  @GetMapping("/notifications/summary")
+  public Map<String,Object> notificationSummary(){
+    Long unread=jdbc.queryForObject("SELECT count(*) FROM user_notification_history WHERE user_id=? AND read_at IS NULL",Long.class,AuthSecurity.currentUser());
+    return Map.of("unread_count",unread==null?0L:unread);
+  }
+
   @GetMapping("/notifications")
   public List<Map<String,Object>> notifications(@RequestParam(defaultValue="false") boolean unreadOnly){
     return jdbc.queryForList("""

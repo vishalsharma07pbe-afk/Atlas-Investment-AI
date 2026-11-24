@@ -1,4 +1,6 @@
 import {useEffect,useState,type ReactNode} from "react";
+import WatchOutcomeHistory from "./WatchOutcomeHistory";
+import AdvancedSection from "./AdvancedSection";
 
 export type Horizon="INTRADAY"|"SWING"|"SHORT_TERM"|"LONG_TERM";
 type AiReview={reviews:{provider:string;findings:{statement:string;evidence_ids:string[]}[]}[];reviewed_at:string;notice:string};
@@ -54,6 +56,7 @@ export default function HorizonResearch({horizon,children,onSettings}:{horizon:H
    {blockers.length>0&&<p className="notice warning-notice">Still required before a complete investment verdict: {blockers.map(words).join(" · ")}.</p>}
    <button type="button" className="secondary" onClick={onSettings}>Check data connections</button>
   </section>
+  {horizon!=="INTRADAY"&&<AdvancedSection title="Research history and outcomes" description="Automatically tracked dated technical watches"><WatchOutcomeHistory horizon={horizon}/></AdvancedSection>}
   <details className="advanced-tools glass" key={horizon}><summary><span><strong>Advanced research tools</strong><small>Optional detailed analysis and evidence review</small></span><b>Open tools</b></summary>{/* Closed tools stay available without loading their workflows. */}<DeferredTools>{children}</DeferredTools></details>
  </section>;
 }
