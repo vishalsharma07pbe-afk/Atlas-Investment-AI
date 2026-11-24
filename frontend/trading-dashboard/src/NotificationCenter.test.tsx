@@ -26,3 +26,13 @@ it("shows no invented notifications for an empty feed",async()=>{
   fireEvent.click(screen.getByRole("button",{name:"Notifications, 0 unread"}));
   await waitFor(()=>expect(screen.getByText(/No verified local alerts available/)).toBeTruthy());
 });
+
+it("includes authenticated personal unread count and loads private history only when opened",async()=>{
+ const mock=vi.fn(async(url:string)=>({ok:true,json:async()=>url==="/api/v1/research-workspace/notifications/summary"?{unread_count:1}:url==="/api/v1/research-workspace/notifications"?[{id:"private-1",title:"Portfolio needs review",message:"Recorded risk",event_type:"PORTFOLIO_RISK",occurred_at:"2026-11-24T10:00:00Z",read_at:null}]:url.endsWith("/summary")?{ids:[],total:0}:{alerts:[]}}));
+ vi.stubGlobal("fetch",mock);
+ render(<NotificationCenter includePersonal/>);
+ await waitFor(()=>expect(screen.getByRole("button",{name:"Notifications, 1 unread"})).toBeTruthy());
+ expect(mock.mock.calls.some(([url])=>url==="/api/v1/research-workspace/notifications")).toBe(false);
+ fireEvent.click(screen.getByRole("button",{name:"Notifications, 1 unread"}));
+ expect(await screen.findByText("Portfolio needs review")).toBeTruthy();
+});
