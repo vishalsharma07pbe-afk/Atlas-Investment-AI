@@ -35,3 +35,16 @@ it("keeps the overview usable when institutional access is disabled on the real 
  fireEvent.click(screen.getByRole("button",{name:"Open research tools"}));
  expect(screen.getByText("Manual research tool")).toBeTruthy();
 });
+
+it("shows consolidated evidence without calling technical watches qualified recommendations",async()=>{
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[],daily_briefing:{
+ status:"PARTIAL",ready_sections:1,total_sections:7,market:{eligible_histories:5,sampled_instruments:10,outlook_status:"MARKET_REGIME_NOT_VALIDATED"},
+ horizons:{SWING:{displayed_watch_count:1,ai_reviewed_count:1,conflicting_evidence_count:1,qualified_count:null}},
+ funds:{growth_pick_count:null,historical_watch_count:0,ready_categories:0,total_categories:5},
+ institutional:{status:"UNAVAILABLE"},leading_evidence_gaps:[],notice:"Not a forecast"}})})));
+ render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}}>{null}</AutonomousOverview>);
+ expect(await screen.findByRole("region",{name:"Daily research briefing"})).toBeTruthy();
+ expect(screen.getByText(/Full investment qualification is not available yet/)).toBeTruthy();
+ expect(screen.getByText(/1 displayed horizon watches/)).toBeTruthy();
+ expect(fetch).toHaveBeenCalledTimes(1);
+});
