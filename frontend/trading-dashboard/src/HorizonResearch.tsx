@@ -1,3 +1,4 @@
+import {visiblePolling} from "./visiblePolling";
 import {useEffect,useState,type ReactNode} from "react";
 import WatchOutcomeHistory from "./WatchOutcomeHistory";
 import IntradayResearch from "./IntradayResearch";
@@ -53,20 +54,15 @@ export default function HorizonResearch({horizon,children,onSettings}:{horizon:H
  const [data,setData]=useState<Snapshot|null>(null);
  const [error,setError]=useState(false);
  useEffect(()=>{
-   let active=true,pending=false;const controller=new AbortController();
-   async function load(){
-     if(pending)return;pending=true;
-     try{
-       const response=await fetch("/intelligence/api/v1/intelligence/research/overview",{cache:"no-store",signal:controller.signal});
-       if(!response.ok)throw Error();
-       const result:Snapshot=await response.json();
-       if(!Array.isArray(result.sections))throw Error();
-       if(active){setData(result);setError(false);}
-     }catch{if(active)setError(true);}finally{pending=false;}
-   }
-   if(horizon==="INTRADAY")return;
-   void load();const timer=window.setInterval(load,30000);
-   return()=>{active=false;controller.abort();window.clearInterval(timer);};
+  if(horizon==="INTRADAY")return;
+  return visiblePolling(async signal=>{
+   try{
+    const response=await fetch("/intelligence/api/v1/intelligence/research/overview",{cache:"no-store",signal});
+    if(!response.ok)throw Error();
+    const result:Snapshot=await response.json();if(!Array.isArray(result.sections))throw Error();
+    if(!signal.aborted){setData(result);setError(false);}
+   }catch{if(!signal.aborted)setError(true);}
+  },30000);
  },[horizon]);
  const sections=data?.sections.filter(s=>s.section==="NSE"||s.section==="BSE")||[];
  const ready=sections.filter(s=>s.status==="READY"&&data?.enabled&&!error&&s.result?.horizons?.[horizon]);
