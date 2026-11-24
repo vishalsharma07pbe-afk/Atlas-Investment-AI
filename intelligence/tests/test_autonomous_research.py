@@ -102,3 +102,12 @@ class AutonomousResearchTests(unittest.TestCase):
         with patch.object(research,"backend_json",side_effect=[[row],[{"instrument_id":2}]]):
             with self.assertRaisesRegex(ValueError,"IDENTITY_MISMATCH"):
                 research.market_snapshot("NSE")
+
+    def test_published_calendar_assertion_expires_at_ist_date_rollover(self):
+        result={"discovery_coverage":{"expected_session":"2026-11-23","calendar_checked_on":"2026-11-24"},
+                "top_gainers":[{"as_of":"2026-11-23"}]}
+        from datetime import date
+        self.assertTrue(research._published_evidence_current("NSE",result,date(2026,11,24)))
+        self.assertFalse(research._published_evidence_current("NSE",result,date(2026,11,25)))
+        result["top_gainers"][0]["as_of"]="2026-11-22"
+        self.assertFalse(research._published_evidence_current("NSE",result,date(2026,11,24)))
