@@ -1,3 +1,4 @@
+import {visiblePolling} from "./visiblePolling";
 import {useEffect,useState} from "react";
 import CompanyEvidenceCard,{type CompanyEvidence} from "./CompanyEvidenceCard";
 import AutomaticCompanyNews,{type NewsEvidence} from "./AutomaticCompanyNews";
@@ -79,21 +80,14 @@ export default function PortfolioDoctor({revision,onSettings,compact=false,onOpe
  const [review,setReview]=useState<Review|null>(null);
  const [error,setError]=useState(false);
  const [expanded,setExpanded]=useState(false);
- useEffect(()=>{
-  let active=true,pending=false;const controller=new AbortController();
-  async function load(){
-   if(pending)return;pending=true;
-   try{
-    const response=await fetch("/api/v1/portfolio/review",{cache:"no-store",signal:controller.signal});
-    if(!response.ok)throw Error();
-    const body:Review=await response.json();
-    if(!Array.isArray(body.holdings))throw Error();
-    if(active){setReview(body);setError(false);}
-   }catch{if(active){setReview(null);setError(true);}}finally{pending=false;}
-  }
-  void load();const timer=window.setInterval(load,60000);
-  return()=>{active=false;controller.abort();window.clearInterval(timer);};
- },[revision]);
+ useEffect(()=>visiblePolling(async signal=>{
+  try{
+   const response=await fetch("/api/v1/portfolio/review",{cache:"no-store",signal});
+   if(!response.ok)throw Error();
+   const body:Review=await response.json();if(!Array.isArray(body.holdings))throw Error();
+   if(!signal.aborted){setReview(body);setError(false);}
+  }catch{if(!signal.aborted){setReview(null);setError(true);}}
+ },60000),[revision]);
  const ordered=[...(review?.holdings||[])].sort((a,b)=>priority(b)-priority(a)||a.symbol.localeCompare(b.symbol));
  const attention=ordered.filter(item=>priority(item)>=2);
  if(compact)return <section className="panel glass portfolio-doctor doctor-compact" aria-label="Portfolio attention summary">
