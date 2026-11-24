@@ -16,3 +16,13 @@ describe("automatic research overview",()=>{
    expect(screen.getByText("Manual research tool")).toBeTruthy();
  });
 });
+
+it("links directly to current horizon watches without triggering a manual scan",async()=>{
+ const navigate=vi.fn();
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[{section:"NSE",status:"READY",generated_at:null,result:{horizons:{SWING:{status:"TECHNICAL_WATCH_ONLY",candidates:[{id:1,symbol:"TEST",exchange:"NSE",as_of:"2026-11-23"}]}}}},{section:"BSE",status:"STALE",generated_at:null,result:{horizons:{SWING:{status:"TECHNICAL_WATCH_ONLY",candidates:[{id:2,symbol:"STALE",exchange:"BSE",as_of:"2026-11-23"}]}}}}]})})));
+ render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}} onHorizon={navigate}>{null}</AutonomousOverview>);
+ expect(await screen.findByText("1 technical watches")).toBeTruthy();
+ fireEvent.click(screen.getByRole("button",{name:/Swing/}));
+ expect(navigate).toHaveBeenCalledWith("SWING");
+ expect(fetch).toHaveBeenCalledTimes(1);
+});
