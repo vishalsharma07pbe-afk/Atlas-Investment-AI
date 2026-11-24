@@ -1,0 +1,89 @@
+"""Automatic bounded public strategy replay cache, independent of current picks."""
+from contextlib import closing
+from datetime import datetime,timedelta,timezone
+from zoneinfo import ZoneInfo
+import json
+from .market_client import backend_json
+from .strategy_validation import replay, WINDOWS
+from .horizon_research import VERSION
+
+IST=ZoneInfo("Asia/Kolkata")
+def _table(db):
+    db.execute("""CREATE TABLE IF NOT EXISTS strategy_validation(
+        exchange TEXT NOT NULL, instrument_id INTEGER NOT NULL, symbol TEXT NOT NULL,
+        methodology TEXT NOT NULL, attempted_at TEXT NOT NULL,status TEXT NOT NULL,payload TEXT,
+        PRIMARY KEY(exchange,instrument_id))""")
+
+def refresh(snapshot,connect,loader=backend_json,instant=None):
+    if not snapshot["enabled"]:
+        return
+    instant=instant or datetime.now(timezone.utc)
+    today=instant.astimezone(IST).date()
+    for exchange in ("NSE","BSE"):
+        if not any(s["section"]==exchange and s["status"]=="READY" for s in snapshot["sections"]):
+            continue
+        try:
+            instruments=loader(f"/api/v1/instruments?limit=60&exchange={exchange}")
+            registry={r["id"]:r for r in instruments if type(r.get("id")) is int and r["id"]>0
+                and r.get("active") is True and r.get("listing_status")=="ACTIVE"
+                and r.get("series")=="EQ" and r.get("exchange")==exchange
+                and r.get("instrument_type") in ("EQUITY","EQ","STOCK")}
+        except Exception:
+            continue
+        if not registry:
+            continue
+        stamp=instant.isoformat()
+        with closing(connect()) as db,db:
+            _table(db)
+            db.execute("BEGIN IMMEDIATE")
+            existing={r["instrument_id"]:r for r in db.execute("SELECT * FROM strategy_validation WHERE exchange=?",(exchange,))}
+            due=[r for i,r in registry.items() if i not in existing or existing[i]["methodology"]!=VERSION
+                or existing[i]["attempted_at"]<=(instant-timedelta(hours=24)).isoformat()]
+            if not due:
+                continue
+            selected=min(due,key=lambda r:(existing[r["id"]]["attempted_at"] if r["id"] in existing else "",r["id"]))
+            i=selected["id"]
+            db.execute("""INSERT INTO strategy_validation VALUES(?,?,?,?,?,'RUNNING',NULL)
+                ON CONFLICT(exchange,instrument_id) DO UPDATE SET symbol=excluded.symbol,methodology=excluded.methodology,
+                attempted_at=excluded.attempted_at,status='RUNNING',payload=NULL""",(exchange,i,selected["symbol"],VERSION,stamp))
+        try:
+            payload=loader(f"/api/v1/market-data/instruments/{i}/candles?limit=500")
+            identity=payload["instrument"]
+            if identity["id"]!=i or identity["symbol"]!=selected["symbol"] or identity["exchange"]!=exchange:
+                raise ValueError("IDENTITY_MISMATCH")
+            result=replay(payload,today)
+        except Exception:
+            result={"status":"UNAVAILABLE","horizons":{}}
+        with closing(connect()) as db,db:
+            db.execute("""UPDATE strategy_validation SET status=?,payload=? WHERE exchange=? AND instrument_id=?
+                AND attempted_at=?""",(result["status"],json.dumps(result,allow_nan=False),exchange,i,stamp))
+            db.execute("DELETE FROM strategy_validation WHERE attempted_at<?",((instant-timedelta(days=7)).isoformat(),))
+
+def read(connect,instant=None):
+    instant=instant or datetime.now(timezone.utc)
+    today=instant.astimezone(IST).date()
+    with closing(connect()) as db:
+        _table(db)
+        rows=db.execute("""SELECT * FROM strategy_validation WHERE methodology=? AND attempted_at BETWEEN ? AND ?
+            ORDER BY exchange,instrument_id""",(VERSION,(instant-timedelta(hours=48)).isoformat(),instant.isoformat())).fetchall()
+    horizons={}
+    for horizon in WINDOWS:
+        items=[]
+        counts={}
+        for row in rows:
+            payload=json.loads(row["payload"] or "{}")
+            result=payload.get("horizons",{}).get(horizon)
+            status=result["status"] if result else row["status"]
+            if result:
+                try:
+                    age=(today-datetime.fromisoformat(payload["as_of"]).date()).days
+                    if not 1<=age<=5:
+                        status="STALE"
+                except (ValueError,TypeError,KeyError):
+                    status="STALE"
+            counts[status]=counts.get(status,0)+1
+            if result and status=="REPLAY_OBSERVED":
+                items.append({"exchange":row["exchange"],"symbol":row["symbol"],"as_of":payload["as_of"],**result})
+        horizons[horizon]={"counts":counts,"observed_instruments":len(items),"items":items[:10]}
+    return {"methodology":VERSION,"sample_count":len(rows),"horizons":horizons,
+        "notice":"Bounded rotating current-registry sample, not selected by current watch score. Per-instrument replay only; results are not independent or a portfolio backtest. No market-index benchmark or prospective validation. No recommendation gate is lifted."}

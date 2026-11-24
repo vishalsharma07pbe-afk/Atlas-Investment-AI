@@ -10,11 +10,29 @@ type AiReview={reviews:{provider:string;findings:{statement:string;evidence_ids:
 type Candidate={news_evidence?:NewsEvidence;company_evidence?:CompanyEvidence;ai_review?:AiReview;id:number;symbol:string;exchange:string;as_of:string;close:number;rank_score:number;review_horizon:string;history_count:number;atr_percent:number;median_daily_traded_value:number;reasons:string[];warnings:string[]};
 type HorizonResult={status:string;candidates:Candidate[];matched_count:number;evaluated_count:number;blockers:string[];exclusions:Record<string,number>};
 type Section={section:string;status:string;generated_at:string|null;result:{universe_size:number;eligible_count:number;horizons?:Partial<Record<Horizon,HorizonResult>>}|null};
-type Snapshot={enabled:boolean;sections:Section[];automatic_ai_status?:string;automatic_company_status?:string;automatic_news_status?:string};
+type ReplayCost={cost_bps_per_side:number;net_return_percent:number;matched_gross_exposure_return_percent:number;max_drawdown_percent:number;win_rate_percent:number|null;wins:number;losses:number;flat:number};
+type ReplayItem={exchange:string;symbol:string;as_of:string;trades:number;holding_sessions:number;test_start:string;test_end:string;gross_buy_hold_percent:number;small_sample:boolean;cost_scenarios:ReplayCost[]};
+type Validation={status?:string;sample_count?:number;horizons?:Partial<Record<Horizon,{counts:Record<string,number>;observed_instruments:number;items:ReplayItem[]}>>;notice?:string};
+type Snapshot={strategy_validation?:Validation;enabled:boolean;sections:Section[];automatic_ai_status?:string;automatic_company_status?:string;automatic_news_status?:string};
 const titles:Record<Horizon,string>={INTRADAY:"Intraday research",SWING:"Swing trading research",SHORT_TERM:"Short-term equity research",LONG_TERM:"Long-term investment research"};
 const descriptions:Record<Horizon,string>={INTRADAY:"Completed current-session candle research. Live liquidity and event risk are not independently verified.",SWING:"Daily trend, relative volume and volatility checks for potential multi-session setups.",SHORT_TERM:"Medium-term trend and 60-session momentum. Fundamental and event research must still confirm each watch candidate.",LONG_TERM:"200-session price trend and longer-term momentum. A technical watch is not a business-quality or fair-value assessment."};
 const words=(value:string)=>value.toLowerCase().replace(/_/g," ");
 const money=(value:number)=>new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",maximumFractionDigits:2}).format(value);
+
+function StrategyValidation({data,horizon}:{data:Validation;horizon:Horizon}){
+ const result=data.horizons?.[horizon];
+ return <section className="panel glass" aria-label="Automatic historical strategy validation">
+  <div className="sectionhead"><div><h3>Historical strategy replay</h3><p className="muted tiny">Existing fixed rules tested on later chronological data, not a forecast.</p></div><span className="tag">RESEARCH ONLY</span></div>
+  <p>{data.sample_count??0} recently attempted registry instruments · {result?.observed_instruments??0} instruments with completed simulated positions</p>
+  {result&&<p className="muted tiny">{Object.entries(result.counts).map(([state,count])=>words(state)+": "+count).join(" · ")}</p>}
+  {!result?.items.length?<p>No usable replay results yet. Adjusted, validated history and a sufficient holdout window are required.</p>:result.items.map(item=><details key={item.exchange+":"+item.symbol}><summary>{item.symbol} · {item.exchange} · {item.trades} simulated positions{item.small_sample?" · small sample":""}</summary>
+   <p>{item.test_start} to {item.test_end} · {item.holding_sessions} session holding window · gross same-asset buy and hold {item.gross_buy_hold_percent}%.</p>
+   <div className="tablewrap"><table><thead><tr><th>Cost per side</th><th>Net simulated return</th><th>Maximum drawdown</th><th>Win rate</th><th>Wins / losses / flat</th></tr></thead><tbody>{item.cost_scenarios.map(cost=><tr key={cost.cost_bps_per_side}><td>{cost.cost_bps_per_side} bps</td><td>{cost.net_return_percent}%</td><td>{cost.max_drawdown_percent}%</td><td>{cost.win_rate_percent===null?"—":cost.win_rate_percent+"%"}</td><td>{cost.wins} / {cost.losses} / {cost.flat}</td></tr>)}</tbody></table></div>
+   <p className="muted tiny">Illustrative all-in costs; not actual broker fees or a market index comparison.</p>
+  </details>)}
+  <p className="muted tiny">{data.notice||"Historical validation unavailable or disabled."} Existing recommendation blockers remain unchanged.</p>
+ </section>;
+}
 
 export default function HorizonResearch({horizon,children,onSettings}:{horizon:Horizon;children:ReactNode;onSettings:()=>void}){
  const [data,setData]=useState<Snapshot|null>(null);
@@ -65,6 +83,7 @@ export default function HorizonResearch({horizon,children,onSettings}:{horizon:H
    <button type="button" className="secondary" onClick={onSettings}>Check data connections</button>
   </section>
   }
+  {horizon!=="INTRADAY"&&data?.enabled&&!error&&data.strategy_validation&&<StrategyValidation data={data.strategy_validation} horizon={horizon}/>}
   {horizon!=="INTRADAY"&&<AdvancedSection title="Research history and outcomes" description="Automatically tracked dated technical watches"><WatchOutcomeHistory horizon={horizon}/></AdvancedSection>}
   <details className="advanced-tools glass" key={horizon}><summary><span><strong>Advanced research tools</strong><small>Optional detailed analysis and evidence review</small></span><b>Open tools</b></summary>{/* Closed tools stay available without loading their workflows. */}<DeferredTools>{children}</DeferredTools></details>
  </section>;
