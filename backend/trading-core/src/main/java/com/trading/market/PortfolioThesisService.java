@@ -26,7 +26,7 @@ public class PortfolioThesisService {
   for(Object row:raw)if(row instanceof Map<?,?> m)holdings.add(new LinkedHashMap<>((Map<String,Object>)m));
   // Only explicit registry identities leave Spring, solely over the internal service route.
   List<Map<String,String>> identities=holdings.stream()
-    .filter(h->"EQUITY".equals(h.get("asset_type"))&&h.get("isin") instanceof String isin&&isin.matches("IN[A-Z0-9]{10}")&&Set.of("NSE","BSE").contains(h.get("exchange")))
+    .filter(h->"EQUITY".equals(h.get("asset_type"))&&h.get("isin") instanceof String isin&&isin.matches("IN[A-Z0-9]{10}")&&("NSE".equals(h.get("exchange"))||"BSE".equals(h.get("exchange"))))
     .map(h->Map.of("isin",(String)h.get("isin"),"exchange",(String)h.get("exchange"))).distinct().limit(100).toList();
   Map<String,JsonNode> evidence=identities.isEmpty()?Map.of():cached(identities);
   int fundReads=0;

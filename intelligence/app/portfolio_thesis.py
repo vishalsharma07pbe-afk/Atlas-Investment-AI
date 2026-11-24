@@ -141,6 +141,19 @@ def refresh(db_connect=connect,loader=backend_json,runner=ai_failover.grounded_r
         return
     instant=instant or datetime.now(timezone.utc)
     snapshot=selection(loader("/api/v1/portfolio-research-identities"))
+    active = identities([{"isin":item["isin"],"exchange":item["exchange"]} for item in _items(snapshot)])
+    # Remove evidence for identities no longer selected. The public cache is untouched.
+    with closing(db_connect()) as db,db:
+        company._table(db)
+        news._table(db)
+        active_isins={isin for _,isin in active}
+        active_keys={ex+"_EQ|"+isin for ex,isin in active}
+        for row in db.execute("SELECT isin FROM automatic_company_evidence").fetchall():
+            if row["isin"] not in active_isins:
+                db.execute("DELETE FROM automatic_company_evidence WHERE isin=?",(row["isin"],))
+        for row in db.execute("SELECT instrument_key FROM automatic_news_state").fetchall():
+            if row["instrument_key"] not in active_keys:
+                db.execute("DELETE FROM automatic_news_state WHERE instrument_key=?",(row["instrument_key"],))
     # Reuse the existing bounded adapters with an isolated private cache.
     company.refresh(snapshot,db_connect,instant=instant)
     news.refresh(snapshot,db_connect,instant=instant)
