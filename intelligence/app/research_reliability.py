@@ -155,3 +155,59 @@ def attach(snapshot, report, today):
                     "prospective_status":history.get("status","UNAVAILABLE"),
                     "notice":"Technical watch only. Evidence conflicts are review prompts, not confirmed adverse events or a calibrated prediction."}
     return snapshot
+
+
+def attach_conclusions(snapshot):
+    """A deterministic conclusion from the same current evidence shown in the report.
+
+    Preserve every qualification blocker. Historical tests and AI commentary
+    cannot promote a technical watch to an investment recommendation.
+    """
+    if not snapshot.get("enabled"):
+        return snapshot
+    for section in snapshot.get("sections",[]):
+        if section.get("status")!="READY" or section.get("section") not in ("NSE","BSE"):
+            continue
+        for horizon in HORIZONS:
+            group=(section.get("result") or {}).get("horizons",{}).get(horizon,{})
+            for item in group.get("candidates",[]):
+                reliability=item.get("research_reliability") or {}
+                warnings=list(reliability.get("warnings",[]))
+                blockers=sorted(set(group.get("blockers",[]))|set(reliability.get("blockers",[])))
+                company=item.get("company_evidence") or {}
+                replay=item.get("matched_strategy_replay") or {}
+                reviews=(item.get("ai_review") or {}).get("reviews",[])
+                news=item.get("news_evidence") or {}
+                trends=[t for t in (company.get("financial_trends") or {}).get("items",[])
+                        if t.get("latest_period_may_be_stale") is False
+                        and t.get("metric") in ("REVENUE","NET_PROFIT","OPERATING_CASH_FLOW")]
+                replay_observed=replay.get("status")=="REPLAY_OBSERVED" and replay.get("as_of")==item.get("as_of")
+                if replay_observed:
+                    if any(_finite(c.get("net_return_percent")) and c["net_return_percent"]<=0 for c in replay.get("cost_scenarios",[])):
+                        warnings.append("MATCHED_REPLAY_NONPOSITIVE_AFTER_COSTS")
+                    if replay.get("small_sample") is True:
+                        warnings.append("MATCHED_REPLAY_SMALL_SAMPLE")
+                thesis="Technical watch meets the current horizon rules; a full investment verdict is withheld."
+                if warnings:
+                    thesis="Technical watch meets the current horizon rules, but risk or conflicting evidence requires review."
+                conditions=["Reassess when the horizon-specific technical rules no longer pass.",
+                            "Reassess on new financial results, material corporate events or changes in data quality."]
+                if warnings:
+                    conditions.append("Resolve the reported evidence concerns before reconsidering qualification.")
+                if not replay_observed:
+                    conditions.append("Obtain compatible same-instrument historical validation.")
+                item["research_conclusion"]={
+                    "status":"REVIEW_REQUIRED" if warnings else "WATCH_ONLY",
+                    "summary":thesis,"blockers":blockers,"warnings":sorted(set(warnings)),
+                    "evidence":{
+                        "technical":"WATCH_RULES_MET",
+                        "fundamentals":"REPORTED_TRENDS_AVAILABLE" if trends else "INCOMPLETE",
+                        "news":"HEADLINES_AVAILABLE" if news.get("status")=="REVIEW_AVAILABLE" else
+                               "NO_RETURNED_ARTICLES" if news.get("status")=="NO_RECENT_RETURNED_ARTICLES" else "UNAVAILABLE",
+                        "historical_validation":"MATCHED_REPLAY_AVAILABLE" if replay_observed else "UNAVAILABLE",
+                        "ai":"COMMENTARY_AVAILABLE" if reviews else "UNAVAILABLE",
+                        "valuation":"NOT_VERIFIED","institutional":"STOCK_LEVEL_NOT_VERIFIED",
+                        "market_regime":"NOT_VALIDATED"},
+                    "reassessment_conditions":conditions,
+                    "notice":"Deterministic watch-only research conclusion; not a recommendation, target, stop-loss or calibrated probability."}
+    return snapshot

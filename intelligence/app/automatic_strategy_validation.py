@@ -1,6 +1,6 @@
 """Automatic bounded public strategy replay cache, independent of current picks."""
 from contextlib import closing
-from datetime import datetime,timedelta,timezone
+from datetime import date,datetime,timedelta,timezone
 from zoneinfo import ZoneInfo
 import json
 from .market_client import backend_json
@@ -23,7 +23,7 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
         if not any(s["section"]==exchange and s["status"]=="READY" for s in snapshot["sections"]):
             continue
         try:
-            instruments=loader(f"/api/v1/instruments?limit=60&exchange={exchange}")
+            instruments=loader(f"/api/v1/market-data/discovery-universe?exchange={exchange}")
             registry={r["id"]:r for r in instruments if type(r.get("id")) is int and r["id"]>0
                 and r.get("active") is True and r.get("listing_status")=="ACTIVE"
                 and r.get("series")=="EQ" and r.get("exchange")==exchange
@@ -59,13 +59,31 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
                 AND attempted_at=?""",(result["status"],json.dumps(result,allow_nan=False),exchange,i,stamp))
             db.execute("DELETE FROM strategy_validation WHERE attempted_at<?",((instant-timedelta(days=7)).isoformat(),))
 
-def read(connect,instant=None):
+def read(connect,instant=None,*,snapshot=None):
     instant=instant or datetime.now(timezone.utc)
     today=instant.astimezone(IST).date()
     with closing(connect()) as db:
         _table(db)
         rows=db.execute("""SELECT * FROM strategy_validation WHERE methodology=? AND attempted_at BETWEEN ? AND ?
             ORDER BY exchange,instrument_id""",(VERSION,(instant-timedelta(hours=48)).isoformat(),instant.isoformat())).fetchall()
+    if snapshot is not None and snapshot.get("enabled"):
+        # Match the cached replay by registry ID, venue, symbol and observation
+        # date, not by ticker alone or membership in the public top-ten sample.
+        indexed={(r["exchange"],r["instrument_id"]):r for r in rows}
+        for section in snapshot.get("sections",[]):
+            if section.get("status")!="READY" or section.get("section") not in ("NSE","BSE"):
+                continue
+            for horizon in WINDOWS:
+                for item in (section.get("result") or {}).get("horizons",{}).get(horizon,{}).get("candidates",[]):
+                    row=indexed.get((section["section"],item.get("id")))
+                    if row is None or row["symbol"]!=item.get("symbol") or item.get("exchange")!=section["section"]:
+                        continue
+                    payload=json.loads(row["payload"] or "{}")
+                    replay_result=payload.get("horizons",{}).get(horizon,{})
+                    if (payload.get("as_of")==item.get("as_of") and replay_result.get("status")=="REPLAY_OBSERVED"
+                            and 1<=(today-date.fromisoformat(payload["as_of"])).days<=5):
+                        item["matched_strategy_replay"]={"as_of":payload["as_of"],"attempted_at":row["attempted_at"],
+                            **replay_result,"notice":"Same-instrument historical replay, not a forward performance estimate."}
     horizons={}
     for horizon in WINDOWS:
         items=[]

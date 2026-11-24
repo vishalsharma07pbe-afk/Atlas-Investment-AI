@@ -63,3 +63,26 @@ class AutomaticAiReviewTests(unittest.TestCase):
             review.refresh(data,research._connect,lambda *a,**kw:self.fail("provider called"))
             with patch.dict(os.environ,{"ATLAS_AUTOMATIC_AI_REVIEW_ENABLED":"false"}):
                 review.refresh(snapshot(),research._connect,lambda *a,**kw:self.fail("provider called"))
+
+    def test_review_includes_only_allowlisted_same_company_financial_trends(self):
+        item=snapshot()["sections"][0]["result"]["horizons"]["SWING"]["candidates"][0]
+        item["isin"]="INE002A01018"
+        item["company_evidence"]={"isin":item["isin"],"financial_trends":{"items":[
+            {"metric":"REVENUE","previous_year":2025,"latest_year":2026,"direction":"INCREASED",
+             "latest_period_may_be_stale":False,"change_percent":8.2,"private_notes":"never forward"},
+            {"metric":"NET_PROFIT","previous_year":2022,"latest_year":2023,"direction":"INCREASED",
+             "latest_period_may_be_stale":True,"change_percent":99}]}}
+        item["matched_strategy_replay"]={"as_of":item["as_of"],"status":"REPLAY_OBSERVED","trades":4,
+            "cost_scenarios":[{"cost_bps_per_side":30,"net_return_percent":-2,"max_drawdown_percent":-5,"notes":"secret notes"}]}
+        pack=review.evidence(item,"SWING")
+        self.assertEqual([r["metric"] for r in pack["financial_trends"]],["REVENUE"])
+        self.assertEqual(pack["historical_replay"]["trades"],4)
+        def runner(prompt,ids,providers):
+            self.assertEqual(set(ids),{"OBS","LIMITS","FUND","REPLAY"})
+            self.assertNotIn("never forward",prompt)
+            self.assertNotIn("secret notes",prompt)
+            return {"status":"MODEL_GROUNDED","provider":providers[0],"response":{
+                "findings":[{"statement":"Reported revenue increased.","evidence_ids":["FUND"]}]}}
+        self.assertIsNotNone(review._review(pack,"OLLAMA",runner))
+        item["company_evidence"]["isin"]="INE009A01021"
+        self.assertNotIn("financial_trends",review.evidence(item,"SWING"))
