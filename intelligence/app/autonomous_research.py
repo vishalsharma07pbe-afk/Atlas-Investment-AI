@@ -65,7 +65,7 @@ def _save(section, result=None):
 
 
 def market_snapshot(exchange):
-    instruments = backend_json("/api/v1/instruments?" + urlencode({"limit": 20, "exchange": exchange}))
+    instruments = backend_json("/api/v1/instruments?" + urlencode({"limit": 60, "exchange": exchange}))
     if not isinstance(instruments, list):
         raise ValueError("INVALID_REGISTRY")
     # Do not include inactive or non-equity listings in discovery.
@@ -73,7 +73,7 @@ def market_snapshot(exchange):
                    and row.get("listing_status", "ACTIVE") == "ACTIVE"
                    and row.get("instrument_type", "EQUITY") in ("EQUITY", "EQ", "STOCK")]
     result = screen(instruments, lambda instrument_id: backend_json(
-        f"/api/v1/market-data/instruments/{instrument_id}/candles?limit=250"))
+        f"/api/v1/market-data/instruments/{instrument_id}/candles?limit=250"), universe_limit=60)
     result["notice"] = ("Automatically refreshed daily observations from a bounded registry sample. "
                         "Not live intraday signals, full-exchange rankings, or recommendations.")
     return result

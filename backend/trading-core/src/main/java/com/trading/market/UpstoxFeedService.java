@@ -91,18 +91,24 @@ import org.springframework.stereotype.Service;
  public int intradayCandles(UUID user,String key,String timeframe,LocalDate from,LocalDate to)throws Exception{
   if(!Set.of("1minute","15minute").contains(timeframe))throw new IllegalArgumentException("Unsupported timeframe");
   if(from.isAfter(to)||from.isBefore(LocalDate.now().minusDays(30)))throw new IllegalArgumentException("Invalid intraday range");
-  return ingestCandles(user,key,from,to,timeframe);
+  return ingestCandles(token(user),key,from,to,timeframe);
  }
  public int dailyCandles(UUID user,String key,LocalDate from,LocalDate to)throws Exception{
-  return ingestCandles(user,key,from,to,"1d");
+  return ingestCandles(token(user),key,from,to,"1d");
  }
- private int ingestCandles(UUID user,String key,LocalDate from,LocalDate to,String timeframe)throws Exception{
+ /** Operator-configured market-data credential only; never exposed through an HTTP endpoint. */
+ int discoveryDailyCandles(String accessToken,String key,LocalDate from,LocalDate to)throws Exception{
+  if(accessToken==null||accessToken.isBlank())throw new IllegalStateException("Discovery credential unavailable");
+  if(!to.isBefore(LocalDate.now(MarketCalendarService.IST)))throw new IllegalArgumentException("Only completed prior dates are allowed");
+  return ingestCandles(accessToken,key,from,to,"1d");
+ }
+ private int ingestCandles(String accessToken,String key,LocalDate from,LocalDate to,String timeframe)throws Exception{
   if(from.isAfter(to)||from.isBefore(LocalDate.now().minusYears(10)))throw new IllegalArgumentException("Invalid range");
   Long instrument=jdbc.query("SELECT i.id FROM instruments i JOIN exchanges e ON e.id=i.exchange_id JOIN upstox_instrument_map m ON m.exchange_code=e.code AND m.trading_symbol=i.symbol WHERE m.instrument_key=? LIMIT 1",(rs,n)->rs.getLong(1),key).stream().findFirst().orElse(null);
   if(instrument==null)throw new IllegalArgumentException("Instrument registry mapping required");
   String interval=timeframe.equals("1d")?"days/1":timeframe.equals("1minute")?"minutes/1":"minutes/15";
   String url="https://api.upstox.com/v3/historical-candle/"+URLEncoder.encode(key,StandardCharsets.UTF_8)+"/"+interval+"/"+to+"/"+from;
-  JsonNode body=json.readTree(http.text(url,token(user),8_000_000));JsonNode candles=body.path("data").path("candles");
+  JsonNode body=json.readTree(http.text(url,accessToken,8_000_000));JsonNode candles=body.path("data").path("candles");
   if(!candles.isArray())throw new IllegalStateException("Invalid candle response");
   long source=jdbc.queryForObject("SELECT id FROM data_sources WHERE source_code='UPSTOX'",Long.class);
   UUID run=jdbc.queryForObject("""
@@ -122,12 +128,13 @@ import org.springframework.stereotype.Service;
     long volume=row.get(5).asLong();if(volume<0)throw new IllegalArgumentException("INVALID_VOLUME");
     LocalDate tradeDate=timestamp.atZoneSameInstant(MarketCalendarService.IST).toLocalDate();
     if(tradeDate.isBefore(from)||tradeDate.isAfter(to))throw new IllegalArgumentException("CANDLE_OUTSIDE_REQUESTED_RANGE");
-    jdbc.update("""
+    int written=jdbc.update("""
       INSERT INTO market_candles(instrument_id,timeframe,candle_time,source_id,ingestion_run_id,open,high,low,close,volume,is_complete,quality_status,adjustment_status)
       VALUES (?,?,?,?,?,?,?,?,?,?,true,'PROVIDER_VALIDATED','RAW_UNADJUSTED')
       ON CONFLICT(instrument_id,timeframe,candle_time) DO UPDATE SET open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,volume=EXCLUDED.volume,source_id=EXCLUDED.source_id,ingestion_run_id=EXCLUDED.ingestion_run_id,quality_status=EXCLUDED.quality_status,received_at=now()
+      WHERE market_candles.adjustment_status='RAW_UNADJUSTED' AND market_candles.source_id=EXCLUDED.source_id
       """,instrument,timeframe,java.sql.Timestamp.from(timestamp.toInstant()),source,run,open,high,low,close,volume);
-    count++;
+    count+=written;
    }catch(RuntimeException ex){
     rejected++;
     jdbc.update("""

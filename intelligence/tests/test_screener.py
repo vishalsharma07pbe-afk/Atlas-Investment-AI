@@ -42,5 +42,12 @@ class ScreenerTests(unittest.TestCase):
         self.assertEqual(result["universe_size"],20)
         self.assertEqual(len(result["top_gainers"]),5)
 
+    def test_background_scan_can_use_larger_bounded_sample(self):
+        instruments=[{"id":i,"exchange":"NSE","symbol":f"T{i}"} for i in range(80)]
+        result=screen(instruments,lambda _:candles(),as_of=date(2026,11,13),universe_limit=60)
+        self.assertEqual(result["universe_size"],60)
+        self.assertEqual(result["eligible_count"],60)
+        self.assertEqual(len(result["top_gainers"]),5)
+
 if __name__=="__main__":
     unittest.main()

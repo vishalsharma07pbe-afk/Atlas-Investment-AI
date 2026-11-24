@@ -1,0 +1,9 @@
+# Automatic opportunity-discovery history
+
+The existing Upstox registry and Spring candle ingestion path now support bounded background backfill, independent of portfolio holdings and browser activity. Compose enables the scheduler, but no collection occurs without explicit market data usage rights, entitlement confirmation and the existing operator UPSTOX_ACCESS_TOKEN. The user vault is not borrowed for shared research. No extra account or bank integration is needed.
+
+Each five-minute fixed-delay pass claims up to two active mapped cash equities per exchange. It only requests completed previous sessions from the configured exchange calendar, prioritizes unattempted instruments and persists attempts across restarts. Missing history gets six months; existing sufficiently long history gets an incremental range. Failed requests wait six hours; successful ones wait a day. Adjusted series are excluded from raw backfill and conflicting writes cannot overwrite existing adjusted or other-source candles. Existing holding and manual research workflows remain available.
+
+The scheduled research overview now scans up to 60 registry instruments per exchange, while manual daily screening retains its existing 20-instrument default. These are bounded daily-history observations, not full-market rankings, live signals or investment recommendations. No automatic external AI usage, order execution or fabricated fundamental data is introduced.
+
+V19 adds an attempt ledger and mapping index; it does not delete records. Check authorized provider rights before activating and ensure market-session coverage. Verify real API behavior, data completeness and local resource use separately from mocked CI. A full market universe, liquidity selection, corporate-action-adjusted history, strategy-specific rankings and automatic AI evidence enrichment remain separate work.
