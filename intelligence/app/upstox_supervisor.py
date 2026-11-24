@@ -1,6 +1,8 @@
 """Explicit opt-in lifecycle for read-only market feed, never order execution."""
 import asyncio
 import os
+from time import monotonic
+from math import ceil
 from .upstox_quote_worker import quote_worker
 from .upstox_stream import StreamPolicy,subscription_request
 from .config import settings
@@ -8,10 +10,13 @@ from .upstox_feed_selection import parse_ids,resolve_ids,FeedSelectionError
 from .market_indices import INDEXES
 
 class FeedSupervisor:
-    def __init__(self,worker=quote_worker):
+    def __init__(self,worker=quote_worker,clock=monotonic):
         self.worker=worker
         self.task=None
         self.last_result=None
+        self.clock=clock
+        self.retry_at=0
+        self.requested_keys=set()
         self.selected_count=0
         self.startup_result={"status":"NOT_STARTED"}
 
@@ -20,6 +25,8 @@ class FeedSupervisor:
         if not enabled:
             return {"status":"DISABLED"}
         if self.task and not self.task.done():return {"status":"ALREADY_RUNNING"}
+        if self.clock()<self.retry_at:
+            return {"status":"RECOVERY_COOLDOWN","retry_after_seconds":ceil(self.retry_at-self.clock())}
         if not keys:return {"status":"BLOCKED","blockers":["INSTRUMENT_KEYS_MISSING"]}
         try:subscription_request(keys,StreamPolicy(),"supervisor")
         except ValueError:return {"status":"BLOCKED","blockers":["INVALID_INSTRUMENT_KEYS"]}
@@ -31,7 +38,13 @@ class FeedSupervisor:
             except asyncio.CancelledError:raise
             except Exception:
                 self.last_result={"status":"FAILED","reason":"FEED_WORKER_UNAVAILABLE"}
-            finally:self.worker.shutdown()
+            finally:
+                self.worker.shutdown()
+            # A cancelled intentional subscription change does not enter cooldown.
+            if self.last_result and self.last_result.get("status") in ("DISCONNECTED","FAILED"):
+                credential_rejected=self.last_result.get("last_failure")=="FEED_CREDENTIAL_REJECTED"
+                self.retry_at=self.clock()+(900 if credential_rejected else 60)
+        self.requested_keys=set(keys)
         self.selected_count=len(keys)
         self.task=asyncio.create_task(runner(),name="atlas-upstox-feed")
         return {"status":"STARTING"}
@@ -48,7 +61,8 @@ class FeedSupervisor:
     def status(self):
         return {"startup":self.startup_result,"selected_instruments":self.selected_count,
                 "supervised_task_running":bool(self.task and not self.task.done()),
-                "last_result":self.last_result}
+                "last_result":self.last_result,
+                "retry_after_seconds":max(0,ceil(self.retry_at-self.clock()))}
 
 feed_supervisor=FeedSupervisor()
 
