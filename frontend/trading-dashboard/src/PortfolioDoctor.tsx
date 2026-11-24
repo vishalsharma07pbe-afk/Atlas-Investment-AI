@@ -10,7 +10,10 @@ type HoldingReview={thesis_summary?:ThesisSummary;thesis_evidence?:Thesis;fund_h
 type Exposure={label:string;weight_percent:number};
 type Diversification={status:string;unpriced_count:number;unresolved_identity_count:number;resolved_identity_count:number;top_three_resolved_weight_percent:number|null;asset_exposure:Exposure[];direct_equity_sector_exposure:Exposure[];fund_category_exposure:Exposure[];sector_coverage_percent:number|null;fund_category_coverage_percent:number|null;review_prompts:string[];notice:string};
 type Correlation={status:string;comparable_pairs?:number;attempted_pairs?:number;high_positive_pair_count?:number;pairs?:{first_symbol:string;second_symbol:string;first_isin:string;second_isin:string;correlation:number;observations:number;first_date:string;last_date:string;high_positive_correlation:boolean}[];notice:string};
-type Review={diversification?:Diversification;equity_correlation?:Correlation;thesis_review_count?:number;generated_at:string;holding_count:number;attention_count:number;data_gap_count:number;holdings:HoldingReview[];notice:string};
+type OpportunityContext={status:string;held_excluded_count:number;ready_sections:string[];blocked_sections:string[];notice:string;
+ equities:{isin:string;symbol:string;exchange:string;horizon:string;as_of:string;sector:string|null;sector_weight_percent:number|null;context:string;identity_status:string;adjustment_status:string;blockers:string[]}[];
+ funds:{scheme_code:string;name:string;category:string;as_of:string;cagr_3y_percent:number;drawdown_3y_percent:number;context:string;identity_status:string}[]};
+type Review={opportunity_context?:OpportunityContext;diversification?:Diversification;equity_correlation?:Correlation;thesis_review_count?:number;generated_at:string;holding_count:number;attention_count:number;data_gap_count:number;holdings:HoldingReview[];notice:string};
 const pct=(value:number|null)=>value==null?"—":(value>0?"+":"")+value.toFixed(2)+"%";
 const statuses={REVIEW_REQUIRED:"Needs review",MONITOR:"Monitor",EVIDENCE_GAP:"Data needed"};
 
@@ -37,6 +40,22 @@ function DiversificationDigest({report,correlation}:{report:Diversification;corr
    {correlation.pairs?.length?<div className="tablewrap"><table><thead><tr><th>Equity pair</th><th>Correlation</th><th>Matched intervals</th></tr></thead><tbody>{correlation.pairs.map(p=><tr key={p.first_isin+":"+p.second_isin}><td>{p.first_symbol} / {p.second_symbol}{p.high_positive_correlation?" · Review":""}</td><td>{p.correlation.toFixed(2)}</td><td>{p.observations} · {p.first_date} to {p.last_date}</td></tr>)}</tbody></table></div>:<p>Comparable adjusted return history unavailable.</p>}
    <p className="muted tiny">{correlation.notice}</p>
   </details>}
+  <p className="muted tiny">{report.notice}</p>
+ </section>;
+}
+
+function OpportunityDigest({report}:{report:OpportunityContext}){
+ const [expanded,setExpanded]=useState(false);
+ const label=(value:string)=>value.replace(/_/g," ").toLowerCase();
+ return <section className="doctor-item" aria-label="Portfolio opportunity research">
+  <h3>Research beyond your recorded holdings</h3>
+  <p className="muted">Existing technical and fund historical watches, compared locally with your portfolio. Not buy recommendations.</p>
+  <p>{report.equities.length} equity watches · {report.funds.length} fund historical watches · {report.held_excluded_count} exact held identities excluded</p>
+  {report.status!=="WATCH_CONTEXT_AVAILABLE"&&<p>{report.status==="NO_NEW_EXACT_IDENTITY_WATCHES"?"No additional exact-identity watches in the current sample.":report.status==="DISABLED"?"Automatic research is disabled.":"Current public watch evidence is unavailable or insufficient."}</p>}
+  {report.blocked_sections.length>0&&<p className="muted tiny">Unavailable or stale sections: {report.blocked_sections.map(label).join(", ")}.</p>}
+  {report.equities.length>0&&<><h4>Equity technical watches</h4><ul>{report.equities.slice(0,expanded?undefined:5).map(item=><li key={item.isin}><strong>{item.symbol} · {item.exchange}</strong> — {label(item.horizon)} · {item.as_of}. {item.sector||"Sector unknown"} · {label(item.context)}{item.sector_weight_percent!==null?` (${item.sector_weight_percent.toFixed(2)}% of priced direct equities)`:""}. {item.identity_status==="UNRESOLVED_HOLDINGS_EXIST"?"Some held identities are unresolved. ":""}{item.adjustment_status==="RAW_UNADJUSTED"?"Raw prices may be distorted by corporate actions. ":""}<small className="muted">Unverified: {item.blockers.map(label).join(", ")||"full investment thesis"}.</small></li>)}</ul></>}
+  {report.funds.length>0&&<><h4>Mutual fund historical watches</h4><ul>{report.funds.slice(0,expanded?undefined:5).map(item=><li key={item.scheme_code}><strong>{item.name}</strong> · {label(item.category)} · {item.as_of}. 3-year CAGR {pct(item.cagr_3y_percent)} · historical drawdown {pct(item.drawdown_3y_percent)}. {label(item.context)}. {item.identity_status==="UNRESOLVED_HOLDINGS_EXIST"?"Some held identities are unresolved.":""}</li>)}</ul></>}
+  {(report.equities.length>5||report.funds.length>5)&&<button type="button" className="secondary" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}>{expanded?"Show fewer watches":"Show all watches"}</button>}
   <p className="muted tiny">{report.notice}</p>
  </section>;
 }
@@ -78,6 +97,7 @@ export default function PortfolioDoctor({revision,onSettings}:{revision:number;o
     <div className="doctor-stats"><div><span>Holdings reviewed</span><strong>{review.holding_count}</strong></div><div><span>Need attention</span><strong>{review.attention_count}</strong></div><div><span>Core data gaps</span><strong>{review.data_gap_count}</strong></div></div>
     {review.thesis_review_count!=null&&<p className="muted">Holdings with research review prompts: <strong>{review.thesis_review_count}</strong> (includes recorded risk flags).</p>}
     {review.diversification&&<DiversificationDigest report={review.diversification} correlation={review.equity_correlation}/>}
+    {review.opportunity_context&&<OpportunityDigest report={review.opportunity_context}/>}
     <div className="doctor-list">{[...review.holdings].sort((a,b)=>Number(b.thesis_summary?.status==="REVIEW_EVIDENCE")-Number(a.thesis_summary?.status==="REVIEW_EVIDENCE")).slice(0,expanded?review.holdings.length:5).map(item=><article key={item.id} className="doctor-item">
       <header><div><strong>{item.symbol}</strong><small>{item.asset_type==="MUTUAL_FUND"?"Mutual fund":item.exchange||"Equity"}</small></div><span className={item.status==="REVIEW_REQUIRED"?"doctor-warning":"doctor-neutral"}>{statuses[item.status]}</span></header>
       {item.thesis_summary?<ThesisDigest summary={item.thesis_summary}/>:item.findings.length?<ul>{item.findings.map(f=><li key={f}>{f}</li>)}</ul>:<p>{item.status==="EVIDENCE_GAP"?"More reliable data is needed.":"No threshold breach in the available observations; not a complete investment assessment."}</p>}
