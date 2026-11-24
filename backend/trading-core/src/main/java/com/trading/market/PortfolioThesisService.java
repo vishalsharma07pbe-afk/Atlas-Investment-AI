@@ -41,10 +41,28 @@ public class PortfolioThesisService {
    h.put("thesis_summary",PortfolioThesisSummary.summarize(h,json));
   }
   var result=new LinkedHashMap<>(review);result.put("holdings",holdings);
-  result.put("diversification",PortfolioDiversification.summarize(holdings,json));
+  var diversification=PortfolioDiversification.summarize(holdings,json);
+  result.put("diversification",diversification);
+  result.put("opportunity_context",PortfolioOpportunityContext.compare(holdings,diversification,publicWatches(),json));
   result.put("thesis_review_count",holdings.stream().filter(h->h.get("thesis_summary") instanceof Map<?,?> m&&"REVIEW_EVIDENCE".equals(m.get("status"))).count());
   result.put("thesis_notice","Company and fund evidence is supplementary; the local holding-risk thresholds are unchanged. No external AI receives portfolio data.");
   return result;
+ }
+
+ private JsonNode publicWatches(){
+  if(serviceToken==null||serviceToken.length()<32)return json.createObjectNode();
+  try{
+   var request=HttpRequest.newBuilder(URI.create(intelligenceUrl+"/api/v1/internal/portfolio-opportunities"))
+    .timeout(Duration.ofSeconds(3)).header("X-Atlas-Service-Token",serviceToken).GET().build();
+   var response=client.send(request,HttpResponse.BodyHandlers.ofInputStream());
+   try(InputStream body=response.body()){
+    if(response.statusCode()!=200)return json.createObjectNode();
+    byte[] bytes=body.readNBytes(256_001);if(bytes.length>256_000)return json.createObjectNode();
+    JsonNode data=json.readTree(bytes);
+    return data!=null&&data.isObject()?data:json.createObjectNode();
+   }
+  }catch(InterruptedException ex){Thread.currentThread().interrupt();return json.createObjectNode();}
+  catch(Exception ex){return json.createObjectNode();}
  }
 
  private Map<String,JsonNode> cached(List<Map<String,String>> identities){
