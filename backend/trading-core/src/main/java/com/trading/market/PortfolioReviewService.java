@@ -98,6 +98,8 @@ public class PortfolioReviewService {
       WHERE p.user_id=? ORDER BY p.id
       """,today,today,owner);
     Map<String,Object> report=assess(rows,today,now);
+    try{report.put("equity_correlation",PortfolioEquityCorrelation.collect(jdbc,rows,today));}
+    catch(org.springframework.dao.DataAccessException ignored){report.put("equity_correlation",Map.of("status","UNAVAILABLE","notice","Local adjusted history could not be read."));}
     try{
       jdbc.update("""
         INSERT INTO portfolio_review_snapshots(user_id,holdings_revision,generated_at,result)
