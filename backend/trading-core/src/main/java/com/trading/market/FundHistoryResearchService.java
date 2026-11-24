@@ -39,6 +39,9 @@ public class FundHistoryResearchService {
   public void scheduled(){
     if(!enabled||!permitted)return;
     LocalDate today=LocalDate.now(MarketCalendarService.IST);
+    // Prioritize the exact saved scheme, including regular, debt and other plans
+    // outside the discovery universe. Only public scheme codes are selected.
+    collectHeld(today);
     for(String category:List.of("LARGE_CAP","MID_CAP","SMALL_CAP","FLEXI_CAP","INDEX")){
       var rows=jdbc.queryForList("SELECT s.scheme_code "+UNIVERSE+"""
         AND EXISTS(SELECT 1 FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code
@@ -49,22 +52,44 @@ public class FundHistoryResearchService {
         ORDER BY (SELECT attempted_at FROM fund_history_attempts a WHERE a.scheme_code=s.scheme_code)
           ASC NULLS FIRST,s.scheme_code LIMIT 1
         """,categoryPattern(category),today,today,today,today);
-      for(var row:rows){
-        long code=((Number)row.get("scheme_code")).longValue();
-        int claimed=jdbc.update("""
-          INSERT INTO fund_history_attempts(scheme_code,attempted_at,next_attempt_at,status)
-          VALUES (?,now(),now()+interval '1 day','RUNNING')
-          ON CONFLICT(scheme_code) DO UPDATE SET attempted_at=now(),next_attempt_at=now()+interval '1 day',status='RUNNING'
-          WHERE fund_history_attempts.next_attempt_at<=now()
-          """,code);
-        if(claimed==0)continue;
-        try{
-          int written=funds.history(code);
-          jdbc.update("UPDATE fund_history_attempts SET status=?,next_attempt_at=now()+interval '7 days' WHERE scheme_code=?",written>0?"SUCCESS":"FAILED",code);
-        }catch(Exception ex){
-          jdbc.update("UPDATE fund_history_attempts SET status='FAILED',next_attempt_at=now()+interval '1 day' WHERE scheme_code=?",code);
-        }
-      }
+      for(var row:rows)collect(((Number)row.get("scheme_code")).longValue());
+    }
+  }
+
+  private void collectHeld(LocalDate today){
+    var rows=jdbc.queryForList("""
+      SELECT s.scheme_code FROM mutual_fund_schemes s
+      WHERE EXISTS(SELECT 1 FROM personal_holdings h
+        WHERE h.asset_type='MUTUAL_FUND' AND h.user_id IS NOT NULL
+          AND h.symbol=s.scheme_code::text)
+        AND EXISTS(SELECT 1 FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code
+          AND n.source_code='AMFI' AND n.nav_date BETWEEN ?::date-7 AND ?::date)
+        AND NOT EXISTS(SELECT 1 FROM fund_history_attempts a WHERE a.scheme_code=s.scheme_code AND a.next_attempt_at>now())
+        AND ((SELECT count(*) FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code
+          AND n.source_code IN ('AMFI','MFAPI') AND n.nav_date BETWEEN ?::date-1100 AND ?::date)<650
+          OR NOT EXISTS(SELECT 1 FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code
+            AND n.source_code IN ('AMFI','MFAPI')
+            AND n.nav_date BETWEEN (?::date-interval '3 years'-interval '21 days')::date
+              AND (?::date-interval '3 years')::date))
+      ORDER BY (SELECT attempted_at FROM fund_history_attempts a WHERE a.scheme_code=s.scheme_code)
+        ASC NULLS FIRST,s.scheme_code LIMIT 2
+      """,today,today,today,today,today,today);
+    for(var row:rows)collect(((Number)row.get("scheme_code")).longValue());
+  }
+
+  private void collect(long code){
+    int claimed=jdbc.update("""
+      INSERT INTO fund_history_attempts(scheme_code,attempted_at,next_attempt_at,status)
+      VALUES (?,now(),now()+interval '1 day','RUNNING')
+      ON CONFLICT(scheme_code) DO UPDATE SET attempted_at=now(),next_attempt_at=now()+interval '1 day',status='RUNNING'
+      WHERE fund_history_attempts.next_attempt_at<=now()
+      """,code);
+    if(claimed==0)return;
+    try{
+      int written=funds.history(code);
+      jdbc.update("UPDATE fund_history_attempts SET status=?,next_attempt_at=now()+interval '7 days' WHERE scheme_code=?",written>0?"SUCCESS":"FAILED",code);
+    }catch(Exception ex){
+      jdbc.update("UPDATE fund_history_attempts SET status='FAILED',next_attempt_at=now()+interval '1 day' WHERE scheme_code=?",code);
     }
   }
 
