@@ -1,0 +1,151 @@
+package com.trading.market;
+
+import java.time.*;
+import java.util.*;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+
+/** Research-only, bounded completed-session observations. */
+@Service
+public class IntradayResearchService {
+ private final JdbcTemplate jdbc;
+ private final UpstoxFeedService stocks;
+ private final MarketCalendarService calendar;
+ @Value("${ATLAS_INTRADAY_RESEARCH_ENABLED:false}") boolean enabled;
+ @Value("${MARKET_DATA_USAGE_RIGHTS_CONFIRMED:false}") boolean rights;
+ @Value("${MARKET_DATA_ENTITLEMENT_CONFIRMED:false}") boolean entitlement;
+ @Value("${UPSTOX_ACCESS_TOKEN:}") String token="";
+ public IntradayResearchService(JdbcTemplate jdbc,UpstoxFeedService stocks,MarketCalendarService calendar){
+  this.jdbc=jdbc;this.stocks=stocks;this.calendar=calendar;
+ }
+ boolean permitted(){return enabled&&rights&&entitlement&&!token.isBlank();}
+
+ @Scheduled(initialDelayString="${atlas.intraday.initial-ms:30000}",fixedDelayString="${atlas.intraday.poll-ms:60000}")
+ public void scheduled(){
+  if(!permitted())return;
+  Instant now=Instant.now();
+  for(String exchange:List.of("NSE","BSE"))if(calendar.isMarketOpen(exchange,now))refreshExchange(exchange,now);
+ }
+
+ void refreshExchange(String exchange,Instant now){
+  LocalDate today=now.atZone(MarketCalendarService.IST).toLocalDate();
+  LocalDate last;
+  try{last=calendar.lastTradingDay(exchange,today);}catch(IllegalStateException ex){return;}
+  // Prior completed daily turnover proxy; bounded to eight mapped stocks per exchange.
+  // Do not claim this is a market-wide or order-book liquidity ranking.
+  var sample=jdbc.queryForList("""
+    WITH liquid AS (
+      SELECT i.id,m.instrument_key,c.close*c.volume AS turnover
+      FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
+      JOIN LATERAL (SELECT instrument_key FROM upstox_instrument_map
+        WHERE exchange_code=e.code AND trading_symbol=i.symbol AND isin=i.isin
+          AND instrument_type IN ('EQ','EQUITY') AND instrument_key LIKE e.code||'_EQ|%'
+        ORDER BY instrument_key LIMIT 1) m ON true
+      JOIN LATERAL (SELECT c.close,c.volume FROM market_candles c
+        WHERE c.instrument_id=i.id AND c.timeframe='1d' AND c.is_complete
+          AND c.quality_status='PROVIDER_VALIDATED'
+          AND (c.candle_time AT TIME ZONE 'Asia/Kolkata')::date=?
+        ORDER BY c.candle_time DESC LIMIT 1) c ON true
+      WHERE e.code=? AND i.active AND i.listing_status='ACTIVE' AND i.series='EQ'
+        AND i.instrument_type IN ('EQ','EQUITY','STOCK') AND c.close*c.volume>=10000000
+      ORDER BY turnover DESC,i.id LIMIT 8
+    )
+    SELECT l.id,l.instrument_key FROM liquid l LEFT JOIN intraday_research_attempts a ON a.instrument_id=l.id
+    WHERE a.next_attempt_at IS NULL OR a.next_attempt_at<=now()
+    ORDER BY a.attempted_at ASC NULLS FIRST,l.id LIMIT 2
+    """,last,exchange);
+  for(var row:sample){
+   long id=((Number)row.get("id")).longValue();
+   int claimed=jdbc.update("""
+     INSERT INTO intraday_research_attempts(instrument_id,attempted_at,next_attempt_at,status)
+     VALUES (?,now(),now()+interval '5 minutes','RUNNING')
+     ON CONFLICT(instrument_id) DO UPDATE SET attempted_at=now(),next_attempt_at=now()+interval '5 minutes',status='RUNNING'
+     WHERE intraday_research_attempts.next_attempt_at<=now()
+     """,id);
+   if(claimed!=1)continue;
+   try{
+    stocks.discoveryIntradayCandles(token,(String)row.get("instrument_key"),now);
+    jdbc.update("UPDATE intraday_research_attempts SET status='SUCCESS' WHERE instrument_id=?",id);
+   }catch(Exception ex){
+    jdbc.update("UPDATE intraday_research_attempts SET status='FAILED',next_attempt_at=now()+interval '15 minutes' WHERE instrument_id=?",id);
+    break;
+   }
+  }
+ }
+
+ public Map<String,Object> current(){
+  Instant now=Instant.now();
+  List<Map<String,Object>> candidates=new ArrayList<>(),warnings=new ArrayList<>();
+  int examined=0,eligible=0;List<String> open=new ArrayList<>();
+  if(permitted())for(String exchange:List.of("NSE","BSE")){
+   if(!calendar.isMarketOpen(exchange,now))continue;
+   open.add(exchange);
+   // Only scheduler-collected, completed provider bars for this exact session.
+   var rows=jdbc.queryForList("""
+     SELECT i.id,i.symbol,e.code AS exchange,c.candle_time,c.open,c.high,c.low,c.close,c.volume
+     FROM intraday_research_attempts a JOIN instruments i ON i.id=a.instrument_id
+     JOIN exchanges e ON e.id=i.exchange_id JOIN market_candles c ON c.instrument_id=i.id
+     JOIN data_sources ds ON ds.id=c.source_id
+     WHERE e.code=? AND i.active AND i.series='EQ' AND i.listing_status='ACTIVE'
+       AND a.status='SUCCESS' AND a.attempted_at>=now()-interval '15 minutes'
+       AND c.timeframe='15minute' AND c.is_complete AND c.quality_status='PROVIDER_VALIDATED'
+       AND ds.source_code='UPSTOX' AND c.adjustment_status='RAW_UNADJUSTED'
+       AND (c.candle_time AT TIME ZONE 'Asia/Kolkata')::date=?
+       AND c.candle_time+interval '15 minutes'<=?
+     ORDER BY i.id,c.candle_time
+     """,exchange,now.atZone(MarketCalendarService.IST).toLocalDate(),java.sql.Timestamp.from(now));
+   Map<Long,List<Map<String,Object>>> groups=new LinkedHashMap<>();
+   for(var row:rows)groups.computeIfAbsent(((Number)row.get("id")).longValue(),k->new ArrayList<>()).add(row);
+   for(var group:groups.values()){
+    examined++;
+    var finding=evaluate(group,now);
+    if(finding==null)continue;
+    eligible++;
+    if("FAILED_BREAKOUT_WATCH".equals(finding.get("pattern")))warnings.add(finding);
+    else if("VOLUME_BREAKOUT_WATCH".equals(finding.get("pattern")))candidates.add(finding);
+   }
+  }
+  candidates.sort(Comparator.comparingDouble((Map<String,Object> r)->((Number)r.get("relative_volume")).doubleValue()).reversed());
+  return Map.of("status",!permitted()?"NOT_AUTHORIZED":open.isEmpty()?"SESSION_CLOSED_OR_UNVERIFIED":"RESEARCH_ONLY",
+    "generated_at",now.toString(),"open_exchanges",open,"examined",examined,"eligible",eligible,
+    "candidates",candidates.stream().limit(5).toList(),"warnings",warnings.stream().limit(5).toList(),
+    "notice","Completed 15-minute observations in a bounded sample. VWAP and volume comparisons are candle-based proxies, not live order-book liquidity. No validated trading signal, target or stop-loss.");
+ }
+
+ static Map<String,Object> evaluate(List<Map<String,Object>> rows,Instant now){
+  if(rows.size()<6||rows.size()>25)return null;
+  var today=now.atZone(MarketCalendarService.IST).toLocalDate();
+  Instant expected=today.atTime(9,15).atZone(MarketCalendarService.IST).toInstant();
+  double sumPV=0,sumV=0,priorVolume=0,priorHigh=0,range=0,first=0;
+  double close=0,high=0,volume=0;
+  for(int n=0;n<rows.size();n++){
+   var row=rows.get(n);
+   Object timestamp=row.get("candle_time");
+   Instant time=timestamp instanceof java.sql.Timestamp t?t.toInstant():timestamp instanceof OffsetDateTime t?t.toInstant():timestamp instanceof Instant t?t:null;
+   if(!expected.equals(time)||time.plusSeconds(900).isAfter(now))return null;
+   expected=expected.plusSeconds(900);
+   double o=num(row,"open"),h=num(row,"high"),l=num(row,"low"),c=num(row,"close"),v=num(row,"volume");
+   if(!Double.isFinite(o+h+l+c+v)||o<=0||l<=0||c<=0||h<Math.max(o,c)||l>Math.min(o,c)||v<=0)return null;
+   if(n==0)first=o;
+   sumPV+=(h+l+c)/3*v;sumV+=v;range+=h-l;
+   if(n<rows.size()-1){priorVolume+=v;priorHigh=Math.max(priorHigh,h);}
+   else{close=c;high=h;volume=v;}
+  }
+  if(Duration.between(expected,now).toMinutes()>20)return null;
+  double vwap=sumPV/sumV,rv=volume/(priorVolume/(rows.size()-1)),momentum=100*(close/first-1),rangePct=100*range/rows.size()/close;
+  if(!Double.isFinite(vwap+rv+momentum+rangePct))return null;
+  String pattern=high>priorHigh&&close<=priorHigh?"FAILED_BREAKOUT_WATCH":
+    close>priorHigh&&close>vwap&&rv>=1.5&&momentum>0?"VOLUME_BREAKOUT_WATCH":"NO_PATTERN";
+  var last=rows.getLast();
+  Map<String,Object> result=new LinkedHashMap<>();
+  result.put("id",last.get("id"));result.put("symbol",last.get("symbol"));result.put("exchange",last.get("exchange"));
+  result.put("pattern",pattern);result.put("bar_end",expected.toString());result.put("close",close);
+  result.put("vwap_proxy",round(vwap));result.put("relative_volume",round(rv));result.put("session_change_percent",round(momentum));
+  result.put("mean_bar_range_percent",round(rangePct));result.put("prior_session_high_so_far",priorHigh);result.put("bar_count",rows.size());
+  return result;
+ }
+ static double num(Map<String,Object> row,String key){return row.get(key) instanceof Number n?n.doubleValue():Double.NaN;}
+ static double round(double n){return Math.round(n*10000)/10000d;}
+}

@@ -102,14 +102,23 @@ import org.springframework.stereotype.Service;
   if(!to.isBefore(LocalDate.now(MarketCalendarService.IST)))throw new IllegalArgumentException("Only completed prior dates are allowed");
   return ingestCandles(accessToken,key,from,to,"1d");
  }
+ /** Current-session operator research, completed bars only; no user vault access. */
+ int discoveryIntradayCandles(String accessToken,String key,Instant cutoff)throws Exception{
+  if(accessToken==null||accessToken.isBlank())throw new IllegalStateException("Discovery credential unavailable");
+  LocalDate day=cutoff.atZone(MarketCalendarService.IST).toLocalDate();
+  return ingestCandles(accessToken,key,day,day,"15minute",cutoff);
+ }
  private int ingestCandles(String accessToken,String key,LocalDate from,LocalDate to,String timeframe)throws Exception{
+  return ingestCandles(accessToken,key,from,to,timeframe,null);
+ }
+ private int ingestCandles(String accessToken,String key,LocalDate from,LocalDate to,String timeframe,Instant cutoff)throws Exception{
   if(from.isAfter(to)||from.isBefore(LocalDate.now().minusYears(10)))throw new IllegalArgumentException("Invalid range");
   Long instrument=jdbc.query("SELECT i.id FROM instruments i JOIN exchanges e ON e.id=i.exchange_id JOIN upstox_instrument_map m ON m.exchange_code=e.code AND m.trading_symbol=i.symbol WHERE m.instrument_key=? LIMIT 1",(rs,n)->rs.getLong(1),key).stream().findFirst().orElse(null);
   if(instrument==null)throw new IllegalArgumentException("Instrument registry mapping required");
   String interval=timeframe.equals("1d")?"days/1":timeframe.equals("1minute")?"minutes/1":"minutes/15";
-  String url="https://api.upstox.com/v3/historical-candle/"+URLEncoder.encode(key,StandardCharsets.UTF_8)+"/"+interval+"/"+to+"/"+from;
+  String url="https://api.upstox.com/v3/historical-candle/"+(cutoff==null?"":"intraday/")+URLEncoder.encode(key,StandardCharsets.UTF_8)+"/"+interval+(cutoff==null?"/"+to+"/"+from:"");
   JsonNode body=json.readTree(http.text(url,accessToken,8_000_000));JsonNode candles=body.path("data").path("candles");
-  if(!candles.isArray())throw new IllegalStateException("Invalid candle response");
+  if(!candles.isArray()||(cutoff!=null&&!"success".equals(body.path("status").asText())))throw new IllegalStateException("Invalid candle response");
   long source=jdbc.queryForObject("SELECT id FROM data_sources WHERE source_code='UPSTOX'",Long.class);
   UUID run=jdbc.queryForObject("""
     INSERT INTO ingestion_runs(source_id,job_name,status,started_at,source_revision)
@@ -120,6 +129,14 @@ import org.springframework.stereotype.Service;
    try{
     if(!row.isArray()||row.size()<6)throw new IllegalArgumentException("INVALID_CANDLE_SHAPE");
     OffsetDateTime timestamp=OffsetDateTime.parse(row.get(0).asText());
+    if(cutoff!=null){
+     var start=timestamp.atZoneSameInstant(MarketCalendarService.IST);
+     LocalTime t=start.toLocalTime();
+     if(!start.toLocalDate().equals(from)||t.isBefore(LocalTime.of(9,15))||!t.isBefore(LocalTime.of(15,30))
+        ||t.getMinute()%15!=0||t.getSecond()!=0||t.getNano()!=0||!row.get(5).isIntegralNumber())throw new IllegalArgumentException("INVALID_SESSION_BAR");
+     if(timestamp.toInstant().plusSeconds(15*60).isAfter(cutoff))continue;
+     for(int j=1;j<=4;j++)if(!row.get(j).isNumber())throw new IllegalArgumentException("INVALID_OHLC");
+    }
     BigDecimal open=row.get(1).decimalValue(),high=row.get(2).decimalValue(),low=row.get(3).decimalValue(),close=row.get(4).decimalValue();
     if(open.signum()<=0||high.signum()<=0||low.signum()<=0||close.signum()<=0||
        high.compareTo(open)<0||high.compareTo(close)<0||high.compareTo(low)<0||
@@ -131,7 +148,7 @@ import org.springframework.stereotype.Service;
     int written=jdbc.update("""
       INSERT INTO market_candles(instrument_id,timeframe,candle_time,source_id,ingestion_run_id,open,high,low,close,volume,is_complete,quality_status,adjustment_status)
       VALUES (?,?,?,?,?,?,?,?,?,?,true,'PROVIDER_VALIDATED','RAW_UNADJUSTED')
-      ON CONFLICT(instrument_id,timeframe,candle_time) DO UPDATE SET open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,volume=EXCLUDED.volume,source_id=EXCLUDED.source_id,ingestion_run_id=EXCLUDED.ingestion_run_id,quality_status=EXCLUDED.quality_status,received_at=now()
+      ON CONFLICT(instrument_id,timeframe,candle_time) DO UPDATE SET open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,volume=EXCLUDED.volume,source_id=EXCLUDED.source_id,ingestion_run_id=EXCLUDED.ingestion_run_id,quality_status=EXCLUDED.quality_status,is_complete=true,received_at=now()
       WHERE market_candles.adjustment_status='RAW_UNADJUSTED' AND market_candles.source_id=EXCLUDED.source_id
       """,instrument,timeframe,java.sql.Timestamp.from(timestamp.toInstant()),source,run,open,high,low,close,volume);
     count+=written;

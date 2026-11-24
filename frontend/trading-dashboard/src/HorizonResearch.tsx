@@ -1,5 +1,6 @@
 import {useEffect,useState,type ReactNode} from "react";
 import WatchOutcomeHistory from "./WatchOutcomeHistory";
+import IntradayResearch from "./IntradayResearch";
 import AdvancedSection from "./AdvancedSection";
 import CompanyEvidenceCard,{type CompanyEvidence} from "./CompanyEvidenceCard";
 
@@ -10,7 +11,7 @@ type HorizonResult={status:string;candidates:Candidate[];matched_count:number;ev
 type Section={section:string;status:string;generated_at:string|null;result:{universe_size:number;eligible_count:number;horizons?:Partial<Record<Horizon,HorizonResult>>}|null};
 type Snapshot={enabled:boolean;sections:Section[];automatic_ai_status?:string;automatic_company_status?:string};
 const titles:Record<Horizon,string>={INTRADAY:"Intraday research",SWING:"Swing trading research",SHORT_TERM:"Short-term equity research",LONG_TERM:"Long-term investment research"};
-const descriptions:Record<Horizon,string>={INTRADAY:"Intraday setups need current-session bars and verified live liquidity. Daily candles cannot qualify an intraday setup.",SWING:"Daily trend, relative volume and volatility checks for potential multi-session setups.",SHORT_TERM:"Medium-term trend and 60-session momentum. Fundamental and event research must still confirm each watch candidate.",LONG_TERM:"200-session price trend and longer-term momentum. A technical watch is not a business-quality or fair-value assessment."};
+const descriptions:Record<Horizon,string>={INTRADAY:"Completed current-session candle research. Live liquidity and event risk are not independently verified.",SWING:"Daily trend, relative volume and volatility checks for potential multi-session setups.",SHORT_TERM:"Medium-term trend and 60-session momentum. Fundamental and event research must still confirm each watch candidate.",LONG_TERM:"200-session price trend and longer-term momentum. A technical watch is not a business-quality or fair-value assessment."};
 const words=(value:string)=>value.toLowerCase().replace(/_/g," ");
 const money=(value:number)=>new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",maximumFractionDigits:2}).format(value);
 
@@ -45,8 +46,8 @@ export default function HorizonResearch({horizon,children,onSettings}:{horizon:H
    <div className="horizon-coverage">{sections.map(s=><div key={s.section}><strong>{s.section}</strong><span>{ready.includes(s)?(s.result?.eligible_count||0)+" / "+(s.result?.universe_size||0)+" daily histories eligible":s.status==="READY"?"Waiting for horizon refresh":words(s.status)}</span></div>)}</div>
    <p className="muted tiny">Bounded registry sample; not a whole-market ranking. Missing source evidence is never replaced with estimates.</p>
   </section>
-  <section className="panel glass horizon-results">
-   <div className="sectionhead"><div><h3>{horizon==="INTRADAY"?"Live setup availability":"Technical watch candidates"}</h3><p className="muted tiny">Up to five observations across the available NSE/BSE samples.</p></div></div>
+  {horizon==="INTRADAY"?<IntradayResearch/>:<section className="panel glass horizon-results">
+   <div className="sectionhead"><div><h3>Technical watch candidates</h3><p className="muted tiny">Up to five observations across the available NSE/BSE samples.</p></div></div>
    {ranked.length?<div className="horizon-cards">{ranked.map((candidate,index)=><article className="horizon-card" key={candidate.exchange+":"+candidate.id}>
     <header><div><small>#{index+1} · {candidate.exchange}</small><h3>{candidate.symbol}</h3></div><strong>{money(candidate.close)}</strong></header>
     <p className="muted tiny">Daily close · {candidate.as_of}</p><p>{candidate.review_horizon}</p>
@@ -54,10 +55,11 @@ export default function HorizonResearch({horizon,children,onSettings}:{horizon:H
     <details><summary>Why this appears &amp; risks</summary><ul>{candidate.reasons.map(reason=><li key={reason}>{reason}</li>)}</ul><p>{candidate.warnings.join(" ")}</p><p className="muted tiny">Median historical daily traded value: {money(candidate.median_daily_traded_value)}</p></details>
     <CompanyEvidenceCard evidence={candidate.company_evidence} status={data?.automatic_company_status}/>
     {candidate.ai_review?.reviews.length?<details><summary>Automatic AI evidence review ({candidate.ai_review.reviews.length} provider{candidate.ai_review.reviews.length===1?"":"s"})</summary>{candidate.ai_review.reviews.map(review=><div key={review.provider}><strong>{review.provider}</strong><ul>{review.findings.map((finding,i)=><li key={i}>{finding.statement} <small>[{finding.evidence_ids.join(", ")}]</small></li>)}</ul></div>)}<p className="muted tiny">OBS = dated technical observations above; LIMITS = missing research evidence. {candidate.ai_review.notice}</p></details>:<p className="muted tiny">{data?.automatic_ai_status==="ENABLED"?"AI review pending or unavailable.":data?.automatic_ai_status==="NO_CONFIGURED_PROVIDER"?"No permitted AI provider configured.":"Automatic AI review unavailable or disabled."}</p>}
-   </article>)}</div>:<div className="research-empty"><strong>{horizon==="INTRADAY"?"No validated intraday setups":ready.length?"No technical candidates meet the current rules":"Waiting for current research"}</strong><p>{horizon==="INTRADAY"?"ATLAS will not substitute daily price observations for live intraday research.":"The background engine will reassess available evidence automatically. No manual scan is required."}</p></div>}
+   </article>)}</div>:<div className="research-empty"><strong>{ready.length?"No technical candidates meet the current rules":"Waiting for current research"}</strong><p>The background engine will reassess available evidence automatically. No manual scan is required.</p></div>}
    {blockers.length>0&&<p className="notice warning-notice">Still required before a complete investment verdict: {blockers.map(words).join(" · ")}.</p>}
    <button type="button" className="secondary" onClick={onSettings}>Check data connections</button>
   </section>
+  }
   {horizon!=="INTRADAY"&&<AdvancedSection title="Research history and outcomes" description="Automatically tracked dated technical watches"><WatchOutcomeHistory horizon={horizon}/></AdvancedSection>}
   <details className="advanced-tools glass" key={horizon}><summary><span><strong>Advanced research tools</strong><small>Optional detailed analysis and evidence review</small></span><b>Open tools</b></summary>{/* Closed tools stay available without loading their workflows. */}<DeferredTools>{children}</DeferredTools></details>
  </section>;
