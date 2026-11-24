@@ -120,6 +120,9 @@ async def reconnecting_stream(
         finally:
             if on_connection_change is not None:
                 await on_connection_change(False)
+        if last_failure=="FEED_CREDENTIAL_REJECTED":
+            return {"status":"DISCONNECTED","sessions":sessions,"retries":max(0,attempts-1),
+                    "reason":"CREDENTIAL_REJECTED","last_failure":last_failure}
         if attempts>policy.max_retries:
             return {"status":"DISCONNECTED","sessions":sessions,"retries":attempts-1,
                     "reason":"RETRY_BUDGET_EXHAUSTED","last_failure":last_failure}
