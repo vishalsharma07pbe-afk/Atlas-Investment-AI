@@ -1224,3 +1224,23 @@ def automatic_watch_outcomes(horizon: Literal["SWING", "SHORT_TERM", "LONG_TERM"
         return summary(_connect, horizon)
     except (OSError, ValueError, sqlite3.Error) as exc:
         raise HTTPException(status_code=503, detail="Watch outcome history unavailable") from exc
+
+class PortfolioThesisIdentity(BaseModel):
+    isin: str = Field(pattern=r"^IN[A-Z0-9]{10}$")
+    exchange: Literal["NSE","BSE"]
+    model_config = {"extra":"forbid"}
+
+
+class PortfolioThesisRead(BaseModel):
+    identities: list[PortfolioThesisIdentity] = Field(max_length=100)
+    model_config = {"extra":"forbid"}
+
+
+@app.post("/api/v1/internal/portfolio-thesis")
+def internal_portfolio_thesis(request: FastAPIRequest, body: PortfolioThesisRead):
+    _require_internal_service(request)
+    from .portfolio_thesis import read
+    try:
+        return read([item.model_dump() for item in body.identities])
+    except (ValueError, OSError, sqlite3.Error) as exc:
+        raise HTTPException(status_code=503,detail="Portfolio evidence unavailable") from exc

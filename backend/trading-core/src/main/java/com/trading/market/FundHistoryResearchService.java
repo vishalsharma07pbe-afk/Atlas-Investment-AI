@@ -120,6 +120,23 @@ public class FundHistoryResearchService {
     return result;
   }
 
+  /** Exact saved scheme only; not a category ranking or forward recommendation. */
+  public Map<String,Object> holdingEvidence(long schemeCode){
+    LocalDate today=LocalDate.now(MarketCalendarService.IST);
+    var schemes=jdbc.queryForList("SELECT scheme_code,scheme_name,category FROM mutual_fund_schemes WHERE scheme_code=?",schemeCode);
+    if(schemes.isEmpty())return null;
+    var rows=jdbc.queryForList("""
+      SELECT nav_date,nav,source_code FROM mutual_fund_nav
+      WHERE scheme_code=? AND nav_date BETWEEN ?::date-1120 AND ?::date
+        AND source_code IN ('AMFI','MFAPI') ORDER BY nav_date
+      """,schemeCode,today,today);
+    var result=metrics(rows,today);
+    if(result==null)return null;
+    result.putAll(schemes.getFirst());
+    result.put("notice","Historical NAV observations for the exact saved scheme. Official benchmark, TER, Riskometer and holdings evidence remain unverified.");
+    return result;
+  }
+
   static Map<String,Object> metrics(List<Map<String,Object>> rows,LocalDate today){
     if(rows.size()<650)return null;
     var last=rows.getLast();
