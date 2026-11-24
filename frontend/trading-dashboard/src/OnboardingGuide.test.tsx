@@ -10,7 +10,7 @@ it("guides keyboard-accessible navigation and remembers completion",()=>{
  render(<OnboardingGuide onNavigate={navigate}/>);
  expect(screen.getByText("Add what you own")).toBeTruthy();
  fireEvent.click(screen.getByRole("button",{name:"Open this area"}));
- expect(navigate).toHaveBeenCalledWith(0);
+ expect(navigate).toHaveBeenCalledWith(9);
  fireEvent.click(screen.getByRole("button",{name:"Next"}));
  expect(screen.getByText("Check the evidence")).toBeTruthy();
  fireEvent.click(screen.getByRole("button",{name:"Next"}));

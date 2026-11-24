@@ -2,6 +2,9 @@ import React, {useEffect, useRef, useState} from "react";
 import {createRoot} from "react-dom/client";
 import "./style.css";
 import ResearchHome from "./ResearchHome";
+import WorkspaceNavigation,{pages,validPage} from "./WorkspaceNavigation";
+import AdvancedSection from "./AdvancedSection";
+import PortfolioSummary from "./PortfolioSummary";
 import AutonomousOverview from "./AutonomousOverview";
 import {AuthGate,type AuthIdentity} from "./AuthGate";
 import StockExplorer from "./StockExplorer";
@@ -58,8 +61,6 @@ type DataHealth = {generatedAt:string;providerMode:string;liveMarketDataConnecte
 type FeedState = {transport_connected?:boolean;selected_instruments?:number;automatic_selection?:{status?:string;resolved_count?:number;missing_symbols?:string[]}};
 
 const API = "/api/v1/portfolio";
-const categories = ["Research Home", "Mutual Funds", "Intraday", "Swing Trading", "Short-Term Equity", "Long-Term Stocks"];
-const tabIcons = ["▦", "◈", "ϟ", "↗", "◷", "◇"];
 const TAB_STORAGE_KEY = "atlas:selected-tab";
 const APPEARANCE_STORAGE_KEY = "atlas:appearance";
 const DEFAULT_APPEARANCE:Appearance = {theme:"system", opacity:72, blur:20, border:true};
@@ -67,7 +68,7 @@ const fmt = (n:number|null|undefined) => n == null ? "—" : new Intl.NumberForm
 const clamp = (value:unknown, min:number, max:number, fallback:number) => { const n = Number(value); return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback; };
 
 const getSavedTab = () => {
-  try { const saved = Number(localStorage.getItem(TAB_STORAGE_KEY)); return Number.isInteger(saved) && saved >= 0 && saved <= 8 ? saved : 0; }
+  try { return validPage(localStorage.getItem(TAB_STORAGE_KEY)); }
   catch { return 0; }
 };
 
@@ -147,9 +148,10 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
   }
 
   useEffect(() => {
-    if(initialRefreshStarted.current)return;
-    initialRefreshStarted.current=true;
-    void (async()=>{await load();await refreshPortfolioPrices(true);})();
+    if(!initialRefreshStarted.current){
+      initialRefreshStarted.current=true;
+      void (async()=>{await load();await refreshPortfolioPrices(true);})();
+    }
     const timer=window.setInterval(()=>{if(document.visibilityState==="visible")void load();},60_000);
     return()=>window.clearInterval(timer);
   }, []);
@@ -213,37 +215,32 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
   }
 
   const style = {"--panel-alpha":(appearance.opacity / 100).toFixed(2), "--panel-blur":`${appearance.opacity === 0 ? 0 : appearance.blur}px`, "--panel-border-color":appearance.border ? "var(--glass-border)" : "transparent"} as React.CSSProperties;
-  const activeTitle = tab===6?"Market & Data Health":tab===7?"Stock Explorer":tab===8?"P2 Research Lab":categories[tab];
+  const activePage = pages[tab] || pages[0];
+  function navigate(id:number){setTab(validPage(id));window.scrollTo({top:0,behavior:"auto"});}
 
   return <div className="dashboard" data-theme={appearance.theme} data-panel-clear={appearance.opacity === 0 ? "true" : undefined} data-blur-zero={appearance.opacity === 0 || appearance.blur === 0 ? "true" : undefined} data-appearance-open={appearanceOpen ? "true" : undefined} style={style}>
     <a className="skip-link" href="#main-content">Skip to main content</a>
     <div className="canvas" aria-hidden="true"><i/><i/><i/><i/></div>
     <div className="layout">
-      <aside className="sidebar glass">
-        <div className="brand"><span className="brandicon">◆</span><div><strong>ATLAS</strong><small>INVESTMENT INTELLIGENCE</small></div></div>
-        <div className="navlabel">WORKSPACE</div>
-        <nav aria-label="Workspace">{categories.map((category, index) => <button type="button" key={category} aria-current={tab === index ? "page" : undefined} className={tab === index ? "active" : ""} onClick={() => setTab(index)}><span className="navdot" aria-hidden="true">{tabIcons[index]}</span><span>{category}</span><span className="navarrow" aria-hidden="true">›</span></button>)}</nav>
-        <div className="navlabel">INTELLIGENCE</div>
-        <nav aria-label="Intelligence"><button type="button" onClick={() => setTab(8)} aria-current={tab === 8 ? "page" : undefined} className={tab === 8 ? "active" : ""}><span className="navdot" aria-hidden="true">✦</span><span>P2 Research Lab</span><span className="navarrow" aria-hidden="true">›</span></button><button type="button" onClick={() => setTab(7)} aria-current={tab === 7 ? "page" : undefined} className={tab === 7 ? "active" : ""}><span className="navdot" aria-hidden="true">⌁</span><span>Stock Explorer</span><span className="navarrow" aria-hidden="true">›</span></button><button type="button" onClick={() => setTab(6)} aria-current={tab === 6 ? "page" : undefined} className={tab === 6 ? "active" : ""}><span className="navdot" aria-hidden="true">◉</span><span>Market &amp; Data Health</span><span className="navarrow" aria-hidden="true">›</span></button></nav>
-        <div className="sidebottom"><span className="statusdot"/> PRIVATE · LOCAL MODE<br/><small>Research only · No order execution</small></div>
-      </aside>
+      <WorkspaceNavigation page={tab} onNavigate={navigate}/>
 
       <main className="content" id="main-content" tabIndex={-1}>
-        <header><div><div className="eyebrow"><span/> YOUR PRIVATE RESEARCH TERMINAL</div><h1>{activeTitle}</h1><p>{tab === 0 ? "Your holdings, performance and portfolio risk — all stored locally." : "Strict research gates. No invented prices or recommendations."}</p></div><div className="header-actions"><button type="button" className="help-trigger" onClick={()=>window.dispatchEvent(new Event("atlas:open-onboarding"))}>Help</button><NotificationCenter/><div className={`headerbadge ${feedState?.transport_connected?"feed-live":""}`} role="status" aria-live="polite" title={feedState?.automatic_selection?.missing_symbols?.length?`Unresolved: ${feedState.automatic_selection.missing_symbols.join(", ")}`:undefined}><span/> {feedState?.transport_connected?`LIVE · ${feedState.selected_instruments||0} STOCKS`:feedState?.automatic_selection?.status==="IDLE_NO_EQUITY_HOLDINGS"?"FEED READY · ADD A STOCK":feedState?.automatic_selection?.status==="STARTING"?"MARKET FEED CONNECTING":"MARKET FEED NOT CONNECTED"}</div><div className="account-chip"><span>{identity.email.slice(0,1).toUpperCase()}</span><div><small>SIGNED IN</small><strong>{identity.email}</strong></div><button type="button" onClick={()=>void onLogout()}>Logout</button></div><AppearanceControls value={appearance} onChange={setAppearance} open={appearanceOpen} onOpenChange={setAppearanceOpen}/></div></header>
+        <header><div><div className="eyebrow"><span/> YOUR PRIVATE RESEARCH TERMINAL</div><h1>{activePage.title}</h1><p>{activePage.description}</p></div><div className="header-actions"><button type="button" className="help-trigger" onClick={()=>window.dispatchEvent(new Event("atlas:open-onboarding"))}>Help</button><NotificationCenter/><div className={`headerbadge ${feedState?.transport_connected?"feed-live":""}`} role="status" aria-live="polite" title={feedState?.automatic_selection?.missing_symbols?.length?`Unresolved: ${feedState.automatic_selection.missing_symbols.join(", ")}`:undefined}><span/> {feedState?.transport_connected?`LIVE · ${feedState.selected_instruments||0} STOCKS`:feedState?.automatic_selection?.status==="IDLE_NO_EQUITY_HOLDINGS"?"FEED READY · ADD A STOCK":feedState?.automatic_selection?.status==="STARTING"?"MARKET FEED CONNECTING":"MARKET FEED NOT CONNECTED"}</div><div className="account-chip"><span>{identity.email.slice(0,1).toUpperCase()}</span><div><small>SIGNED IN</small><strong>{identity.email}</strong></div><button type="button" onClick={()=>void onLogout()}>Logout</button></div><AppearanceControls value={appearance} onChange={setAppearance} open={appearanceOpen} onOpenChange={setAppearanceOpen}/></div></header>
         <MarketIndexStrip/>
         {providerActionRequired&&<div className="provider-action-banner" role="status"><div><strong>Live prices need today’s Upstox authorization</strong><span>Your holdings are safe. Connect the read-only token once, then ATLAS will refresh prices and research automatically.</span></div><button className="secondary" onClick={()=>setTab(6)}>Connect Upstox</button></div>}
-        <OnboardingGuide onNavigate={setTab}/>
+        <OnboardingGuide onNavigate={navigate}/>
         {loading&&<div className="global-loading" role="status" aria-live="polite"><span/>Saving your changes…</div>}
         {error && <div className="error glass" role="alert">{error} <button type="button" onClick={() => tab === 6 ? loadHealth() : load()}>Retry</button></div>}
 
         {tab === 0 ? <>
-          <AutonomousOverview onPortfolio={()=>document.getElementById("portfolio-overview")?.scrollIntoView({behavior:"smooth",block:"start"})} onFunds={()=>setTab(1)} onSettings={()=>setTab(6)}><ResearchHome holdings={holdings} revision={portfolioRevision} onReviewHoldings={()=>document.getElementById("portfolio-overview")?.scrollIntoView({behavior:"smooth",block:"start"})} onOpenExplorer={()=>setTab(7)} onOpenDataHealth={()=>setTab(6)}/></AutonomousOverview>
-          <PortfolioDoctor revision={portfolioRevision} onSettings={()=>setTab(6)}/>
-          <div className="two">
-            <PortfolioIntelligence holdings={holdings} analysis={analysis}/>
-            <section className="panel glass"><div className="sectionhead"><div><small className="section-kicker">POSITION MANAGER</small><h2>Add an investment</h2></div><span className="tag">AUTO PRICE</span></div><HoldingEditor busy={loading} onSave={submitHolding} onSaveSip={submitSip}/></section>
-          </div>
-          <details className="advanced-tools glass"><summary><span><strong>Advanced portfolio tools</strong><small>Stress tests, allocation, goals, journal, fees and concentration</small></span><b>Open tools</b></summary><div className="advanced-tools-content">
+          <PortfolioSummary analysis={analysis} onOpen={()=>navigate(9)}/>
+          <PortfolioDoctor revision={portfolioRevision} onSettings={()=>navigate(6)}/>
+          <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)}><ResearchHome holdings={holdings} revision={portfolioRevision} onReviewHoldings={()=>navigate(9)} onOpenExplorer={()=>navigate(7)} onOpenDataHealth={()=>navigate(6)}/></AutonomousOverview>
+        </> : tab === 9 ? <>
+          <PortfolioDoctor revision={portfolioRevision} onSettings={()=>navigate(6)}/>
+          <PortfolioIntelligence holdings={holdings} analysis={analysis}/>
+          <AdvancedSection title="Add or update an investment" description="Search a stock or fund, save a holding or set up an SIP"><HoldingEditor busy={loading} onSave={submitHolding} onSaveSip={submitSip}/></AdvancedSection>
+          <AdvancedSection title="Advanced portfolio tools" description="Stress tests, allocation, goals, journal, fees and concentration">
             <PortfolioStress revision={portfolioRevision}/>
             <PortfolioAllocation revision={portfolioRevision}/>
             <GoalPlanner/>
@@ -253,20 +250,24 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
             <PortfolioConcentration revision={portfolioRevision}/>
             <PortfolioPerformanceHistory revision={portfolioRevision}/>
             <PersonalAlerts/>
-          </div></details>
+          </AdvancedSection>
           <section className="panel glass holdings-panel"><div className="sectionhead"><div><small className="section-kicker">CURRENT INVESTMENTS</small><h2>Active holdings</h2></div><label className="upload">Import CSV <input type="file" accept=".csv,text/csv" hidden disabled={loading} onChange={e => { const file = e.target.files?.[0]; if (file) importCsv(file); e.target.value = ""; }}/></label></div><p className="muted tiny">Only investments you still own appear here. One-day change uses the previous provider close or previous published NAV when available.</p><div className="tablewrap"><table><thead><tr><th>INVESTMENT</th><th>TYPE</th><th>QTY</th><th>AVG COST</th><th>CURRENT*</th><th>VALUE*</th><th>OVERALL P&amp;L*</th><th>1 DAY*</th><th/></tr></thead><tbody>
             {holdings.map(holding => <tr key={holding.id}><td className="symbol">{holding.asset_type==="MUTUAL_FUND"&&holding.notes?<>{holding.notes}<small>Scheme {holding.symbol}</small></>:holding.symbol}</td><td><span className="asset-pill">{holding.asset_type}</span></td><td>{holding.quantity}</td><td>{fmt(holding.average_cost)}</td><td>{fmt(holding.last_price)}</td><td>{fmt(holding.market_value)}</td><td className={(holding.unrealized_pnl || 0) >= 0 ? "positive" : "negative"}>{fmt(holding.unrealized_pnl)}</td><td className={(holding.one_day_change||0)>=0?"positive":"negative"}>{fmt(holding.one_day_change)}</td><td><button className="danger" onClick={() => remove(holding.id)}>Delete</button></td></tr>)}
-            {!holdings.length && <tr><td colSpan={9} className="empty">No active holdings yet. Add a stock or mutual fund above.</td></tr>}
+            {!holdings.length && <tr><td colSpan={9} className="empty">No active holdings yet. Open Add or update an investment above.</td></tr>}
           </tbody></table></div></section>
-          <HistoricalInvestments activeHoldings={holdings}/>
-        </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : (tab === 2 || tab === 3 || tab === 4 || tab === 5) ? <HorizonResearch key={tab} horizon={tab===2?"INTRADAY":tab===3?"SWING":tab===4?"SHORT_TERM":"LONG_TERM"} onSettings={()=>setTab(6)}>{tab===5?<EquityResearchDashboard/>:<><MarketIntelligence/><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/></>}</HorizonResearch> : tab === 8 ? <P2ResearchWorkspace/> : tab === 7 ? <StockExplorer/> : tab === 6 ? <>
-          <UpstoxVaultCard onConnected={()=>refreshPortfolioPrices(true)}/><DataReadiness/><MultiProviderHub/>
+          <AdvancedSection title="Past investments" description="Review closed holdings and realized performance"><HistoricalInvestments activeHoldings={holdings}/></AdvancedSection>
+        </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : (tab === 2 || tab === 3 || tab === 4 || tab === 5) ? <HorizonResearch key={tab} horizon={tab===2?"INTRADAY":tab===3?"SWING":tab===4?"SHORT_TERM":"LONG_TERM"} onSettings={()=>setTab(6)}>{tab===5?<EquityResearchDashboard/>:<><MarketIntelligence/><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/></>}</HorizonResearch> : tab === 8 ? <P2ResearchWorkspace/> : tab === 7 ? <StockExplorer/> : tab === 10 ? <>
+          <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)}><MarketIntelligence/></AutonomousOverview>
+          <AdvancedSection title="Company and institutional research" description="Company reports, news and institutional activity"><EquityResearchDashboard/><InstitutionalFlows/></AdvancedSection>
+          <AdvancedSection title="Research evidence and history" description="Broker research, source audit, outcome review and evidence ledgers"><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/><FlowLedger/><NewsEvidence/><NewsLedger/></AdvancedSection>
+        </> : tab === 6 ? <>
+          <UpstoxVaultCard onConnected={()=>refreshPortfolioPrices(true)}/>
+          <DataReadiness/>
+          <AdvancedSection title="Data and AI provider connections" description="Provider setup, authorization and capabilities"><MultiProviderHub/><UpstoxAuthorization/><EntitlementRegistry/><MarketReadiness/></AdvancedSection>
+          <AdvancedSection title="Advanced system diagnostics" description="Feed health, ingestion, reliability, data quality and audit records">
           <FeedHealth/>
           <ReliabilityIncidents/>
           <IngestionQualityGate/>
-          <EntitlementRegistry/>
-          <MarketReadiness/>
-          <UpstoxAuthorization/>
           <ProviderQuality/>
           <ProviderBatchPreflight/>
           <ProviderReconciliation/>
@@ -274,26 +275,21 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
             <div className="stat glass"><small>INSTRUMENTS</small><strong>{health?.instrumentCount ?? "—"}</strong><span>NSE/BSE registry records</span><b aria-hidden="true">◇</b></div>
             <div className="stat glass"><small>DAILY CANDLES</small><strong>{health?.candleCount ?? "—"}</strong><span>Validated 1d OHLCV records</span><b aria-hidden="true">▥</b></div>
             <div className="stat glass"><small>OPEN QUALITY EVENTS</small><strong className={(health?.unresolvedIssueCount || 0)>0?"negative":"positive"}>{health?.unresolvedIssueCount ?? "—"}</strong><span>Review before research use</span><b aria-hidden="true">!</b></div>
-            <div className="stat glass"><small>PROVIDER MODE</small><strong>MANUAL</strong><span>Lawfully sourced CSV only</span><b aria-hidden="true">⇧</b></div>
+            <div className="stat glass"><small>PROVIDER MODE</small><strong>{health?.providerMode?.replace(/_/g," ")||"—"}</strong><span>Reported by the backend</span><b aria-hidden="true">⇧</b></div>
           </div>
           <section className="panel glass"><div className="sectionhead"><div><small className="section-kicker">CONTROLLED INGESTION</small><h2>Import validated source files</h2></div><span className="tag">NO SCRAPING</span></div>
             <p className="muted tiny">Import in order: instruments, market sessions, corporate actions, then daily candles. Files are accepted atomically, hashed for idempotency, and must match the templates in <code>data/templates</code>. You are responsible for having lawful rights to each source file.</p>
             <div className="import-grid">{[["instruments","Instrument registry"],["market-sessions","Market sessions"],["corporate-actions","Corporate actions"],["daily-candles","Daily OHLCV"]].map(([type,label])=><label className="upload" key={type}>{label}<input type="file" accept=".csv,text/csv" hidden disabled={loading} onChange={e=>{const file=e.target.files?.[0];if(file)importMarketData(type,file);e.target.value="";}}/></label>)}</div>
             <div className="notice warning-notice">Daily candles must explicitly declare RAW_UNADJUSTED or ADJUSTED. ATLAS never silently assumes corporate-action adjustment.</div>
           </section>
-          <InstitutionalFlows/>
-          <FlowLedger/>
-          <NewsEvidence/><NewsLedger/>
           <div className="two health-two">
             <section className="panel glass"><div className="sectionhead"><div><small className="section-kicker">EXCHANGE COVERAGE</small><h2>Registry &amp; date coverage</h2></div></div><div className="tablewrap"><table><thead><tr><th>EXCHANGE</th><th>INSTRUMENTS</th><th>CANDLES</th><th>FIRST DATE</th><th>LATEST DATE</th></tr></thead><tbody>{health?.coverage.map(row=><tr key={row.exchange}><td className="symbol">{row.exchange}</td><td>{row.instruments}</td><td>{row.candle_count}</td><td>{row.first_date || "—"}</td><td>{row.latest_date || "—"}</td></tr>)}</tbody></table></div></section>
             <section className="panel glass"><div className="sectionhead"><div><small className="section-kicker">PROVENANCE</small><h2>Enabled data sources</h2></div></div><div className="tablewrap"><table><thead><tr><th>SOURCE</th><th>ACCESS</th><th>LICENSE SCOPE</th><th>LATEST CANDLE</th></tr></thead><tbody>{health?.sources.map(row=><tr key={row.source_code}><td><span className="asset-pill">{row.source_code}</span></td><td>{row.access_mode}</td><td>{row.license_scope}</td><td>{row.latest_candle ? new Date(row.latest_candle).toLocaleDateString("en-IN") : "—"}</td></tr>)}</tbody></table></div></section>
           </div>
           <section className="panel glass"><div className="sectionhead"><div><small className="section-kicker">AUDIT TRAIL</small><h2>Recent ingestion runs</h2></div><button className="secondary" onClick={loadHealth}>Refresh</button></div><div className="tablewrap"><table><thead><tr><th>STARTED</th><th>JOB</th><th>FILE</th><th>STATUS</th><th>SEEN</th><th>WRITTEN</th><th>ERROR</th></tr></thead><tbody>{health?.recentRuns.map(row=><tr key={row.id}><td>{new Date(row.started_at).toLocaleString("en-IN")}</td><td>{row.job_name}</td><td>{row.artifact_name}</td><td><span className={`status-pill status-${row.status.toLowerCase()}`}>{row.status}</span></td><td>{row.records_seen}</td><td>{row.records_written}</td><td className="failure-cell">{row.error_message || "—"}</td></tr>)}{!health?.recentRuns.length&&<tr><td colSpan={7} className="empty">No ingestion has run. No market data is claimed.</td></tr>}</tbody></table></div></section>
           <section className="panel glass"><div className="sectionhead"><div><small className="section-kicker">DATA QUALITY</small><h2>Unresolved quality events</h2></div></div><div className="tablewrap"><table><thead><tr><th>OBSERVED</th><th>SEVERITY</th><th>EVENT</th><th>INSTRUMENT</th><th>DETAILS</th></tr></thead><tbody>{health?.issues.map(row=><tr key={row.id}><td>{new Date(row.observed_at).toLocaleString("en-IN")}</td><td><span className={`severity severity-${row.severity.toLowerCase()}`}>{row.severity}</span></td><td>{row.event_type.replace(/_/g," ")}</td><td>{row.exchange&&row.symbol?`${row.exchange}:${row.symbol}`:"—"}</td><td className="details-cell">{JSON.stringify(row.details)}</td></tr>)}{!health?.issues.length&&<tr><td colSpan={5} className="empty">No unresolved quality events.</td></tr>}</tbody></table></div></section>
-        </> : <>
-          <div className="stats placeholder-stats"><div className="stat glass"><small>DATA STATUS</small><strong>OFFLINE</strong><span>Provider not configured</span><b aria-hidden="true">◌</b></div><div className="stat glass"><small>QUALIFIED SIGNALS</small><strong>0</strong><span>Strict gates enabled</span><b aria-hidden="true">⌁</b></div><div className="stat glass"><small>RECOMMENDATION ENGINE</small><strong>PAUSED</strong><span>No verified input data</span><b aria-hidden="true">Ⅱ</b></div></div>
-          <section className="panel glass emptyfeature"><div className="featureicon">◎</div><small className="section-kicker">RESEARCH MODULE</small><h2>{tab === 6 ? "Data sources & intelligence services" : categories[tab]}</h2><p>{tab === 1 ? "Mutual fund NAV, benchmark, expense ratio, drawdown and overlap analysis will appear after verified fund data is connected." : tab === 2 ? "Intraday opportunities require fresh market quotes, liquidity checks, trap detection and validated risk gates." : tab === 3 ? "Swing setups require historical candles, sector momentum, confirmation and stop-loss validation." : tab === 4 ? "Short-term ideas require verified earnings, valuation, catalysts and momentum." : tab === 5 ? "Long-term research requires company fundamentals, valuation history, governance and downside scenarios." : "The application is operating locally. Licensed market data, global news and institutional reports are not yet connected."}</p><div className="notice">No signals are shown until the data, strategy and risk checks pass. This is intentional.</div></section>
-        </>}
+          </AdvancedSection>
+        </> : null}
         <footer>ATLAS · Local-first investment research · Not financial advice · No automated trading</footer>
       </main>
     </div>
