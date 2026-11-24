@@ -54,7 +54,7 @@ def evaluate(candles, indicators, base):
         if horizon == "SWING":
             passed = close > sma20 > sma50 and 50 <= rsi <= 70 and relative >= 1.2 and 0 < atr_pct <= 5 and momentum > 0
             rank = momentum*100 + min(relative, 3)*2 - atr_pct
-            reasons = ["Close above rising 20/50-day averages", "Relative volume at least 1.2x", "RSI 50–70 and ATR within 5%"]
+            reasons = ["Close above aligned 20/50-day averages", "Relative volume at least 1.2x", "RSI 50–70 and ATR within 5%"]
             window = "2–20 trading sessions (review horizon)"
         elif horizon == "SHORT_TERM":
             change = close/candles[-61].close-1
