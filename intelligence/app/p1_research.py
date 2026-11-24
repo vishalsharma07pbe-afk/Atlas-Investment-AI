@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import os
+from math import isfinite
 import re
 from urllib.parse import urlencode, quote
 
@@ -49,7 +50,10 @@ def _source(endpoint: str) -> dict:
 
 def _safe_section(name: str, endpoint: str, loader) -> dict:
     try:
-        return {"name": name, "status": "AVAILABLE", "data": loader(),
+        data = loader()
+        if not data:
+            raise ProviderFailure("NO_PROVIDER_RECORDS")
+        return {"name": name, "status": "AVAILABLE", "data": data,
                 "source": _source(endpoint), "error": None}
     except ProviderFailure as exc:
         return {"name": name, "status": "UNAVAILABLE", "data": None,
@@ -60,7 +64,8 @@ def _ratio_number(value):
     if value is None:
         return None
     try:
-        return float(str(value).strip().rstrip("%"))
+        number = float(str(value).strip().rstrip("%"))
+        return number if isfinite(number) else None
     except (TypeError, ValueError):
         return None
 

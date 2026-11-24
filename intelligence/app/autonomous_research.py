@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from .market_client import backend_json
 from .screener import screen
 from .mutual_fund_recommendations import CATEGORIES, dashboard
-from . import automatic_ai_review, watch_outcomes
+from . import automatic_ai_review, watch_outcomes, automatic_company_evidence
 
 SECTIONS = ("NSE", "BSE", *CATEGORIES)
 DEFAULT_INTERVAL = 900
@@ -83,6 +83,14 @@ def market_snapshot(exchange):
                 if str(row["trade_date"]) < today.isoformat()]}
     result = screen(instruments, completed_history, as_of=today,
                     universe_limit=60, max_age_days=4, include_horizons=True)
+    # Attach registry identity, not ticker-based guesses, for company evidence.
+    registry = {row["id"]: row for row in instruments if row.get("active") is True
+                and row.get("listing_status") == "ACTIVE" and row.get("series") == "EQ"}
+    for group in result["horizons"].values():
+        for candidate in group["candidates"]:
+            record = registry.get(candidate["id"])
+            if record and record.get("symbol") == candidate["symbol"] and record.get("exchange") == candidate["exchange"]:
+                candidate["isin"] = record.get("isin")
     result["notice"] = ("Automatically refreshed daily observations from a bounded registry sample. "
                         "Not live intraday signals, full-exchange rankings, or recommendations.")
     return result
@@ -132,6 +140,10 @@ def read_snapshot(include_ai=True):
             "notice": "Snapshot time is not the underlying observation time. Missing evidence never becomes a recommendation."}
     if include_ai:
         try:
+            automatic_company_evidence.attach(snapshot, _connect)
+        except (ValueError, OSError, sqlite3.Error):
+            snapshot["automatic_company_status"] = "UNAVAILABLE"
+        try:
             return automatic_ai_review.attach(snapshot, _connect)
         except (ValueError, OSError, sqlite3.Error):
             snapshot["automatic_ai_status"] = "UNAVAILABLE"
@@ -158,6 +170,10 @@ class ResearchScheduler:
                     await asyncio.to_thread(watch_outcomes.refresh, snapshot, _connect)
                 except Exception:
                     pass  # Outcome collection cannot block AI or deterministic research.
+                try:
+                    await asyncio.to_thread(automatic_company_evidence.refresh, snapshot, _connect)
+                except Exception:
+                    pass  # Company evidence must not block the existing research engine.
                 await asyncio.to_thread(automatic_ai_review.refresh, snapshot, _connect)
             except Exception:
                 # Storage failures must not terminate future attempts.
