@@ -42,6 +42,18 @@ class InternalFeedControllerTest {
     verifyNoInteractions(jdbc);
   }
 
+  @Test void discoveryBatchRequiresTokenAndBoundedUniqueIds() {
+    JdbcTemplate jdbc=mock(JdbcTemplate.class);
+    HttpServletRequest request=mock(HttpServletRequest.class);
+    InternalFeedController controller=controller(jdbc,"service-secret");
+    assertThatThrownBy(()->controller.discoveryUniverse(request,"NSE")).isInstanceOf(ResponseStatusException.class);
+    when(request.getHeader("X-Atlas-Service-Token")).thenReturn("service-secret");
+    assertThatThrownBy(()->controller.discoveryCandles(request,"NSE",List.of(7L,7L))).isInstanceOf(ResponseStatusException.class);
+    assertThatThrownBy(()->controller.discoveryCandles(request,"OTHER",List.of(7L))).isInstanceOf(ResponseStatusException.class);
+    assertThatThrownBy(()->controller.discoveryCandles(request,"NSE",java.util.stream.LongStream.rangeClosed(1,21).boxed().toList())).isInstanceOf(ResponseStatusException.class);
+    verifyNoInteractions(jdbc);
+  }
+
   @Test void protectsAndDelegatesReadOnlyResearchData() {
     JdbcTemplate jdbc=mock(JdbcTemplate.class);
     InstrumentController instruments=mock(InstrumentController.class);

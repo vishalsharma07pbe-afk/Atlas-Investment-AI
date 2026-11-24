@@ -9,8 +9,8 @@ MIN_HISTORY = 21
 MAX_INSTRUMENTS = 20
 MAX_CANDLES = 250
 
-def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit=MAX_INSTRUMENTS, include_horizons=False):
-    limit = max(1, min(60, universe_limit))
+def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit=MAX_INSTRUMENTS, include_horizons=False, *, batch_loaded=False):
+    limit = max(1, min(200 if batch_loaded else 60, universe_limit))
     today = as_of or date.today()
     rows = []
     horizon_evaluations = []

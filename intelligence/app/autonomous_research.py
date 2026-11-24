@@ -67,22 +67,41 @@ def _save(section, result=None):
 
 
 def market_snapshot(exchange):
-    instruments = backend_json("/api/v1/instruments?" + urlencode({"limit": 60, "exchange": exchange}))
-    if not isinstance(instruments, list):
+    instruments = backend_json("/api/v1/market-data/discovery-universe?" + urlencode({"exchange": exchange}))
+    if not isinstance(instruments, list) or len(instruments)>200:
         raise ValueError("INVALID_REGISTRY")
-    # Do not include inactive or non-equity listings in discovery.
-    instruments = [row for row in instruments if row.get("active", True)
-                   and row.get("listing_status", "ACTIVE") == "ACTIVE"
-                   and row.get("instrument_type", "EQUITY") in ("EQUITY", "EQ", "STOCK")]
+    if any(not isinstance(row,dict) or row.get("exchange")!=exchange or row.get("active") is not True
+           or row.get("listing_status")!="ACTIVE" or row.get("series")!="EQ"
+           or row.get("instrument_type") not in ("EQUITY","EQ","STOCK")
+           or type(row.get("id")) is not int or row["id"]<=0 for row in instruments):
+        raise ValueError("INVALID_DISCOVERY_IDENTITY")
+    ids=[row["id"] for row in instruments]
+    if len(set(ids))!=len(ids):
+        raise ValueError("DUPLICATE_DISCOVERY_IDENTITY")
+    counts={row.get("recent_registry_count") for row in instruments}
+    recent_count=next(iter(counts)) if len(counts)==1 else 0
+    if instruments and (type(recent_count) is not int or recent_count<len(instruments)):
+        raise ValueError("INVALID_DISCOVERY_COVERAGE")
     today = now().astimezone(ZoneInfo("Asia/Kolkata")).date()
-    # This pipeline deliberately excludes the current session, which may still
-    # be forming. Retain the real underlying candle dates in every observation.
-    def completed_history(instrument_id):
-        payload = backend_json(f"/api/v1/market-data/instruments/{instrument_id}/candles?limit=250")
-        return {**payload, "candles": [row for row in payload["candles"]
-                if str(row["trade_date"]) < today.isoformat()]}
-    result = screen(instruments, completed_history, as_of=today,
-                    universe_limit=60, max_age_days=4, include_horizons=True)
+    histories={identifier:[] for identifier in ids}
+    # At most ten local batch requests per exchange; no provider requests.
+    for offset in range(0,len(ids),20):
+        batch=ids[offset:offset+20]
+        rows=backend_json("/api/v1/market-data/discovery-candles?"+urlencode({"exchange":exchange,"ids":batch},doseq=True))
+        if not isinstance(rows,list) or len(rows)>len(batch)*250:
+            raise ValueError("INVALID_DISCOVERY_HISTORY")
+        for row in rows:
+            if not isinstance(row,dict) or type(row.get("instrument_id")) is not int or row["instrument_id"] not in batch:
+                raise ValueError("DISCOVERY_HISTORY_IDENTITY_MISMATCH")
+            if str(row["trade_date"])<today.isoformat():
+                histories[row["instrument_id"]].append(row)
+        if any(len(histories[i])>250 for i in batch):
+            raise ValueError("DISCOVERY_HISTORY_LIMIT_EXCEEDED")
+    result = screen(instruments, lambda identifier:{"candles":histories[identifier]}, as_of=today,
+                    universe_limit=200, max_age_days=4, include_horizons=True, batch_loaded=True)
+    result["discovery_coverage"]={"recent_registry_count":recent_count,"selected_count":len(ids),
+        "selection_limit":200,"selection_method":"LATEST_COMPLETED_DAILY_TRADED_VALUE",
+        "history_batch_size":20}
     # Attach registry identity, not ticker-based guesses, for company evidence.
     registry = {row["id"]: row for row in instruments if row.get("active") is True
                 and row.get("listing_status") == "ACTIVE" and row.get("series") == "EQ"}
@@ -91,7 +110,7 @@ def market_snapshot(exchange):
             record = registry.get(candidate["id"])
             if record and record.get("symbol") == candidate["symbol"] and record.get("exchange") == candidate["exchange"]:
                 candidate["isin"] = record.get("isin")
-    result["notice"] = ("Automatically refreshed daily observations from a bounded registry sample. "
+    result["notice"] = ("Automatically refreshed daily observations from up to 200 recent active cash equities per exchange, ordered by latest completed daily traded value. "
                         "Not live intraday signals, full-exchange rankings, or recommendations.")
     return result
 
