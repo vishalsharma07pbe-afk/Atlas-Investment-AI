@@ -78,6 +78,22 @@ class BackupVerificationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "UNSAFE_ARCHIVE"):
                 verify_backup.verify(root)
 
+    def test_rejects_unexpected_root_and_duplicate_archive_members(self):
+        for names in (["unexpected/file.sqlite3"], ["nav-data/a.sqlite3", "nav-data/a.sqlite3"]):
+            with self.subTest(names=names), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "postgres.dump").write_bytes(b"pg-data")
+                with tarfile.open(root / "intelligence-state.tar.gz", "w:gz") as archive:
+                    for name in names:
+                        info = tarfile.TarInfo(name)
+                        info.size = 1
+                        archive.addfile(info, io.BytesIO(b"x"))
+                lines = [f"{hashlib.sha256((root/name).read_bytes()).hexdigest()}  {name}"
+                         for name in verify_backup.EXPECTED]
+                (root / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "UNSAFE_ARCHIVE"):
+                    verify_backup.verify(root)
+
     def test_rejects_empty_backup_artifact(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

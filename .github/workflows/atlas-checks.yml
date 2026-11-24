@@ -218,7 +218,7 @@ jobs:
   production-gateway-contract:
     name: Production image and gateway integration
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     env:
       COMPOSE_PROJECT_NAME: atlas-ci-production
       ATLAS_IMAGE_NAMESPACE: atlas-ci
@@ -265,6 +265,10 @@ jobs:
           exit 1
       - name: Verify production gateway and internal service authorization
         run: python3 scripts/production_gateway_smoke.py --disposable-ci-stack
+      - name: Run bounded gateway readiness load check
+        run: python3 scripts/p3_smoke.py --base-url http://127.0.0.1:8088 --requests 100 --concurrency 5 --max-error-rate 0 --p95-ms 750
+      - name: Exercise disposable production backup and isolated recovery
+        run: python3 scripts/ci_recovery_drill.py --disposable-ci-stack
       - name: Diagnose failed production containers
         if: failure()
         run: |

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 from pathlib import Path, PurePosixPath
 import tarfile
 
 
 EXPECTED = ("postgres.dump", "intelligence-state.tar.gz")
+STATE_ROOTS = {"nav-data", "ingestion-data", "flow-data", "news-data", "reliability-data", "journal"}
 
 
 def digest(path: Path) -> str:
@@ -28,22 +30,26 @@ def verify(directory: Path) -> dict:
     expected = {}
     for line in checksum_file.read_text(encoding="utf-8").splitlines():
         parts = line.split()
-        if len(parts) != 2 or parts[1] not in EXPECTED:
+        if (len(parts) != 2 or parts[1] not in EXPECTED
+                or parts[1] in expected or not re.fullmatch(r"[0-9a-f]{64}", parts[0])):
             raise ValueError("INVALID_CHECKSUM_MANIFEST")
         expected[parts[1]] = parts[0]
     if set(expected) != set(EXPECTED):
         raise ValueError("INCOMPLETE_CHECKSUM_MANIFEST")
     for name in EXPECTED:
         path = directory / name
-        if not path.is_file() or path.stat().st_size == 0 or digest(path) != expected[name]:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size == 0 or digest(path) != expected[name]:
             raise ValueError(f"CHECKSUM_MISMATCH:{name}")
     member_count = 0
+    seen = set()
     with tarfile.open(directory / "intelligence-state.tar.gz", "r:gz") as archive:
         for member in archive.getmembers():
             name = PurePosixPath(member.name)
-            if (name.is_absolute() or ".." in name.parts or member.issym()
+            if (not name.parts or name.parts[0] not in STATE_ROOTS
+                    or name in seen or name.is_absolute() or ".." in name.parts or member.issym()
                     or member.islnk() or not (member.isfile() or member.isdir())):
                 raise ValueError("UNSAFE_ARCHIVE_MEMBER")
+            seen.add(name)
             member_count += 1
     return {"status": "VERIFIED", "files": list(EXPECTED),
             "intelligence_state_members": member_count,
