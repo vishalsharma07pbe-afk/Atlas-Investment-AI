@@ -112,13 +112,27 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
   const [feedState,setFeedState] = useState<FeedState|null>(null);
   const [providerActionRequired,setProviderActionRequired]=useState(false);
   const initialRefreshStarted=useRef(false);
+  const portfolioRequest=useRef(0);
+  const portfolioPending=useRef(false);
+  const portfolioFingerprint=useRef<string|null>(null);
+  const feedPending=useRef(false);
 
-  async function load() {
+  async function load(background=false) {
+    if(background&&portfolioPending.current)return;
+    const request=++portfolioRequest.current;
+    portfolioPending.current=true;
     try {
       const [h, a] = await Promise.all([fetch(API + "/holdings"), fetch(API + "/analysis")]);
       if (!h.ok || !a.ok) throw Error("Portfolio API is unavailable. Start the local backend.");
-      setHoldings(await h.json()); setAnalysis(await a.json()); setPortfolioRevision(v => v + 1); setError("");
-    } catch (e) { setError(String(e)); }
+      const nextHoldings:Holding[]=await h.json(),nextAnalysis:Analysis=await a.json();
+      if(request!==portfolioRequest.current)return;
+      const fingerprint=JSON.stringify([nextHoldings,nextAnalysis]);
+      if(fingerprint!==portfolioFingerprint.current){
+        portfolioFingerprint.current=fingerprint;setHoldings(nextHoldings);setAnalysis(nextAnalysis);setPortfolioRevision(v=>v+1);
+      }
+      setError("");
+    } catch (e) { if(request===portfolioRequest.current)setError(String(e)); }
+    finally{if(request===portfolioRequest.current)portfolioPending.current=false;}
   }
 
   async function loadHealth() {
@@ -127,8 +141,10 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
   }
 
   async function refreshFeedState(){
+    if(feedPending.current)return;feedPending.current=true;
     try{const response=await fetch("/intelligence/api/v1/intelligence/providers/upstox/quote-status");if(response.ok)setFeedState(await response.json());}
     catch{/* Background feed status must not interrupt portfolio use. */}
+    finally{feedPending.current=false;}
   }
 
   async function refreshPortfolioPrices(includeHistory=false){
@@ -152,10 +168,12 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
       initialRefreshStarted.current=true;
       void (async()=>{await load();await refreshPortfolioPrices(true);})();
     }
-    const timer=window.setInterval(()=>{if(document.visibilityState==="visible")void load();},60_000);
-    return()=>window.clearInterval(timer);
+    const poll=()=>{if(document.visibilityState==="visible")void load(true);};
+    const timer=window.setInterval(poll,60_000);
+    document.addEventListener("visibilitychange",poll);
+    return()=>{window.clearInterval(timer);document.removeEventListener("visibilitychange",poll);};
   }, []);
-  useEffect(()=>{void refreshFeedState();const timer=window.setInterval(()=>void refreshFeedState(),10000);return()=>window.clearInterval(timer);},[]);
+  useEffect(()=>{const poll=()=>{if(document.visibilityState==="visible")void refreshFeedState();};poll();const timer=window.setInterval(poll,10000);document.addEventListener("visibilitychange",poll);return()=>{window.clearInterval(timer);document.removeEventListener("visibilitychange",poll);};},[]);
   useEffect(() => { if(tab === 6) loadHealth(); }, [tab]);
   useEffect(() => { try { localStorage.setItem(TAB_STORAGE_KEY, String(tab)); } catch { /* Storage may be blocked. */ } }, [tab]);
   useEffect(() => { try { localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify(appearance)); } catch { /* Storage may be blocked. */ } }, [appearance]);
