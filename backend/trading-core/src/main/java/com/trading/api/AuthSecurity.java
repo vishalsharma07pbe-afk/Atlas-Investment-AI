@@ -104,7 +104,7 @@ public class AuthSecurity {
       try {
         String head=enc("{\"alg\":\"HS256\",\"typ\":\"JWT\"}");
         if(ttlSeconds<900 || ttlSeconds>2_592_000)throw new IllegalArgumentException("INVALID_SESSION_TTL");
-        String body=enc(json.writeValueAsString(java.util.Map.of("sub",user.toString(),"exp",Instant.now().plusSeconds(ttlSeconds).getEpochSecond(),"iss","atlas-local")));
+        String body=enc(json.writeValueAsString(java.util.Map.of("sub",user.toString(),"exp",Instant.now().plusSeconds(ttlSeconds).getEpochSecond(),"iss","atlas-local","jti",UUID.randomUUID().toString())));
         String data=head+"."+body;
         return data+"."+Base64.getUrlEncoder().withoutPadding().encodeToString(sign(data));
       }catch(Exception ex){throw new IllegalStateException("JWT signing failed",ex);}
@@ -122,7 +122,11 @@ public class AuthSecurity {
     public void revoke(String token,UUID user){
       UUID valid=verify(token);
       if(!user.equals(valid))throw new IllegalArgumentException("INVALID_SESSION");
-      jdbc.update("INSERT INTO revoked_jwt(token_sha256,user_id,expires_at) VALUES (?,?,now()+interval '15 minutes') ON CONFLICT DO NOTHING",sha(token),user);
+      // verify above authenticated the signature and expiry; keep revocation until that expiry.
+      long expiry;
+      try {expiry=json.readTree(Base64.getUrlDecoder().decode(token.split("\\\\.",-1)[1])).path("exp").asLong();}
+      catch(Exception ex){throw new IllegalArgumentException("INVALID_SESSION",ex);}
+      jdbc.update("INSERT INTO revoked_jwt(token_sha256,user_id,expires_at) VALUES (?,?,to_timestamp(?)) ON CONFLICT (token_sha256) DO UPDATE SET expires_at=GREATEST(revoked_jwt.expires_at,EXCLUDED.expires_at)",sha(token),user,expiry);
       jdbc.update("DELETE FROM revoked_jwt WHERE expires_at < now()");
     }
     public UUID verify(String token){
