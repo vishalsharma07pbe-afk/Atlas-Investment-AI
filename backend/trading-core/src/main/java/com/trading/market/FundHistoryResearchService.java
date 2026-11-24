@@ -108,12 +108,9 @@ public class FundHistoryResearchService {
         AND n.nav_date BETWEEN ?::date-1100 AND ?::date) DESC,s.scheme_code LIMIT 40
       """,pattern,today,today,today,today);
     List<Map<String,Object>> observations=new ArrayList<>();
+    Map<Long,List<Map<String,Object>>> histories=sampledHistories(sample,today);
     for(var fund:sample){
-      var rows=jdbc.queryForList("""
-        SELECT nav_date,nav,source_code FROM mutual_fund_nav
-        WHERE scheme_code=? AND nav_date BETWEEN ?::date-1120 AND ?::date
-          AND source_code IN ('AMFI','MFAPI') ORDER BY nav_date
-        """,fund.get("scheme_code"),today,today);
+      var rows=histories.getOrDefault(((Number)fund.get("scheme_code")).longValue(),List.of());
       var metrics=metrics(rows,today);
       if(metrics==null||commonEnd==null||!commonEnd.toString().equals(metrics.get("nav_date")))continue;
       metrics.putAll(fund);observations.add(metrics);
@@ -143,6 +140,25 @@ public class FundHistoryResearchService {
     result.put("automatic_collection_enabled",enabled&&permitted);
     result.put("notice","Historical observations only, from a bounded same-date AMFI category sample. Return-to-drawdown is CAGR divided by absolute observed maximum drawdown, not Sharpe or a forward forecast. Index funds may track different assets. Official benchmark TRI, TER, Riskometer and holdings evidence are still required.");
     return result;
+  }
+
+  // The category sample is capped at 40 by watch(). One bounded query replaces
+  // up to 40 round trips; each scheme retains its original chronological series.
+  Map<Long,List<Map<String,Object>>> sampledHistories(List<Map<String,Object>> sample,LocalDate today){
+    if(sample.isEmpty())return Map.of();
+    if(sample.size()>40)throw new IllegalArgumentException("SAMPLE_LIMIT_EXCEEDED");
+    String placeholders=String.join(",",Collections.nCopies(sample.size(),"?"));
+    List<Object> args=new ArrayList<>();
+    for(var fund:sample)args.add(((Number)fund.get("scheme_code")).longValue());
+    args.add(today);args.add(today);
+    var rows=jdbc.queryForList("""
+      SELECT scheme_code,nav_date,nav,source_code FROM mutual_fund_nav
+      WHERE scheme_code IN (%s) AND nav_date BETWEEN ?::date-1120 AND ?::date
+        AND source_code IN ('AMFI','MFAPI') ORDER BY scheme_code,nav_date
+      """.formatted(placeholders),args.toArray());
+    Map<Long,List<Map<String,Object>>> grouped=new HashMap<>();
+    for(var row:rows)grouped.computeIfAbsent(((Number)row.get("scheme_code")).longValue(),key->new ArrayList<>()).add(row);
+    return grouped;
   }
 
   /** Exact saved scheme only; not a category ranking or forward recommendation. */
