@@ -80,7 +80,11 @@ def snapshots() -> dict:
             observed = _timestamp(item.get("last_trade_time"))
         except ProviderFailure:
             continue
-        age = max(0, round((now - observed).total_seconds()))
+        elapsed = (now - observed).total_seconds()
+        # Do not turn future provider observations into zero-age live quotes.
+        if elapsed < 0:
+            continue
+        age = round(elapsed)
         items.append({
             "label": label,
             "instrument_key": key,
