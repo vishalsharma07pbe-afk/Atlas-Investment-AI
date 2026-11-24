@@ -37,6 +37,7 @@ class LiveFeedsDatabaseIntegrationTest {
  @Autowired JdbcTemplate db;
  @Autowired UpstoxFeedService stocks;
  @Autowired AmfiFeedService funds;
+ @Autowired DiscoveryHistoryScheduler discovery;
  @Autowired MockMvc mvc;
  @MockitoBean FeedHttp http;
  @MockitoBean VersionedVaultReader vault;
@@ -131,4 +132,41 @@ class LiveFeedsDatabaseIntegrationTest {
   assertThat((List<?>)metrics.get("rolling3Y")).isNotEmpty();
   assertThat(((BigDecimal)metrics.get("maxDrawdown")).doubleValue()).isLessThan(-0.20);
  }
+
+ @Test void discoveryBackfillsMappedEquityWithoutBorrowingOwnerToken()throws Exception{
+  db.update("INSERT INTO instruments(exchange_id,symbol,series,source) VALUES ((SELECT id FROM exchanges WHERE code='BSE'),'DISCOVERYTEST','EQ','UPSTOX')");
+  db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,instrument_type) VALUES ('BSE_EQ|DISCOVERYTEST','BSE','DISCOVERYTEST','EQ')");
+  long instrument=db.queryForObject("SELECT id FROM instruments WHERE symbol='DISCOVERYTEST'",Long.class);
+  LocalDate day=LocalDate.now(MarketCalendarService.IST).minusDays(1);
+  when(http.text(contains("BSE_EQ%7CDISCOVERYTEST"),eq("discovery-test-token"),anyInt()))
+    .thenReturn("{\"data\":{\"candles\":[[\""+day+"T09:15:00+05:30\",100,105,99,102,200]]}}");
+  org.springframework.test.util.ReflectionTestUtils.setField(discovery,"accessToken","discovery-test-token");
+  try{
+    org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"refreshExchange","BSE",day);
+    assertThat(db.queryForObject("SELECT count(*) FROM market_candles WHERE instrument_id=?",Long.class,instrument)).isEqualTo(1);
+    assertThat(db.queryForMap("SELECT status,rows_written FROM discovery_history_attempts WHERE instrument_id=?",instrument))
+      .containsEntry("status","SUCCESS").containsEntry("rows_written",1);
+    org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"refreshExchange","BSE",day);
+    verify(http,times(1)).text(contains("BSE_EQ%7CDISCOVERYTEST"),eq("discovery-test-token"),anyInt());
+    verifyNoInteractions(vault);
+  }finally{org.springframework.test.util.ReflectionTestUtils.setField(discovery,"accessToken","");}
+ }
+
+ @Test void providerHistoryDoesNotOverwriteAdjustedManualCandle()throws Exception{
+  db.update("INSERT INTO instruments(exchange_id,symbol,series,source) VALUES ((SELECT id FROM exchanges WHERE code='NSE'),'ADJUSTEDTEST','EQ','MANUAL_CSV')");
+  db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,instrument_type) VALUES ('NSE_EQ|ADJUSTEDTEST','NSE','ADJUSTEDTEST','EQ')");
+  long instrument=db.queryForObject("SELECT id FROM instruments WHERE symbol='ADJUSTEDTEST'",Long.class);
+  LocalDate day=LocalDate.now(MarketCalendarService.IST).minusDays(1);
+  var stamp=java.sql.Timestamp.from(day.atTime(9,15).atZone(MarketCalendarService.IST).toInstant());
+  db.update("INSERT INTO market_candles(instrument_id,timeframe,candle_time,source_id,open,high,low,close,volume,is_complete,quality_status,adjustment_status) VALUES (?,'1d',?,(SELECT id FROM data_sources WHERE source_code='MANUAL_CSV'),100,110,95,105,200,true,'VALIDATED_MANUAL','ADJUSTED')",instrument,stamp);
+  UUID owner=UUID.randomUUID();
+  when(vault.decrypt(owner,"UPSTOX")).thenReturn("owner-test-token");
+  when(http.text(contains("NSE_EQ%7CADJUSTEDTEST"),eq("owner-test-token"),anyInt()))
+    .thenReturn("{\"data\":{\"candles\":[[\""+day+"T09:15:00+05:30\",200,210,190,205,300]]}}");
+  assertThatThrownBy(()->stocks.dailyCandles(owner,"NSE_EQ|ADJUSTEDTEST",day,day)).isInstanceOf(IllegalStateException.class);
+  assertThat(db.queryForMap("SELECT close,adjustment_status FROM market_candles WHERE instrument_id=?",instrument))
+    .containsEntry("adjustment_status","ADJUSTED");
+  assertThat(db.queryForObject("SELECT close FROM market_candles WHERE instrument_id=?",BigDecimal.class,instrument)).isEqualByComparingTo("105");
+ }
+
 }
