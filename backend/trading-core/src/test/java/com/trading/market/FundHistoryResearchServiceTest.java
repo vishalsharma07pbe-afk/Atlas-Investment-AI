@@ -13,6 +13,34 @@ class FundHistoryResearchServiceTest {
   var service=new FundHistoryResearchService(jdbc,funds);service.enabled=true;service.scheduled();
   verifyNoInteractions(jdbc,funds);
  }
+ @Test void heldSchemeIsCollectedBeforeDiscoveryWithoutCategoryRestriction()throws Exception{
+  JdbcTemplate jdbc=mock(JdbcTemplate.class);AmfiFeedService funds=mock(AmfiFeedService.class);
+  var service=new FundHistoryResearchService(jdbc,funds);service.enabled=true;service.permitted=true;
+  when(jdbc.queryForList(contains("FROM personal_holdings h"),any(LocalDate.class),any(LocalDate.class),
+    any(LocalDate.class),any(LocalDate.class),any(LocalDate.class),any(LocalDate.class)))
+    .thenReturn(List.of(Map.of("scheme_code",123456L),Map.of("scheme_code",234567L)));
+  when(jdbc.update(contains("INSERT INTO fund_history_attempts"),eq(123456L))).thenReturn(1);
+  when(funds.history(123456L)).thenReturn(800);
+  service.scheduled();
+  verify(funds).history(123456L);
+  verify(funds,never()).history(234567L);
+  verify(jdbc).update(contains("SET status=?"),eq("SUCCESS"),eq(123456L));
+  var ordered=inOrder(jdbc,funds);
+  ordered.verify(funds).history(123456L);
+  ordered.verify(jdbc,times(5)).queryForList(contains("lower(trim(s.category))"),anyString(),
+    any(LocalDate.class),any(LocalDate.class),any(LocalDate.class),any(LocalDate.class));
+ }
+ @Test void heldSchemeFailureKeepsExistingRetryLedger()throws Exception{
+  JdbcTemplate jdbc=mock(JdbcTemplate.class);AmfiFeedService funds=mock(AmfiFeedService.class);
+  var service=new FundHistoryResearchService(jdbc,funds);service.enabled=true;service.permitted=true;
+  when(jdbc.queryForList(contains("FROM personal_holdings h"),any(LocalDate.class),any(LocalDate.class),
+    any(LocalDate.class),any(LocalDate.class),any(LocalDate.class),any(LocalDate.class)))
+    .thenReturn(List.of(Map.of("scheme_code",123456L)));
+  when(jdbc.update(contains("INSERT INTO fund_history_attempts"),eq(123456L))).thenReturn(1);
+  when(funds.history(123456L)).thenThrow(new IllegalStateException("source unavailable"));
+  service.scheduled();
+  verify(jdbc).update(contains("SET status='FAILED'"),eq(123456L));
+ }
  @Test void datedHistoryWithAmfiAnchorProducesObservedReturns(){
   LocalDate end=LocalDate.of(2026,11,24);
   List<Map<String,Object>> rows=new ArrayList<>();
