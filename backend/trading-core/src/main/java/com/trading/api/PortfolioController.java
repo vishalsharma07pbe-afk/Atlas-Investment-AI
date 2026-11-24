@@ -1,7 +1,6 @@
 package com.trading.api;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.trading.market.UpstoxFeedService;
+import com.trading.market.PortfolioRefreshService;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.*;
@@ -14,9 +13,9 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/api/v1/portfolio")
 public class PortfolioController {
   private final JdbcTemplate jdbc;
-  private final UpstoxFeedService upstox;
-  public PortfolioController(JdbcTemplate jdbc,UpstoxFeedService upstox) {
-    this.jdbc = jdbc;this.upstox=upstox;
+  private final PortfolioRefreshService refreshService;
+  public PortfolioController(JdbcTemplate jdbc,PortfolioRefreshService refreshService) {
+    this.jdbc = jdbc;this.refreshService=refreshService;
   }
 
   public record HoldingInput(String symbol, String assetType, BigDecimal quantity,
@@ -143,64 +142,6 @@ public class PortfolioController {
    * not prevent other holdings from updating. */
   @PostMapping("/refresh-prices")
   public Map<String,Object> refreshPrices(@RequestParam(defaultValue="false") boolean includeHistory){
-    UUID user=AuthSecurity.currentUser();
-    List<Map<String,Object>> rows=jdbc.queryForList("""
-      SELECT id,symbol,asset_type FROM personal_holdings
-      WHERE user_id=? ORDER BY asset_type,symbol LIMIT 200
-      """,user);
-    int updated=0,historySynced=0;List<Map<String,String>> skipped=new ArrayList<>();
-    for(Map<String,Object> row:rows){
-      long id=((Number)row.get("id")).longValue();
-      String symbol=String.valueOf(row.get("symbol"));
-      try{
-        if("EQUITY".equals(row.get("asset_type"))){
-          List<String> keys=jdbc.queryForList("""
-            SELECT instrument_key FROM upstox_instrument_map
-            WHERE upper(trading_symbol)=upper(?)
-            ORDER BY CASE WHEN exchange_code='NSE' THEN 0 ELSE 1 END,
-              CASE WHEN instrument_type='EQ' THEN 0 ELSE 1 END,instrument_key LIMIT 1
-            """,String.class,symbol);
-          if(keys.isEmpty())throw new IllegalStateException("INSTRUMENT_NOT_MAPPED");
-          String instrumentKey=keys.get(0);
-          JsonNode quote=upstox.quote(user,instrumentKey);
-          BigDecimal price=quote.path("ltp").decimalValue();
-          BigDecimal previous=quote.path("previous_close").isNumber()?quote.path("previous_close").decimalValue():null;
-          jdbc.update("UPDATE personal_holdings SET last_price=?,previous_close=?,price_as_of=now(),updated_at=now() WHERE id=? AND user_id=?",
-            price,previous,id,user);updated++;
-          if(includeHistory){
-            Map<String,Object> history=jdbc.queryForMap("""
-              SELECT count(c.*) candle_count,max(c.candle_time)::date latest_date
-              FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
-              LEFT JOIN market_candles c ON c.instrument_id=i.id AND c.timeframe='1d'
-                AND c.is_complete AND c.quality_status IN ('VALIDATED_MANUAL','PROVIDER_VALIDATED')
-              JOIN upstox_instrument_map m ON m.exchange_code=e.code AND m.trading_symbol=i.symbol
-              WHERE m.instrument_key=? GROUP BY i.id
-              """,instrumentKey);
-            long count=((Number)history.get("candle_count")).longValue();
-            LocalDate latest=history.get("latest_date") instanceof java.sql.Date d?d.toLocalDate():null;
-            if(count<21||latest==null||latest.isBefore(LocalDate.now().minusDays(5))){
-              try{historySynced+=upstox.dailyCandles(user,instrumentKey,LocalDate.now().minusMonths(6),LocalDate.now());}
-              catch(Exception historyError){skipped.add(Map.of("symbol",symbol,"reason","HISTORY_SYNC_FAILED"));}
-            }
-          }
-        }else if(symbol.matches("\\d+")){
-          List<Map<String,Object>> nav=jdbc.queryForList("""
-            SELECT nav,nav_date FROM mutual_fund_nav WHERE scheme_code=?
-            ORDER BY nav_date DESC LIMIT 2
-            """,Long.parseLong(symbol));
-          if(nav.isEmpty())throw new IllegalStateException("NAV_NOT_AVAILABLE");
-          Object previous=nav.size()>1?nav.get(1).get("nav"):null;
-          jdbc.update("UPDATE personal_holdings SET last_price=?,previous_close=?,price_as_of=?::date,updated_at=now() WHERE id=? AND user_id=?",
-            nav.get(0).get("nav"),previous,nav.get(0).get("nav_date"),id,user);updated++;
-        }else throw new IllegalStateException("SCHEME_CODE_REQUIRED");
-      }catch(Exception ex){
-        String reason=ex.getMessage();
-        if(reason==null||reason.isBlank()||reason.length()>80)reason=ex.getClass().getSimpleName();
-        skipped.add(Map.of("symbol",symbol,"reason",reason));
-      }
-    }
-    Map<String,Object> out=new LinkedHashMap<>();out.put("updated",updated);out.put("history_synced",historySynced);
-    out.put("total",rows.size());out.put("skipped",skipped);out.put("refreshed_at",java.time.Instant.now());
-    return out;
+    return refreshService.refreshUser(AuthSecurity.currentUser(),includeHistory);
   }
 }
