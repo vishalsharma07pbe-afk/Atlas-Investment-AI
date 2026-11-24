@@ -22,11 +22,12 @@ export default function MutualFundResearchDashboard({onExplore}:{onExplore:()=>v
   const [data,setData]=useState<Result|null>(null);
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState("");
-  useEffect(()=>{const controller=new AbortController();setLoading(true);setError("");
-    fetch(`/intelligence/api/v1/intelligence/mutual-funds/recommendations?category=${category}&horizon_months=${horizon}&risk_tolerance=${risk}`,{signal:controller.signal,cache:"no-store"})
-      .then(r=>{if(!r.ok)throw Error("Research snapshot unavailable");return r.json()}).then(setData)
-      .catch(e=>{if(e.name!=="AbortError")setError(e.message)}).finally(()=>setLoading(false));
-    return()=>controller.abort();},[category,horizon,risk]);
+  useEffect(()=>{const controller=new AbortController();let active=true,pending=false;setLoading(true);setError("");setData(null);
+    function load(){if(pending)return;pending=true;fetch(`/intelligence/api/v1/intelligence/mutual-funds/recommendations?category=${category}&horizon_months=${horizon}&risk_tolerance=${risk}`,{signal:controller.signal,cache:"no-store"})
+      .then(r=>{if(!r.ok)throw Error("Research snapshot unavailable");return r.json()}).then(result=>{if(active){setData(result);setError("");}})
+      .catch(e=>{if(active&&e.name!=="AbortError"){setError(e.message);setData(null)}}).finally(()=>{pending=false;if(active)setLoading(false)});}
+    load();const timer=window.setInterval(load,60000);
+    return()=>{active=false;controller.abort();window.clearInterval(timer);};},[category,horizon,risk]);
   return <section className="mf-research-dashboard">
     <header className="mf-research-hero"><div><small className="section-kicker">VERIFIED FUND RESEARCH</small><h2>Research picks, only when evidence qualifies</h2><p>Historical strength and forward growth use separate gates. Strong recent returns alone cannot enter Growth Outlook.</p></div><button className="secondary" type="button" onClick={onExplore}>Explore all funds</button></header>
     <div className="mf-category-tabs" role="tablist" aria-label="Mutual fund categories">{categories.map(([id,label])=><button key={id} type="button" role="tab" aria-selected={category===id} onClick={()=>setCategory(id)}>{label}</button>)}</div>
@@ -34,10 +35,10 @@ export default function MutualFundResearchDashboard({onExplore}:{onExplore:()=>v
     <div className="mf-research-filters"><label>Investment horizon<select value={horizon} onChange={e=>setHorizon(Number(e.target.value))}><option value={36}>3 years — near-term goal</option><option value={60}>5 years</option><option value={84}>7 years</option><option value={120}>10 years</option></select></label><label>Risk tolerance<select value={risk} onChange={e=>setRisk(e.target.value)}><option value="LOW">Low</option><option value="MODERATE">Moderate</option><option value="HIGH">High</option></select></label></div>
     {loading&&<div className="mf-research-state" role="status">Checking category evidence…</div>}
     {error&&<div className="mf-attention" role="alert"><span>!</span><div><strong>Research unavailable</strong><p>{error}</p></div></div>}
-    {!loading&&data&&<>
+    {!loading&&data&&!error&&data.category===category&&<>
       {data.suitability.flags.length>0&&<div className="mf-horizon-warning"><strong>{horizon===36?"A 36-month goal needs capital protection":"Suitability warning"}</strong><p>{data.suitability.flags.map(words).join(" · ")}. Volatile equity funds can be unsuitable for money required on this date even when their long-term record is strong.</p></div>}
       <div className="mf-market-overview"><header><h3>Market context</h3><p>Trend, fund performance and forward outlook remain separate evidence.</p></header><div>{data.market_overview.map(item=><article key={item.segment}><span>{words(item.segment)}</span><strong>{words(item.status)}</strong><small>{item.benchmark??"Benchmark feed not connected"}</small></article>)}</div></div>
-      <div className="mf-coverage-strip"><div><span>Name-matched universe</span><strong>{data.coverage.name_matched_schemes}</strong></div><div><span>Direct Growth candidates</span><strong>{data.coverage.exact_direct_growth_schemes}</strong></div><div><span>Performance eligible</span><strong>{data.coverage.dated_nav_history_eligible}</strong></div><div><span>Forward evidence eligible</span><strong>{data.coverage.portfolio_disclosures_eligible}</strong></div></div>
+      <div className="mf-coverage-strip"><div><span>Name-matched universe</span><strong>{data.coverage.name_matched_schemes}</strong></div><div><span>Direct Growth candidates</span><strong>{data.coverage.exact_direct_growth_schemes}</strong></div><div><span>AMFI history eligible (sample)</span><strong>{data.coverage.dated_nav_history_eligible}</strong></div><div><span>Forward evidence eligible</span><strong>{data.coverage.portfolio_disclosures_eligible}</strong></div></div>
       <div className="mf-ranking-grid"><PickList title="Top Performers" subtitle="Consistency, benchmark-relative returns and downside risk." items={data.top_performers}/><PickList title="Growth Outlook" subtitle="Current holdings, earnings, valuation, concentration and risks." items={data.growth_outlook}/></div>
       <details className="mf-research-method"><summary>Why are recommendations unavailable?</summary><p>{data.notice}</p><div>{data.blockers.map(b=><span key={b}>{words(b)}</span>)}</div><small>Methodology {data.methodology_version} · Snapshot {data.snapshot_hash.slice(0,12)}</small></details>
     </>}

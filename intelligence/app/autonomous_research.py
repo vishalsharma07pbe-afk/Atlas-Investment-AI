@@ -102,7 +102,7 @@ def fund_snapshot(category):
     # needed by the overview, not the catalog or individual excluded records.
     return {key: result[key] for key in (
         "category", "coverage", "top_performers", "growth_outlook",
-        "recommendation_status", "blockers", "notice", "filters")}
+        "recommendation_status", "blockers", "notice", "filters", "historical_coverage")}
 
 
 def refresh_once(market_loader=market_snapshot, fund_loader=fund_snapshot):

@@ -11,6 +11,7 @@ import hashlib
 import json
 
 from . import nav_catalog
+from .market_client import backend_json
 
 METHODOLOGY_VERSION = "MF-RESEARCH-1.0.0"
 CATEGORIES = ("LARGE_CAP","MID_CAP","SMALL_CAP","FLEXI_CAP","INDEX")
@@ -199,15 +200,42 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
     if category not in CATEGORIES:raise ValueError("UNSUPPORTED_CATEGORY")
     if horizon_months<12 or horizon_months>360:raise ValueError("INVALID_HORIZON")
     if risk_tolerance not in RISK_LEVELS:raise ValueError("INVALID_RISK_TOLERANCE")
-    candidates,coverage=_catalog_candidates(category);ranked=rank_candidates(candidates,category,horizon_months,risk_tolerance)
+    candidates,coverage=_catalog_candidates(category)
+    # AMFI history is independent of the Upstox discovery catalog. Do not
+    # equate sampled NAV history with complete benchmark/holdings evidence.
+    historical=None
+    try:
+        observed=backend_json("/api/v1/mutual-funds/historical-watch?category="+category)
+        if (isinstance(observed,dict) and observed.get("category")==category
+                and type(observed.get("universe_count")) is int
+                and type(observed.get("eligible_count")) is int
+                and 0<=observed["eligible_count"]<=observed["universe_count"]
+                and isinstance(observed.get("items"),list)):
+            historical=observed
+            coverage["official_category_verified"]=observed["universe_count"]
+            coverage["dated_nav_history_eligible"]=observed["eligible_count"]
+    except Exception:
+        pass  # Local backend unavailability is not permission to fabricate history.
+    ranked=rank_candidates(candidates,category,horizon_months,risk_tolerance)
     blockers=["OFFICIAL_CATEGORY_SOURCE_NOT_CONNECTED","DATED_NAV_HISTORY_INSUFFICIENT",
               "BENCHMARK_TRI_NOT_CONNECTED","OFFICIAL_RISKOMETER_NOT_CONNECTED",
               "PORTFOLIO_DISCLOSURES_NOT_CONNECTED","HOLDING_FUNDAMENTALS_NOT_CONNECTED",
               "EXPENSE_RATIO_NOT_CONNECTED","LICENSED_RATING_SOURCE_NOT_CONNECTED"]
+    if historical is not None:
+        if coverage["official_category_verified"]>0:
+            blockers.remove("OFFICIAL_CATEGORY_SOURCE_NOT_CONNECTED")
+        if coverage["dated_nav_history_eligible"]>0:
+            blockers.remove("DATED_NAV_HISTORY_INSUFFICIENT")
+    else:
+        blockers.append("AMFI_HISTORY_READ_MODEL_UNAVAILABLE")
     generated=datetime.now(timezone.utc).isoformat()
     payload={"generated_at":generated,"methodology_version":METHODOLOGY_VERSION,"category":category,
       "filters":{"horizon_months":horizon_months,"risk_tolerance":risk_tolerance},"coverage":coverage,
       "top_performers":ranked["top_performers"],"growth_outlook":ranked["growth_outlook"],
+      "historical_coverage":{"status":"UNAVAILABLE"} if historical is None else {
+          "status":historical.get("status"),"comparison_date":historical.get("comparison_date"),
+          "sample_count":historical.get("sample_count"),"weekly_risk_eligible_count":historical.get("weekly_risk_eligible_count"),
+          "items":historical["items"][:5]},
       "suitability":ranked["suitability"],"blockers":blockers,
       "market_overview":[{"segment":x,"status":"UNAVAILABLE","benchmark":None,"period":None,
                           "last_available_date":None,"evidence":[],"blocker":"BENCHMARK_TRI_NOT_CONNECTED"}
