@@ -168,7 +168,7 @@ public class PortfolioReviewService {
       Map<String,Object> item=new LinkedHashMap<>();
       item.put("id",r.get("id"));item.put("symbol",r.get("symbol"));item.put("asset_type",r.get("asset_type"));
       item.put("exchange",r.get("exchange"));item.put("isin",r.get("isin"));item.put("status",status);item.put("weight_percent",weight);
-      item.put("recorded_return_percent",returnPct);item.put("evidence_date",observed==null?null:observed.toString());
+      item.put("recorded_market_value",value);item.put("recorded_return_percent",returnPct);item.put("evidence_date",observed==null?null:observed.toString());
       item.put("history_count",count);item.put("change_20_observations_percent",momentum);
       item.put("recent_peak_change_percent",drawdown);item.put("findings",findings);item.put("missing_evidence",missing);
       assessments.add(item);
