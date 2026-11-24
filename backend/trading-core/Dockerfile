@@ -1,6 +1,8 @@
 FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /app
 COPY pom.xml maven-build-retry.sh ./
+# Reuse resolved dependencies across source-only changes, as in production.
+RUN sh maven-build-retry.sh -DskipTests dependency:go-offline
 COPY src ./src
 RUN sh maven-build-retry.sh -DskipTests package
 FROM eclipse-temurin:21-jre
