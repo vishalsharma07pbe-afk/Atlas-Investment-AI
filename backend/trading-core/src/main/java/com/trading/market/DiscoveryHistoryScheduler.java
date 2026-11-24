@@ -13,6 +13,9 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class DiscoveryHistoryScheduler {
+  // Align ingestion with all existing daily research horizons (long term: 200 sessions).
+  private static final int REQUIRED_DAILY_CANDLES=200;
+  private static final int BACKFILL_MONTHS=12;
   private final JdbcTemplate jdbc;
   private final UpstoxFeedService stocks;
   private final MarketCalendarService calendar;
@@ -61,11 +64,11 @@ public class DiscoveryHistoryScheduler {
       WHERE e.code=? AND i.active AND i.listing_status='ACTIVE' AND i.series='EQ'
         AND i.instrument_type IN ('EQ','EQUITY','STOCK')
         AND NOT coalesce(h.has_adjusted,false)
-        AND (h.candle_count<60 OR h.latest_date IS NULL OR h.latest_date<?)
+        AND (h.candle_count<? OR h.latest_date IS NULL OR h.latest_date<?)
         AND (a.next_attempt_at IS NULL OR a.next_attempt_at<=now())
       ORDER BY a.attempted_at ASC NULLS FIRST,i.id
       LIMIT 2
-      """,exchange,end);
+      """,exchange,REQUIRED_DAILY_CANDLES,end);
     for(var row:rows){
       long id=((Number)row.get("id")).longValue();
       long count=((Number)row.get("candle_count")).longValue();
@@ -82,8 +85,8 @@ public class DiscoveryHistoryScheduler {
         """,id);
       if(claimed==0)continue;
       try{
-        LocalDate floor=end.minusMonths(6);
-        LocalDate from=count<60||latest==null||latest.isBefore(floor)?floor:latest.plusDays(1);
+        LocalDate floor=end.minusMonths(BACKFILL_MONTHS);
+        LocalDate from=count<REQUIRED_DAILY_CANDLES||latest==null||latest.isBefore(floor)?floor:latest.plusDays(1);
         if(from.isAfter(end))from=floor;
         int written=stocks.discoveryDailyCandles(accessToken,(String)row.get("instrument_key"),from,end);
         jdbc.update("UPDATE discovery_history_attempts SET status='SUCCESS',rows_written=?,next_attempt_at=now()+interval '1 day' WHERE instrument_id=?",written,id);
