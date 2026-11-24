@@ -1,0 +1,7 @@
+# Automatic fund NAV research
+
+This increment reuses the existing AMFI category catalog and MFAPI history adapter in PostgreSQL. A permission-gated scheduler requests at most one eligible Direct Growth scheme per category per 15-minute fixed-delay pass, with persisted cooldowns. Existing official AMFI observations take precedence over MFAPI on overlapping dates; future history dates and explicitly mismatched scheme codes are rejected.
+
+The fund research tab automatically reads a bounded sample of up to 40 schemes per category from stored NAV evidence. It displays up to five historical observations ordered by three-year CAGR, with one-year CAGR, observed drawdown, actual NAV date and source codes. It requires a recent AMFI NAV, adequate dated observations, close trailing period anchors and no large history gaps. This is not a comprehensive ranking, future-performance estimate or official risk rating. Existing strict Top Performers and Growth Outlook gates are unchanged. No user-supplied research evidence or paid API is required.
+
+The scheduler is enabled in Compose, but external history collection requires the existing MARKET_DATA_USAGE_RIGHTS_CONFIRMED permission. Verify source rights and live behavior before enabling. V21 adds only a persistent scheme attempt ledger. Benchmark, expenses, fund disclosures and official riskometer are still missing. No change to trading, holdings or broker credentials.

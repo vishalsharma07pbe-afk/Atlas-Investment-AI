@@ -1,4 +1,5 @@
 import {useEffect,useState} from "react";
+import FundHistoricalWatch from "./FundHistoricalWatch";
 
 type Category="LARGE_CAP"|"MID_CAP"|"SMALL_CAP"|"FLEXI_CAP"|"INDEX";
 type Pick={rank:number;score:number;atlas_research_rating:string;evidence_confidence:string;qualification_reason:string;key_risk:string;suitability:{status:string;flags:string[]};fund:{identifier:string;name:string;category:string;plan:string;nav:string|null;nav_date:string|null;returns_1y:number|null;returns_3y:number|null;returns_5y:number|null;riskometer:string|null;riskometer_date:string|null;benchmark:string|null}};
@@ -29,6 +30,7 @@ export default function MutualFundResearchDashboard({onExplore}:{onExplore:()=>v
   return <section className="mf-research-dashboard">
     <header className="mf-research-hero"><div><small className="section-kicker">VERIFIED FUND RESEARCH</small><h2>Research picks, only when evidence qualifies</h2><p>Historical strength and forward growth use separate gates. Strong recent returns alone cannot enter Growth Outlook.</p></div><button className="secondary" type="button" onClick={onExplore}>Explore all funds</button></header>
     <div className="mf-category-tabs" role="tablist" aria-label="Mutual fund categories">{categories.map(([id,label])=><button key={id} type="button" role="tab" aria-selected={category===id} onClick={()=>setCategory(id)}>{label}</button>)}</div>
+    <FundHistoricalWatch category={category}/>
     <div className="mf-research-filters"><label>Investment horizon<select value={horizon} onChange={e=>setHorizon(Number(e.target.value))}><option value={36}>3 years — near-term goal</option><option value={60}>5 years</option><option value={84}>7 years</option><option value={120}>10 years</option></select></label><label>Risk tolerance<select value={risk} onChange={e=>setRisk(e.target.value)}><option value="LOW">Low</option><option value="MODERATE">Moderate</option><option value="HIGH">High</option></select></label></div>
     {loading&&<div className="mf-research-state" role="status">Checking category evidence…</div>}
     {error&&<div className="mf-attention" role="alert"><span>!</span><div><strong>Research unavailable</strong><p>{error}</p></div></div>}

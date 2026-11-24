@@ -37,6 +37,7 @@ class LiveFeedsDatabaseIntegrationTest {
  @Autowired JdbcTemplate db;
  @Autowired UpstoxFeedService stocks;
  @Autowired AmfiFeedService funds;
+ @Autowired FundHistoryResearchService fundResearch;
  @Autowired DiscoveryHistoryScheduler discovery;
  @Autowired MockMvc mvc;
  @MockitoBean FeedHttp http;
@@ -167,6 +168,29 @@ class LiveFeedsDatabaseIntegrationTest {
   assertThat(db.queryForMap("SELECT close,adjustment_status FROM market_candles WHERE instrument_id=?",instrument))
     .containsEntry("adjustment_status","ADJUSTED");
   assertThat(db.queryForObject("SELECT close FROM market_candles WHERE instrument_id=?",BigDecimal.class,instrument)).isEqualByComparingTo("105");
+ }
+
+
+ @Test void fundHistoryWatchUsesOfficialCategoryAndPreservesAmfiNav()throws Exception{
+  long code=987650123L;
+  LocalDate today=LocalDate.now(MarketCalendarService.IST);
+  db.update("INSERT INTO mutual_fund_schemes(scheme_code,scheme_name,category) VALUES (?,'Example Direct Plan Growth','Open Ended Schemes(Equity Scheme - Large Cap Fund)')",code);
+  db.update("""
+    INSERT INTO mutual_fund_nav(scheme_code,nav_date,nav,source_code)
+    SELECT ?,?::date-g,120-g*0.01,CASE WHEN g=0 THEN 'AMFI' ELSE 'MFAPI' END
+    FROM generate_series(0,1100) g
+    """,code,today);
+  var watch=fundResearch.watch("LARGE_CAP");
+  assertThat(watch).containsEntry("status","HISTORICAL_WATCH_ONLY");
+  assertThat((List<?>)watch.get("items")).hasSize(1);
+  assertThat(((List<?>)watch.get("items")).getFirst()).isInstanceOf(Map.class);
+  assertThat(((Map<?,?>)((List<?>)watch.get("items")).getFirst()).get("scheme_code")).isEqualTo(code);
+  assertThat((List<?>)fundResearch.watch("SMALL_CAP").get("items")).isEmpty();
+  String day=today.format(java.time.format.DateTimeFormatter.ofPattern("dd-MM-yyyy"));
+  when(http.text(contains("api.mfapi.in/mf/"+code),isNull(),anyInt()))
+    .thenReturn("{\"meta\":{\"scheme_code\":"+code+"},\"data\":[{\"date\":\""+day+"\",\"nav\":\"999\"}]}");
+  funds.history(code);
+  assertThat(db.queryForObject("SELECT nav FROM mutual_fund_nav WHERE scheme_code=? AND nav_date=?",BigDecimal.class,code,today)).isEqualByComparingTo("120");
  }
 
 }

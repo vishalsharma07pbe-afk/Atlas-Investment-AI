@@ -8,12 +8,12 @@ const response={generated_at:"2026-11-17T06:30:00Z",methodology_version:"MF-RESE
 
 describe("Mutual fund research dashboard",()=>{
   it("shows independent empty recommendation lists and short-horizon warning",async()=>{
-    const fetchMock=vi.fn().mockResolvedValue({ok:true,json:async()=>response});vi.stubGlobal("fetch",fetchMock);
+    const fetchMock=vi.fn(async(url:string)=>({ok:true,json:async()=>url.includes("historical-watch")?{category:"LARGE_CAP",items:[],universe_count:120,sample_count:20,eligible_count:0,automatic_collection_enabled:true,notice:"Historical only"}:response}));vi.stubGlobal("fetch",fetchMock);
     render(<MutualFundResearchDashboard onExplore={()=>{}}/>);
     await screen.findByText("Top Performers");
     expect(screen.getByText("Growth Outlook")).toBeTruthy();
     expect(screen.getAllByText("No fund currently qualifies")).toHaveLength(2);
     fireEvent.change(screen.getByLabelText("Investment horizon"),{target:{value:"36"}});
-    await waitFor(()=>expect(fetchMock).toHaveBeenLastCalledWith(expect.stringContaining("horizon_months=36"),expect.anything()));
+    await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("horizon_months=36"),expect.anything()));
   });
 });

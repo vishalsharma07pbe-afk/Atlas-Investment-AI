@@ -40,14 +40,16 @@ import org.springframework.stereotype.Service;
  }
  public int history(long code)throws Exception{
   JsonNode root=json.readTree(http.text("https://api.mfapi.in/mf/"+code,null,12_000_000));
+  JsonNode meta=root.path("meta");
+  if(meta.has("scheme_code")&&!Long.toString(code).equals(meta.path("scheme_code").asText()))throw new IllegalStateException("History scheme mismatch");
   JsonNode rows=root.path("data");if(!rows.isArray()||rows.isEmpty())throw new IllegalStateException("No historical NAV");
   int count=0;
   for(JsonNode row:rows){
    try{
     LocalDate day=LocalDate.parse(row.path("date").asText(),DateTimeFormatter.ofPattern("dd-MM-yyyy"));
     BigDecimal nav=new BigDecimal(row.path("nav").asText());
-    if(nav.signum()<=0)continue;
-    jdbc.update("INSERT INTO mutual_fund_nav(scheme_code,nav_date,nav,source_code) VALUES (?,?,?,'MFAPI') ON CONFLICT(scheme_code,nav_date) DO UPDATE SET nav=EXCLUDED.nav,received_at=now()",code,day,nav);count++;
+    if(nav.signum()<=0||day.isAfter(LocalDate.now(MarketCalendarService.IST)))continue;
+    jdbc.update("INSERT INTO mutual_fund_nav(scheme_code,nav_date,nav,source_code) VALUES (?,?,?,'MFAPI') ON CONFLICT(scheme_code,nav_date) DO UPDATE SET nav=EXCLUDED.nav,received_at=now() WHERE mutual_fund_nav.source_code='MFAPI'",code,day,nav);count++;
    }catch(NumberFormatException|DateTimeParseException ignored){}
   }
   return count;
