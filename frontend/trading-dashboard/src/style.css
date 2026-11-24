@@ -1302,3 +1302,22 @@ html:has(.appearance-panel),html:has(.atlas-notification-panel),body:has(.appear
 .autonomous-result li small { display:block; margin-top:3px; }
 .autonomous-footer { display:flex; gap:10px; flex-wrap:wrap; }
 @media(max-width:720px){.autonomous-grid{grid-template-columns:1fr}.autonomous-footer>*{flex:1 1 160px}}
+
+/* Horizon research: consistent, responsive results-first cards. */
+.horizon-workspace{display:grid;gap:16px;min-width:0}
+.horizon-hero .sectionhead{align-items:flex-start;flex-wrap:wrap}
+.horizon-hero p{color:var(--ink-soft);line-height:1.5}
+.horizon-coverage{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:16px 0}
+.horizon-coverage>div{display:flex;flex-direction:column;gap:5px;border:1px solid var(--glass-border);padding:12px;border-radius:12px}
+.horizon-coverage span,.horizon-card small{font-size:12px;color:var(--ink-muted)}
+.horizon-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:14px;margin:14px 0}
+.horizon-card{border:1px solid var(--glass-border);border-radius:14px;padding:16px;min-width:0}
+.horizon-card header{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+.horizon-card h3{margin:4px 0;overflow-wrap:anywhere}
+.horizon-card dl{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.horizon-card dt{font-size:12px;color:var(--ink-muted)}
+.horizon-card dd{margin:5px 0;font-weight:600}
+.horizon-card details{font-size:13px;line-height:1.5}
+.horizon-card summary{cursor:pointer;font-weight:600}
+.horizon-card ul{padding-left:20px}
+@media(max-width:480px){.horizon-coverage{grid-template-columns:1fr}}
