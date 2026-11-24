@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from .market_client import backend_json
 from .screener import screen
 from .mutual_fund_recommendations import CATEGORIES, dashboard
-from . import automatic_ai_review, watch_outcomes, automatic_company_evidence
+from . import automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional
 
 SECTIONS = ("NSE", "BSE", *CATEGORIES)
 DEFAULT_INTERVAL = 900
@@ -140,6 +140,10 @@ def read_snapshot(include_ai=True):
             "notice": "Snapshot time is not the underlying observation time. Missing evidence never becomes a recommendation."}
     if include_ai:
         try:
+            snapshot["institutional_activity"] = automatic_institutional.read(_connect) if enabled else {"status":"AUTOMATION_DISABLED"}
+        except (ValueError, OSError, sqlite3.Error):
+            snapshot["institutional_activity"] = {"status":"UNAVAILABLE"}
+        try:
             automatic_company_evidence.attach(snapshot, _connect)
         except (ValueError, OSError, sqlite3.Error):
             snapshot["automatic_company_status"] = "UNAVAILABLE"
@@ -164,6 +168,10 @@ class ResearchScheduler:
     async def _loop(self, interval):
         while not self.stopping.is_set():
             try:
+                try:
+                    await asyncio.to_thread(automatic_institutional.refresh, _connect)
+                except Exception:
+                    pass  # Aggregate flows never block other research sections.
                 await asyncio.to_thread(refresh_once)
                 snapshot = await asyncio.to_thread(read_snapshot, False)
                 try:
