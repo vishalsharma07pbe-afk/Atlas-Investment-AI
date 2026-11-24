@@ -205,4 +205,23 @@ class LiveFeedsDatabaseIntegrationTest {
   assertThat(((Number)((Map<?,?>)health.get("officialAmfiNav")).get("records")).longValue()).isGreaterThanOrEqualTo(1);
   assertThat(((Number)((Map<?,?>)health.get("upstoxRegistry")).get("records")).longValue()).isGreaterThanOrEqualTo(1);
  }
+
+ @Test void currentSessionIngestionExcludesFormingBars()throws Exception{
+  String symbol="INTRADAYTEST",key="NSE_EQ|INTRADAYTEST";
+  db.update("INSERT INTO instruments(exchange_id,symbol,series,source) VALUES ((SELECT id FROM exchanges WHERE code='NSE'),?,'EQ','TEST')",symbol);
+  db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol) VALUES (?,'NSE',?)",key,symbol);
+  LocalDate day=LocalDate.now(MarketCalendarService.IST);
+  Instant cutoff=day.atTime(9,50).atZone(MarketCalendarService.IST).toInstant();
+  String payload="{\"status\":\"success\",\"data\":{\"candles\":["
+    +"[\""+day+"T09:45:00+05:30\",100,102,99,101,300],"
+    +"[\""+day+"T09:30:00+05:30\",100,102,99,101,200],"
+    +"[\""+day+"T09:15:00+05:30\",100,102,99,101,100]]}}";
+  when(http.text(contains("/intraday/"),eq("test-only"),anyInt())).thenReturn(payload);
+  Integer written=org.springframework.test.util.ReflectionTestUtils.invokeMethod(stocks,"discoveryIntradayCandles","test-only",key,cutoff);
+  assertThat(written).isEqualTo(2);
+  long instrument=db.queryForObject("SELECT id FROM instruments WHERE symbol=?",Long.class,symbol);
+  assertThat(db.queryForObject("SELECT count(*) FROM market_candles WHERE instrument_id=? AND timeframe='15minute' AND is_complete",Long.class,instrument)).isEqualTo(2L);
+  assertThat(db.queryForObject("SELECT count(*) FROM market_candles WHERE instrument_id=? AND (candle_time AT TIME ZONE 'Asia/Kolkata')::time='09:45:00'",Long.class,instrument)).isZero();
+  verifyNoInteractions(vault);
+ }
 }

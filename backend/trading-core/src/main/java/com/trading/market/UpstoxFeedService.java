@@ -137,6 +137,9 @@ import org.springframework.stereotype.Service;
      if(timestamp.toInstant().plusSeconds(15*60).isAfter(cutoff))continue;
      for(int j=1;j<=4;j++)if(!row.get(j).isNumber())throw new IllegalArgumentException("INVALID_OHLC");
     }
+    // Manual history also must not overwrite a forming intraday bar as complete.
+    if(cutoff==null&&!timeframe.equals("1d")&&timestamp.toInstant()
+        .plusSeconds(timeframe.equals("1minute")?60:900).isAfter(Instant.now()))continue;
     BigDecimal open=row.get(1).decimalValue(),high=row.get(2).decimalValue(),low=row.get(3).decimalValue(),close=row.get(4).decimalValue();
     if(open.signum()<=0||high.signum()<=0||low.signum()<=0||close.signum()<=0||
        high.compareTo(open)<0||high.compareTo(close)<0||high.compareTo(low)<0||

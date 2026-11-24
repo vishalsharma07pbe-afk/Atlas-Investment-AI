@@ -30,21 +30,24 @@ export default function HorizonResearch({horizon,children,onSettings}:{horizon:H
        if(active){setData(result);setError(false);}
      }catch{if(active)setError(true);}finally{pending=false;}
    }
+   if(horizon==="INTRADAY")return;
    void load();const timer=window.setInterval(load,30000);
    return()=>{active=false;controller.abort();window.clearInterval(timer);};
- },[]);
+ },[horizon]);
  const sections=data?.sections.filter(s=>s.section==="NSE"||s.section==="BSE")||[];
  const ready=sections.filter(s=>s.status==="READY"&&data?.enabled&&!error&&s.result?.horizons?.[horizon]);
  const ranked=ready.flatMap(s=>s.result!.horizons![horizon]!.candidates).sort((a,b)=>b.rank_score-a.rank_score||a.exchange.localeCompare(b.exchange)||a.symbol.localeCompare(b.symbol)).slice(0,5);
  const blockers=[...new Set(ready.flatMap(s=>s.result!.horizons![horizon]!.blockers))];
  return <section className="horizon-workspace" aria-label={titles[horizon]}>
   <section className="panel glass horizon-hero">
-   <div className="sectionhead"><div><small className="section-kicker">AUTOMATIC RESEARCH</small><h2>{titles[horizon]}</h2><p>{descriptions[horizon]}</p></div><span className="tag">{error?"UNAVAILABLE":data?.enabled===false?"AUTOMATION OFF":"RESEARCH ONLY"}</span></div>
+   <div className="sectionhead"><div><small className="section-kicker">AUTOMATIC RESEARCH</small><h2>{titles[horizon]}</h2><p>{descriptions[horizon]}</p></div><span className="tag">{horizon!=="INTRADAY"&&error?"UNAVAILABLE":horizon!=="INTRADAY"&&data?.enabled===false?"AUTOMATION OFF":"RESEARCH ONLY"}</span></div>
+   {horizon!=="INTRADAY"&&<>
    {!data&&!error&&<p role="status">Loading saved research…</p>}
    {error&&<p role="alert" className="notice warning-notice">Research service is unavailable. No previous candidates are shown as current.</p>}
    {data?.enabled===false&&<p className="notice warning-notice">Automatic research is disabled.</p>}
    <div className="horizon-coverage">{sections.map(s=><div key={s.section}><strong>{s.section}</strong><span>{ready.includes(s)?(s.result?.eligible_count||0)+" / "+(s.result?.universe_size||0)+" daily histories eligible":s.status==="READY"?"Waiting for horizon refresh":words(s.status)}</span></div>)}</div>
    <p className="muted tiny">Bounded registry sample; not a whole-market ranking. Missing source evidence is never replaced with estimates.</p>
+   </>}
   </section>
   {horizon==="INTRADAY"?<IntradayResearch/>:<section className="panel glass horizon-results">
    <div className="sectionhead"><div><h3>Technical watch candidates</h3><p className="muted tiny">Up to five observations across the available NSE/BSE samples.</p></div></div>
