@@ -26,3 +26,12 @@ it("links directly to current horizon watches without triggering a manual scan",
  expect(navigate).toHaveBeenCalledWith("SWING");
  expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+it("keeps the overview usable when institutional access is disabled on the real API",async()=>{
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,interval_seconds:900,sections:[{section:"NSE",status:"READY",generated_at:null,result:{eligible_count:0,universe_size:0,momentum_leaders:[]}}],institutional_activity:{status:"DISABLED_OR_NOT_AUTHORIZED",market:"NSE_CASH",unit:"PROVIDER_REPORTED",participants:{},paired_five_date_window:null,blockers:["RETAIL_FLOW_FEED_MISSING"]}})})));
+ render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}}><p>Manual research tool</p></AutonomousOverview>);
+ expect(await screen.findByText("Institutional activity & company news")).toBeTruthy();
+ expect(screen.getAllByText(/No recent usable observation/)).toHaveLength(2);
+ fireEvent.click(screen.getByRole("button",{name:"Open research tools"}));
+ expect(screen.getByText("Manual research tool")).toBeTruthy();
+});

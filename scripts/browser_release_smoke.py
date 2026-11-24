@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""Real Chromium smoke on the disposable CI development stack only."""
+import argparse
+import uuid
+from pathlib import Path
+from playwright.sync_api import sync_playwright, expect
+
+PAGES=("Overview","My Portfolio","Intraday","Swing Trading","Short-Term Equity",
+       "Long-Term Investments","Mutual Funds","Market Intelligence","Stock Explorer","AI Research","Settings")
+
+def run():
+    base="http://127.0.0.1:5173"
+    email=f"browser-{uuid.uuid4().hex}@example.test"
+    password="disposable-browser-password-123"
+    with sync_playwright() as p:
+        browser=p.chromium.launch(headless=True)
+        context=browser.new_context(viewport={"width":1440,"height":900},reduced_motion="reduce")
+        errors=[]
+        page=context.new_page()
+        page.on("pageerror",lambda exc:errors.append(str(exc)))
+        try:
+            registration=context.request.post(base+"/api/v1/auth/register",data={"email":email,"password":password})
+            assert registration.ok,"disposable registration failed"
+            page.goto(base,wait_until="domcontentloaded")
+            expect(page.get_by_role("heading",name="Welcome back")).to_be_visible(timeout=20000)
+            page.get_by_label("Account email").fill(email)
+            page.get_by_label("Account password").fill(password)
+            page.get_by_role("button",name="Open dashboard").click()
+            expect(page.get_by_role("heading",name="Overview",exact=True)).to_be_visible(timeout=20000)
+            # Reopen the guide explicitly rather than racing the initial mount.
+            page.get_by_role("button",name="Help",exact=True).click()
+            guide=page.locator("section.onboarding")
+            expect(guide).to_be_visible()
+            guide.locator("button.onboarding-dismiss").click()
+            expect(guide).to_have_count(0)
+            assert page.evaluate("localStorage.getItem('atlas:onboarding-complete:v1')")=="true","onboarding dismissal was not persisted"
+            navigation=page.locator("#atlas-workspace-nav")
+            def go(title):
+                button=navigation.get_by_role("button",name=title,exact=True)
+                if not navigation.is_visible():
+                    page.locator(".workspace-menu-toggle").click()
+                expect(button).to_be_visible()
+                button.click()
+                expect(page.get_by_role("heading",name=title,exact=True,level=1)).to_be_visible()
+            for title in PAGES:
+                go(title)
+                expect(navigation.get_by_role("button",name=title,exact=True)).to_have_attribute("aria-current","page")
+            go("Overview")
+            expect(page.get_by_role("region",name="Portfolio attention summary")).to_be_visible()
+            expect(page.get_by_role("region",name="Automatic research overview")).to_be_visible()
+            # Verify navigation and overlay controls on narrow and desktop layouts.
+            for width in (768,320,1440):
+                page.set_viewport_size({"width":width,"height":900})
+                go("My Portfolio")
+                page.get_by_role("button",name="Open appearance settings").click()
+                expect(page.get_by_role("dialog",name="Appearance settings")).to_be_visible()
+                page.keyboard.press("Escape")
+                expect(page.get_by_role("dialog",name="Appearance settings")).to_have_count(0)
+            page.reload(wait_until="domcontentloaded")
+            expect(page.get_by_role("heading",name="My Portfolio",exact=True,level=1)).to_be_visible(timeout=20000)
+            page.get_by_role("button",name="Logout",exact=True).click()
+            expect(page.get_by_role("heading",name="Welcome back")).to_be_visible(timeout=20000)
+            assert not errors,"Unhandled browser errors: "+"; ".join(errors[:5])
+        except Exception:
+            # Only disposable CI accounts are used here. Never capture real holdings.
+            Path("browser-failure").mkdir(exist_ok=True)
+            page.screenshot(path="browser-failure/page.png",full_page=True,timeout=5000)
+            print("Browser failure location:",page.url)
+            print("Browser errors:",errors[:5])
+            raise
+        context.close()
+        browser.close()
+    print("PASS: Chromium sign-in, 11 preserved pages, responsive navigation, appearance overlay, persistence, logout")
+
+if __name__=="__main__":
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--disposable-ci-stack",action="store_true",required=True)
+    parser.parse_args()
+    run()

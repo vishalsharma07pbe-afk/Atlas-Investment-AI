@@ -64,6 +64,15 @@ jobs:
       # The cross-service HTTP test has its own job below.
       - run: mvn -B -ntp -Dtest='*Test,!AiBridgeHttpIntegrationTest' test
 
+  api-compatibility:
+    name: Existing API endpoint compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: python3 scripts/api_compatibility_gate.py
+
   deployment-contract:
     name: Compose config and Python syntax
     runs-on: ubuntu-latest
@@ -136,7 +145,8 @@ jobs:
 
   stack-http-contract:
     name: Full local stack HTTP integration
-    runs-on: ubuntu-latest
+    # Playwright 1.51 supports Ubuntu 24.04, not the newer ubuntu-latest runner.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       COMPOSE_PROJECT_NAME: atlas-ci-contract
@@ -178,6 +188,23 @@ jobs:
           exit 1
       - name: Verify browser and service contracts
         run: python3 scripts/stack_contract_smoke.py --disposable-ci-stack
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install browser test dependency
+        run: |
+          python3 -m pip install playwright==1.51.0
+          python3 -m playwright install --with-deps chromium
+      - name: Verify actual browser workflows at desktop and mobile widths
+        run: python3 scripts/browser_release_smoke.py --disposable-ci-stack
+      - name: Save disposable browser failure screenshot
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-failure
+          path: browser-failure/
+          if-no-files-found: ignore
+          retention-days: 3
       - name: Report service status and startup logs on failure
         if: failure()
         run: |
@@ -186,3 +213,63 @@ jobs:
       - name: Remove disposable services and volumes
         if: always()
         run: docker compose down -v --remove-orphans
+
+
+  production-gateway-contract:
+    name: Production image and gateway integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      COMPOSE_PROJECT_NAME: atlas-ci-production
+      ATLAS_IMAGE_NAMESPACE: atlas-ci
+      ATLAS_RELEASE_TAG: v0.0.0-ci
+      ATLAS_HTTP_PORT: '8088'
+      POSTGRES_DB: atlas
+      POSTGRES_USER: atlas
+      ATLAS_AUTONOMOUS_RESEARCH_ENABLED: 'true'
+      ATLAS_MARKET_FEEDS_ENABLED: 'false'
+      ATLAS_PORTFOLIO_AUTO_REFRESH_ENABLED: 'false'
+      ATLAS_MF_HISTORY_AUTO_REFRESH_ENABLED: 'false'
+      ATLAS_DISCOVERY_HISTORY_ENABLED: 'false'
+      ATLAS_INTRADAY_RESEARCH_ENABLED: 'false'
+      ATLAS_MF_NAV_AUTO_REFRESH_ENABLED: 'false'
+      ATLAS_UPSTOX_FEED_ENABLED: 'false'
+      ATLAS_AUTOMATIC_AI_REVIEW_ENABLED: 'false'
+      MARKET_DATA_USAGE_RIGHTS_CONFIRMED: 'false'
+      MARKET_DATA_ENTITLEMENT_CONFIRMED: 'false'
+      MARKET_DATA_AUTO_REFRESH: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate disposable credentials
+        run: |
+          for key in POSTGRES_PASSWORD INTERNAL_SERVICE_TOKEN; do
+            value=$(openssl rand -hex 32)
+            echo "::add-mask::$value"
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done
+          for key in ATLAS_JWT_SECRET ATLAS_VAULT_MASTER_KEY; do
+            value=$(openssl rand -base64 32)
+            echo "::add-mask::$value"
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done
+      - name: Build and start production image stack
+        run: docker compose -f docker-compose.production.yml -f infrastructure/ci/production-smoke.yml up --build -d --wait --wait-timeout 300
+      - name: Verify published loopback gateway before HTTP contracts
+        run: |
+          binding=$(docker compose -f docker-compose.production.yml -f infrastructure/ci/production-smoke.yml port frontend 8080)
+          test "$binding" = "127.0.0.1:8088"
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --max-time 3 http://127.0.0.1:8088/healthz > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+      - name: Verify production gateway and internal service authorization
+        run: python3 scripts/production_gateway_smoke.py --disposable-ci-stack
+      - name: Diagnose failed production containers
+        if: failure()
+        run: |
+          docker compose -f docker-compose.production.yml -f infrastructure/ci/production-smoke.yml ps -a
+          docker compose -f docker-compose.production.yml -f infrastructure/ci/production-smoke.yml logs --no-color --tail=120 postgres backend intelligence frontend
+      - name: Remove disposable production stack
+        if: always()
+        run: docker compose -f docker-compose.production.yml -f infrastructure/ci/production-smoke.yml down -v --remove-orphans

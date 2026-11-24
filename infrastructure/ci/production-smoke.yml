@@ -1,0 +1,19 @@
+# Disposable CI only. Never use for an actual deployment.
+services:
+  backend:
+    build:
+      context: ./backend/trading-core
+      dockerfile: Dockerfile.production
+    pull_policy: build
+    environment:
+      ALLOW_REGISTRATION: "true"
+  intelligence:
+    build:
+      context: ./intelligence
+      dockerfile: Dockerfile.production
+    pull_policy: build
+  frontend:
+    build:
+      context: ./frontend/trading-dashboard
+      dockerfile: Dockerfile.production
+    pull_policy: build
