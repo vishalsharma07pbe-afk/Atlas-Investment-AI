@@ -51,6 +51,7 @@ services:
       ATLAS_SESSION_COOKIE_SECURE: "true"
       ATLAS_AI_PROXY_ENABLED: ${ATLAS_AI_PROXY_ENABLED:-false}
       ATLAS_MARKET_FEEDS_ENABLED: ${ATLAS_MARKET_FEEDS_ENABLED:-false}
+      ATLAS_PORTFOLIO_AUTO_REFRESH_ENABLED: ${ATLAS_PORTFOLIO_AUTO_REFRESH_ENABLED:-true}
     depends_on:
       postgres:
         condition: service_healthy

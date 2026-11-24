@@ -148,7 +148,7 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
     if(initialRefreshStarted.current)return;
     initialRefreshStarted.current=true;
     void (async()=>{await load();await refreshPortfolioPrices(true);})();
-    const timer=window.setInterval(()=>{if(document.visibilityState==="visible")void refreshPortfolioPrices(false);},60_000);
+    const timer=window.setInterval(()=>{if(document.visibilityState==="visible")void load();},60_000);
     return()=>window.clearInterval(timer);
   }, []);
   useEffect(()=>{void refreshFeedState();const timer=window.setInterval(()=>void refreshFeedState(),10000);return()=>window.clearInterval(timer);},[]);
