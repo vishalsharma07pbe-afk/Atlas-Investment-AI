@@ -27,7 +27,7 @@ class FundHistoryResearchServiceTest {
   verify(jdbc).update(contains("SET status=?"),eq("SUCCESS"),eq(123456L));
   var ordered=inOrder(jdbc,funds);
   ordered.verify(funds).history(123456L);
-  ordered.verify(jdbc).queryForList(contains("lower(trim(s.category))"),anyString(),
+  ordered.verify(jdbc,times(5)).queryForList(contains("lower(trim(s.category))"),anyString(),
     any(LocalDate.class),any(LocalDate.class),any(LocalDate.class),any(LocalDate.class));
  }
  @Test void heldSchemeFailureKeepsExistingRetryLedger()throws Exception{
