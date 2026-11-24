@@ -221,7 +221,7 @@ def read_snapshot(include_ai=True):
             "notice": "Snapshot time is not the underlying observation time. Missing evidence never becomes a recommendation."}
     if include_ai:
         try:
-            snapshot["strategy_validation"] = automatic_strategy_validation.read(_connect) if enabled else {"status":"DISABLED"}
+            snapshot["strategy_validation"] = automatic_strategy_validation.read(_connect,current,snapshot=snapshot) if enabled else {"status":"DISABLED"}
         except (ValueError, OSError, sqlite3.Error):
             snapshot["strategy_validation"] = {"status":"UNAVAILABLE"}
         try:
@@ -245,6 +245,7 @@ def read_snapshot(include_ai=True):
             automatic_ai_review.attach(snapshot, _connect)
         except (ValueError, OSError, sqlite3.Error):
             snapshot["automatic_ai_status"] = "UNAVAILABLE"
+        research_reliability.attach_conclusions(snapshot)
         snapshot["daily_briefing"] = daily_briefing.summarize(snapshot)
     return snapshot
 
@@ -289,6 +290,16 @@ class ResearchScheduler:
                     await asyncio.to_thread(automatic_strategy_validation.refresh, snapshot, _connect)
                 except Exception:
                     pass  # Validation cannot block other research.
+                # Use the same cached evidence enrichment as the browser read
+                # path, before constructing allowlisted public AI evidence packs.
+                try:
+                    await asyncio.to_thread(automatic_company_evidence.attach, snapshot, _connect)
+                except Exception:
+                    pass
+                try:
+                    await asyncio.to_thread(automatic_strategy_validation.read, _connect, snapshot=snapshot)
+                except Exception:
+                    pass
                 await asyncio.to_thread(automatic_ai_review.refresh, snapshot, _connect)
             except Exception:
                 # Storage failures must not terminate future attempts.
