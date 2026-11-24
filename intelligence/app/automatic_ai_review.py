@@ -16,7 +16,7 @@ import sqlite3
 
 from . import ai_failover
 
-VERSION = "AUTO-GROUNDED-1"
+VERSION = "AUTO-GROUNDED-2"
 HORIZONS = ("SWING", "SHORT_TERM", "LONG_TERM")
 SYMBOL = re.compile(r"^[A-Z0-9._&-]{1,40}$")
 UNSAFE = re.compile(r"\b(?:buy|sell|stop.loss|price target|guaranteed|guarantee|risk.free)\b", re.I)
@@ -57,11 +57,44 @@ def evidence(candidate, horizon):
     adjustment = candidate.get("adjustment_status")
     if adjustment not in ("RAW_UNADJUSTED", "ADJUSTED"):
         raise ValueError("INVALID_ADJUSTMENT")
-    return {"version": VERSION, "symbol": symbol, "exchange": candidate["exchange"],
+    pack = {"version": VERSION, "symbol": symbol, "exchange": candidate["exchange"],
             "as_of": observed, "horizon": horizon, "adjustment": adjustment,
             "observations": numeric,
             "missing": ["Live liquidity", "Current company fundamentals", "Valuation",
                         "Institutional flows", "Material news", "Strategy validation"]}
+    # Only dated, allowlisted numeric summaries for the same public ISIN.
+    # Never forward provider prose, URLs, notes, holdings or arbitrary fields.
+    company=candidate.get("company_evidence") or {}
+    isin=candidate.get("isin")
+    if isinstance(isin,str) and re.fullmatch(r"IN[A-Z0-9]{10}",isin) and company.get("isin")==isin:
+        trends=[]
+        for row in (company.get("financial_trends") or {}).get("items",[])[:10]:
+            if (row.get("metric") not in ("REVENUE","NET_PROFIT","OPERATING_CASH_FLOW","TOTAL_ASSETS","TOTAL_LIABILITIES")
+                or row.get("latest_period_may_be_stale") is not False
+                or type(row.get("latest_year")) is not int or type(row.get("previous_year")) is not int
+                or not 2000<=row["previous_year"]<row["latest_year"]<=date.fromisoformat(observed).year
+                or row["latest_year"]-row["previous_year"]!=1
+                or date.fromisoformat(observed).year-row["latest_year"]>1
+                or row.get("direction") not in ("INCREASED","DECREASED","UNCHANGED")):
+                continue
+            change=row.get("change_percent")
+            if change is not None and (type(change) not in (int,float) or not math.isfinite(change)):
+                continue
+            trends.append({"metric":row["metric"],"previous_year":row["previous_year"],"latest_year":row["latest_year"],
+                           "direction":row["direction"],"change_percent":change})
+        if trends:
+            pack["financial_trends"]=sorted(trends,key=lambda r:r["metric"])
+    replay=candidate.get("matched_strategy_replay") or {}
+    if replay.get("as_of")==observed and replay.get("status")=="REPLAY_OBSERVED" and type(replay.get("trades")) is int and replay["trades"]>0:
+        costs=[]
+        for row in replay.get("cost_scenarios",[]):
+            if row.get("cost_bps_per_side") not in (15,30,60):
+                continue
+            if all(type(row.get(k)) in (int,float) and math.isfinite(row[k]) for k in ("net_return_percent","max_drawdown_percent")):
+                costs.append({k:row[k] for k in ("cost_bps_per_side","net_return_percent","max_drawdown_percent")})
+        if costs:
+            pack["historical_replay"]={"trades":replay["trades"],"cost_scenarios":costs,"small_sample":replay["trades"]<30}
+    return pack
 
 
 def identity(pack):
@@ -103,14 +136,21 @@ def _finish(connect, key, status, result):
 
 def _review(pack, provider, runner):
     # Text is entirely constructed from public, typed observations.
-    prompt = ("Review this dated technical watch for research purposes only. "
+    facts={k:v for k,v in pack.items() if k not in ("missing","financial_trends","historical_replay")}
+    supplied={"OBS":facts,"LIMITS":pack["missing"]}
+    if "financial_trends" in pack:
+        supplied["FUND"]=pack["financial_trends"]
+    if "historical_replay" in pack:
+        supplied["REPLAY"]=pack["historical_replay"]
+    prompt = ("Review this dated research watch for research purposes only. "
               "Use only the supplied evidence. Give cautious descriptive findings, "
               "not trade actions, targets, predictions or confidence percentages. "
-              "Cite OBS for numeric observations or LIMITS for missing evidence. "
+              "Cite OBS for technical observations, FUND for reported annual trends if supplied, "
+              "REPLAY for historical simulations if supplied, or LIMITS for missing evidence. "
+              "Annual trends are not independently verified; replay is not forward performance. "
               "Do not invent facts. Return the required JSON.\n"
-              + json.dumps({"OBS": {k:v for k,v in pack.items() if k!="missing"},
-                            "LIMITS": pack["missing"]}, ensure_ascii=True))
-    result = runner(prompt, ["OBS", "LIMITS"], providers=[provider])
+              + json.dumps(supplied, ensure_ascii=True))
+    result = runner(prompt, list(supplied), providers=[provider])
     response = result.get("response")
     if result.get("status") != "MODEL_GROUNDED" or result.get("provider") != provider or not isinstance(response, dict):
         return None
@@ -125,7 +165,7 @@ def _review(pack, provider, runner):
         if (not isinstance(statement, str) or not 1<=len(statement)<=500
                 or ai_failover.BLOCKED.search(statement) or UNSAFE.search(statement)
                 or not isinstance(citations, list) or not 1<=len(citations)<=5
-                or any(c not in ("OBS", "LIMITS") for c in citations)):
+                or any(c not in supplied for c in citations)):
             return None
         clean.append({"statement": statement, "evidence_ids": citations})
     # Never persist raw prompts, raw answers, actions, confidence, or provider errors.
