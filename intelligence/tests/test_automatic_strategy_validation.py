@@ -19,7 +19,7 @@ class AutomaticValidationTests(unittest.TestCase):
             registry=[{"id":i,"symbol":f"TEST{i}","active":True,"listing_status":"ACTIVE","series":"EQ","exchange":"NSE","instrument_type":"EQUITY"} for i in (1,2)]
             def loader(path):
                 calls.append(path)
-                if path.startswith("/api/v1/instruments?"):
+                if path.startswith("/api/v1/market-data/discovery-universe?"):
                     return registry
                 i=int(path.split("/")[5])
                 return {"instrument":{"id":i,"symbol":f"TEST{i}","exchange":"NSE"},"candles":[]}
