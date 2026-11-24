@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from .market_client import backend_json
 from .screener import screen
 from .mutual_fund_recommendations import CATEGORIES, dashboard
-from . import automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis
+from . import automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation
 
 SECTIONS = ("NSE", "BSE", *CATEGORIES)
 DEFAULT_INTERVAL = 900
@@ -140,6 +140,10 @@ def read_snapshot(include_ai=True):
             "notice": "Snapshot time is not the underlying observation time. Missing evidence never becomes a recommendation."}
     if include_ai:
         try:
+            snapshot["strategy_validation"] = automatic_strategy_validation.read(_connect) if enabled else {"status":"DISABLED"}
+        except (ValueError, OSError, sqlite3.Error):
+            snapshot["strategy_validation"] = {"status":"UNAVAILABLE"}
+        try:
             snapshot["institutional_activity"] = automatic_institutional.read(_connect) if enabled else {"status":"AUTOMATION_DISABLED"}
         except (ValueError, OSError, sqlite3.Error):
             snapshot["institutional_activity"] = {"status":"UNAVAILABLE"}
@@ -194,6 +198,10 @@ class ResearchScheduler:
                     await asyncio.to_thread(portfolio_thesis.refresh)
                 except Exception:
                     pass  # Private company research is independent of public discovery.
+                try:
+                    await asyncio.to_thread(automatic_strategy_validation.refresh, snapshot, _connect)
+                except Exception:
+                    pass  # Validation cannot block other research.
                 await asyncio.to_thread(automatic_ai_review.refresh, snapshot, _connect)
             except Exception:
                 # Storage failures must not terminate future attempts.
