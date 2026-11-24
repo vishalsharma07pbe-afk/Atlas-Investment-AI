@@ -32,3 +32,28 @@ class AutomaticValidationTests(unittest.TestCase):
             self.assertEqual(result["horizons"]["SWING"]["counts"],{"INSUFFICIENT_HISTORY":2})
             self.assertEqual(read(connect,now+timedelta(hours=49))["sample_count"],0)
             self.assertEqual(result["methodology"],VERSION)
+
+    def test_replay_attaches_only_exact_current_stock_and_observation(self):
+        import json
+        from app.automatic_strategy_validation import _table
+        with tempfile.TemporaryDirectory() as directory:
+            def connect():
+                db=sqlite3.connect(directory+"/validation.sqlite")
+                db.row_factory=sqlite3.Row
+                return db
+            instant=datetime(2026,11,24,10,tzinfo=timezone.utc)
+            result={"as_of":"2026-11-23","horizons":{"SWING":{"status":"REPLAY_OBSERVED",
+                "trades":3,"small_sample":True,"cost_scenarios":[]}}}
+            with connect() as db:
+                _table(db)
+                db.execute("INSERT INTO strategy_validation VALUES(?,?,?,?,?,?,?)",
+                    ("NSE",1,"TEST",VERSION,instant.isoformat(),"HISTORICAL_REPLAY_ONLY",json.dumps(result)))
+            items=[{"id":1,"symbol":"TEST","exchange":"NSE","as_of":"2026-11-23"},
+                   {"id":2,"symbol":"TEST","exchange":"NSE","as_of":"2026-11-23"},
+                   {"id":1,"symbol":"OTHER","exchange":"NSE","as_of":"2026-11-23"},
+                   {"id":1,"symbol":"TEST","exchange":"NSE","as_of":"2026-11-22"}]
+            snapshot={"enabled":True,"sections":[{"section":"NSE","status":"READY",
+                "result":{"horizons":{"SWING":{"candidates":items}}}}]}
+            read(connect,instant,snapshot=snapshot)
+            self.assertEqual(items[0]["matched_strategy_replay"]["trades"],3)
+            self.assertTrue(all("matched_strategy_replay" not in i for i in items[1:]))
