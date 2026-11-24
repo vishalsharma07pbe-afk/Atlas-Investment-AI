@@ -24,3 +24,9 @@ Perform quarterly in an isolated environment with no provider credentials and no
 
 Never test restoration by overwriting the live database. Never use `docker compose down -v` as an operational shortcut.
 
+
+## Automated release recovery gate
+
+The production integration workflow now invokes `scripts/ci_recovery_drill.py --disposable-ci-stack` after the real gateway contract test. It uses the actual production backup command with generated credentials and synthetic holdings; checks archive integrity; extracts SQLite state into temporary storage and runs integrity checks; restores the PostgreSQL dump into a uniquely named container on no network using the identical source image and TimescaleDB pre/post-restore procedures; compares selected table counts, migration state and saved holding ownership/values. Cleanup targets only that container and its anonymous volumes. It refuses to run outside the named disposable CI project. This is not a live restore tool, full application recovery test, or proof of real-data RPO/RTO. The manual isolated production recovery drill remains required.
+
+The production gateway job also checks 100 health requests at concurrency five (zero failures, p95 <= 750 ms). This is a bounded synthetic readiness check, not a representative portfolio-load or soak test.
