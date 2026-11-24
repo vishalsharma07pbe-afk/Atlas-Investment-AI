@@ -48,3 +48,15 @@ it("prioritizes thesis review prompts and explains evidence gaps automatically",
  expect(screen.getAllByRole("article")[0].textContent).toContain("REVIEW");
  expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+it("automatically displays partial diversification coverage and missing adjusted history",async()=>{
+ const holding={id:1,symbol:"TEST",asset_type:"EQUITY",exchange:"NSE",status:"MONITOR",weight_percent:100,recorded_return_percent:1,evidence_date:null,history_count:0,change_20_observations_percent:null,recent_peak_change_percent:null,findings:[],missing_evidence:[]};
+ const diversification={status:"PARTIAL_COVERAGE",unpriced_count:0,unresolved_identity_count:0,resolved_identity_count:1,top_three_resolved_weight_percent:100,asset_exposure:[{label:"EQUITY",weight_percent:100}],direct_equity_sector_exposure:[{label:"Unknown",weight_percent:100}],fund_category_exposure:[],sector_coverage_percent:0,fund_category_coverage_percent:null,review_prompts:["Complete missing classification."],notice:"Underlying fund exposure unknown."};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-24T10:00:00Z",holding_count:1,attention_count:0,data_gap_count:0,notice:"Research only",holdings:[holding],diversification,equity_correlation:{status:"UNAVAILABLE",comparable_pairs:0,attempted_pairs:0,pairs:[],notice:"Adjusted prices required."}})})));
+ render(<PortfolioDoctor revision={0} onSettings={()=>{}}/>);
+ expect(await screen.findByRole("heading",{name:"Diversification & concentration"})).toBeTruthy();
+ expect(screen.getByText("Complete missing classification.")).toBeTruthy();
+ expect(screen.getByText("Comparable adjusted return history unavailable.")).toBeTruthy();
+ expect(screen.getByText("Partial classification or pricing coverage.")).toBeTruthy();
+ expect(fetch).toHaveBeenCalledTimes(1);
+});

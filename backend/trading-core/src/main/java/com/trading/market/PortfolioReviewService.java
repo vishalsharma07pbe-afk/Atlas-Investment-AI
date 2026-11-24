@@ -44,7 +44,7 @@ public class PortfolioReviewService {
     var rows=jdbc.queryForList("""
       SELECT p.id,p.symbol,p.asset_type,p.quantity*p.average_cost AS invested,
         p.quantity*p.last_price AS market_value,p.price_as_of,
-        i.exchange,i.id AS instrument_id,i.isin,
+        i.exchange,i.id AS instrument_id,i.isin,s.scheme_code AS exact_scheme_code,s.category AS scheme_category,
         CASE WHEN p.asset_type='EQUITY' THEN eq.n ELSE mf.n END AS history_count,
         CASE WHEN p.asset_type='EQUITY' THEN eq.latest_date ELSE mf.latest_date END AS evidence_date,
         CASE WHEN p.asset_type='EQUITY' THEN eq.latest ELSE mf.latest END AS latest,
@@ -53,6 +53,7 @@ public class PortfolioReviewService {
         eq.average AS average_close,eq.distinct_dates,eq.adjustments,eq.raw_count,
         mf.distinct_sources
       FROM personal_holdings p
+      LEFT JOIN mutual_fund_schemes s ON p.asset_type='MUTUAL_FUND' AND p.symbol=s.scheme_code::text
       LEFT JOIN LATERAL (
         SELECT candidate.id,candidate.exchange,candidate.isin FROM (
           SELECT x.id,e.code AS exchange,x.isin,
@@ -97,6 +98,8 @@ public class PortfolioReviewService {
       WHERE p.user_id=? ORDER BY p.id
       """,today,today,owner);
     Map<String,Object> report=assess(rows,today,now);
+    try{report.put("equity_correlation",PortfolioEquityCorrelation.collect(jdbc,rows,today));}
+    catch(org.springframework.dao.DataAccessException ignored){report.put("equity_correlation",Map.of("status","UNAVAILABLE","notice","Local adjusted history could not be read."));}
     try{
       jdbc.update("""
         INSERT INTO portfolio_review_snapshots(user_id,holdings_revision,generated_at,result)
@@ -168,7 +171,7 @@ public class PortfolioReviewService {
       Map<String,Object> item=new LinkedHashMap<>();
       item.put("id",r.get("id"));item.put("symbol",r.get("symbol"));item.put("asset_type",r.get("asset_type"));
       item.put("exchange",r.get("exchange"));item.put("isin",r.get("isin"));item.put("status",status);item.put("weight_percent",weight);
-      item.put("recorded_return_percent",returnPct);item.put("evidence_date",observed==null?null:observed.toString());
+      item.put("recorded_market_value",value);item.put("exact_scheme_code",r.get("exact_scheme_code"));item.put("scheme_category",r.get("scheme_category"));item.put("recorded_return_percent",returnPct);item.put("evidence_date",observed==null?null:observed.toString());
       item.put("history_count",count);item.put("change_20_observations_percent",momentum);
       item.put("recent_peak_change_percent",drawdown);item.put("findings",findings);item.put("missing_evidence",missing);
       assessments.add(item);
