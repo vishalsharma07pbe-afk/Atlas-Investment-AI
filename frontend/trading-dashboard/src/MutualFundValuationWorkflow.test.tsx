@@ -9,6 +9,7 @@ const holding={id:7,symbol:"FUND-TEST",asset_type:"MUTUAL_FUND",quantity:2,avera
 describe("Validated NAV to portfolio reconciliation",()=>{
  it("requires explicit holding mapping and reuses imported NAV without changing holdings",async()=>{
   const fetchMock=vi.fn(async(url:string,_init?:RequestInit)=>{
+   if(url.includes("/historical-watch"))return {ok:true,json:async()=>({category:"LARGE_CAP",status:"COLLECTING_HISTORY",universe_count:0,sample_count:0,eligible_count:0,items:[],automatic_collection_enabled:true,notice:"Historical only"})};
    if(url.includes("/recommendations"))return {ok:true,json:async()=>({coverage:{},top_performers:[],growth_outlook:[],market_overview:[],blockers:[],suitability:{flags:[]}})};
    if(url.includes("/reconcile"))return {ok:true,json:async()=>({rows:[{holding_id:7,scheme_code:"12345",status:"STALE_NAV",estimated_value:"22",difference_from_recorded:null}],diagnostics:[],missing_nav_positions:0,stale_nav_positions:1,portfolio_estimated_value:null,verification:"USER_SUPPLIED_UNVERIFIED",notice:"Read only"})};
    return {ok:true,json:async()=>({scheme_name:"Fund A",latest_nav:{as_of:"2025-01-02",nav:11,status:"HISTORICAL"},trailing_returns_pct:{},import:{rows_accepted:2,stored:false},source:{verification:"USER_SUPPLIED_UNVERIFIED"}})};
@@ -35,7 +36,9 @@ describe("Validated NAV to portfolio reconciliation",()=>{
   expect(holding.market_value).toBeNull();
  });
  it("rejects missing holding scheme mapping before network request",async()=>{
-  const fetchMock=vi.fn(async(url:string,_init?:RequestInit)=>url.includes("/recommendations")
+  const fetchMock=vi.fn(async(url:string,_init?:RequestInit)=>url.includes("/historical-watch")
+   ?{ok:true,json:async()=>({category:"LARGE_CAP",status:"COLLECTING_HISTORY",universe_count:0,sample_count:0,eligible_count:0,items:[],automatic_collection_enabled:true,notice:"Historical only"})}
+   :url.includes("/recommendations")
    ?{ok:true,json:async()=>({coverage:{},top_performers:[],growth_outlook:[],market_overview:[],blockers:[],suitability:{flags:[]}})}
    :{ok:true,json:async()=>({scheme_name:"Fund A",latest_nav:{as_of:"2025-01-02",nav:11,status:"HISTORICAL"},trailing_returns_pct:{},import:{rows_accepted:2,stored:false},source:{verification:"USER_SUPPLIED_UNVERIFIED"}})});
   vi.stubGlobal("fetch",fetchMock);
@@ -50,6 +53,8 @@ describe("Validated NAV to portfolio reconciliation",()=>{
   fireEvent.click(screen.getByRole("button",{name:/More tools/}));
   fireEvent.click(screen.getByRole("button",{name:"Reconcile with validated imports"}));
   await waitFor(()=>expect(screen.getByRole("alert").textContent).toContain("Map each holding ID"));
-  expect(fetchMock.mock.calls.filter(([url])=>!url.includes("/recommendations"))).toHaveLength(1);
+  expect(fetchMock.mock.calls.some(([url])=>url.includes("/historical-watch"))).toBe(true);
+  expect(fetchMock.mock.calls.some(([url])=>url.includes("/reconcile"))).toBe(false);
+  expect(fetchMock.mock.calls.filter(([url])=>!url.includes("/recommendations")&&!url.includes("/historical-watch"))).toHaveLength(1);
  });
 });
