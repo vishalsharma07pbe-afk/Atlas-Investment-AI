@@ -234,8 +234,8 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
 
         {tab === 0 ? <>
           <PortfolioSummary analysis={analysis} onOpen={()=>navigate(9)}/>
-          <PortfolioDoctor revision={portfolioRevision} onSettings={()=>navigate(6)}/>
-          <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)}><ResearchHome holdings={holdings} revision={portfolioRevision} onReviewHoldings={()=>navigate(9)} onOpenExplorer={()=>navigate(7)} onOpenDataHealth={()=>navigate(6)}/></AutonomousOverview>
+          <PortfolioDoctor compact revision={portfolioRevision} onOpenPortfolio={()=>navigate(9)} onSettings={()=>navigate(6)}/>
+          <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)} onHorizon={horizon=>navigate(horizon==="SWING"?3:horizon==="SHORT_TERM"?4:5)}><ResearchHome holdings={holdings} revision={portfolioRevision} onReviewHoldings={()=>navigate(9)} onOpenExplorer={()=>navigate(7)} onOpenDataHealth={()=>navigate(6)}/></AutonomousOverview>
         </> : tab === 9 ? <>
           <PortfolioDoctor revision={portfolioRevision} onSettings={()=>navigate(6)}/>
           <PortfolioIntelligence holdings={holdings} analysis={analysis}/>
@@ -257,7 +257,7 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
           </tbody></table></div></section>
           <AdvancedSection title="Past investments" description="Review closed holdings and realized performance"><HistoricalInvestments activeHoldings={holdings}/></AdvancedSection>
         </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : (tab === 2 || tab === 3 || tab === 4 || tab === 5) ? <HorizonResearch key={tab} horizon={tab===2?"INTRADAY":tab===3?"SWING":tab===4?"SHORT_TERM":"LONG_TERM"} onSettings={()=>setTab(6)}>{tab===5?<EquityResearchDashboard/>:<><MarketIntelligence/><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/></>}</HorizonResearch> : tab === 8 ? <P2ResearchWorkspace/> : tab === 7 ? <StockExplorer/> : tab === 10 ? <>
-          <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)}><MarketIntelligence/></AutonomousOverview>
+          <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)} onHorizon={horizon=>navigate(horizon==="SWING"?3:horizon==="SHORT_TERM"?4:5)}><MarketIntelligence/></AutonomousOverview>
           <AdvancedSection title="Company and institutional research" description="Company reports, news and institutional activity"><EquityResearchDashboard/><InstitutionalFlows/></AdvancedSection>
           <AdvancedSection title="Research evidence and history" description="Broker research, source audit, outcome review and evidence ledgers"><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/><FlowLedger/><NewsEvidence/><NewsLedger/></AdvancedSection>
         </> : tab === 6 ? <>
