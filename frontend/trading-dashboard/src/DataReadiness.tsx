@@ -1,7 +1,7 @@
 import {useEffect,useState} from "react";
 
-type Dataset={code:string;label:string;records:number;latest_observed_at:string|null;age:number|null;age_unit:string;freshness_threshold:number;status:string;ingestion_mode:string;independently_verified:boolean;automatic_collection_enabled:boolean;usable_as_live_market_data:boolean};
-type Readiness={generated_at:string;status:string;provider_mode:string;live_market_data_connected:boolean;automatic_research_enabled:boolean;actionable_recommendations_enabled:boolean;blockers:string[];datasets:Dataset[];notice:string};
+type Dataset={code:string;label:string;records:number|null;latest_observed_at:string|null;age:number|null;age_unit:string;freshness_threshold:number;status:string;ingestion_mode:string;independently_verified:boolean;automatic_collection_enabled:boolean;usable_as_live_market_data:boolean};
+type Readiness={generated_at:string;status:string;provider_mode:string;live_market_data_connected:boolean;automatic_research_enabled:boolean;actionable_recommendations_enabled:boolean;blockers:string[];datasets:Dataset[];backend_evidence?:Dataset[];research_sections?:{section:string;status:string;generated_at:string|null}[];notice:string};
 
 export default function DataReadiness(){
   const [data,setData]=useState<Readiness|null>(null);
@@ -25,15 +25,17 @@ export default function DataReadiness(){
     {error&&<p role="alert">{error}</p>}
     {!data&&!error&&<p role="status">Checking local data readiness…</p>}
     {data&&<>
-      <p role="status"><strong>Automatic market research: blocked</strong> · Provider: {data.provider_mode} · Live market feed: not verified</p>
+      <p role="status"><strong>Automatic research: {data.automatic_research_enabled?"configured":"disabled"}</strong> · Provider: {data.provider_mode} · Live feed: {data.live_market_data_connected?"fresh subscribed tick observed":"not verified"}</p>
       <p>Last checked: {new Date(data.generated_at).toLocaleString("en-IN")}</p>
       <div className="tablewrap"><table><thead><tr><th>Dataset</th><th>Records</th><th>Latest observation</th><th>Freshness</th><th>Collection</th></tr></thead>
-        <tbody>{data.datasets.map(d=><tr key={d.code}>
-          <td>{d.label}</td><td>{d.records}</td><td>{d.latest_observed_at??"No records"}</td>
+        <tbody>{[...(data.backend_evidence||[]),...data.datasets].map(d=><tr key={d.code}>
+          <td>{d.label}</td><td>{d.records??"—"}</td><td>{d.latest_observed_at??"No records"}</td>
           <td>{d.status.replace(/_/g," ")}{d.age!==null?" ("+d.age+" "+d.age_unit+" old)":""}</td>
-          <td>Manual only</td>
+          <td>{d.automatic_collection_enabled?"Automatic configured":d.ingestion_mode.replace(/_/g," ").toLowerCase()}</td>
         </tr>)}</tbody></table></div>
-      <p><strong>Activation blockers:</strong> {data.blockers.map(x=>x.replace(/_/g," ")).join(" · ")}</p>
+      {data.research_sections?.length?<div><h3>Research snapshot status</h3><div className="tablewrap"><table><thead><tr><th>Section</th><th>Status</th><th>Generated</th></tr></thead><tbody>{data.research_sections.map(row=><tr key={row.section}><td>{row.section.replace(/_/g," ")}</td><td>{row.status}</td><td>{row.generated_at?new Date(row.generated_at).toLocaleString("en-IN"):"Not yet generated"}</td></tr>)}</tbody></table></div></div>:null}
+      {data.blockers.length>0&&<p><strong>Outstanding data checks:</strong> {data.blockers.map(x=>x.replace(/_/g," ")).join(" · ")}</p>}
+      <p className="muted tiny">Fully qualified investment recommendations are not enabled by this status check.</p>
       <p>{data.notice}</p>
     </>}
   </section>;

@@ -698,6 +698,9 @@ def market_data_readiness(
     health=backend_json("/api/v1/data-health/summary")
     if not isinstance(health,dict):
         raise HTTPException(status_code=502,detail="Invalid backend data-health response")
+    from .data_readiness import live_feed_observation
+    from datetime import datetime, timezone
+    health = {**health, "liveMarketDataConnected": live_feed_observation(datetime.now(timezone.utc))}
     return evaluate_readiness(health,ReadinessPolicy(
         max_calendar_age_days=max_calendar_age_days,
         minimum_instruments=minimum_instruments,

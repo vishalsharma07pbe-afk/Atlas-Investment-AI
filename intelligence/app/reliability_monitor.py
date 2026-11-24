@@ -32,8 +32,8 @@ def observe_once():
     snapshot = readiness()
     issues = [{"dataset": row["code"], "code": CODES[row["status"]]}
               for row in snapshot["datasets"] if row["status"] in CODES]
-    # No verified market-data provider is connected; do not clear this incident.
-    issues.append({"dataset": "MARKET_DATA", "code": "UNVERIFIED_SOURCE"})
+    if not snapshot.get("live_market_data_connected", False):
+        issues.append({"dataset": "MARKET_DATA", "code": "UNVERIFIED_SOURCE"})
     result = record_snapshot(issues)
     return {**result, "readiness_generated_at": snapshot["generated_at"],
             "source": "SERVER_COMPUTED_LOCAL_READINESS"}
