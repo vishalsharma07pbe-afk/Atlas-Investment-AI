@@ -59,8 +59,29 @@ public class InternalFeedController {
     requireServiceToken(request.getHeader("X-Atlas-Service-Token"));
     requireExchange(exchange);
     return jdbc.queryForList("""
+      WITH days AS (
+        SELECT (now() AT TIME ZONE 'Asia/Kolkata')::date-g.n AS day
+        FROM generate_series(1,14) AS g(n)
+      ), calendar_days AS (
+        SELECT d.day,CASE
+          WHEN extract(isodow FROM d.day) IN (6,7) OR h.holiday_date IS NOT NULL THEN 'CLOSED'
+          WHEN s.is_trading_day IS TRUE THEN 'TRADING'
+          WHEN s.is_trading_day IS FALSE THEN 'CLOSED'
+          ELSE 'UNKNOWN' END AS state
+        FROM days d JOIN exchanges ex ON ex.code=?
+        LEFT JOIN exchange_holidays h ON h.exchange_code=ex.code AND h.holiday_date=d.day
+        LEFT JOIN market_sessions s ON s.exchange_id=ex.id AND s.session_date=d.day AND s.session_type='REGULAR'
+      ), calendar AS (
+        SELECT CASE WHEN max(day) FILTER (WHERE state='TRADING') >
+           coalesce(max(day) FILTER (WHERE state='UNKNOWN'),DATE '1900-01-01')
+          THEN max(day) FILTER (WHERE state='TRADING') END AS expected_session
+        FROM calendar_days
+      )
       SELECT i.id,e.code AS exchange,i.symbol,i.series,i.isin,i.instrument_type,i.listing_status,i.active,
-             count(*) OVER () AS recent_registry_count
+             count(*) OVER () AS recent_registry_count,calendar.expected_session,
+             (SELECT max(a.ex_date) FROM corporate_actions a
+               WHERE a.instrument_id=i.id AND a.action_type IN ('SPLIT','BONUS','DIVIDEND')
+               AND a.ex_date <= (latest.candle_time AT TIME ZONE e.timezone)::date) AS latest_action_date
       FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
       JOIN LATERAL (
         SELECT c.close,c.volume,c.candle_time FROM market_candles c
@@ -70,10 +91,11 @@ public class InternalFeedController {
           AND c.candle_time >= ((now() AT TIME ZONE 'Asia/Kolkata')::date-4)::timestamp AT TIME ZONE 'Asia/Kolkata'
         ORDER BY c.candle_time DESC LIMIT 1
       ) latest ON true
+      CROSS JOIN calendar
       WHERE e.code=? AND i.active AND i.listing_status='ACTIVE' AND i.series='EQ'
         AND i.instrument_type IN ('EQ','EQUITY','STOCK')
       ORDER BY latest.close*latest.volume DESC NULLS LAST,i.id LIMIT 200
-      """,exchange);
+      """,exchange,exchange);
   }
 
   /** Batch reads the same validated history used by the existing single-instrument route. */

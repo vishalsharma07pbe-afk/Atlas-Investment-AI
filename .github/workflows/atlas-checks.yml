@@ -177,8 +177,22 @@ jobs:
             echo "::add-mask::$value"
             echo "$key=$value" >> "$GITHUB_ENV"
           done
-      - name: Build and start actual local services
-        run: docker compose up --build -d --wait --wait-timeout 240
+      # Build the real development Dockerfile, retaining its dependency layers
+      # between CI runs. Do not reuse a stale application image.
+      - uses: docker/setup-buildx-action@v3
+      - name: Build local backend with reusable dependency layers
+        uses: docker/build-push-action@v6
+        with:
+          context: backend/trading-core
+          file: backend/trading-core/Dockerfile
+          load: true
+          tags: atlas-ci-contract-backend:latest
+          cache-from: type=gha,scope=atlas-local-backend-v1
+          cache-to: type=gha,scope=atlas-local-backend-v1,mode=max,ignore-error=true
+      - name: Build remaining actual local application images
+        run: docker compose build intelligence frontend
+      - name: Start actual local services using images from this commit
+        run: docker compose up --no-build -d --wait --wait-timeout 240
       - name: Wait for frontend proxy and Python
         run: |
           for attempt in $(seq 1 40); do

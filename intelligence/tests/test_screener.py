@@ -49,5 +49,23 @@ class ScreenerTests(unittest.TestCase):
         self.assertEqual(result["eligible_count"],60)
         self.assertEqual(len(result["top_gainers"]),5)
 
+    def test_batch_calendar_rejects_wrong_session(self):
+        row={"id":1,"exchange":"NSE","symbol":"TEST"}
+        result=screen([row],lambda _:candles(),as_of=date(2026,11,14),
+                      batch_loaded=True,expected_session=date(2026,11,12))
+        self.assertEqual(result["eligible_count"],0)
+        self.assertEqual(result["skipped"]["SESSION_MISMATCH"],1)
+
+    def test_raw_history_crossing_recorded_action_is_not_ranked(self):
+        row={"id":1,"exchange":"NSE","symbol":"TEST","latest_action_date":"2026-11-02"}
+        result=screen([row],lambda _:candles(),as_of=date(2026,11,14),batch_loaded=True)
+        self.assertEqual(result["eligible_count"],0)
+        self.assertEqual(result["skipped"]["RAW_CORPORATE_ACTION"],1)
+        adjusted=candles()
+        for candle in adjusted["candles"]:
+            candle["adjustment_status"]="ADJUSTED"
+        result=screen([row],lambda _:adjusted,as_of=date(2026,11,14),batch_loaded=True)
+        self.assertEqual(result["eligible_count"],1)
+
 if __name__=="__main__":
     unittest.main()

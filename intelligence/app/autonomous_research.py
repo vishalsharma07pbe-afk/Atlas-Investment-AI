@@ -83,6 +83,13 @@ def market_snapshot(exchange):
     if instruments and (type(recent_count) is not int or recent_count<len(instruments)):
         raise ValueError("INVALID_DISCOVERY_COVERAGE")
     today = now().astimezone(ZoneInfo("Asia/Kolkata")).date()
+    sessions={row.get("expected_session") for row in instruments}
+    if len(sessions)>1:
+        raise ValueError("INCONSISTENT_DISCOVERY_CALENDAR")
+    expected=next(iter(sessions),None)
+    expected_session=date.fromisoformat(expected) if expected is not None else None
+    if expected_session is not None and not 1<=(today-expected_session).days<=14:
+        raise ValueError("INVALID_DISCOVERY_CALENDAR")
     histories={identifier:[] for identifier in ids}
     # At most ten local batch requests per exchange; no provider requests.
     for offset in range(0,len(ids),20):
@@ -98,10 +105,11 @@ def market_snapshot(exchange):
         if any(len(histories[i])>250 for i in batch):
             raise ValueError("DISCOVERY_HISTORY_LIMIT_EXCEEDED")
     result = screen(instruments, lambda identifier:{"candles":histories[identifier]}, as_of=today,
-                    universe_limit=200, max_age_days=4, include_horizons=True, batch_loaded=True)
+                    universe_limit=200, max_age_days=4, include_horizons=True, batch_loaded=True, expected_session=expected_session)
     result["discovery_coverage"]={"recent_registry_count":recent_count,"selected_count":len(ids),
         "selection_limit":200,"selection_method":"LATEST_COMPLETED_DAILY_TRADED_VALUE",
-        "history_batch_size":20}
+        "history_batch_size":20,"calendar_status":"PUBLISHED_SESSION" if expected_session else "CALENDAR_UNVERIFIED",
+        "expected_session":expected,"calendar_checked_on":today.isoformat()}
     # Attach registry identity, not ticker-based guesses, for company evidence.
     registry = {row["id"]: row for row in instruments if row.get("active") is True
                 and row.get("listing_status") == "ACTIVE" and row.get("series") == "EQ"}
@@ -146,11 +154,20 @@ def _published_evidence_current(section, result, today):
         return minimum <= (today-date.fromisoformat(value)).days <= maximum
 
     if section in ("NSE", "BSE"):
+        coverage=result.get("discovery_coverage") or {}
+        expected=coverage.get("expected_session")
+        # A published session assertion belongs only to its checked IST date.
+        if expected is not None and coverage.get("calendar_checked_on")!=today.isoformat():
+            return False
+        if expected is not None and not fresh(expected,1,4):
+            return False
+        def equity_fresh(item):
+            return fresh(item["as_of"],1,4) and (expected is None or item["as_of"]==expected)
         for key in ("top_gainers", "top_losers", "momentum_leaders"):
-            if any(not fresh(item["as_of"], 1, 4) for item in result.get(key, [])):
+            if any(not equity_fresh(item) for item in result.get(key, [])):
                 return False
         for group in result.get("horizons", {}).values():
-            if any(not fresh(item["as_of"], 1, 4) for item in group.get("candidates", [])):
+            if any(not equity_fresh(item) for item in group.get("candidates", [])):
                 return False
     else:
         history = result.get("historical_coverage") or {}
