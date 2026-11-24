@@ -4,6 +4,7 @@ This module deliberately does not issue investment recommendations. Factor score
 user-/upstream-supplied observations, not independently verified market research.
 """
 from datetime import date, datetime, timezone
+import sqlite3
 from enum import Enum
 from typing import Literal
 
@@ -1198,3 +1199,16 @@ async def ai_analyze(symbol: str, observations: AllowlistedAnalysisPayload, requ
     if observations.symbol != symbol:
         raise HTTPException(status_code=422,detail="SYMBOL_MISMATCH")
     return await committee(symbol,observations.model_dump(exclude={"symbol"},exclude_none=True))
+
+# Autonomous research uses the existing validated screen and fund ranking engines.
+from .autonomous_research import scheduler as research_scheduler, read_snapshot as research_snapshot
+app.add_event_handler("startup", research_scheduler.start)
+app.add_event_handler("shutdown", research_scheduler.stop)
+
+@app.get("/api/v1/intelligence/research/overview")
+def autonomous_research_overview():
+    """Read cached public-market research; no provider calls or user data."""
+    try:
+        return research_snapshot()
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        raise HTTPException(status_code=503, detail="Research snapshot storage unavailable") from exc

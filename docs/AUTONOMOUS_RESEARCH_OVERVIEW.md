@@ -1,0 +1,9 @@
+# ATLAS 2.0: results-first foundation
+
+This increment preserves the existing application and provider adapters. The intelligence service now refreshes public market observations and strict mutual-fund ranking snapshots automatically at startup and every 900 seconds after a completed pass by default in Compose. It reuses the existing daily screener, internal service-token protected registry/candle APIs and mutual-fund dashboard ranking engine. Snapshots persist on the existing ingestion volume, without a PostgreSQL migration.
+
+The overview reads cached results every 30 seconds and shows section failures, pending state and actual sample coverage. Manual research tools remain available on demand. An old result is never displayed as a current pick after failure or snapshot expiry. No private holdings or broker tokens are copied into the snapshot; no additional external AI calls, provider subscriptions or trades are introduced.
+
+Configuration: ATLAS_AUTONOMOUS_RESEARCH_ENABLED (Compose default true), ATLAS_AUTONOMOUS_RESEARCH_INTERVAL_SECONDS (300–86400, default 900). A running intelligence container and configured INTERNAL_SERVICE_TOKEN are required for market scans. This first increment does not backfill missing candles, expand universe coverage beyond 20 registry entries per exchange, implement intraday recommendations, fill missing verified fund evidence, or move browser-triggered portfolio refresh to the server. Those require separate integrated implementation and authorized provider verification. A successful snapshot is not proof of fresh underlying data or investment suitability.
+
+Acceptance: start Compose, sign in, open Overview, verify snapshots appear without starting a scan; close browser, wait through a refresh interval, reopen and check attempted/generated timestamps. Test backend failure, missing candles, missing fund evidence and restart persistence. No mock test substitutes for live-source verification.
