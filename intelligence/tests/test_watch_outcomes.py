@@ -38,6 +38,16 @@ class WatchOutcomeTests(unittest.TestCase):
         points[5]["adjustment_status"]="RAW_UNADJUSTED"
         self.assertEqual(watch.evaluate(row,payload,date(2026,12,10)),("EVIDENCE_GAP",None))
 
+    def test_publication_records_isin_and_rejects_identity_change(self):
+        self.item["isin"]="INE002A01018"
+        watch.publish(self.snapshot,research._connect,self.instant)
+        with research._connect() as db:
+            row=db.execute("SELECT * FROM watch_outcomes").fetchone()
+        import json
+        self.assertEqual(json.loads(row["evidence"])["isin"],"INE002A01018")
+        payload={"instrument":{"id":7,"symbol":"TEST","exchange":"NSE","isin":"INE009A01021"},"candles":[]}
+        self.assertEqual(watch.evaluate(row,payload,date(2026,12,10)),("IDENTITY_MISMATCH",None))
+
     def test_failed_snapshot_never_publishes(self):
         self.snapshot["sections"][0]["status"]="FAILED"
         watch.publish(self.snapshot,research._connect,self.instant)

@@ -47,6 +47,8 @@ def publish(snapshot, connect, instant):
                         # Keep the original publication, not a later edited candidate.
                         evidence = {k:item[k] for k in ("symbol","exchange","close","adjustment_status","as_of")}
                         evidence["methodology"] = result.get("methodology","UNKNOWN")
+                        if isinstance(item.get("isin"),str) and re.fullmatch(r"IN[A-Z0-9]{10}",item["isin"]):
+                            evidence["isin"]=item["isin"]
                         db.execute("""INSERT OR IGNORE INTO watch_outcomes
                             (instrument_id,horizon,observed_date,published_at,maturity_date,evidence)
                             VALUES (?,?,?,?,?,?)""",
@@ -61,6 +63,8 @@ def evaluate(row, payload, today):
     instrument=payload["instrument"]
     if (int(instrument["id"])!=row["instrument_id"] or instrument["symbol"]!=evidence["symbol"]
             or instrument["exchange"]!=evidence["exchange"]):
+        return "IDENTITY_MISMATCH", None
+    if evidence.get("isin") and instrument.get("isin")!=evidence["isin"]:
         return "IDENTITY_MISMATCH", None
     start=datetime.fromisoformat(row["published_at"]).astimezone(IST).date()
     maturity=date.fromisoformat(row["maturity_date"])

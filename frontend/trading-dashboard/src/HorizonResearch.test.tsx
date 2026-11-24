@@ -48,3 +48,17 @@ it("displays automated historical replay without removing strategy research bloc
  expect(screen.getByText("66.67%")).toBeTruthy();
  expect(screen.getByText(/event risk not verified/)).toBeTruthy();
 });
+
+it("shows prospective evidence gaps and candidate conflicts without implying calibrated odds",async()=>{
+ const enriched={...candidate,research_reliability:{status:"REVIEW_CONFLICTING_EVIDENCE",warnings:["NET_PROFIT_DETERIORATION_REVIEW"],blockers:["STRATEGY_BACKTEST_NOT_VERIFIED"],prospective_status:"INSUFFICIENT_EVIDENCE",notice:"Watch only."}};
+ const market={...section,result:{...section.result,horizons:{...section.result.horizons,SWING:{...section.result.horizons.SWING,candidates:[enriched]}}}};
+ const research_reliability={horizons:{SWING:{status:"INSUFFICIENT_EVIDENCE",selected_mature_watches:2,observed_outcomes:1,distinct_observed_isins:1,coverage_percent:50,overlap_excluded:1,immature_excluded:0,incompatible_excluded:0,invalid_excluded:0,blockers:["INCOMPLETE_OUTCOME_COVERAGE"],cost_scenarios:[],notice:"No recommendation gate is lifted."}}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[market],research_reliability})})));
+ render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+ expect(await screen.findByRole("heading",{name:"Prospective watch reliability"})).toBeTruthy();
+ expect(screen.getByText("NOT CALIBRATED")).toBeTruthy();
+ expect(screen.getByText(/50% coverage/)).toBeTruthy();
+ fireEvent.click(screen.getByText("Conflicting evidence · review needed"));
+ expect(screen.getByText("net profit deterioration review")).toBeTruthy();
+ expect(screen.getByText(/strategy backtest not verified/)).toBeTruthy();
+});
