@@ -145,7 +145,8 @@ jobs:
 
   stack-http-contract:
     name: Full local stack HTTP integration
-    runs-on: ubuntu-latest
+    # Playwright 1.51 supports Ubuntu 24.04, not the newer ubuntu-latest runner.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       COMPOSE_PROJECT_NAME: atlas-ci-contract
@@ -187,6 +188,9 @@ jobs:
           exit 1
       - name: Verify browser and service contracts
         run: python3 scripts/stack_contract_smoke.py --disposable-ci-stack
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Install browser test dependency
         run: |
           python3 -m pip install playwright==1.51.0
