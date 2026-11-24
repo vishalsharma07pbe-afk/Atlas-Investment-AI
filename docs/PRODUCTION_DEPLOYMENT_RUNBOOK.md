@@ -15,16 +15,17 @@ Generate every secret independently. Do not copy local development secrets into 
 
 ## Release and deploy
 
-1. Merge a reviewed commit with green CI.
+1. Merge a reviewed commit with green CI, including existing API endpoint compatibility, the full local stack HTTP and Chromium workflows, and production image/gateway integration. Do not waive failed checks.
 2. Create a signed SemVer tag. The release workflow re-runs CI and publishes three immutable GHCR images with SBOM and provenance.
 3. On the approved host, authenticate to GHCR and create a root-readable environment file outside the checkout.
 4. Validate without starting services:
    `docker compose --env-file /secure/path/atlas.env -f docker-compose.production.yml config --quiet`
-5. Back up the current release using `ATLAS_PRODUCTION_ENV_FILE=/secure/path/atlas.env ATLAS_BACKUP_DIR=/secure/staging scripts/backup-production.sh` and verify it using `scripts/verify-production-backup.py`.
-6. Pull images, then start with `docker compose --env-file /secure/path/atlas.env -f docker-compose.production.yml up -d`.
-7. Confirm every health check, migration, login, portfolio read, data-health page, AI-disabled fallback, and logout.
-8. Run `python3 scripts/p3_smoke.py --base-url http://127.0.0.1:8088` on the host.
-9. Record image digests, migration version, test output, operator, time, and approval in the release record.
+5. For an existing installation, back up the current release using `ATLAS_PRODUCTION_ENV_FILE=/secure/path/atlas.env ATLAS_BACKUP_DIR=/secure/staging scripts/backup-production.sh` and verify it using `scripts/verify-production-backup.py`.
+6. For a fresh installation, ensure `infrastructure/postgres/init` and `data/entitlements` are present in the checkout. PostgreSQL initializes the base schema only on an empty data volume; Flyway applies the remaining migrations. Never delete an existing database volume to force initialization. Provision the first account using the approved administrative procedure before expecting login. The CI-only registration override is not a deployment option.
+7. Pull images, then start with `docker compose --env-file /secure/path/atlas.env -f docker-compose.production.yml up -d`.
+8. Confirm every health check, migration, login, portfolio read, data-health page, AI-disabled fallback, and logout.
+9. Run `python3 scripts/p3_smoke.py --base-url http://127.0.0.1:8088` on the host.
+10. Record image digests, migration version, test output, operator, time, and approval in the release record.
 
 ## Network boundary
 
