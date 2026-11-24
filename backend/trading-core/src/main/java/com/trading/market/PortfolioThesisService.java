@@ -38,8 +38,10 @@ public class PortfolioThesisService {
     try{var historical=funds.holdingEvidence(Long.parseLong(code));if(historical!=null)h.put("fund_history_evidence",historical);}
     catch(RuntimeException ignored){/* Never fabricate missing fund evidence. */}
    }
+   h.put("thesis_summary",PortfolioThesisSummary.summarize(h,json));
   }
   var result=new LinkedHashMap<>(review);result.put("holdings",holdings);
+  result.put("thesis_review_count",holdings.stream().filter(h->h.get("thesis_summary") instanceof Map<?,?> m&&"REVIEW_EVIDENCE".equals(m.get("status"))).count());
   result.put("thesis_notice","Company and fund evidence is supplementary; the local holding-risk thresholds are unchanged. No external AI receives portfolio data.");
   return result;
  }
