@@ -23,7 +23,7 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
         if not any(s["section"]==exchange and s["status"]=="READY" for s in snapshot["sections"]):
             continue
         try:
-            instruments=loader(f"/api/v1/instruments?limit=60&exchange={exchange}")
+            instruments=loader(f"/api/v1/market-data/discovery-universe?exchange={exchange}")
             registry={r["id"]:r for r in instruments if type(r.get("id")) is int and r["id"]>0
                 and r.get("active") is True and r.get("listing_status")=="ACTIVE"
                 and r.get("series")=="EQ" and r.get("exchange")==exchange
