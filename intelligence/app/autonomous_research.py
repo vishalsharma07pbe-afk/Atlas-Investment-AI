@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 import json
 import os
@@ -116,6 +116,37 @@ def refresh_once(market_loader=market_snapshot, fund_loader=fund_snapshot):
             _save(section)
 
 
+def _published_evidence_current(section, result, today):
+    """Reapply observation-date limits at read time, not just generation time.
+
+    The entire section becomes stale if any published watch fails its original
+    date gate. This avoids silently reranking an incomplete persisted sample.
+    Empty successful samples remain READY; READY is processing, not coverage.
+    """
+    def fresh(value, minimum, maximum):
+        return minimum <= (today-date.fromisoformat(value)).days <= maximum
+
+    if section in ("NSE", "BSE"):
+        for key in ("top_gainers", "top_losers", "momentum_leaders"):
+            if any(not fresh(item["as_of"], 1, 4) for item in result.get(key, [])):
+                return False
+        for group in result.get("horizons", {}).values():
+            if any(not fresh(item["as_of"], 1, 4) for item in group.get("candidates", [])):
+                return False
+    else:
+        history = result.get("historical_coverage") or {}
+        for key in ("items", "risk_adjusted_items"):
+            if any(not fresh(item["nav_date"], 0, 7) or item["nav_date"] != history.get("comparison_date")
+                   for item in history.get(key, [])):
+                return False
+        # The current strict catalog cannot qualify recommendations without
+        # evidence, but recheck dates defensively if qualified picks are stored.
+        for key in ("top_performers", "growth_outlook"):
+            if any(not fresh(item["fund"]["nav_date"], 0, 7) for item in result.get(key, [])):
+                return False
+    return True
+
+
 def read_snapshot(include_ai=True):
     enabled, interval = config()
     current = now()
@@ -128,13 +159,27 @@ def read_snapshot(include_ai=True):
             sections.append({"section": section, "status": "PENDING" if enabled else "DISABLED",
                              "generated_at": None, "attempted_at": None, "result": None})
             continue
-        age = (current - datetime.fromisoformat(row["generated_at"])).total_seconds() if row["generated_at"] else None
-        stale = age is None or age < 0 or age > max(3600, interval * 3)
-        status = "FAILED" if row["status"] == "FAILED" else "STALE" if stale else "READY"
+        error_code = row["error_code"]
+        try:
+            result = json.loads(row["payload"]) if row["payload"] else None
+            if result is not None and not isinstance(result, dict):
+                raise ValueError("INVALID_SNAPSHOT")
+            age = (current - datetime.fromisoformat(row["generated_at"])).total_seconds() if row["generated_at"] else None
+            stale = age is None or age < 0 or age > max(3600, interval * 3)
+            status = "DISABLED" if not enabled else "FAILED" if row["status"] == "FAILED" else "STALE" if stale else "READY"
+            if status == "READY":
+                if result is None:
+                    raise ValueError("MISSING_SNAPSHOT")
+                if not _published_evidence_current(section, result, current.astimezone(ZoneInfo("Asia/Kolkata")).date()):
+                    status = "STALE"
+                    error_code = "UNDERLYING_OBSERVATION_STALE"
+        except (ValueError, TypeError, KeyError, AttributeError, OverflowError):
+            result = None
+            status = "FAILED" if enabled else "DISABLED"
+            error_code = "INVALID_STORED_RESEARCH_SNAPSHOT"
         sections.append({"section": section, "status": status,
                          "generated_at": row["generated_at"], "attempted_at": row["attempted_at"],
-                         "result": json.loads(row["payload"]) if row["payload"] else None,
-                         "error_code": row["error_code"]})
+                         "result": result, "error_code": error_code})
     snapshot = {"enabled": enabled, "interval_seconds": interval, "sections": sections,
             "scope": "PUBLIC_MARKET_RESEARCH_ONLY",
             "notice": "Snapshot time is not the underlying observation time. Missing evidence never becomes a recommendation."}
