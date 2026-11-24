@@ -8,11 +8,12 @@ MIN_HISTORY = 21
 MAX_INSTRUMENTS = 20
 MAX_CANDLES = 250
 
-def screen(instruments, load_candles, as_of=None, max_age_days=7):
+def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit=MAX_INSTRUMENTS):
+    limit = max(1, min(60, universe_limit))
     today = as_of or date.today()
     rows = []
     skipped = {"NO_HISTORY": 0, "STALE": 0, "INVALID": 0, "MIXED_ADJUSTMENT": 0}
-    for instrument in instruments[:MAX_INSTRUMENTS]:
+    for instrument in instruments[:limit]:
         try:
             payload = load_candles(instrument["id"])
             raw = payload["candles"]
@@ -62,7 +63,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7):
     return {
         "status": "RESEARCH_ONLY",
         "timeframe": "1d",
-        "universe_size": min(len(instruments), MAX_INSTRUMENTS),
+        "universe_size": min(len(instruments), limit),
         "eligible_count": len(rows),
         "skipped": skipped,
         "top_gainers": rows[:5],
@@ -71,5 +72,5 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7):
             [x for x in rows if x["momentum_20d_percent"] is not None],
             key=lambda x: (-x["momentum_20d_percent"], x["symbol"])
         )[:5],
-        "notice": "On-demand daily sample of up to 20 registry instruments; not a full-market top-five ranking, live feed, intraday signal or recommendation.",
+        "notice": f"Bounded daily sample of up to {limit} registry instruments; not a full-market top-five ranking, live feed, intraday signal or recommendation.",
     }
