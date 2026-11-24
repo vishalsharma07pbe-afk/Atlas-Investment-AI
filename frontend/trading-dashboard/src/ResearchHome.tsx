@@ -15,7 +15,7 @@ type View="holdings"|"discover"|"compare"|"ai";
 const money=(value:number|null|undefined)=>value==null?"—":new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",maximumFractionDigits:0}).format(value);
 const pct=(value:number|null|undefined)=>value==null?"—":`${value>=0?"+":""}${value.toFixed(2)}%`;
 
-export default function ResearchHome({holdings,onReviewHoldings,onOpenExplorer,onOpenDataHealth}:{holdings:Holding[];onReviewHoldings:()=>void;onOpenExplorer:()=>void;onOpenDataHealth:()=>void}){
+export default function ResearchHome({holdings,onReviewHoldings,onOpenExplorer,onOpenDataHealth,revision=0}:{holdings:Holding[];onReviewHoldings:()=>void;onOpenExplorer:()=>void;onOpenDataHealth:()=>void;revision?:number}){
  const [view,setView]=useState<View>("holdings");
  const [symbol,setSymbol]=useState(holdings[0]?.symbol||"");
  const [exchange,setExchange]=useState<""|"NSE"|"BSE">("NSE");
@@ -42,6 +42,7 @@ export default function ResearchHome({holdings,onReviewHoldings,onOpenExplorer,o
  },[symbol,exchange,selectedSearch?.trading_symbol]);
  function choose(next:View){setView(next);setError("");}
  async function discover(){setLoading(true);setError("");try{const params=new URLSearchParams({limit:"20",max_age_days:"7"});if(exchange)params.set("exchange",exchange);const response=await fetch("/intelligence/api/v1/intelligence/screener/daily?"+params);const body=await response.json().catch(()=>null);if(!response.ok)throw Error(body?.detail||"The market scanner could not reach validated daily data.");setOpportunities(body);}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setLoading(false);}}
+ useEffect(()=>{void discover();},[revision]);
  async function research(raw:string){
    const ticker=raw.trim().toUpperCase();if(!ticker)throw Error("Enter both symbols to compare.");
    const params=new URLSearchParams({q:ticker,limit:"50"});if(exchange)params.set("exchange",exchange);

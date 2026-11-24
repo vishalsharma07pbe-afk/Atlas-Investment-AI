@@ -1,4 +1,4 @@
-import React, {useEffect, useState} from "react";
+import React, {useEffect, useRef, useState} from "react";
 import {createRoot} from "react-dom/client";
 import "./style.css";
 import ResearchHome from "./ResearchHome";
@@ -34,14 +34,16 @@ import IngestionQualityGate from "./IngestionQualityGate";
 import EntitlementRegistry from "./EntitlementRegistry";
 import ProviderReconciliation from "./ProviderReconciliation";
 import NotificationCenter from "./NotificationCenter";
-import HoldingEditor,{type HoldingDraft} from "./HoldingEditor";
+import HoldingEditor,{type HoldingDraft,type SipDraft} from "./HoldingEditor";
 import MarketIndexStrip from "./MarketIndexStrip";
 import PortfolioIntelligence from "./PortfolioIntelligence";
 import EquityResearchDashboard from "./EquityResearchDashboard";
 import P2ResearchWorkspace from "./P2ResearchWorkspace";
 import OnboardingGuide from "./OnboardingGuide";
+import UpstoxVaultCard from "./UpstoxVaultCard";
+import HistoricalInvestments from "./HistoricalInvestments";
 
-type Holding = {id:number;symbol:string;asset_type:string;quantity:number;average_cost:number;last_price:number|null;invested:number;market_value:number|null;unrealized_pnl:number|null;price_as_of:string|null};
+type Holding = {id:number;symbol:string;asset_type:string;quantity:number;average_cost:number;last_price:number|null;previous_close:number|null;invested:number;market_value:number|null;unrealized_pnl:number|null;one_day_change:number|null;price_as_of:string|null;notes:string|null};
 type Analysis = {holdingCount:number;invested:number;pricedMarketValue:number;pricedCostBasis:number;pricedUnrealizedPnl:number;unpricedHoldings:number;valuationComplete:boolean;riskFlags:string[]};
 type Theme = "system" | "dark" | "light";
 type Appearance = {theme:Theme;opacity:number;blur:number;border:boolean};
@@ -104,6 +106,8 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
   const [health, setHealth] = useState<DataHealth|null>(null);
   const [portfolioRevision, setPortfolioRevision] = useState(0);
   const [feedState,setFeedState] = useState<FeedState|null>(null);
+  const [providerActionRequired,setProviderActionRequired]=useState(false);
+  const initialRefreshStarted=useRef(false);
 
   async function load() {
     try {
@@ -123,26 +127,52 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
     catch{/* Background feed status must not interrupt portfolio use. */}
   }
 
+  async function refreshPortfolioPrices(includeHistory=false){
+    try{
+      const response=await fetch(`${API}/refresh-prices?includeHistory=${includeHistory}`,{method:"POST"});
+      if(!response.ok)return;
+      const result=await response.json();
+      const unavailable=Array.isArray(result.skipped)&&result.skipped.some((item:{reason?:string})=>String(item.reason||"").includes("credential unavailable"));
+      setProviderActionRequired(unavailable);
+      if(Number(result.updated)>0||Number(result.history_synced)>0)await load();
+    }catch{/* Automatic refresh is best-effort; saved data remains usable offline. */}
+  }
+
   async function reconcileFeed(){
     try{await fetch("/intelligence/api/v1/intelligence/providers/upstox/subscriptions/reconcile",{method:"POST"});await refreshFeedState();}
     catch{/* The ten-second background reconciler remains the fallback. */}
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    if(initialRefreshStarted.current)return;
+    initialRefreshStarted.current=true;
+    void (async()=>{await load();await refreshPortfolioPrices(true);})();
+    const timer=window.setInterval(()=>{if(document.visibilityState==="visible")void refreshPortfolioPrices(false);},60_000);
+    return()=>window.clearInterval(timer);
+  }, []);
   useEffect(()=>{void refreshFeedState();const timer=window.setInterval(()=>void refreshFeedState(),10000);return()=>window.clearInterval(timer);},[]);
   useEffect(() => { if(tab === 6) loadHealth(); }, [tab]);
   useEffect(() => { try { localStorage.setItem(TAB_STORAGE_KEY, String(tab)); } catch { /* Storage may be blocked. */ } }, [tab]);
   useEffect(() => { try { localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify(appearance)); } catch { /* Storage may be blocked. */ } }, [appearance]);
 
-  async function save(item:{symbol:string;assetType:string;quantity:number;averageCost:number;lastPrice:number|null}) {
+  async function save(item:{symbol:string;assetType:string;quantity:number;averageCost:number;lastPrice:number|null;notes?:string|null}) {
     const response = await fetch(API + "/holdings", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(item)});
     if (!response.ok) throw Error((await response.text()).slice(0, 250));
   }
 
   async function submitHolding(draft:HoldingDraft) {
     setLoading(true);
-    try { await save(draft); await load();await reconcileFeed(); }
+    try { await save(draft); await load();await reconcileFeed();await refreshPortfolioPrices(true); }
     catch (e) { setError(String(e)); throw e; } finally { setLoading(false); }
+  }
+
+  async function submitSip(draft:SipDraft){
+    setLoading(true);
+    try{
+      const response=await fetch("/api/v1/research-workspace/sip-plans",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...draft,active:true})});
+      if(!response.ok)throw Error((await response.json().catch(()=>null))?.message||"SIP could not be saved");
+      setError("");setTab(1);
+    }catch(error){setError(String(error));throw error;}finally{setLoading(false);}
   }
 
   async function remove(id:number) {
@@ -198,15 +228,16 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
       <main className="content" id="main-content" tabIndex={-1}>
         <header><div><div className="eyebrow"><span/> YOUR PRIVATE RESEARCH TERMINAL</div><h1>{activeTitle}</h1><p>{tab === 0 ? "Your holdings, performance and portfolio risk — all stored locally." : "Strict research gates. No invented prices or recommendations."}</p></div><div className="header-actions"><button type="button" className="help-trigger" onClick={()=>window.dispatchEvent(new Event("atlas:open-onboarding"))}>Help</button><NotificationCenter/><div className={`headerbadge ${feedState?.transport_connected?"feed-live":""}`} role="status" aria-live="polite" title={feedState?.automatic_selection?.missing_symbols?.length?`Unresolved: ${feedState.automatic_selection.missing_symbols.join(", ")}`:undefined}><span/> {feedState?.transport_connected?`LIVE · ${feedState.selected_instruments||0} STOCKS`:feedState?.automatic_selection?.status==="IDLE_NO_EQUITY_HOLDINGS"?"FEED READY · ADD A STOCK":feedState?.automatic_selection?.status==="STARTING"?"MARKET FEED CONNECTING":"MARKET FEED NOT CONNECTED"}</div><div className="account-chip"><span>{identity.email.slice(0,1).toUpperCase()}</span><div><small>SIGNED IN</small><strong>{identity.email}</strong></div><button type="button" onClick={()=>void onLogout()}>Logout</button></div><AppearanceControls value={appearance} onChange={setAppearance} open={appearanceOpen} onOpenChange={setAppearanceOpen}/></div></header>
         <MarketIndexStrip/>
+        {providerActionRequired&&<div className="provider-action-banner" role="status"><div><strong>Live prices need today’s Upstox authorization</strong><span>Your holdings are safe. Connect the read-only token once, then ATLAS will refresh prices and research automatically.</span></div><button className="secondary" onClick={()=>setTab(6)}>Connect Upstox</button></div>}
         <OnboardingGuide onNavigate={setTab}/>
         {loading&&<div className="global-loading" role="status" aria-live="polite"><span/>Saving your changes…</div>}
         {error && <div className="error glass" role="alert">{error} <button type="button" onClick={() => tab === 6 ? loadHealth() : load()}>Retry</button></div>}
 
         {tab === 0 ? <>
-          <ResearchHome holdings={holdings} onReviewHoldings={()=>document.getElementById("portfolio-overview")?.scrollIntoView({behavior:"smooth",block:"start"})} onOpenExplorer={()=>setTab(7)} onOpenDataHealth={()=>setTab(6)}/>
+          <ResearchHome holdings={holdings} revision={portfolioRevision} onReviewHoldings={()=>document.getElementById("portfolio-overview")?.scrollIntoView({behavior:"smooth",block:"start"})} onOpenExplorer={()=>setTab(7)} onOpenDataHealth={()=>setTab(6)}/>
           <div className="two">
             <PortfolioIntelligence holdings={holdings} analysis={analysis}/>
-            <section className="panel glass"><div className="sectionhead"><div><small className="section-kicker">POSITION MANAGER</small><h2>Add or update holding</h2></div><span className="tag">AUTO PRICE</span></div><HoldingEditor busy={loading} onSave={submitHolding}/></section>
+            <section className="panel glass"><div className="sectionhead"><div><small className="section-kicker">POSITION MANAGER</small><h2>Add an investment</h2></div><span className="tag">AUTO PRICE</span></div><HoldingEditor busy={loading} onSave={submitHolding} onSaveSip={submitSip}/></section>
           </div>
           <details className="advanced-tools glass"><summary><span><strong>Advanced portfolio tools</strong><small>Stress tests, allocation, goals, journal, fees and concentration</small></span><b>Open tools</b></summary><div className="advanced-tools-content">
             <PortfolioStress revision={portfolioRevision}/>
@@ -219,12 +250,13 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
             <PortfolioPerformanceHistory revision={portfolioRevision}/>
             <PersonalAlerts/>
           </div></details>
-          <section className="panel glass holdings-panel"><div className="sectionhead"><div><small className="section-kicker">POSITION RECORDS</small><h2>Positions</h2></div><label className="upload">Import CSV <input type="file" accept=".csv,text/csv" hidden disabled={loading} onChange={e => { const file = e.target.files?.[0]; if (file) importCsv(file); e.target.value = ""; }}/></label></div><p className="muted tiny">This table is your editable position record. CSV format: symbol,asset_type,quantity,average_cost,last_price. Imports update matching positions; they do not add transactions.</p><div className="tablewrap"><table><thead><tr><th>SYMBOL</th><th>TYPE</th><th>QTY</th><th>AVG COST</th><th>LAST PRICE*</th><th>INVESTED</th><th>VALUE*</th><th>P&amp;L*</th><th/></tr></thead><tbody>
-            {holdings.map(holding => <tr key={holding.id}><td className="symbol">{holding.symbol}</td><td><span className="asset-pill">{holding.asset_type}</span></td><td>{holding.quantity}</td><td>{fmt(holding.average_cost)}</td><td>{fmt(holding.last_price)}</td><td>{fmt(holding.invested)}</td><td>{fmt(holding.market_value)}</td><td className={(holding.unrealized_pnl || 0) >= 0 ? "positive" : "negative"}>{fmt(holding.unrealized_pnl)}</td><td><button className="danger" onClick={() => remove(holding.id)}>Delete</button></td></tr>)}
-            {!holdings.length && <tr><td colSpan={9} className="empty">No holdings yet. Add your first position above or import a CSV.</td></tr>}
+          <section className="panel glass holdings-panel"><div className="sectionhead"><div><small className="section-kicker">CURRENT INVESTMENTS</small><h2>Active holdings</h2></div><label className="upload">Import CSV <input type="file" accept=".csv,text/csv" hidden disabled={loading} onChange={e => { const file = e.target.files?.[0]; if (file) importCsv(file); e.target.value = ""; }}/></label></div><p className="muted tiny">Only investments you still own appear here. One-day change uses the previous provider close or previous published NAV when available.</p><div className="tablewrap"><table><thead><tr><th>INVESTMENT</th><th>TYPE</th><th>QTY</th><th>AVG COST</th><th>CURRENT*</th><th>VALUE*</th><th>OVERALL P&amp;L*</th><th>1 DAY*</th><th/></tr></thead><tbody>
+            {holdings.map(holding => <tr key={holding.id}><td className="symbol">{holding.asset_type==="MUTUAL_FUND"&&holding.notes?<>{holding.notes}<small>Scheme {holding.symbol}</small></>:holding.symbol}</td><td><span className="asset-pill">{holding.asset_type}</span></td><td>{holding.quantity}</td><td>{fmt(holding.average_cost)}</td><td>{fmt(holding.last_price)}</td><td>{fmt(holding.market_value)}</td><td className={(holding.unrealized_pnl || 0) >= 0 ? "positive" : "negative"}>{fmt(holding.unrealized_pnl)}</td><td className={(holding.one_day_change||0)>=0?"positive":"negative"}>{fmt(holding.one_day_change)}</td><td><button className="danger" onClick={() => remove(holding.id)}>Delete</button></td></tr>)}
+            {!holdings.length && <tr><td colSpan={9} className="empty">No active holdings yet. Add a stock or mutual fund above.</td></tr>}
           </tbody></table></div></section>
+          <HistoricalInvestments activeHoldings={holdings}/>
         </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : tab === 5 ? <EquityResearchDashboard/> : (tab === 2 || tab === 3 || tab === 4) ? <><MarketIntelligence/><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/></> : tab === 8 ? <P2ResearchWorkspace/> : tab === 7 ? <StockExplorer/> : tab === 6 ? <>
-          <DataReadiness/><MultiProviderHub/>
+          <UpstoxVaultCard onConnected={()=>refreshPortfolioPrices(true)}/><DataReadiness/><MultiProviderHub/>
           <FeedHealth/>
           <ReliabilityIncidents/>
           <IngestionQualityGate/>

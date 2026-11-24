@@ -16,9 +16,9 @@ public class InstrumentController {
     int safeLimit = Math.max(1, Math.min(limit, 200));
     if (q == null || q.isBlank()) {
       if (exchange == null || exchange.isBlank()) return jdbc.queryForList("SELECT i.id,e.code AS exchange,i.symbol,i.series,i.isin,i.security_name,i.instrument_type,i.listing_status,i.active,i.source,i.source_revision,i.updated_at " +
-        "FROM instruments i JOIN exchanges e ON e.id=i.exchange_id ORDER BY e.code,i.symbol LIMIT ?", safeLimit);
+        "FROM instruments i JOIN exchanges e ON e.id=i.exchange_id ORDER BY (SELECT max(c.candle_time) FROM market_candles c WHERE c.instrument_id=i.id AND c.timeframe='1d' AND c.is_complete AND c.quality_status IN ('VALIDATED_MANUAL','PROVIDER_VALIDATED')) DESC NULLS LAST,e.code,i.symbol LIMIT ?", safeLimit);
       return jdbc.queryForList("SELECT i.id,e.code AS exchange,i.symbol,i.series,i.isin,i.security_name,i.instrument_type,i.listing_status,i.active,i.source,i.source_revision,i.updated_at " +
-        "FROM instruments i JOIN exchanges e ON e.id=i.exchange_id WHERE e.code=? ORDER BY e.code,i.symbol LIMIT ?", exchange.trim().toUpperCase(),safeLimit);
+        "FROM instruments i JOIN exchanges e ON e.id=i.exchange_id WHERE e.code=? ORDER BY (SELECT max(c.candle_time) FROM market_candles c WHERE c.instrument_id=i.id AND c.timeframe='1d' AND c.is_complete AND c.quality_status IN ('VALIDATED_MANUAL','PROVIDER_VALIDATED')) DESC NULLS LAST,i.symbol LIMIT ?", exchange.trim().toUpperCase(),safeLimit);
     }
     String term=q.trim(), contains="%"+term+"%";
     String select="SELECT i.id,e.code AS exchange,i.symbol,i.series,i.isin,i.security_name,i.instrument_type,i.listing_status,i.active,i.source,i.source_revision,i.updated_at FROM instruments i JOIN exchanges e ON e.id=i.exchange_id ";

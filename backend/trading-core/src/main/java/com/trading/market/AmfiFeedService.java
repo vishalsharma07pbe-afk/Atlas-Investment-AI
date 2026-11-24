@@ -17,9 +17,15 @@ import org.springframework.stereotype.Service;
    if(!line.contains(";")){if(line.endsWith("Mutual Fund"))amc=line;else if(line.contains("Scheme")||line.contains("Open Ended")||line.contains("Close Ended"))category=line;continue;}
    String[] p=line.split(";",-1);if(p.length<6||!p[0].trim().matches("\\d+"))continue;
    try{
-    long code=Long.parseLong(p[0].trim());String name=p[3].trim();if(name.isBlank())continue;
-    BigDecimal nav=new BigDecimal(p[4].trim());if(nav.signum()<=0)continue;
-    LocalDate date=LocalDate.parse(p[5].trim(),DateTimeFormatter.ofPattern("dd-MMM-yyyy",Locale.ENGLISH));
+    long code=Long.parseLong(p[0].trim());
+    // AMFI added separate Plan and Option columns in 2026. Accept both the
+    // legacy six-column file and the current eight-column official format.
+    int navIndex=p.length>=8?6:4,dateIndex=p.length>=8?7:5;
+    String name=p[3].trim();
+    if(p.length>=8)name=java.util.stream.Stream.of(p[3],p[4],p[5]).map(String::trim).filter(value->!value.isBlank()).reduce((a,b)->a+" - "+b).orElse("");
+    if(name.isBlank())continue;
+    BigDecimal nav=new BigDecimal(p[navIndex].trim());if(nav.signum()<=0)continue;
+    LocalDate date=LocalDate.parse(p[dateIndex].trim(),DateTimeFormatter.ofPattern("dd-MMM-yyyy",Locale.ENGLISH));
     jdbc.update("INSERT INTO mutual_fund_schemes(scheme_code,scheme_name,isin_growth,isin_reinvestment,amc_name,category) VALUES (?,?,?,?,?,?) ON CONFLICT(scheme_code) DO UPDATE SET scheme_name=EXCLUDED.scheme_name,isin_growth=EXCLUDED.isin_growth,isin_reinvestment=EXCLUDED.isin_reinvestment,amc_name=EXCLUDED.amc_name,category=EXCLUDED.category,last_synced_at=now()",code,name,p[1].trim(),p[2].trim(),amc,category);
     jdbc.update("INSERT INTO mutual_fund_nav(scheme_code,nav_date,nav,source_code) VALUES (?,?,?,'AMFI') ON CONFLICT(scheme_code,nav_date) DO UPDATE SET nav=EXCLUDED.nav,source_code='AMFI',received_at=now()",code,date,nav);
     count++;

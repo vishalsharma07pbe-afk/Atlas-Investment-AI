@@ -29,4 +29,20 @@ describe("HoldingEditor",()=>{
   expect(screen.getByText("₹1,000.00")).toBeTruthy();
   expect(fetcher.mock.calls[0][0]).toContain("q=R");
  });
+ it("suggests mutual funds, fills NAV, and saves a SIP separately",async()=>{
+  vi.spyOn(globalThis,"fetch").mockResolvedValue(new Response(JSON.stringify([
+   {scheme_code:12345,scheme_name:"HDFC Balanced Advantage Fund - Direct Plan - Growth Option",nav:512.34,nav_date:"2026-11-24"}
+  ]),{status:200,headers:{"Content-Type":"application/json"}}));
+  const saveHolding=vi.fn(),saveSip=vi.fn().mockResolvedValue(undefined);
+  render(<HoldingEditor busy={false} onSave={saveHolding} onSaveSip={saveSip}/>);
+  fireEvent.change(screen.getByLabelText("Asset type"),{target:{value:"MUTUAL_FUND"}});
+  fireEvent.change(screen.getByLabelText("Symbol"),{target:{value:"HDFC"}});
+  fireEvent.click(await screen.findByText("HDFC Balanced Advantage Fund - Direct Plan - Growth Option"));
+  expect((screen.getByLabelText("Last price") as HTMLInputElement).value).toBe("512.34");
+  fireEvent.change(screen.getByLabelText("Mutual fund investment mode"),{target:{value:"SIP"}});
+  fireEvent.change(screen.getByLabelText("Monthly SIP amount"),{target:{value:"7500"}});
+  fireEvent.click(screen.getByRole("button",{name:/Save SIP/}));
+  await waitFor(()=>expect(saveSip).toHaveBeenCalledWith(expect.objectContaining({schemeCode:12345,monthlyAmount:7500})));
+  expect(saveHolding).not.toHaveBeenCalled();
+ });
 });

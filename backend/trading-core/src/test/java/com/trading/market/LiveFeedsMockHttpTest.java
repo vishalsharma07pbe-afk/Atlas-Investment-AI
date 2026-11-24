@@ -24,14 +24,16 @@ class LiveFeedsMockHttpTest {
   JdbcTemplate db=mock(JdbcTemplate.class);FeedHttp http=mock(FeedHttp.class);VersionedVaultReader vault=mock(VersionedVaultReader.class);
   UUID user=UUID.randomUUID();when(vault.decrypt(user,"UPSTOX")).thenReturn("test-only-token");
   when(db.queryForObject(contains("upstox_instrument_map"),eq(Integer.class),any())).thenReturn(1);
-  when(http.text(contains("market-quote/quotes"),eq("test-only-token"),anyInt())).thenReturn("{\"status\":\"success\",\"data\":{\"NSE_EQ:RELIANCE\":{\"last_price\":2500.50}}}");
+  when(http.text(contains("market-quote/quotes"),eq("test-only-token"),anyInt())).thenReturn("{\"status\":\"success\",\"data\":{\"NSE_EQ:RELIANCE\":{\"last_price\":2500.50,\"ohlc\":{\"close\":2475.00}}}}");
   JsonNode result=new UpstoxFeedService(db,http,vault).quote(user,"NSE_EQ|INE002A01018");
   assertThat(result.path("ltp").decimalValue()).isEqualByComparingTo(new BigDecimal("2500.50"));
+  assertThat(result.path("previous_close").decimalValue()).isEqualByComparingTo(new BigDecimal("2475.00"));
   verify(db).update(contains("market_quotes"),any(),any(),any());
  }
  @Test void amfiParserAndHistoricalNavHttp()throws Exception{
   JdbcTemplate db=mock(JdbcTemplate.class);FeedHttp http=mock(FeedHttp.class);AmfiFeedService svc=new AmfiFeedService(db,http);
   assertThat(svc.importNav("123456;INF000A01001;;Example Growth;123.45;13-Nov-2026")).isEqualTo(1);
+  assertThat(svc.importNav("123457;INF000A01002;-;Example Fund;Direct Plan;Growth Option;125.50;23-Nov-2026")).isEqualTo(1);
   when(http.text(contains("api.mfapi.in/mf/123456"),isNull(),anyInt())).thenReturn("{\"data\":[{\"date\":\"13-11-2026\",\"nav\":\"123.45\"}]}");
   assertThat(svc.history(123456)).isEqualTo(1);
   verify(db,atLeastOnce()).update(contains("mutual_fund_nav"),any(),any(),any());

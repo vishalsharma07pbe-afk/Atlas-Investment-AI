@@ -14,6 +14,7 @@ import MutualFundRisk from "./MutualFundRisk";
 import MutualFundHistoricalRisk from "./MutualFundHistoricalRisk";
 import NavCatalog from "./NavCatalog";
 import MutualFundResearchDashboard from "./MutualFundResearchDashboard";
+import SavedSipPlans from "./SavedSipPlans";
 
 export type FundHolding = {
   id:number;symbol:string;asset_type:string;quantity:number;average_cost:number;
@@ -74,7 +75,7 @@ export default function MutualFundHoldings({holdings}:{holdings:FundHolding[]}){
 
     {view==="find"&&<div className="mf-task-pane active"><div className="mf-explainer"><strong>Find the exact fund you want</strong><p>Search using the fund name or scheme code. NAV means the price of one fund unit and is usually updated once per business day.</p></div><NavCatalog/></div>}
     {view==="compare"&&<div className="mf-task-pane active"><div className="mf-explainer"><strong>Compare funds fairly</strong><p>Add historical NAV files for two funds. ATLAS compares the same date range so you can review growth and falls without mixing periods.</p></div><MutualFundHistoryImport onValidated={acceptHistory}/><MutualFundComparison validatedHistories={validatedHistories} onRemoveValidated={code=>setValidatedHistories(previous=>previous.filter(item=>item.schemeCode!==code))}/></div>}
-    {view==="plan"&&<div className="mf-task-pane active"><div className="mf-explainer"><strong>Turn a goal into a monthly plan</strong><p>Estimate a monthly SIP for your target, then see how it may fit across your saved funds. The return rate is your assumption, not a forecast.</p></div><MutualFundGoals/><MutualFundPlanning holdings={holdings}/></div>}
+    {view==="plan"&&<div className="mf-task-pane active"><div className="mf-explainer"><strong>Save your SIPs, then plan the goal</strong><p>Keep your monthly fund plans in one place. The calculators below help with scenarios; their return rate is an assumption, not a forecast.</p></div><SavedSipPlans/><MutualFundGoals/><MutualFundPlanning holdings={holdings}/></div>}
     {view==="risk"&&<div className="mf-task-pane active"><div className="mf-explainer"><strong>Understand concentration and past falls</strong><p>Check whether too much money sits in one fund and, when history is available, see the largest past drop. Past performance does not predict future returns.</p></div><MutualFundRisk holdings={holdings}/><MutualFundHistoricalRisk validatedHistory={validatedHistory}/></div>}
     {view==="more"&&<div className="mf-task-pane active"><div className="mf-explainer"><strong>Advanced data tools</strong><p>Use these only when importing or checking source files. Your holdings are never changed without an explicit portfolio action.</p></div><MutualFundSchemeSearch/><AmfiNavImport/><MutualFundReconciliation holdings={holdings} validatedHistories={validatedHistories}/><MutualFundSnapshotReview holdings={holdings}/><NavRefreshPreflight/><MutualFundNavResearch/></div>}
   </div>;
