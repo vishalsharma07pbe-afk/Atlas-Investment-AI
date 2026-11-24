@@ -4,6 +4,7 @@ import argparse
 import time
 import uuid
 from stack_contract_smoke import Browser, check
+from local_research_acceptance import collect, SECTIONS
 
 def run():
     gateway=Browser("http://127.0.0.1:8088")
@@ -26,10 +27,14 @@ def run():
     deadline=time.monotonic()+120
     while True:
         snapshot=gateway.request("/intelligence/api/v1/intelligence/research/overview",headers=headers)
-        if {"NSE","BSE"}<={s["section"] for s in snapshot["sections"] if s["status"]=="READY"}:
+        if SECTIONS<={s["section"] for s in snapshot["sections"] if s["status"]=="READY"}:
             break
         check(time.monotonic()<deadline,"production automatic research never reached READY")
         time.sleep(3)
+    acceptance=collect(lambda path: gateway.request(path,headers=headers))
+    check(acceptance["runtime"]=="PASS","local acceptance runtime contract blocked")
+    check(acceptance["stored_provider_evidence"]=="BLOCKED","empty CI provider data incorrectly accepted")
+    check(acceptance["live_feed"]=="NOT_OBSERVED","unauthorized CI feed incorrectly accepted")
     gateway.request("/api/v1/auth/logout","POST",headers=headers)
     gateway.request("/api/v1/auth/me",expected=401,headers=headers)
     gateway.request("/intelligence/health",expected=401,headers=headers)

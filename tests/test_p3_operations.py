@@ -19,6 +19,7 @@ def load(name, path):
 
 
 smoke = load("p3_smoke", "scripts/p3_smoke.py")
+acceptance = load("local_research_acceptance", "scripts/local_research_acceptance.py")
 verify_backup = load("verify_backup", "scripts/verify-production-backup.py")
 ops_snapshot = load("ops_snapshot", "intelligence/app/ops_snapshot.py")
 
@@ -44,6 +45,42 @@ class P3SmokeTests(unittest.TestCase):
         with patch.object(smoke, "request_once", return_value=(False, 80.0, 503)):
             result = smoke.run("http://localhost:8088", 5, 1, 1, 50, 1)
         self.assertEqual(result["status"], "FAIL")
+
+
+class LocalAcceptanceTests(unittest.TestCase):
+    def fixture(self):
+        readiness = {"automatic_research_enabled": True, "actionable_recommendations_enabled": False,
+                     "provider_mode": "UPSTOX", "blockers": [], "live_market_data_connected": False,
+                     "backend_evidence": [{"code": c, "status": "RECENT_LOCAL_EVIDENCE", "records": 1}
+                                          for c in acceptance.SOURCES]}
+        overview = {"enabled": True, "scope": "PUBLIC_MARKET_RESEARCH_ONLY", "sections": [
+            {"section": key, "status": "READY", "result": {"eligible_count": 1} if key in ("NSE","BSE")
+             else {"historical_coverage": {"status": "HISTORICAL_WATCH_ONLY", "items": [{"private": "never-printed"}]}}}
+            for key in sorted(acceptance.SECTIONS)]}
+        review = {"holding_count": 1, "holdings": [{"symbol": "PRIVATE_MARKER"}],
+                  "diversification": {}, "opportunity_context": {"status": "WATCH_EVIDENCE_AVAILABLE"}}
+        return readiness, overview, review
+
+    def test_stored_data_and_live_status_are_independent(self):
+        r, o, p = self.fixture()
+        result = acceptance.assess(r, o, p)
+        self.assertEqual(result["runtime"], "PASS")
+        self.assertEqual(result["stored_provider_evidence"], "PASS")
+        self.assertEqual(result["live_feed"], "NOT_OBSERVED")
+        self.assertNotIn("PRIVATE_MARKER", str(result))
+        self.assertNotIn("never-printed", str(result))
+
+    def test_empty_and_stale_sources_cannot_pass(self):
+        r, o, p = self.fixture()
+        r["backend_evidence"][0]["records"] = 0
+        o["sections"][0]["status"] = "STALE"
+        self.assertEqual(acceptance.assess(r, o, p)["runtime"], "BLOCKED")
+        self.assertEqual(acceptance.assess(r, o, p)["stored_provider_evidence"], "BLOCKED")
+
+    def test_remote_gateway_rejected_before_network_request(self):
+        with self.assertRaisesRegex(ValueError, "LOOPBACK"):
+            acceptance.LocalSession("https://example.com")
+        self.assertIsNone(acceptance.NoRedirect().redirect_request(None, None, 302, "", {}, "https://example.com"))
 
 
 class BackupVerificationTests(unittest.TestCase):
