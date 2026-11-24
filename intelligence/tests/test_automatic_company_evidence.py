@@ -36,6 +36,17 @@ class CompanyEvidenceTests(unittest.TestCase):
         company.attach(self.snapshot,research._connect,self.now+timedelta(hours=25))
         self.assertNotIn("company_evidence",self.item)
 
+    def test_cached_statement_trends_are_derived_without_new_provider_call(self):
+        def report(isin,key):
+            result=self.report(isin,key)
+            result["sections"]["income_statement"]["data"]["income_statement"][0]["history"].append({"period":"FY2024","value":80})
+            return result
+        company.refresh(self.snapshot,research._connect,report,self.now)
+        company.attach(self.snapshot,research._connect,self.now)
+        self.assertEqual(self.item["company_evidence"]["financial_trends"]["items"][0]["change_percent"],25)
+        company.attach(self.snapshot,research._connect,self.now)
+        self.assertEqual(self.item["company_evidence"]["financial_trends"]["items"][0]["latest_year"],2025)
+
     def test_rights_required_and_identity_mismatch_rejected(self):
         with patch.dict(os.environ,{"MARKET_DATA_USAGE_RIGHTS_CONFIRMED":"false"}):
             company.refresh(self.snapshot,research._connect,lambda *a:self.fail("unauthorized"),self.now)
