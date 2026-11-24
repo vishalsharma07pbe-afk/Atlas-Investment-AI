@@ -124,7 +124,7 @@ public class AuthSecurity {
       if(!user.equals(valid))throw new IllegalArgumentException("INVALID_SESSION");
       // verify above authenticated the signature and expiry; keep revocation until that expiry.
       long expiry;
-      try {expiry=json.readTree(Base64.getUrlDecoder().decode(token.split("\\\\.",-1)[1])).path("exp").asLong();}
+      try {expiry=json.readTree(Base64.getUrlDecoder().decode(token.split("\\.",-1)[1])).path("exp").asLong();}
       catch(Exception ex){throw new IllegalArgumentException("INVALID_SESSION",ex);}
       jdbc.update("INSERT INTO revoked_jwt(token_sha256,user_id,expires_at) VALUES (?,?,to_timestamp(?)) ON CONFLICT (token_sha256) DO UPDATE SET expires_at=GREATEST(revoked_jwt.expires_at,EXCLUDED.expires_at)",sha(token),user,expiry);
       jdbc.update("DELETE FROM revoked_jwt WHERE expires_at < now()");
