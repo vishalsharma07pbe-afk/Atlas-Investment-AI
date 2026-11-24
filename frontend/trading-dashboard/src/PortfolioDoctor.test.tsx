@@ -33,3 +33,18 @@ it("renders exact-scheme history and local-only company review without a manual 
  expect(screen.getByText("+12.00%")).toBeTruthy();
  expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+it("prioritizes thesis review prompts and explains evidence gaps automatically",async()=>{
+ const base={status:"MONITOR",asset_type:"EQUITY",exchange:"NSE",weight_percent:10,recorded_return_percent:2,evidence_date:null,history_count:0,change_20_observations_percent:null,recent_peak_change_percent:null,findings:[],missing_evidence:[]};
+ const summary={status:"REVIEW_EVIDENCE",risks:[],observations:[],review_prompts:[{statement:"P/E 25.00 vs sector 15.00.",source:"Upstox provider ratios"}],gaps:["Official filings unverified."],notice:"Partial research synthesis."};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-24T10:00:00Z",holding_count:2,attention_count:0,data_gap_count:0,thesis_review_count:1,notice:"Research only",holdings:[
+ {...base,id:1,symbol:"FIRST"},
+ {...base,id:2,symbol:"REVIEW",thesis_summary:summary}
+ ]})})));
+ render(<PortfolioDoctor revision={0} onSettings={()=>{}}/>);
+ expect(await screen.findByText(/P\/E 25.00 vs sector 15.00/)).toBeTruthy();
+ expect(screen.getByText("Upstox provider ratios",{exact:false})).toBeTruthy();
+ expect(screen.getByText("Official filings unverified.")).toBeTruthy();
+ expect(screen.getAllByRole("article")[0].textContent).toContain("REVIEW");
+ expect(fetch).toHaveBeenCalledTimes(1);
+});
