@@ -201,3 +201,53 @@ jobs:
       - name: Remove disposable services and volumes
         if: always()
         run: docker compose down -v --remove-orphans
+
+
+  production-gateway-contract:
+    name: Production image and gateway integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      COMPOSE_PROJECT_NAME: atlas-ci-production
+      ATLAS_IMAGE_NAMESPACE: atlas-ci
+      ATLAS_RELEASE_TAG: v0.0.0-ci
+      POSTGRES_DB: atlas
+      POSTGRES_USER: atlas
+      ATLAS_AUTONOMOUS_RESEARCH_ENABLED: 'true'
+      ATLAS_MARKET_FEEDS_ENABLED: 'false'
+      ATLAS_PORTFOLIO_AUTO_REFRESH_ENABLED: 'false'
+      ATLAS_MF_HISTORY_AUTO_REFRESH_ENABLED: 'false'
+      ATLAS_DISCOVERY_HISTORY_ENABLED: 'false'
+      ATLAS_INTRADAY_RESEARCH_ENABLED: 'false'
+      ATLAS_MF_NAV_AUTO_REFRESH_ENABLED: 'false'
+      ATLAS_UPSTOX_FEED_ENABLED: 'false'
+      ATLAS_AUTOMATIC_AI_REVIEW_ENABLED: 'false'
+      MARKET_DATA_USAGE_RIGHTS_CONFIRMED: 'false'
+      MARKET_DATA_ENTITLEMENT_CONFIRMED: 'false'
+      MARKET_DATA_AUTO_REFRESH: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate disposable credentials
+        run: |
+          for key in POSTGRES_PASSWORD INTERNAL_SERVICE_TOKEN; do
+            value=$(openssl rand -hex 32)
+            echo "::add-mask::$value"
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done
+          for key in ATLAS_JWT_SECRET ATLAS_VAULT_MASTER_KEY; do
+            value=$(openssl rand -base64 32)
+            echo "::add-mask::$value"
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done
+      - name: Build and start production image stack
+        run: docker compose -f docker-compose.production.yml -f infrastructure/ci/production-smoke.yml up --build -d --wait --wait-timeout 300
+      - name: Verify production gateway and internal service authorization
+        run: python3 scripts/production_gateway_smoke.py --disposable-ci-stack
+      - name: Diagnose failed production containers
+        if: failure()
+        run: |
+          docker compose -f docker-compose.production.yml -f infrastructure/ci/production-smoke.yml ps -a
+          docker compose -f docker-compose.production.yml -f infrastructure/ci/production-smoke.yml logs --no-color --tail=120 postgres backend intelligence frontend
+      - name: Remove disposable production stack
+        if: always()
+        run: docker compose -f docker-compose.production.yml -f infrastructure/ci/production-smoke.yml down -v --remove-orphans
