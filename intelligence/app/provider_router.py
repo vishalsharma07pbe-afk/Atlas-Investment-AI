@@ -33,11 +33,12 @@ class CircuitBreaker:
             return self.clock()>=until
     def success(self, name):
         with self._lock: self._states.pop(name,None)
-    def failure(self, name):
+    def failure(self, name, cooldown=None):
         with self._lock:
             failures,until=self._states.get(name,(0,0))
             failures=(1 if until>0 and self.clock()>=until else failures+1) if self.clock()>=until else failures
-            self._states[name]=(failures,self.clock()+self.cooldown_seconds if failures>=self.threshold else 0)
+            pause = cooldown if cooldown is not None else self.cooldown_seconds if failures>=self.threshold else 0
+            self._states[name]=(failures,max(until,self.clock()+pause) if pause else 0)
     def status(self, name):
         with self._lock:
             failures,until=self._states.get(name,(0,0))
@@ -80,9 +81,13 @@ class ReadOnlyRouter:
                 continue
             try:
                 quote=validate_quote(fetch(symbol),symbol,max_age_seconds,self.clock())
-            except Exception:
-                self.breaker.failure(name)
-                attempted.append({"provider":name,"status":"FAILED_OR_INVALID"})
+            except Exception as exc:
+                # Only fixed internal codes may leave this boundary.
+                code = str(exc) if isinstance(exc, ProviderFailure) else ""
+                reason = code if code in {"PROVIDER_ACCESS_REJECTED","PROVIDER_RATE_LIMITED","PROVIDER_REQUEST_FAILED","PROVIDER_HTTP_FAILURE","STALE_OR_FUTURE","INSTRUMENT_MISMATCH"} else "FAILED_OR_INVALID"
+                cooldown = 900 if reason=="PROVIDER_ACCESS_REJECTED" else 60 if reason=="PROVIDER_RATE_LIMITED" else None
+                self.breaker.failure(name,cooldown)
+                attempted.append({"provider":name,"status":"FAILED_OR_INVALID","reason":reason})
                 continue
             self.breaker.success(name)
             return {"status":"VALIDATED","live":False,"quote":{"symbol":quote.symbol,"price":quote.price,
