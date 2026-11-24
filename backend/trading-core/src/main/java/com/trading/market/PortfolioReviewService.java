@@ -44,7 +44,7 @@ public class PortfolioReviewService {
     var rows=jdbc.queryForList("""
       SELECT p.id,p.symbol,p.asset_type,p.quantity*p.average_cost AS invested,
         p.quantity*p.last_price AS market_value,p.price_as_of,
-        i.exchange,i.id AS instrument_id,
+        i.exchange,i.id AS instrument_id,i.isin,
         CASE WHEN p.asset_type='EQUITY' THEN eq.n ELSE mf.n END AS history_count,
         CASE WHEN p.asset_type='EQUITY' THEN eq.latest_date ELSE mf.latest_date END AS evidence_date,
         CASE WHEN p.asset_type='EQUITY' THEN eq.latest ELSE mf.latest END AS latest,
@@ -54,7 +54,7 @@ public class PortfolioReviewService {
         mf.distinct_sources
       FROM personal_holdings p
       LEFT JOIN LATERAL (
-        SELECT candidate.id,candidate.exchange FROM (
+        SELECT candidate.id,candidate.exchange,candidate.isin FROM (
           SELECT x.id,e.code AS exchange,x.isin,
                  count(*) OVER() AS matches,count(x.isin) OVER() AS known_isins,
                  min(x.isin) OVER() AS min_isin,max(x.isin) OVER() AS max_isin
@@ -167,7 +167,7 @@ public class PortfolioReviewService {
       if(!valid||value==null)gaps++;
       Map<String,Object> item=new LinkedHashMap<>();
       item.put("id",r.get("id"));item.put("symbol",r.get("symbol"));item.put("asset_type",r.get("asset_type"));
-      item.put("exchange",r.get("exchange"));item.put("status",status);item.put("weight_percent",weight);
+      item.put("exchange",r.get("exchange"));item.put("isin",r.get("isin"));item.put("status",status);item.put("weight_percent",weight);
       item.put("recorded_return_percent",returnPct);item.put("evidence_date",observed==null?null:observed.toString());
       item.put("history_count",count);item.put("change_20_observations_percent",momentum);
       item.put("recent_peak_change_percent",drawdown);item.put("findings",findings);item.put("missing_evidence",missing);

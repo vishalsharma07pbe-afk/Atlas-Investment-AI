@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from .market_client import backend_json
 from .screener import screen
 from .mutual_fund_recommendations import CATEGORIES, dashboard
-from . import automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news
+from . import automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis
 
 SECTIONS = ("NSE", "BSE", *CATEGORIES)
 DEFAULT_INTERVAL = 900
@@ -190,6 +190,10 @@ class ResearchScheduler:
                     await asyncio.to_thread(automatic_news.refresh, snapshot, _connect)
                 except Exception:
                     pass  # Provider news failure must not block research.
+                try:
+                    await asyncio.to_thread(portfolio_thesis.refresh)
+                except Exception:
+                    pass  # Private company research is independent of public discovery.
                 await asyncio.to_thread(automatic_ai_review.refresh, snapshot, _connect)
             except Exception:
                 # Storage failures must not terminate future attempts.

@@ -14,6 +14,8 @@ def _internal_path(path:str)->str:
         category = path.removeprefix("/api/v1/mutual-funds/historical-watch?category=")
         if category in ("LARGE_CAP","MID_CAP","SMALL_CAP","FLEXI_CAP","INDEX"):
             return "/api/v1/internal/feed/fund-history?category="+category
+    if path == "/api/v1/portfolio-research-identities":
+        return "/api/v1/internal/feed/portfolio-research-identities"
     if path == "/api/v1/data-health/summary":
         return "/api/v1/internal/feed/data-health/summary"
     raise HTTPException(status_code=500,detail="Unsupported internal market-data route")
