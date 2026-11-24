@@ -1,8 +1,8 @@
 FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /app
-COPY pom.xml .
+COPY pom.xml maven-build-retry.sh ./
 COPY src ./src
-RUN mvn -q -DskipTests package
+RUN sh maven-build-retry.sh -DskipTests package
 FROM eclipse-temurin:21-jre
 WORKDIR /app
 COPY --from=build /app/target/trading-core-0.0.1-SNAPSHOT.jar app.jar
