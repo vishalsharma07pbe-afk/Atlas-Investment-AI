@@ -96,6 +96,19 @@ class AuthIsolationIntegrationTest {
       .andExpect(status().isOk())
       .andExpect(header().string("Set-Cookie",org.hamcrest.Matchers.containsString("Max-Age=0")));
   }
+  @Test void logoutRevokesUntilExpiryAndIndependentLoginRemainsValid()throws Exception{
+    String email="revoke-"+UUID.randomUUID()+"@example.test";
+    String first=create(email);
+    String input=mapper.writeValueAsString(Map.of("email",email,"password","strong-password-12345"));
+    String second="Bearer "+mapper.readTree(mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content(input))
+      .andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("access_token").asText();
+    org.junit.jupiter.api.Assertions.assertNotEquals(first,second);
+    mvc.perform(post("/api/v1/auth/logout").header("Authorization",first)).andExpect(status().isOk());
+    UUID user=jdbc.queryForObject("SELECT id FROM atlas_users WHERE email=?",UUID.class,email);
+    org.junit.jupiter.api.Assertions.assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM revoked_jwt WHERE user_id=? AND expires_at>now()+interval '6 days'",Integer.class,user));
+    mvc.perform(get("/api/v1/auth/me").header("Authorization",first)).andExpect(status().isUnauthorized());
+    mvc.perform(get("/api/v1/auth/me").header("Authorization",second)).andExpect(status().isOk());
+  }
   @Test void researchWorkspaceStateIsPersistedAndUserScoped()throws Exception{
     String a=create("research-a-"+UUID.randomUUID()+"@example.test");
     String b=create("research-b-"+UUID.randomUUID()+"@example.test");
