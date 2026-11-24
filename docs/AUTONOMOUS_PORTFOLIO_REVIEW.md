@@ -1,0 +1,7 @@
+# Automatic portfolio review
+
+The backend now derives and persists per-owner holding-level assessments using existing recorded valuations, validated daily candles and AMFI-backed historical NAV records. Compose enables a periodic background review (five owners per pass, one-minute polling, five-minute cache age). Opening the dashboard also computes a local review if the cache is missing, expired or holdings changed. No external AI calls, broker requests or additional paid data sources are introduced.
+
+The review surfaces recorded concentration, loss relative to cost, 20-observation historical weakness, recent peak decline and 50-observation stock trend. Historical evidence is withheld when stale, ambiguous or inconsistent; the UI explicitly distinguishes recorded valuations from verified live prices. A 25% concentration threshold is a basic review heuristic, not personalized suitability. No investment verdict or health score is fabricated. Raw price history may contain corporate action effects. Funds use NAV rather than stock technical indicators.
+
+V20 adds only an owner-scoped derived JSON cache. No holdings, transactions or credentials are modified. The endpoint derives identity solely from the authenticated session. Existing portfolio tools remain intact. Future work must integrate company fundamentals, material news, institutional activity, fund portfolio disclosures, benchmark analysis and AI evidence review before claiming complete investment thesis monitoring. Live acceptance testing remains required.
