@@ -151,7 +151,7 @@ def company_coverage(equities,instant):
             "cached_company_count":len(found)}
 
 
-def matched(disclosures,instant=None):
+def matched(disclosures,instant=None,*,include_exact_weights=False):
     if not permitted() or not disclosures:
         return []
     instant=instant or datetime.now(timezone.utc)
@@ -171,11 +171,16 @@ def matched(disclosures,instant=None):
                     continue
                 equities=report.pop("equities")
                 from .fund_underlying_research import summarize
-                result.append({**report,**company_coverage(equities,instant),
+                item_report={**report,**company_coverage(equities,instant),
                     "underlying_research":summarize(equities,instant),
                     "scheme_code":item["scheme_code"],"scheme_name":item["scheme_name"],
                     "collected_at":found["collected_at"],"top_holdings":equities[:10],
-                    "status":"SECONDARY_COMPOSITION_ONLY"})
+                    "status":"SECONDARY_COMPOSITION_ONLY"}
+                # Private service only: compact full exact weights, no top-ten truncation.
+                # Do not silently truncate large portfolios or normalize reported weights.
+                if include_exact_weights and len(equities)<=500:
+                    item_report["exact_equity_weights"]={h["isin"]:h["weight_percent"] for h in equities}
+                result.append(item_report)
     except (OSError,sqlite3.Error,ValueError,TypeError,KeyError,AttributeError):
         return []
     return result
