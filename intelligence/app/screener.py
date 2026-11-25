@@ -6,6 +6,7 @@ from .technical import Candle, compute
 from .horizon_research import evaluate, summarize, MIN_HISTORY as HORIZON_MIN_HISTORY
 from .price_structure import analyze as price_structure
 from .corporate_action_normalization import preview as action_preview
+from .replay_evidence import fingerprint
 
 MIN_HISTORY = 21
 MAX_INSTRUMENTS = 20
@@ -89,7 +90,11 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                 "data_age_calendar_days": age,
             }
             if include_horizons:
+                evidence_hash=fingerprint(raw,today) if batch_loaded else None
                 evaluation=evaluate(candles, ind, row)
+                for state,candidate in evaluation.values():
+                    if candidate is not None and evidence_hash is not None:
+                        candidate["replay_evidence_hash"]=evidence_hash
                 for horizon, (state,candidate) in evaluation.items():
                     if candidate is not None:
                         candidate["price_structure"]=price_structure(candles,ind,horizon,
