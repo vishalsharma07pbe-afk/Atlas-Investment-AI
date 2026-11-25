@@ -25,6 +25,11 @@ class P1ResearchTests(unittest.TestCase):
         self.assertEqual(ratio["sector_unit"],"RATIO")
         self.assertIsNone(ratio["relative_difference_percent"])
 
+    def test_competitors_request_uses_documented_isin_without_exchange_mapping(self):
+        with patch.object(p1,"_get",return_value=[]) as get:
+            p1.company_research("INE002A01018")
+            self.assertIn("/v2/fundamentals/INE002A01018/competitors",[call.args[0] for call in get.call_args_list])
+
     def test_company_research_rejects_bad_identifiers(self):
         with self.assertRaisesRegex(ValueError, "INVALID_ISIN"):
             p1.company_research("bad")
