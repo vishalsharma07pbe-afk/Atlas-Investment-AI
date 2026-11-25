@@ -29,7 +29,8 @@ type LevelRisk={look_through_status?:string;benchmark_status:string;concentratio
 type JournalLots={status:string;reconciled_count:number;holdings:{symbol:string;assetType:string;status:string;recordedQuantity:number|null;journalQuantity:number|null;journalOpenCost:number|null;recordedCost:number|null;openLots:{acquired:string;quantity:number;unitPrice:number;calendarDaysHeld:number}[]}[];notice:string};
 type EquityTaxReference={status:string;taxYear:string;shortPositiveGains:number|null;shortGrossLosses:number|null;longPositiveGains:number|null;longGrossLosses:number|null;baseTaxIfFullThresholdUnused:number|null;baseTaxIfThresholdAlreadyUsed:number|null;withheld:string[]};
 type SaleResearch={status:string;scenarios:{scope:string;kind:string;status:string;grossProceeds:number|null;provisionalOpenCost:number|null;grossGainOrLoss:number|null;taxReference?:EquityTaxReference;sales:{identity:string;symbol:string;assetType:string;hypotheticalQuantity:number;grossProceeds:number;provisionalOpenCost:number;grossGainOrLoss:number;youngestCalendarDays:number;oldestCalendarDays:number}[];withheld:string[]}[];notice:string};
-type Review={sale_research?:SaleResearch;journal_lot_reconciliation?:JournalLots;portfolio_level_risk?:LevelRisk;ownership_changed_count?:number;ownership_attention_count?:number;ownership_monitor_notice?:string;fund_thesis_changed_count?:number;fund_thesis_attention_count?:number;fund_monitor_notice?:string;thesis_changed_count?:number;thesis_monitor_notice?:string;benchmark_risk_estimate?:BenchmarkRisk;opportunity_context?:OpportunityContext;diversification?:Diversification;equity_correlation?:Correlation;thesis_review_count?:number;generated_at:string;holding_count:number;attention_count:number;data_gap_count:number;holdings:HoldingReview[];notice:string};
+type FundExitLoad={status:string;scenarios:{scope:string;kind:string;status:string;hypotheticalFundExitLoad:number|null;funds:{schemeCode:string;status:string;disclosureDate:string|null;disclosureText:string|null;hypotheticalLoad:number|null;proceedsAfterLoad:number|null;reason:string|null}[]}[];notice:string};
+type Review={fund_exit_load_research?:FundExitLoad;sale_research?:SaleResearch;journal_lot_reconciliation?:JournalLots;portfolio_level_risk?:LevelRisk;ownership_changed_count?:number;ownership_attention_count?:number;ownership_monitor_notice?:string;fund_thesis_changed_count?:number;fund_thesis_attention_count?:number;fund_monitor_notice?:string;thesis_changed_count?:number;thesis_monitor_notice?:string;benchmark_risk_estimate?:BenchmarkRisk;opportunity_context?:OpportunityContext;diversification?:Diversification;equity_correlation?:Correlation;thesis_review_count?:number;generated_at:string;holding_count:number;attention_count:number;data_gap_count:number;holdings:HoldingReview[];notice:string};
 const pct=(value:number|null)=>value==null?"—":(value>0?"+":"")+value.toFixed(2)+"%";
 const statuses={REVIEW_REQUIRED:"Needs review",MONITOR:"Monitor",EVIDENCE_GAP:"Data needed"};
 
@@ -167,6 +168,20 @@ function SaleResearchDigest({report}:{report:SaleResearch}){
    {report.scenarios.filter(s=>s.taxReference&&s.taxReference.status!=="CONDITIONAL_REFERENCE_ONLY").map(s=><p key={s.scope+":"+s.kind}>{label(s.scope)} · {label(s.kind)}: {s.taxReference!.status==="NO_HYPOTHETICAL_SALE"?"No hypothetical sale.":s.taxReference!.withheld.join("; ")||"Tax reference withheld."}</p>)}
    <p className="muted tiny">Reference: Income-tax Act, 2025 sections 2(101), 196 and 198, as amended by Finance Act 2026. <a href="https://wm.incometaxindia.gov.in/w/determination-of-tax-in-certain-special-cases" target="_blank" rel="noreferrer">Income Tax Department rate reference</a>. Actual STT, tax residency, capital-asset treatment, full-year gains/losses and verified cost basis are not established.</p>
   </details>}
+  <p className="muted tiny">{report.notice}</p>
+ </section>;
+}
+function FundExitLoadDigest({report}:{report:FundExitLoad}){
+ const money=(v:number|null)=>v==null?"Withheld":new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",minimumFractionDigits:0,maximumFractionDigits:2}).format(v);
+ if(!report.scenarios.length)return null;
+ return <section className="doctor-item" aria-label="Conditional fund exit-load research">
+  <h3>Conditional fund exit-load research</h3>
+  <p>Illustration from current secondary disclosures only, not confirmed acquisition-date terms or actual redemption charges.</p>
+  {report.scenarios.map(s=><details key={s.scope+":"+s.kind}><summary>{s.scope.replace(/_/g," ").toLowerCase()} · {s.kind.replace(/_/g," ").toLowerCase()} · {money(s.hypotheticalFundExitLoad)}</summary>
+    <div className="tablewrap"><table><thead><tr><th>AMFI scheme</th><th>Dated reported terms</th><th>Hypothetical exit load</th><th>Proceeds after load only</th></tr></thead><tbody>
+     {s.funds.map(f=><tr key={f.schemeCode}><td>{f.schemeCode}</td><td>{f.disclosureDate??"No eligible date"} · {f.disclosureText??"Unavailable"}{f.reason&&<p>{f.reason}</p>}</td><td>{money(f.hypotheticalLoad)}</td><td>{money(f.proceedsAfterLoad)}</td></tr>)}
+    </tbody></table></div>
+  </details>)}
   <p className="muted tiny">{report.notice}</p>
  </section>;
 }
@@ -322,6 +337,7 @@ export default function PortfolioDoctor({revision,onSettings,compact=false,onOpe
     {review.diversification&&<DiversificationDigest report={review.diversification} correlation={review.equity_correlation}/>}
     {review.journal_lot_reconciliation&&<JournalLotsDigest report={review.journal_lot_reconciliation}/>}
     {review.sale_research&&<SaleResearchDigest report={review.sale_research}/>}
+    {review.fund_exit_load_research&&<FundExitLoadDigest report={review.fund_exit_load_research}/>}
     {review.opportunity_context&&<OpportunityDigest report={review.opportunity_context}/>}
     <p className="muted tiny">Reviewed {new Date(review.generated_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})} IST. {review.notice}</p>
   </>}
