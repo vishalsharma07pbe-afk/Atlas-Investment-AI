@@ -271,6 +271,26 @@ def _official_history_candidates(historical,category,today):
     return output
 
 
+def _rolling_peer_context(row):
+    block=row.get("rolling_peer_consistency")
+    if not isinstance(block,dict) or block.get("status")!="MATCHED_SAMPLE_ONLY":
+        return None
+    keys=("matched_windows","total_windows","minimum_peer_count","above_median_windows","below_median_windows","tied_windows")
+    if any(type(block.get(k)) is not int or block[k]<0 for k in keys):
+        return None
+    matched=block["matched_windows"]
+    if not (block["total_windows"]==105 and 84<=matched<=105 and 4<=block["minimum_peer_count"]<=39
+            and sum(block[k] for k in keys[-3:])==matched):
+        return None
+    for k in ("above_median_percent","median_difference_pp","worst_difference_pp"):
+        if type(block.get(k)) not in (int,float) or not isfinite(block[k]):
+            return None
+    if abs(block["above_median_percent"]-100*block["above_median_windows"]/matched)>.0001 or block["worst_difference_pp"]>block["median_difference_pp"]:
+        return None
+    return {"status":"MATCHED_SAMPLE_ONLY",**{k:block[k] for k in (*keys,"above_median_percent","median_difference_pp","worst_difference_pp")},
+            "notice":"Overlapping matched NAV windows versus the other sampled funds, not official benchmark TRI or independent observations."}
+
+
 def _research_reports(candidates, ranked, source_rows, disclosed, portfolios):
     """Build bounded, deterministic reports from the same exact-scheme evidence
     and qualification decisions used by the existing recommendation endpoint.
@@ -283,6 +303,7 @@ def _research_reports(candidates, ranked, source_rows, disclosed, portfolios):
     growth_ranks={row["fund"]["identifier"]:row["rank"] for row in ranked["growth_outlook"]}
     sources={str(row["scheme_code"]):row["sources"] for row in source_rows
              if isinstance(row,dict) and type(row.get("scheme_code")) is int and isinstance(row.get("sources"),list)}
+    source_by_id={str(row["scheme_code"]):row for row in source_rows if isinstance(row,dict) and type(row.get("scheme_code")) is int}
     disclosure_ids={row["scheme_code"] for row in disclosed}
     portfolio_ids={row["scheme_code"] for row in portfolios}
     reports=[]
@@ -302,7 +323,8 @@ def _research_reports(candidates, ranked, source_rows, disclosed, portfolios):
             "historical":{"sources":sources.get(fund.identifier,[]),
                 "returns_1y":fund.returns_1y,"returns_3y":fund.returns_3y,
                 "sample_peer_percentile":fund.peer_percentile,"worst_rolling_return":fund.worst_rolling_return,
-                "max_drawdown":fund.max_drawdown,"volatility":fund.volatility},
+                "max_drawdown":fund.max_drawdown,"volatility":fund.volatility,
+                "rolling_peer_consistency":_rolling_peer_context(source_by_id.get(fund.identifier,{})) if fund.category in COMPARABLE else None},
             "secondary_disclosure_available":fund.identifier in disclosure_ids,
             "secondary_portfolio_available":fund.identifier in portfolio_ids,
             "top_performer":top,"growth_outlook":growth,

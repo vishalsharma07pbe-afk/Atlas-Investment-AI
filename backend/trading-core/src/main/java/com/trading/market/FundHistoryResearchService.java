@@ -143,6 +143,7 @@ public class FundHistoryResearchService {
         row.put("sample_peer_percentile",round(100.0*(below+(equal-1)/2.0)/(observations.size()-1)));
       }
     }
+    if(comparable)rollingPeerConsistency(observations,histories,commonEnd);
     if(!comparable)observations.sort(Comparator.comparingLong(row->((Number)row.get("scheme_code")).longValue()));
     var riskRank=observations.stream().filter(row->comparable&&row.get("return_to_drawdown") instanceof Number)
       .sorted(Comparator.comparingDouble((Map<String,Object> row)->((Number)row.get("return_to_drawdown")).doubleValue()).reversed()
@@ -262,23 +263,93 @@ public class FundHistoryResearchService {
     result.put("sources",rows.stream().map(r->String.valueOf(r.get("source_code"))).distinct().sorted().toList());
     return result;
   }
+  private record Anchor(LocalDate date,double nav){}
+  private record Window(LocalDate start,LocalDate end){}
+
+  /** Exact matched rolling endpoints, leave-one-out median, not benchmark TRI. */
+  static void rollingPeerConsistency(List<Map<String,Object>> observations,
+      Map<Long,List<Map<String,Object>>> histories,LocalDate end){
+    if(end==null||observations.size()<5||observations.size()>40)return;
+    Map<String,Integer> identities=new HashMap<>();
+    for(var row:observations){
+      if(row.get("isin_growth") instanceof String isin)identities.merge(isin,1,Integer::sum);
+    }
+    Map<Long,Map<Window,Double>> windows=new LinkedHashMap<>();
+    for(var row:observations){
+      if(!"DIRECT".equals(row.get("amfi_plan"))||!"GROWTH".equals(row.get("amfi_option"))
+          ||!(row.get("isin_growth") instanceof String isin)||!isin.matches("INF[A-Z0-9]{9}")
+          ||identities.getOrDefault(isin,0)!=1||!end.equals(date(row.get("amfi_metadata_date")))
+          ||!end.toString().equals(row.get("nav_date")))continue;
+      long id=((Number)row.get("scheme_code")).longValue();
+      List<Anchor> anchors=weeklyAnchors(histories.getOrDefault(id,List.of()),end);
+      if(anchors.size()!=157)continue;
+      Map<Window,Double> returns=new LinkedHashMap<>();
+      for(int i=52;i<anchors.size();i++){
+        Anchor a=anchors.get(i-52),b=anchors.get(i);
+        long days=ChronoUnit.DAYS.between(a.date(),b.date());
+        double value=100*(Math.pow(b.nav()/a.nav(),365.2425/days)-1);
+        if(!Double.isFinite(value)){returns.clear();break;}
+        returns.put(new Window(a.date(),b.date()),value);
+      }
+      if(returns.size()==105)windows.put(id,returns);
+    }
+    if(windows.size()<5)return;
+    for(var row:observations){
+      long id=((Number)row.get("scheme_code")).longValue();
+      var own=windows.get(id);
+      if(own==null)continue;
+      int above=0,below=0,ties=0,minPeers=Integer.MAX_VALUE;
+      List<Double> differences=new ArrayList<>();
+      for(var entry:own.entrySet()){
+        double[] peers=windows.entrySet().stream().filter(other->other.getKey()!=id)
+          .map(other->other.getValue().get(entry.getKey())).filter(Objects::nonNull)
+          .mapToDouble(Double::doubleValue).sorted().toArray();
+        if(peers.length<4)continue;
+        double median=peers.length%2==0?peers[peers.length/2-1]/2+peers[peers.length/2]/2:peers[peers.length/2];
+        double difference=entry.getValue()-median;
+        if(!Double.isFinite(difference))continue;
+        minPeers=Math.min(minPeers,peers.length);
+        differences.add(difference);
+        if(difference>0.00005)above++;else if(difference< -0.00005)below++;else ties++;
+      }
+      int matched=differences.size();
+      // At least 80% of the 105 overlapping windows, not cherry-picked dates.
+      if(matched<84)continue;
+      differences.sort(Double::compare);
+      double median=matched%2==0?differences.get(matched/2-1)/2+differences.get(matched/2)/2:differences.get(matched/2);
+      row.put("rolling_peer_consistency",Map.of(
+        "status","MATCHED_SAMPLE_ONLY","matched_windows",matched,"total_windows",105,
+        "minimum_peer_count",minPeers,"above_median_windows",above,"below_median_windows",below,
+        "tied_windows",ties,"above_median_percent",round(100.0*above/matched),
+        "median_difference_pp",round(median),"worst_difference_pp",round(differences.getFirst())));
+    }
+  }
+
+  /** Fixed seven-day target dates, using a NAV at most three days earlier. */ 
+  private static List<Anchor> weeklyAnchors(List<Map<String,Object>> rows,LocalDate end){
+    NavigableMap<LocalDate,Double> series=new TreeMap<>();
+    for(var row:rows){
+      LocalDate d=date(row.get("nav_date"));Object value=row.get("nav");
+      if(d==null||!(value instanceof Number n)||!Double.isFinite(n.doubleValue())||n.doubleValue()<=0||series.putIfAbsent(d,n.doubleValue())!=null)return List.of();
+    }
+    List<Anchor> anchors=new ArrayList<>();LocalDate prior=null;
+    for(int i=156;i>=0;i--){
+      LocalDate target=end.minusWeeks(i);
+      var point=series.floorEntry(target);
+      if(point==null||point.getKey().isBefore(target.minusDays(3))||prior!=null&&!point.getKey().isAfter(prior))return List.of();
+      anchors.add(new Anchor(point.getKey(),point.getValue()));prior=point.getKey();
+    }
+    return anchors;
+  }
+
   /** Fixed seven-day target dates, using a NAV at most three days earlier.
    * Returns are weekly close proxies (not equally spaced daily returns).
    * No interpolation; any missing/duplicate anchor makes risk unavailable.
    */
   static Map<String,Object> weeklyRisk(List<Map<String,Object>> rows,LocalDate end){
-    NavigableMap<LocalDate,Double> series=new TreeMap<>();
-    for(var row:rows){
-      LocalDate d=date(row.get("nav_date"));Object value=row.get("nav");
-      if(d==null||!(value instanceof Number n)||!Double.isFinite(n.doubleValue())||n.doubleValue()<=0||series.putIfAbsent(d,n.doubleValue())!=null)return Map.of();
-    }
-    List<Double> anchors=new ArrayList<>();LocalDate prior=null;
-    for(int i=156;i>=0;i--){
-      LocalDate target=end.minusWeeks(i);
-      var point=series.floorEntry(target);
-      if(point==null||point.getKey().isBefore(target.minusDays(3))||prior!=null&&!point.getKey().isAfter(prior))return Map.of();
-      anchors.add(point.getValue());prior=point.getKey();
-    }
+    var points=weeklyAnchors(rows,end);
+    if(points.size()!=157)return Map.of();
+    List<Double> anchors=points.stream().map(Anchor::nav).toList();
     double sum=0,sumSq=0,downsideSq=0,worst=Double.POSITIVE_INFINITY;int positive=0,rolling=0,negativeWeeks=0;
     List<Double> rollingReturns=new ArrayList<>();
     for(int i=1;i<anchors.size();i++){
