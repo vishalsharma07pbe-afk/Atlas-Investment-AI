@@ -73,3 +73,16 @@ class ResearchReliabilityTests(unittest.TestCase):
         self.assertIn("VALUATION_NOT_VERIFIED",result["blockers"])
         self.assertEqual(result["evidence"]["valuation"],"NOT_VERIFIED")
         self.assertEqual(result["evidence"]["ai"],"COMMENTARY_AVAILABLE")
+
+    def test_conclusion_connects_business_deterioration_without_lifting_valuation_gate(self):
+        from app.research_reliability import attach_conclusions
+        item={"company_evidence":{"fundamental_quality":{"status":"REVIEW_REQUIRED",
+            "warnings":["NET_MARGIN_DETERIORATION_REVIEW"],"valuation":{"status":"SECTOR_COMPARISON_ONLY"}}}}
+        snapshot={"enabled":True,"sections":[{"section":"NSE","status":"READY","result":{"horizons":{
+            "LONG_TERM":{"blockers":["VALUATION_NOT_VERIFIED"],"candidates":[item]}}}}]}
+        attach_conclusions(snapshot)
+        result=item["research_conclusion"]
+        self.assertEqual(result["status"],"REVIEW_REQUIRED")
+        self.assertIn("NET_MARGIN_DETERIORATION_REVIEW",result["warnings"])
+        self.assertEqual(result["evidence"]["valuation"],"SECTOR_COMPARISON_ONLY")
+        self.assertIn("VALUATION_NOT_VERIFIED",result["blockers"])
