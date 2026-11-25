@@ -14,7 +14,7 @@ import re
 from .p1_research import company_research
 from .financial_trends import summarize as financial_trends, earnings_evidence
 from .fundamental_quality import summarize as fundamental_quality
-from . import peer_research
+from . import peer_research, shareholding_research
 
 ISIN = re.compile(r"^IN[A-Z0-9]{10}$")
 HORIZONS = ("LONG_TERM", "SHORT_TERM", "SWING")
@@ -239,6 +239,7 @@ def _enrich(report,today):
     report["financial_trends"]=financial_trends(report,today.year,as_of=today)
     report["reported_earnings"]=earnings_evidence(report,today)
     report["fundamental_quality"]=fundamental_quality(report,today.year)
+    report["ownership_research"]=shareholding_research.summarize(report,today)
     return report
 
 
