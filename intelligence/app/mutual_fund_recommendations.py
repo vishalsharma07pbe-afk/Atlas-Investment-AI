@@ -13,7 +13,7 @@ from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 
-from . import nav_catalog, fund_disclosures
+from . import nav_catalog, fund_disclosures, fund_portfolios
 from .market_client import backend_json
 
 METHODOLOGY_VERSION = "MF-RESEARCH-1.0.0"
@@ -274,6 +274,8 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
     official_ids={f.identifier for f in official}
     disclosed=fund_disclosures.matched([row for row in historical["items"] if isinstance(row,dict) and str(row.get("scheme_code")) in official_ids],datetime.now(ZoneInfo("Asia/Kolkata")).date()) if historical else []
     coverage["secondary_disclosure_matches"]=len(disclosed)
+    portfolios=fund_portfolios.matched(disclosed)
+    coverage["secondary_portfolio_matches"]=len(portfolios)
     # Public catalog discovery remains separate from exact AMFI scheme evidence.
     # Unknown fee, benchmark, holdings and risk data still block recommendations.
     ranked=rank_candidates(official,category,horizon_months,risk_tolerance)
@@ -292,6 +294,8 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
     payload={"generated_at":generated,"methodology_version":METHODOLOGY_VERSION,"category":category,
       "filters":{"horizon_months":horizon_months,"risk_tolerance":risk_tolerance},"coverage":coverage,
       "top_performers":ranked["top_performers"],"growth_outlook":ranked["growth_outlook"],
+      "portfolio_evidence":{"status":"SECONDARY_COMPOSITION_ONLY" if portfolios else "NOT_AVAILABLE_OR_NOT_AUTHORIZED",
+          "items":portfolios,"notice":"Selected fund coverage only. Reported weights and existing cached company evidence are not verified forward earnings or valuation coverage."},
       "disclosure_evidence":{"status":"SECONDARY_REPORTED" if disclosed else "NOT_AVAILABLE_OR_NOT_AUTHORIZED",
           "items":disclosed,"notice":"AMFI-derived disclosures from TigZig, not independently verified. AUM covers all plans; dates differ by field. Reported benchmark names are not benchmark return histories. No holdings or rating verification."},
       "historical_coverage":{"status":"UNAVAILABLE"} if historical is None else {
