@@ -46,3 +46,20 @@ it("withholds combined progress when a linked holding disappears",async()=>{
  expect(screen.getByText("Combined progress unavailable until linked valuations are complete.")).toBeTruthy();
  expect(screen.getByRole("button",{name:"Unassign TEST"})).toBeTruthy();
 });
+
+it("requires confirmation before assigning a whole holding and refreshes funding",async()=>{
+ const linkedReport={...report,availableHoldings:[{holdingId:7,symbol:"TEST",assetType:"EQUITY"}],
+   goals:[{...goal,funding:{linkedValue:0,totalRecordedFunding:40000,holdings:[]}}]};
+ const fetchMock=vi.fn(async(_url:string,options?:RequestInit)=>options?.method==="POST"?{ok:true,json:async()=>({assigned:true})}:{ok:true,json:async()=>linkedReport});
+ vi.stubGlobal("fetch",fetchMock);
+ render(<GoalMonitor/>);
+ fireEvent.click(await screen.findByRole("button",{name:"Assign holding"}));
+ fireEvent.change(screen.getByLabelText("Unassigned investment"),{target:{value:"7"}});
+ const confirm=screen.getByRole("button",{name:"Confirm whole-holding assignment"}) as HTMLButtonElement;
+ expect(confirm.disabled).toBe(true);
+ fireEvent.click(screen.getByLabelText("Reserved savings exclude assigned holdings and other goals."));
+ expect(confirm.disabled).toBe(false);
+ fireEvent.click(confirm);
+ await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith("/api/v1/portfolio/goals/goal-1/holdings/7",expect.objectContaining({method:"POST",body:JSON.stringify({confirmSeparateBalance:true})})));
+ await waitFor(()=>expect(fetchMock.mock.calls.filter(c=>!c[1]?.method)).toHaveLength(2));
+});

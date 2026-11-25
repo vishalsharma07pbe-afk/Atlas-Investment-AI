@@ -59,4 +59,23 @@ class PortfolioGoalControllerTest {
     eq("40000",PortfolioGoalController.funding(input,java.util.List.of()).totalRecordedFunding());
   }
 
+  @Test void goalAttentionDistinguishesShortfallsDeadlinesAndUnavailableEvidence(){
+    var today=TODAY;
+    var cases=java.util.List.of(
+      goal("40000","1000",today,today.plusMonths(6)),
+      goal("40000","100000",today,today.plusDays(25)),
+      goal("40000","0",today,today.plusDays(1)),
+      goal("40000","1000",today.minusDays(31),today.plusMonths(6)),
+      goal("100000","0",today,today.plusMonths(6)));
+    var expected=java.util.Arrays.asList("SHORTFALL","DEADLINE_NEAR","DEADLINE_GAP","STALE_BALANCE",null);
+    for(int i=0;i<cases.size();i++){
+      var input=cases.get(i);
+      var funding=PortfolioGoalController.funding(input,java.util.List.of());
+      var g=new PortfolioGoalController.Goal(java.util.UUID.randomUUID(),input.name(),input.targetAmount(),input.reservedAmount(),
+        input.balanceDate(),input.deadline(),input.monthlyContribution(),PortfolioGoalController.linkedProgress(input,funding,today),funding);
+      var attention=PortfolioGoalNotifications.attention(g,today);
+      assertEquals(expected.get(i),attention==null?null:attention.kind());
+    }
+  }
+
 }

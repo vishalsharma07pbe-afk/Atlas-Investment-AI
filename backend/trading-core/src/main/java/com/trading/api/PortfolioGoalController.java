@@ -14,7 +14,8 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/api/v1/portfolio/goals")
 public class PortfolioGoalController {
   private final JdbcTemplate jdbc;
-  public PortfolioGoalController(JdbcTemplate jdbc){this.jdbc=jdbc;}
+  private final PortfolioGoalReadService reader;
+  public PortfolioGoalController(JdbcTemplate jdbc,PortfolioGoalReadService reader){this.jdbc=jdbc;this.reader=reader;}
   public record Input(String name,BigDecimal targetAmount,BigDecimal reservedAmount,LocalDate balanceDate,
     LocalDate deadline,BigDecimal monthlyContribution){}
   record Progress(String status,int remainingMonthEnds,BigDecimal recordedProgressPercent,
@@ -31,42 +32,13 @@ public class PortfolioGoalController {
   public Map<String,Object> goals(){
     UUID owner=AuthSecurity.currentUser();
     LocalDate today=LocalDate.now(MarketCalendarService.IST);
-    var linked=new HashMap<UUID,List<LinkedHolding>>();
-    jdbc.query("""
-      SELECT a.goal_id,a.holding_id,a.symbol,a.asset_type,
-        CASE WHEN p.id IS NULL THEN 'MISSING_HOLDING'
-          WHEN p.quantity<=0 OR p.last_price IS NULL OR p.last_price<0 OR p.price_as_of IS NULL
-            OR p.price_as_of>now() OR (now() AT TIME ZONE 'Asia/Kolkata')::date-
-              (p.price_as_of AT TIME ZONE 'Asia/Kolkata')::date >
-              CASE WHEN p.asset_type='MUTUAL_FUND' THEN 7 ELSE 5 END THEN 'UNAVAILABLE_RECENT_VALUE'
-          ELSE 'RECENT_RECORDED' END AS status,
-        p.quantity*p.last_price AS recorded_value
-      FROM portfolio_goal_holdings a LEFT JOIN personal_holdings p
-        ON p.id=a.holding_id AND p.user_id=a.user_id AND p.symbol=a.symbol AND p.asset_type=a.asset_type
-      WHERE a.user_id=? ORDER BY a.holding_id
-      """,rs->{
-        String status=rs.getString("status");
-        linked.computeIfAbsent(rs.getObject("goal_id",UUID.class),k->new ArrayList<>()).add(
-          new LinkedHolding(rs.getLong("holding_id"),rs.getString("symbol"),rs.getString("asset_type"),status,
-            "RECENT_RECORDED".equals(status)?rs.getBigDecimal("recorded_value"):null));
-      },owner);
     var available=jdbc.query("""
       SELECT p.id,p.symbol,p.asset_type FROM personal_holdings p
       WHERE p.user_id=? AND p.asset_type IN ('EQUITY','MUTUAL_FUND')
         AND NOT EXISTS(SELECT 1 FROM portfolio_goal_holdings a WHERE a.user_id=p.user_id AND a.holding_id=p.id)
       ORDER BY p.symbol,p.id LIMIT 200
       """,(rs,row)->new AvailableHolding(rs.getLong("id"),rs.getString("symbol"),rs.getString("asset_type")),owner);
-    List<Goal> goals=jdbc.query("""
-      SELECT id,name,target_amount,reserved_amount,balance_date,deadline,monthly_contribution
-      FROM portfolio_saved_goals WHERE user_id=? ORDER BY deadline,id
-      """,(rs,row)->{
-        var input=new Input(rs.getString("name"),rs.getBigDecimal("target_amount"),rs.getBigDecimal("reserved_amount"),
-          rs.getObject("balance_date",LocalDate.class),rs.getObject("deadline",LocalDate.class),rs.getBigDecimal("monthly_contribution"));
-        UUID id=rs.getObject("id",UUID.class);
-        var funding=funding(input,linked.getOrDefault(id,List.of()));
-        return new Goal(id,input.name(),input.targetAmount(),input.reservedAmount(),
-          input.balanceDate(),input.deadline(),input.monthlyContribution(),linkedProgress(input,funding,today),funding);
-      },owner);
+    List<Goal> goals=reader.read(owner,today);
     return Map.of("as_of",today.toString(),"goals",goals,"availableHoldings",available,"notice",
       "Recorded earmarked savings plus explicitly assigned whole holdings only. Reserved savings must exclude assigned investment values and other goals. Recent recorded prices are not verified live or liquidation values. Missing/stale assigned holdings withhold total progress and projections. Zero-growth assumes unchanged values and future month-end contributions through the deadline. No contribution presumed paid. Balances older than 30 days withhold forward estimates. No return forecast, taxes, fees, inflation, liquidity, affordability or bank connection.");
   }
