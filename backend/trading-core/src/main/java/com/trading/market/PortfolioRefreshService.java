@@ -79,6 +79,7 @@ public class PortfolioRefreshService {
             throw new IllegalStateException("INVALID_QUOTE");
           BigDecimal price=quote.path("ltp").decimalValue();
           BigDecimal previous=quote.path("previous_close").isNumber()?quote.path("previous_close").decimalValue():null;
+          if(previous!=null&&previous.signum()<=0)previous=null;
           Instant observed=Instant.parse(quote.path("as_of").asText());
           if(observed.isAfter(Instant.now()))throw new IllegalStateException("INVALID_QUOTE_TIME");
           var stamp=java.sql.Timestamp.from(observed);
@@ -114,10 +115,16 @@ public class PortfolioRefreshService {
         }else if(symbol.matches("[0-9]{1,18}")){
           List<Map<String,Object>> nav=jdbc.queryForList("""
             SELECT nav,nav_date FROM mutual_fund_nav WHERE scheme_code=?
+              AND nav>0 AND nav_date<=(now() AT TIME ZONE 'Asia/Kolkata')::date
             ORDER BY nav_date DESC LIMIT 2
             """,Long.parseLong(symbol));
           if(nav.isEmpty()){skipped.add(issue(symbol,"NAV_NOT_AVAILABLE"));continue;}
+          Object latest=nav.get(0).get("nav");
+          Object rawDate=nav.get(0).get("nav_date");
+          LocalDate navDate=rawDate instanceof java.sql.Date d?d.toLocalDate():rawDate instanceof LocalDate d?d:null;
+          if(!(latest instanceof BigDecimal amount)||amount.signum()<=0||navDate==null||navDate.isAfter(LocalDate.now(MarketCalendarService.IST))){skipped.add(issue(symbol,"INVALID_NAV_OBSERVATION"));continue;}
           Object previous=nav.size()>1?nav.get(1).get("nav"):null;
+          if(!(previous instanceof BigDecimal amountPrevious)||amountPrevious.signum()<=0)previous=null;
           updated+=jdbc.update("""
             UPDATE personal_holdings SET last_price=?,previous_close=?,price_as_of=?::date,updated_at=now()
             WHERE id=? AND user_id=? AND symbol=? AND asset_type='MUTUAL_FUND'

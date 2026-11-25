@@ -139,6 +139,42 @@ class AuthIsolationIntegrationTest {
     mvc.perform(get("/api/v1/research-workspace/alerts").header("Authorization",b))
       .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
   }
+  @Test void recordedValuationAgeAndPerformanceAreOwnerScoped()throws Exception{
+    String email="valuation-"+UUID.randomUUID()+"@example.test";
+    String a=create(email),b=create("valuation-other-"+UUID.randomUUID()+"@example.test");
+    UUID owner=jdbc.queryForObject("SELECT id FROM atlas_users WHERE email=?",UUID.class,email);
+    for(String symbol:new String[]{"RECENTVAL","STALEVAL","UNDATEDVAL","FUTUREVAL","UNPRICEDVAL"}){
+      mvc.perform(post("/api/v1/portfolio/holdings").header("Authorization",a)
+        .contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(Map.of(
+          "symbol",symbol,"assetType","EQUITY","quantity",2,"averageCost",100,"lastPrice",125))))
+        .andExpect(status().isOk());
+    }
+    jdbc.update("UPDATE personal_holdings SET price_as_of=now()-interval '10 days' WHERE user_id=? AND symbol='STALEVAL'",owner);
+    jdbc.update("UPDATE personal_holdings SET price_as_of=NULL WHERE user_id=? AND symbol='UNDATEDVAL'",owner);
+    jdbc.update("UPDATE personal_holdings SET price_as_of=now()+interval '1 day' WHERE user_id=? AND symbol='FUTUREVAL'",owner);
+    jdbc.update("UPDATE personal_holdings SET last_price=NULL,price_as_of=NULL WHERE user_id=? AND symbol='UNPRICEDVAL'",owner);
+    mvc.perform(get("/api/v1/portfolio/analysis").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.holdingCount").value(5))
+      .andExpect(jsonPath("$.pricedMarketValue").value(1000))
+      .andExpect(jsonPath("$.pricedCostBasis").value(800))
+      .andExpect(jsonPath("$.recordedReturnPercent").value(25.0))
+      .andExpect(jsonPath("$.recentRecordedHoldings").value(1))
+      .andExpect(jsonPath("$.stalePriceHoldings").value(1))
+      .andExpect(jsonPath("$.undatedPriceHoldings").value(1))
+      .andExpect(jsonPath("$.futureDatedPriceHoldings").value(1))
+      .andExpect(jsonPath("$.unpricedHoldings").value(1))
+      .andExpect(jsonPath("$.valuationFreshnessStatus").value("INCOMPLETE_OR_AGED"));
+    mvc.perform(get("/api/v1/portfolio/analysis").header("Authorization",b))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.holdingCount").value(0))
+      .andExpect(jsonPath("$.valuationFreshnessStatus").value("NO_HOLDINGS"))
+      .andExpect(jsonPath("$.recordedReturnPercent").isEmpty());
+    jdbc.update("UPDATE personal_holdings SET previous_close=120 WHERE user_id=? AND symbol='RECENTVAL'",owner);
+    mvc.perform(post("/api/v1/portfolio/holdings").header("Authorization",a)
+      .contentType(MediaType.APPLICATION_JSON).content("{\"symbol\":\"RECENTVAL\",\"assetType\":\"EQUITY\",\"quantity\":2,\"averageCost\":100,\"lastPrice\":130}"))
+      .andExpect(status().isOk());
+    org.junit.jupiter.api.Assertions.assertNull(jdbc.queryForObject("SELECT previous_close FROM personal_holdings WHERE user_id=? AND symbol='RECENTVAL'",java.math.BigDecimal.class,owner));
+  }
+
   @Test void portfolioHistoryCalculatesOnlyFromDatedUserEvidence()throws Exception{
     String email="history-"+UUID.randomUUID()+"@example.test";
     String a=create(email),b=create("history-b-"+UUID.randomUUID()+"@example.test");
