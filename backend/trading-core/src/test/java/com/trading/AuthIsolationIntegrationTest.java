@@ -527,12 +527,18 @@ class AuthIsolationIntegrationTest {
 
   @Test void journalLotsReconcileOnlyOwnerTradesAndRefreshAfterJournalDeletion()throws Exception{
     String a=create("lot-a-"+UUID.randomUUID()+"@example.test"),b=create("lot-b-"+UUID.randomUUID()+"@example.test");
+    jdbc.update("""
+      INSERT INTO instruments(exchange_id,symbol,series,source,isin,active,listing_status,instrument_type)
+      VALUES ((SELECT id FROM exchanges WHERE code='NSE'),'LOTTEST','EQ','TEST','INE002A01018',true,'ACTIVE','EQUITY')
+      ON CONFLICT DO NOTHING
+      """);
     String holding="{\"symbol\":\"LOTTEST\",\"assetType\":\"EQUITY\",\"quantity\":2,\"averageCost\":100,\"lastPrice\":120}";
     for(String user:java.util.List.of(a,b))
       mvc.perform(post("/api/v1/portfolio/holdings").header("Authorization",user)
         .contentType(MediaType.APPLICATION_JSON).content(holding)).andExpect(status().isOk());
     mvc.perform(get("/api/v1/portfolio/review").header("Authorization",a))
-      .andExpect(status().isOk()).andExpect(jsonPath("$.journal_lot_reconciliation.holdings[0].status").value("NO_RECORDED_TRADES"));
+      .andExpect(status().isOk()).andExpect(jsonPath("$.journal_lot_reconciliation.holdings[0].status").value("NO_RECORDED_TRADES"))
+      .andExpect(jsonPath("$.sale_research.scenarios[0].status").value("INSUFFICIENT_SALE_EVIDENCE"));
     String day=LocalDate.now(com.trading.market.MarketCalendarService.IST).minusDays(400).toString();
     String body="{\"symbol\":\"LOTTEST\",\"assetType\":\"EQUITY\",\"transactionType\":\"BUY\",\"transactionDate\":\""+day+"\",\"quantity\":2,\"unitPrice\":100,\"cashAmount\":200}";
     var response=mvc.perform(post("/api/v1/portfolio/history/transactions").header("Authorization",a)
@@ -540,7 +546,10 @@ class AuthIsolationIntegrationTest {
     String transaction=mapper.readTree(response.getContentAsString()).path("id").asText();
     mvc.perform(get("/api/v1/portfolio/review").header("Authorization",a))
       .andExpect(status().isOk()).andExpect(jsonPath("$.journal_lot_reconciliation.reconciled_count").value(1))
-      .andExpect(jsonPath("$.journal_lot_reconciliation.holdings[0].openLots[0].calendarDaysHeld").value(400));
+      .andExpect(jsonPath("$.journal_lot_reconciliation.holdings[0].openLots[0].calendarDaysHeld").value(400))
+      .andExpect(jsonPath("$.sale_research.scenarios[0].status").value("PROVISIONAL_SALE_EVIDENCE"))
+      .andExpect(jsonPath("$.sale_research.scenarios[0].grossProceeds").value(180.0))
+      .andExpect(jsonPath("$.sale_research.scenarios[0].grossGainOrLoss").value(30.0));
     mvc.perform(get("/api/v1/portfolio/review").header("Authorization",b))
       .andExpect(status().isOk()).andExpect(jsonPath("$.journal_lot_reconciliation.holdings[0].status").value("NO_RECORDED_TRADES"));
     mvc.perform(delete("/api/v1/portfolio/history/transactions/"+transaction).header("Authorization",a)).andExpect(status().isOk());

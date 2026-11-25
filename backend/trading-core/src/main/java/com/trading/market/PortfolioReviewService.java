@@ -55,7 +55,7 @@ public class PortfolioReviewService {
     // Read only this owner's holdings; market history is shared public evidence.
     // Ambiguous symbol matches are rejected unless all listings share an ISIN.
     var rows=jdbc.queryForList("""
-      SELECT p.id,p.symbol,p.asset_type,p.quantity,p.quantity*p.average_cost AS invested,
+      SELECT p.id,p.symbol,p.asset_type,p.quantity,p.last_price,p.quantity*p.average_cost AS invested,
         p.quantity*p.last_price AS market_value,p.price_as_of,
         (p.last_price IS NOT NULL AND p.last_price>=0 AND p.price_as_of IS NOT NULL
           AND p.price_as_of<=now()
@@ -140,6 +140,7 @@ public class PortfolioReviewService {
     report=PortfolioFundThesisChanges.attach(report,previous,json,now);
     report=PortfolioOwnershipChanges.attach(report,previous,json,now);
     report.put("portfolio_level_risk",PortfolioLevelRisk.assess(report,json,today));
+    report.put("sale_research",PortfolioSaleResearch.assess(rows,report,json));
     report.put("thesis_monitor_version","ANNUAL_DIRECTION_V1");
     try{
       jdbc.update("""

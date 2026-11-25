@@ -232,15 +232,23 @@ it("renders mixed stock and fund allocation comparisons with their NAV sources",
 it("shows provisional recorded acquisition dates and reconciliation gaps",async()=>{
  const base={status:"MONITOR",weight_percent:50,recorded_return_percent:10,evidence_date:null,history_count:0,change_20_observations_percent:null,recent_peak_change_percent:null,findings:[],missing_evidence:[]};
  const holdings=[{...base,id:1,symbol:"LOTTEST",asset_type:"EQUITY",exchange:"NSE"},{...base,id:2,symbol:"MISSING",asset_type:"EQUITY",exchange:"NSE"}];
+ const sale_research={status:"SCENARIO_RESEARCH_AVAILABLE",scenarios:[
+  {scope:"DIRECT_EQUITY_ALLOCATION",kind:"EQUAL_WEIGHTS",status:"PROVISIONAL_SALE_EVIDENCE",grossProceeds:300,provisionalOpenCost:180,grossGainOrLoss:120,sales:[{identity:"INE002A01018",symbol:"LOTTEST",assetType:"EQUITY",hypotheticalQuantity:3,grossProceeds:300,provisionalOpenCost:180,grossGainOrLoss:120,youngestCalendarDays:100,oldestCalendarDays:400}],withheld:[]},
+  {scope:"CONCENTRATION_REDISTRIBUTION",kind:"5 new identities",status:"INSUFFICIENT_SALE_EVIDENCE",grossProceeds:null,provisionalOpenCost:null,grossGainOrLoss:null,sales:[],withheld:["MISSING: reconciled journal acquisition lots required"]}],notice:"No actual tax liability estimate."};
  const journal_lot_reconciliation={status:"PARTIAL_JOURNAL_RECONCILIATION",reconciled_count:1,holdings:[
   {symbol:"LOTTEST",assetType:"EQUITY",status:"PROVISIONAL_JOURNAL_RECONCILED",recordedQuantity:2,journalQuantity:2,recordedCost:200,journalOpenCost:200,openLots:[{acquired:"2025-10-21",quantity:2,unitPrice:100,calendarDaysHeld:400}]},
   {symbol:"MISSING",assetType:"EQUITY",status:"NO_RECORDED_TRADES",recordedQuantity:3,journalQuantity:null,recordedCost:300,journalOpenCost:null,openLots:[]}],notice:"Provisional journal evidence, not verified tax lots."};
- vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-25T10:00:00Z",holding_count:2,attention_count:0,data_gap_count:0,notice:"Research only",holdings,journal_lot_reconciliation})})));
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-25T10:00:00Z",holding_count:2,attention_count:0,data_gap_count:0,notice:"Research only",holdings,journal_lot_reconciliation,sale_research})})));
  render(<PortfolioDoctor revision={0} onSettings={()=>{}}/>);
  expect(await screen.findByRole("heading",{name:"Recorded acquisition history"})).toBeTruthy();
  expect(screen.getByText("Provisionally reconciled")).toBeTruthy();
  expect(screen.getByText("No recorded trades")).toBeTruthy();
  expect(screen.getByText("2025-10-21")).toBeTruthy();
  expect(screen.getByText("Provisional journal evidence, not verified tax lots.")).toBeTruthy();
+ expect(screen.getByRole("heading",{name:"Hypothetical sale gain and loss research"})).toBeTruthy();
+ expect(screen.getAllByText("₹120")).toHaveLength(2);
+ expect(screen.getAllByText("Withheld")).toHaveLength(3);
+ expect(screen.getByText("MISSING: reconciled journal acquisition lots required")).toBeTruthy();
+ expect(screen.getByText("100–400")).toBeTruthy();
  expect(fetch).toHaveBeenCalledTimes(1);
 });
