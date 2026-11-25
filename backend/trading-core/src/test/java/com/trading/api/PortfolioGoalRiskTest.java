@@ -64,4 +64,22 @@ class PortfolioGoalRiskTest {
     eq("9000",r.scenarios().getLast().projectedShortfall());
     eq("4285.72",r.scenarios().getLast().requiredMonthlyContribution());
   }
+  @Test void alertUsesWorstIllustrativeGapOnlyForBaselineFundedGoals(){
+    var g=goal("20000","3000",TODAY,LocalDate.of(2027,6,15),List.of(equity(),fund()));
+    var a=PortfolioGoalNotifications.attention(g,TODAY);
+    assertEquals("DOWNSIDE_SHORTFALL",a.kind());
+    assertTrue(a.message().contains("direct equity -20%, fund NAV -10%"));
+    assertTrue(a.message().contains("9000.00"));
+    var funded=goal("40000","0",TODAY,TODAY.plusMonths(6),List.of(equity(),fund()));
+    assertEquals("DOWNSIDE_SHORTFALL",PortfolioGoalNotifications.attention(funded,TODAY).kind());
+    var buffered=goal("60000","0",TODAY,TODAY.plusMonths(6),List.of(equity(),fund()));
+    assertNull(PortfolioGoalNotifications.attention(buffered,TODAY));
+    var baselineGap=goal("10000","0",TODAY,TODAY.plusMonths(6),List.of(equity(),fund()));
+    assertEquals("SHORTFALL",PortfolioGoalNotifications.attention(baselineGap,TODAY).kind());
+    var near=goal("20000","30000",TODAY,TODAY.plusDays(25),List.of(equity(),fund()));
+    assertEquals("DEADLINE_NEAR",PortfolioGoalNotifications.attention(near,TODAY).kind());
+    var stale=goal("40000","0",TODAY.minusDays(31),TODAY.plusMonths(6),List.of(equity(),fund()));
+    assertEquals("STALE_BALANCE",PortfolioGoalNotifications.attention(stale,TODAY).kind());
+  }
+
 }
