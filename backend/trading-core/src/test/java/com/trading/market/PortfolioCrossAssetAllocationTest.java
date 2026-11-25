@@ -71,4 +71,24 @@ class PortfolioCrossAssetAllocationTest {
       PortfolioCrossAssetAllocation.collect(jdbc,List.of(equity),Map.of(),TODAY).get("status"));
     verifyNoInteractions(jdbc);
   }
+  @Test void collectorCombinesOneEquityAndDuplicateExactFundHoldings(){
+    JdbcTemplate jdbc=mock(JdbcTemplate.class);
+    var navRows=history("AMFI",41);
+    when(jdbc.queryForList(anyString(),eq(123456L),eq(TODAY),eq(TODAY),eq(TODAY),eq(TODAY))).thenReturn(navRows);
+    var nav=PortfolioCrossAssetAllocation.navReturns(navRows,TODAY);
+    assertNotNull(nav);
+    var equityReturns=new HashMap<PortfolioEquityCorrelation.Interval,Double>();
+    nav.returns().forEach((d,v)->equityReturns.put(d,-v));
+    var equity=Map.<String,Object>of("asset_type","EQUITY","market_value",new BigDecimal("800"),
+      "recorded_valuation_recent",true,"isin",EQUITY,"instrument_id",1L,"symbol","TEST");
+    var fund=Map.<String,Object>of("asset_type","MUTUAL_FUND","market_value",new BigDecimal("100"),
+      "recorded_valuation_recent",true,"symbol","123456","exact_scheme_code",123456L);
+    var report=PortfolioCrossAssetAllocation.collect(jdbc,List.of(equity,fund,fund),Map.of(EQUITY,equityReturns),TODAY);
+    assertEquals("HISTORICAL_COMPARISON_AVAILABLE",report.get("status"));
+    assertEquals(1,report.get("equity_identity_count"));assertEquals(1,report.get("fund_identity_count"));
+    assertEquals(Map.of(FUND,"AMFI"),report.get("nav_sources"));
+    assertEquals(0,new BigDecimal("1000").compareTo((BigDecimal)report.get("recorded_value")));
+    verify(jdbc,times(1)).queryForList(anyString(),eq(123456L),eq(TODAY),eq(TODAY),eq(TODAY),eq(TODAY));
+  }
+
 }
