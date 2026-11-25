@@ -39,6 +39,17 @@ class FundUnderlyingResearchTests(unittest.TestCase):
         self.assertEqual(result["cached_report_weight_percent"],30)
         self.assertEqual(research.summarize([{"isin":A,"weight_percent":30}]*2,NOW,{})["status"],"INVALID_HOLDING_IDENTITIES")
 
+    def test_exact_sector_evidence_requires_fresh_matching_upstox_profile(self):
+        from datetime import timedelta
+        good=report(A)
+        good["retrieved_at"]=NOW.isoformat()
+        good["sections"]["profile"]["source"]={"provider":"UPSTOX"}
+        stale=report(B)
+        stale["retrieved_at"]=(NOW-timedelta(hours=25)).isoformat()
+        stale["sections"]["profile"]["source"]={"provider":"UPSTOX"}
+        result=research.exact_sector_evidence([{"isin":A},{"isin":B},{"isin":C}],NOW,{A:good,B:stale,C:good})
+        self.assertEqual(result,{A:{"sector":"Example sector","retrieved_at":NOW.isoformat(),"provider":"UPSTOX"}})
+
     def test_coordinator_requires_both_permissions_and_reuses_company_cache(self):
         with patch.object(coordinator.fund_portfolios,"permitted",return_value=False),patch.object(coordinator.automatic_company_evidence,"refresh") as refresh:
             self.assertEqual(coordinator._execute_job("FUND_COMPANY_EVIDENCE"),"DISABLED_OR_NOT_AUTHORIZED")
