@@ -309,6 +309,39 @@ class LiveFeedsDatabaseIntegrationTest {
  }
 
 
+ @Test
+ @org.springframework.transaction.annotation.Transactional
+ void amfiPreservesSchemeIdentityAndRejectsConflictingHistory()throws Exception{
+  long code=987650456L;
+  LocalDate today=LocalDate.now(MarketCalendarService.IST);
+  var fmt=java.time.format.DateTimeFormatter.ofPattern("dd-MMM-uuuu",Locale.ENGLISH);
+  String prefix="Open Ended Schemes(Equity Scheme - Large Cap Fund)\nExample Mutual Fund\n";
+  String row=code+";INF000A01001;-;Example Fund;Direct Plan;Growth Option;125.50;"+today.format(fmt);
+  assertThat(funds.importNav(prefix+row)).isEqualTo(1);
+  var scheme=db.queryForMap("SELECT amfi_plan,amfi_option,amfi_metadata_date,category,amc_name FROM mutual_fund_schemes WHERE scheme_code=?",code);
+  assertThat(scheme).containsEntry("amfi_plan","DIRECT").containsEntry("amfi_option","GROWTH").containsEntry("category","Open Ended Schemes(Equity Scheme - Large Cap Fund)").containsEntry("amc_name","Example Mutual Fund");
+  assertThatThrownBy(()->funds.importNav(prefix+row.replace("INF000A01001","INF000A01002"))).isInstanceOf(IllegalStateException.class);
+  assertThat(db.queryForObject("SELECT isin_growth FROM mutual_fund_schemes WHERE scheme_code=?",String.class,code)).isEqualTo("INF000A01001");
+ }
+ @Test void historicalNavRequiresDeclaredIdentityAndUniqueDates()throws Exception{
+  long code=987650457L;
+  LocalDate day=LocalDate.now(MarketCalendarService.IST).minusDays(1);
+  db.update("INSERT INTO mutual_fund_schemes(scheme_code,scheme_name) VALUES (?,'History Identity Test')",code);
+  String formatted=day.format(java.time.format.DateTimeFormatter.ofPattern("dd-MM-yyyy"));
+  String item="{\"date\":\""+formatted+"\",\"nav\":\"100\"}";
+  for(String payload:List.of("{\"data\":["+item+"]}",
+     "{\"meta\":{\"scheme_code\":1},\"data\":["+item+"]}",
+     "{\"meta\":{\"scheme_code\":"+code+"},\"data\":["+item+","+item.replace("100","200")+"]}")){
+   when(http.text(contains("api.mfapi.in/mf/"+code),isNull(),anyInt())).thenReturn(payload);
+   assertThatThrownBy(()->funds.history(code)).isInstanceOf(IllegalStateException.class);
+   assertThat(db.queryForObject("SELECT count(*) FROM mutual_fund_nav WHERE scheme_code=?",Long.class,code)).isZero();
+  }
+  when(http.text(contains("api.mfapi.in/mf/"+code),isNull(),anyInt()))
+    .thenReturn("{\"meta\":{\"scheme_code\":"+code+"},\"data\":["+item+","+item+"]}");
+  assertThat(funds.history(code)).isEqualTo(1);
+  assertThat(db.queryForObject("SELECT count(*) FROM mutual_fund_nav WHERE scheme_code=?",Long.class,code)).isEqualTo(1L);
+ }
+
  @Test void fundHistoryWatchUsesOfficialCategoryAndPreservesAmfiNav()throws Exception{
   long code=987650123L;
   LocalDate today=LocalDate.now(MarketCalendarService.IST);
