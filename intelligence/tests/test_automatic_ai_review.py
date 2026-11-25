@@ -86,3 +86,49 @@ class AutomaticAiReviewTests(unittest.TestCase):
         self.assertIsNotNone(review._review(pack,"OLLAMA",runner))
         item["company_evidence"]["isin"]="INE009A01021"
         self.assertNotIn("financial_trends",review.evidence(item,"SWING"))
+
+
+    def test_five_provider_role_committee_resumes_in_bounded_batches(self):
+        calls=[]
+        def runner(prompt,ids,providers):
+            calls.append((providers[0],prompt))
+            return {"status":"MODEL_GROUNDED","provider":providers[0],"response":{
+                "findings":[{"statement":"Dated ATR observation.","evidence_ids":["OBS"]}]}}
+        with patch.dict(os.environ,{"ATLAS_AUTOMATIC_EXTERNAL_AI_ALLOWED":"true",
+            "ATLAS_AI_PROVIDER_ORDER":"GEMINI,GROQ,OPENAI,XAI,OLLAMA"}),patch.object(review.ai_failover,"_enabled",return_value=True):
+            for expected in (2,4,5,5):
+                review.refresh(snapshot(),research._connect,runner)
+                self.assertEqual(len(calls),expected)
+            result=review.attach(snapshot(),research._connect)
+            item=result["sections"][0]["result"]["horizons"]["SWING"]["candidates"][0]
+            committee=item["ai_review"]["committee"]
+            self.assertEqual(committee["reviewed_count"],5)
+            self.assertEqual(committee["status"],"ALL_CONFIGURED_REVIEWS_RETURNED")
+            self.assertEqual(committee["agreement_status"],"NOT_ASSESSED")
+            self.assertEqual(committee["uncited_domains"],["LIMITS"])
+            self.assertEqual([p for p,_ in calls],["OLLAMA","GEMINI","GROQ","OPENAI","XAI"])
+            self.assertEqual(len({m["role"] for m in committee["members"]}),5)
+            self.assertTrue(all("Assigned independent review role" in prompt for _,prompt in calls))
+            with patch.dict(os.environ,{"ATLAS_AUTOMATIC_EXTERNAL_AI_ALLOWED":"false"}):
+                changed=review.attach(snapshot(),research._connect)
+                self.assertNotIn("ai_review",changed["sections"][0]["result"]["horizons"]["SWING"]["candidates"][0])
+
+    def test_failed_member_does_not_suppress_later_members_or_repeat_immediately(self):
+        calls=[]
+        def runner(prompt,ids,providers):
+            provider=providers[0]
+            calls.append(provider)
+            if provider=="GEMINI":
+                return {"status":"MODEL_UNAVAILABLE"}
+            return {"status":"MODEL_GROUNDED","provider":provider,"response":{
+                "findings":[{"statement":"Evidence remains limited.","evidence_ids":["LIMITS"]}]}}
+        with patch.dict(os.environ,{"ATLAS_AUTOMATIC_EXTERNAL_AI_ALLOWED":"true",
+            "ATLAS_AI_PROVIDER_ORDER":"OLLAMA,GEMINI,GROQ"}),patch.object(review.ai_failover,"_enabled",return_value=True):
+            for _ in range(3):
+                review.refresh(snapshot(),research._connect,runner)
+            self.assertEqual(calls,["OLLAMA","GEMINI","GROQ"])
+            item=review.attach(snapshot(),research._connect)["sections"][0]["result"]["horizons"]["SWING"]["candidates"][0]
+            committee=item["ai_review"]["committee"]
+            self.assertEqual(committee["status"],"PARTIAL_REVIEWS")
+            self.assertEqual(committee["members"][1]["status"],"NO_USABLE_REVIEW")
+            self.assertEqual(committee["reviewed_count"],2)
