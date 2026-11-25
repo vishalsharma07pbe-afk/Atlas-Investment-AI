@@ -20,6 +20,8 @@ def _internal_path(path:str)->str:
             return "/api/v1/internal/feed/fund-history?category="+category
     if path == "/api/v1/portfolio-research-identities":
         return "/api/v1/internal/feed/portfolio-research-identities"
+    if path == "/api/v1/market-data/session-context":
+        return "/api/v1/internal/feed/session-context"
     if path == "/api/v1/data-health/summary":
         return "/api/v1/internal/feed/data-health/summary"
     raise HTTPException(status_code=500,detail="Unsupported internal market-data route")
