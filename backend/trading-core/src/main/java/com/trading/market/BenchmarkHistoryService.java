@@ -62,7 +62,7 @@ public class BenchmarkHistoryService {
     return result;
   }
 
-  int refresh(long instrument,String token,LocalDate from,LocalDate to)throws Exception{
+  public int refresh(long instrument,String token,LocalDate from,LocalDate to)throws Exception{
     LocalDate today=LocalDate.now(MarketCalendarService.IST);
     if(token==null||token.isBlank()||from.isAfter(to)||from.isBefore(to.minusDays(370))||!to.isBefore(today))
       throw new IllegalArgumentException("Invalid completed index history request");
