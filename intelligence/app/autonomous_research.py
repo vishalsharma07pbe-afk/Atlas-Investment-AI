@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from .market_client import backend_json
 from .screener import screen
 from .mutual_fund_recommendations import CATEGORIES, dashboard
-from . import global_releases, global_context, global_markets, global_macro, global_fx, automatic_deals, fund_portfolios, fund_disclosures, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
+from . import economic_calendar, global_releases, global_context, global_markets, global_macro, global_fx, automatic_deals, fund_portfolios, fund_disclosures, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
 
 SECTIONS = ("NSE", "BSE", *CATEGORIES)
 DEFAULT_INTERVAL = 900
@@ -270,6 +270,10 @@ def read_snapshot(include_ai=True):
             snapshot["global_releases"]=global_releases.read(_connect,current) if enabled else {"status":"AUTOMATION_DISABLED","sources":[],"events":[],"notice":global_releases.NOTICE}
         except (ValueError,OSError,sqlite3.Error):
             snapshot["global_releases"]={"status":"UNAVAILABLE","sources":[],"events":[],"notice":global_releases.NOTICE}
+        try:
+            snapshot["economic_calendar"]=economic_calendar.read(_connect,current) if enabled else economic_calendar.empty("AUTOMATION_DISABLED")
+        except (ValueError,OSError,sqlite3.Error):
+            snapshot["economic_calendar"]=economic_calendar.empty("UNAVAILABLE")
         global_context.attach(snapshot,current)
         research_reliability.attach_conclusions(snapshot)
         snapshot["daily_briefing"] = daily_briefing.summarize(snapshot)
@@ -289,6 +293,11 @@ def job_status():
 
 def _execute_job(job):
     """Dispatch existing bounded engines, with explicit evidence/config gates."""
+    if job=="ECONOMIC_CALENDAR":
+        if not economic_calendar.permitted():
+            return "DISABLED_OR_NOT_AUTHORIZED"
+        economic_calendar.refresh(_connect)
+        return "PASS_COMPLETED"
     if job in global_releases.JOBS:
         source=global_releases.JOBS[job]
         if not global_releases.permitted(source):
@@ -399,7 +408,7 @@ def run_one_job(interval):
         outcome=_execute_job(job)
     except Exception:
         outcome="FAILED"
-    research_jobs.finish(_connect,job,token,now().timestamp(),(research_calendar.POLL_SECONDS if job=="CALENDAR_CONTEXT" else global_releases.INTERVAL if job in global_releases.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_markets.INTERVAL if job in global_markets.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_macro.INTERVAL if job in global_macro.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_fx.INTERVAL if job=="GLOBAL_FX" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else fund_disclosures.INTERVAL if job in ("FUND_DISCLOSURES","FUND_PORTFOLIOS") and outcome!="DISABLED_OR_NOT_AUTHORIZED" else interval),outcome)
+    research_jobs.finish(_connect,job,token,now().timestamp(),(research_calendar.POLL_SECONDS if job=="CALENDAR_CONTEXT" else economic_calendar.INTERVAL if job=="ECONOMIC_CALENDAR" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_releases.INTERVAL if job in global_releases.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_markets.INTERVAL if job in global_markets.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_macro.INTERVAL if job in global_macro.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_fx.INTERVAL if job=="GLOBAL_FX" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else fund_disclosures.INTERVAL if job in ("FUND_DISCLOSURES","FUND_PORTFOLIOS") and outcome!="DISABLED_OR_NOT_AUTHORIZED" else interval),outcome)
     return True
 
 

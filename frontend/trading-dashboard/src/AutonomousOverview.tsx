@@ -16,7 +16,8 @@ type MacroContext={status:string;sources:MacroSource[];notice:string};
 type GlobalMarketContext={status:string;notice:string;items:{series:string;label:string;source:string;unit:string;status:string;as_of?:string|null;value?:number|null;changes:{observations:number;start_date:string;end_date:string;percent:number}[]}[]};
 type GlobalContext={status:string;available_count:number;total_count:number;groups:{group:string;available_count:number;total_count:number;items:{key:string;label:string;source:string;as_of:string;change:{start_date:string;end_date:string;value:number;unit:string}|null}[]}[];notice:string};
 type GlobalReleaseContext={status:string;sources:{source:string;label:string;status:string;retrieved_at?:string;event_count?:number}[];events:{id:string;headline:string;source_name:string;source_url:string;published_at:string;topics:string[];geography:string}[];notice:string};
-type Snapshot={global_releases?:GlobalReleaseContext;global_context?:GlobalContext;global_markets?:GlobalMarketContext;global_macro?:MacroContext;global_fx?:FxContext;daily_briefing?:Briefing;recent_company_news?:Article[];institutional_activity?:InstitutionalActivity;enabled:boolean;interval_seconds:number;sections:{section:string;status:string;generated_at:string|null;attempted_at:string|null;result:Result|null}[]};
+type EconomicCalendar={status:string;source_url:string;retrieved_at?:string;events:{id:string;headline:string;topic:string;scheduled_at:string;status:string;review_window:boolean}[];notice:string};
+type Snapshot={economic_calendar?:EconomicCalendar;global_releases?:GlobalReleaseContext;global_context?:GlobalContext;global_markets?:GlobalMarketContext;global_macro?:MacroContext;global_fx?:FxContext;daily_briefing?:Briefing;recent_company_news?:Article[];institutional_activity?:InstitutionalActivity;enabled:boolean;interval_seconds:number;sections:{section:string;status:string;generated_at:string|null;attempted_at:string|null;result:Result|null}[]};
 const labels:Record<string,string>={NSE:"NSE",BSE:"BSE",LARGE_CAP:"Large cap",MID_CAP:"Mid cap",SMALL_CAP:"Small cap",FLEXI_CAP:"Flexi cap",INDEX:"Index funds",LARGE_MID_CAP:"Large & mid cap",MULTI_CAP:"Multi cap",AGGRESSIVE_HYBRID:"Aggressive hybrid",CORPORATE_BOND:"Corporate bond",SHORT_DURATION:"Short duration"};
 const percent=(value:number|null)=>value==null?"—":(value>0?"+":"")+value.toFixed(2)+"%";
 const stamp=(value:string|null)=>value?new Date(value).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",dateStyle:"medium",timeStyle:"short"})+" IST":"Not yet refreshed";
@@ -44,6 +45,7 @@ export default function AutonomousOverview({children,onPortfolio,onFunds,onSetti
    {data?.enabled===false&&<p className="notice warning-notice">Background research is disabled. Check the local configuration in Settings.</p>}
    {current&&data?.daily_briefing&&<DailyBriefing report={data.daily_briefing} onFunds={onFunds} onSettings={onSettings}/>}
    {onHorizon&&<div className="research-shortcuts" aria-label="Automatic equity research shortcuts">{horizonLinks.map(({id,title})=>{const groups=readyMarkets.flatMap(row=>row.result?.horizons?.[id]?[row.result.horizons[id]!]:[]);const count=groups.reduce((n,group)=>n+(group.status==="TECHNICAL_WATCH_ONLY"?group.candidates.length:0),0);return <button key={id} type="button" className="research-shortcut" onClick={()=>onHorizon(id)}><strong>{title}</strong><span>{groups.length?`${count} technical watches`:"Current research pending"}</span><small>Open research →</small></button>;})}</div>}
+   {current&&data?.economic_calendar&&<EconomicCalendarPanel report={data.economic_calendar}/>}
    {current&&data?.global_releases&&<GlobalReleasePanel report={data.global_releases}/>}
    {current&&data?.global_context&&<GlobalResearchSummary report={data.global_context}/>}
    {current&&data?.global_fx&&<GlobalFxContext report={data.global_fx}/>}
@@ -110,4 +112,11 @@ function GlobalReleasePanel({report}:{report:GlobalReleaseContext}){
  return <section className="autonomous-result" aria-label="Official global economic announcements"><header><strong>Official global economic announcements</strong><span>{report.status.toLowerCase().replace(/_/g," ")}</span></header>
  {report.events.length?<ul>{report.events.map(e=><li key={e.id}><div><a href={e.source_url} target="_blank" rel="noopener noreferrer">{e.headline}</a><small>{e.source_name} · {stamp(e.published_at)} · {e.geography}</small><small>{e.topics.map(t=>t.toLowerCase().replace(/_/g," ")).join(" · ")||"General announcement"}</small></div></li>)}</ul>:<p>No recent usable published announcement in the enabled feeds.</p>}
  <details><summary>Official feed coverage</summary>{report.sources.map(s=><p key={s.source}>{s.label} · {s.status.toLowerCase().replace(/_/g," ")}{s.retrieved_at?" · "+stamp(s.retrieved_at):""}</p>)}</details><p className="muted tiny">{report.notice}</p></section>;
+}
+
+function EconomicCalendarPanel({report}:{report:EconomicCalendar}){
+ return <section className="autonomous-result" aria-label="Upcoming economic release calendar"><header><strong>Upcoming economic release calendar</strong><span>{report.status.toLowerCase().replace(/_/g," ")}</span></header>
+ <p className="muted tiny">US Bureau of Labor Statistics · scheduled time in IST · <a href={report.source_url} target="_blank" rel="noopener noreferrer">Official calendar</a>{report.retrieved_at&&" · retrieved "+stamp(report.retrieved_at)}</p>
+ {report.events.length?<ul>{report.events.map(e=><li key={e.id}><div><strong>{e.headline}</strong><small>{stamp(e.scheduled_at)} · {e.status.toLowerCase().replace(/_/g," ")}</small>{e.review_window&&<small>Upcoming within 24 hours · review event exposure</small>}</div></li>)}</ul>:<p>No usable scheduled events in the current coverage window.</p>}
+ <p className="muted tiny">{report.notice}</p></section>;
 }
