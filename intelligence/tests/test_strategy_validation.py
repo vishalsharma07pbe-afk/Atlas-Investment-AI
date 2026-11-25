@@ -188,3 +188,48 @@ class StrategyValidationTests(unittest.TestCase):
         attach_market_benchmark(result,data,{**benchmark,"candles":rows[:70]+rows[71:]},TODAY)
         self.assertEqual(fold["market_benchmark_status"],"UNAVAILABLE")
         self.assertNotIn("gross_nifty50_price_index_percent",fold["cost_scenarios"][0])
+
+    def test_execution_proxy_counts_and_friction_do_not_change_replay(self):
+        data=history()
+        always={h:("TECHNICAL_WATCH",{}) for h in ("SWING","SHORT_TERM","LONG_TERM")}
+        with patch("app.strategy_validation.evaluate",return_value=always):
+            result=replay(data,TODAY)
+            swing=result["horizons"]["SWING"]
+            research=swing["execution_research"]
+            self.assertEqual(research["positions"],19)
+            self.assertEqual(research["notional_scenarios"][0]["within_proxy_limit"],19)
+            self.assertEqual(research["notional_scenarios"][1]["exceeds_proxy_limit"],19)
+            self.assertEqual(research["friction_scenarios"][0]["net_return_percent"],swing["cost_scenarios"][1]["net_return_percent"])
+            self.assertGreater(research["friction_scenarios"][0]["net_return_percent"],research["friction_scenarios"][-1]["net_return_percent"])
+            self.assertEqual(swing["chronological_validation"]["folds"][0]["execution_research"]["positions"],6)
+            data["candles"][301]["volume"]=0
+            data["candles"][325]["volume"]=0
+            changed=replay(data,TODAY)["horizons"]["SWING"]
+        self.assertEqual(changed["trades"],swing["trades"])
+        self.assertEqual(changed["cost_scenarios"],swing["cost_scenarios"])
+        research=changed["execution_research"]
+        self.assertEqual(research["zero_volume_endpoint_positions"],1)
+        small=research["notional_scenarios"][0]
+        self.assertEqual(small["exceeds_proxy_limit"],1)
+        self.assertGreater(small["unknown"],0)
+        for scenario in research["notional_scenarios"]:
+            self.assertEqual(sum(scenario[k] for k in ("within_proxy_limit","exceeds_proxy_limit","unknown")),19)
+
+    def test_execution_prior_median_excludes_current_and_future_volume(self):
+        from app.strategy_validation import _prior_turnover,_history
+        data=history()
+        candles=_history(data,TODAY)
+        before=_prior_turnover(candles,301)
+        data["candles"][301]["volume"]=999999999
+        data["candles"][302]["volume"]=0
+        self.assertEqual(_prior_turnover(_history(data,TODAY),301),before)
+        data["candles"][300]["volume"]=0
+        self.assertIsNone(_prior_turnover(_history(data,TODAY),301))
+        self.assertIsNone(_prior_turnover(candles,19))
+
+    def test_execution_no_signals_has_no_return_estimate(self):
+        with patch("app.strategy_validation.evaluate",return_value={h:("RULES_NOT_MET",None) for h in ("SWING","SHORT_TERM","LONG_TERM")}):
+            result=replay(history(),TODAY)["horizons"]["SWING"]["execution_research"]
+        self.assertEqual(result["status"],"NO_SIGNALS")
+        self.assertEqual(result["friction_scenarios"],[])
+        self.assertEqual(result["positions"],0)
