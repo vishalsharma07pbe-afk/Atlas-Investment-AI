@@ -11,8 +11,9 @@ import org.springframework.stereotype.Service;
 public class PortfolioReviewService {
   private final JdbcTemplate jdbc;
   private final com.fasterxml.jackson.databind.ObjectMapper json;
-  public PortfolioReviewService(JdbcTemplate jdbc,com.fasterxml.jackson.databind.ObjectMapper json){
-    this.jdbc=jdbc;this.json=json;
+  private final PortfolioThesisService thesis;
+  public PortfolioReviewService(JdbcTemplate jdbc,com.fasterxml.jackson.databind.ObjectMapper json,PortfolioThesisService thesis){
+    this.jdbc=jdbc;this.json=json;this.thesis=thesis;
   }
 
   private String revision(UUID owner){
@@ -104,6 +105,17 @@ public class PortfolioReviewService {
     }
     try{report.put("equity_correlation",PortfolioEquityCorrelation.collect(jdbc,rows,today));}
     catch(org.springframework.dao.DataAccessException ignored){report.put("equity_correlation",Map.of("status","UNAVAILABLE","notice","Local adjusted history could not be read."));}
+    // Enrichment reads existing caches only. The scheduled review now produces
+    // the same detailed digest that the authenticated dashboard consumes.
+    var prior=json.createObjectNode();
+    var priorRows=jdbc.queryForList("SELECT result::text FROM portfolio_review_snapshots WHERE user_id=?",String.class,owner);
+    com.fasterxml.jackson.databind.JsonNode previous=prior;
+    if(!priorRows.isEmpty())try{
+      previous=json.readTree(priorRows.getFirst());
+      if(previous==null)previous=prior;
+    }catch(com.fasterxml.jackson.core.JsonProcessingException ignored){/* Invalid cache has no baseline. */}
+    report=PortfolioThesisChanges.attach(thesis.enrich(report),previous,json,now);
+    report.put("thesis_monitor_version","ANNUAL_DIRECTION_V1");
     try{
       jdbc.update("""
         INSERT INTO portfolio_review_snapshots(user_id,holdings_revision,generated_at,result)
