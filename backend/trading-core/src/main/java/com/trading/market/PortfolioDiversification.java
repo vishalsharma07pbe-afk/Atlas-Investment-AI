@@ -65,11 +65,18 @@ final class PortfolioDiversification {
   }
   var ranked=identities.values().stream().sorted(Comparator.comparing(Position::value).reversed().thenComparing(Position::label)).toList();
   List<String> prompts=new ArrayList<>();
+  List<Map<String,Object>> concentration=new ArrayList<>();
   BigDecimal topThree=ranked.stream().limit(3).map(Position::value).reduce(ZERO,BigDecimal::add);
   for(Position p:ranked)if(over(p.value(),total,25))prompts.add(p.label()+" exceeds 25% of recorded priced portfolio value after exact identity aggregation.");
   if(over(topThree,total,60))prompts.add("Top three resolved investment identities exceed 60% of recorded priced portfolio value.");
   for(var e:sectors.entrySet())if(!UNKNOWN.equals(e.getKey())&&over(e.getValue(),directEquity,40))
     prompts.add(e.getKey()+" exceeds 40% of recorded direct-equity value. Review sector exposure.");
+  // Structured observations use the same unrounded thresholds as the existing prompts.
+  for(Position p:ranked)if(over(p.value(),total,25))
+    concentration.add(Map.of("kind","SINGLE_IDENTITY","label",p.label(),"weight_percent",pct(p.value(),total),"threshold_percent",25));
+  if(over(topThree,total,60))concentration.add(Map.of("kind","TOP_THREE","label","Top three resolved identities","weight_percent",pct(topThree,total),"threshold_percent",60));
+  for(var e:sectors.entrySet())if(!UNKNOWN.equals(e.getKey())&&over(e.getValue(),directEquity,40))
+    concentration.add(Map.of("kind","DIRECT_EQUITY_SECTOR","label",e.getKey(),"weight_percent",pct(e.getValue(),directEquity),"threshold_percent",40));
   if(unpriced>0||unresolved>0||knownEquity.compareTo(directEquity)<0||knownFund.compareTo(fundValue)<0)
     prompts.add("Complete missing recorded valuations, exact identities and classification evidence before relying on diversification measures.");
   Map<String,Object> out=new LinkedHashMap<>();
@@ -80,6 +87,7 @@ final class PortfolioDiversification {
   out.put("fund_category_exposure",exposure(categories,fundValue));
   out.put("sector_coverage_percent",pct(knownEquity,directEquity));out.put("fund_category_coverage_percent",pct(knownFund,fundValue));
   out.put("review_prompts",prompts);
+  out.put("concentration_observations",concentration);
   out.put("notice","Recorded priced holdings only, not independently verified live valuations. Sector weights use direct equity value; fund category weights use fund value. Exact identities aggregate duplicate holdings. Fund underlying exposures, overlap, correlations and optimal allocations are not established. Thresholds are illustrative review triggers, not personalized targets.");
   return out;
  }
