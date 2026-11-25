@@ -12,6 +12,7 @@ final class PortfolioLookThrough {
   private static final BigDecimal ZERO=BigDecimal.ZERO,HUNDRED=BigDecimal.valueOf(100),TOLERANCE=new BigDecimal("0.0001");
   private record Composition(String code,String fundId,LocalDate date,Map<String,BigDecimal> weights,BigDecimal coverage){}
   private record Fund(Composition composition,BigDecimal value){}
+  private record Sector(String sector,BigDecimal directValue,BigDecimal indirectValue,BigDecimal estimatedValue,BigDecimal portfolioPercent){}
   private record Exposure(String isin,BigDecimal directValue,BigDecimal indirectValue,BigDecimal estimatedValue,BigDecimal portfolioPercent,int contributingSchemes){}
   private record Pair(String schemeA,String schemeB,boolean sameUnderlyingFund,int commonEquities,BigDecimal sharedWeightPercent,BigDecimal coverageA,BigDecimal coverageB){}
   private static BigDecimal number(JsonNode n){
@@ -54,6 +55,18 @@ final class PortfolioLookThrough {
     if(coverage.compareTo(HUNDRED)>0||reported.subtract(coverage).abs().compareTo(TOLERANCE)>0)return null;
     return new Composition(code,fundId,day,valid,coverage);
   }
+  private static void sectorEvidence(Map<String,Set<String>> labels,String isin,JsonNode evidence,Instant now){
+    if(!equityIsin(isin)||!"UPSTOX".equals(evidence.path("provider").asText()))return;
+    try{
+      Instant stamp=OffsetDateTime.parse(evidence.path("retrieved_at").asText()).toInstant();
+      if(stamp.isAfter(now)||stamp.isBefore(now.minus(Duration.ofHours(24))))return;
+    }catch(RuntimeException ex){return;}
+    JsonNode field=evidence.path("sector");
+    if(!field.isTextual())return;
+    String label=field.asText().trim().replaceAll("\\s+"," ").toLowerCase(Locale.ROOT);
+    if(label.isBlank()||label.length()>180||Set.of("unknown","n/a","na","not available","-","null").contains(label))return;
+    labels.computeIfAbsent(isin,k->new TreeSet<>()).add(label);
+  }
   private static BigDecimal pct(BigDecimal value,BigDecimal total){return value.multiply(HUNDRED).divide(total,2,RoundingMode.HALF_UP);}
   private static BigDecimal money(BigDecimal v){return v.setScale(2,RoundingMode.HALF_UP);}
 
@@ -64,6 +77,8 @@ final class PortfolioLookThrough {
     out.put("risk_observations",List.of());out.put("risk_observation_count",0);
     BigDecimal total=ZERO,fundValue=ZERO,directValue=ZERO;
     Map<String,BigDecimal> direct=new TreeMap<>();
+    Map<String,Set<String>> sectorLabels=new HashMap<>();
+    Map<String,List<JsonNode>> fundSectorEvidence=new HashMap<>();
     Map<String,Fund> funds=new TreeMap<>();
     Set<String> conflicts=new HashSet<>();
     int positiveFunds=0;
@@ -80,7 +95,18 @@ final class PortfolioLookThrough {
       if("EQUITY".equals(asset)){
         directValue=directValue.add(value);
         String isin=h.path("isin").asText();
-        if(equityIsin(isin))direct.merge(isin,value,BigDecimal::add);
+        if(equityIsin(isin)){
+          direct.merge(isin,value,BigDecimal::add);
+          var company=h.path("thesis_evidence").path("company_evidence");
+          var profile=company.path("sections").path("profile");
+          if(isin.equals(company.path("isin").asText())&&"AVAILABLE".equals(profile.path("status").asText())){
+            var evidence=json.createObjectNode();
+            evidence.set("sector",profile.path("data").path("sector"));
+            evidence.set("provider",profile.path("source").path("provider"));
+            evidence.set("retrieved_at",company.path("retrieved_at"));
+            sectorEvidence(sectorLabels,isin,evidence,now);
+          }
+        }
       }else if("MUTUAL_FUND".equals(asset)){
         positiveFunds++;fundValue=fundValue.add(value);
         Composition c=composition(h,now,today);
@@ -89,6 +115,7 @@ final class PortfolioLookThrough {
         Fund old=funds.get(code);
         if(old!=null&&!old.composition().equals(c)){conflicts.add(code);continue;}
         funds.put(code,new Fund(c,old==null?value:old.value().add(value)));
+        fundSectorEvidence.computeIfAbsent(code,k->new ArrayList<>()).add(h.path("fund_thesis_evidence").path("portfolio").path("exact_sector_evidence"));
       }else{out.put("status","UNSUPPORTED_ASSET_TYPE");return out;}
     }
     if(positiveFunds==0){out.put("status","NO_POSITIVE_FUND_HOLDINGS");return out;}
@@ -108,6 +135,8 @@ final class PortfolioLookThrough {
     BigDecimal matchedFundValue=ZERO;
     for(Fund f:selected){
       matchedFundValue=matchedFundValue.add(f.value());
+      for(JsonNode evidence:fundSectorEvidence.getOrDefault(f.composition().code(),List.of()))
+        for(String isin:f.composition().weights().keySet())sectorEvidence(sectorLabels,isin,evidence.path(isin),now);
       f.composition().weights().forEach((isin,w)->{
         indirect.merge(isin,f.value().multiply(w).movePointLeft(2),BigDecimal::add);
         contributors.merge(isin,1,Integer::sum);
@@ -127,6 +156,27 @@ final class PortfolioLookThrough {
     }
     exposures.sort(Comparator.comparing(Exposure::estimatedValue).reversed().thenComparing(Exposure::isin));
     BigDecimal mapped=direct.values().stream().reduce(ZERO,BigDecimal::add).add(indirect.values().stream().reduce(ZERO,BigDecimal::add));
+    Map<String,BigDecimal> directSectors=new TreeMap<>(),indirectSectors=new TreeMap<>();
+    for(String isin:all){
+      Set<String> labels=sectorLabels.getOrDefault(isin,Set.of());
+      if(labels.size()!=1)continue;
+      String sector=labels.iterator().next();
+      directSectors.merge(sector,direct.getOrDefault(isin,ZERO),BigDecimal::add);
+      indirectSectors.merge(sector,indirect.getOrDefault(isin,ZERO),BigDecimal::add);
+    }
+    List<Sector> sectorRows=new ArrayList<>();BigDecimal classified=ZERO;
+    for(String sector:directSectors.keySet()){
+      BigDecimal d=directSectors.get(sector),i=indirectSectors.get(sector),v=d.add(i);
+      classified=classified.add(v);
+      sectorRows.add(new Sector(sector,money(d),money(i),money(v),pct(v,total)));
+    }
+    sectorRows.sort(Comparator.comparing(Sector::estimatedValue).reversed().thenComparing(Sector::sector));
+    out.put("sector_status",classified.signum()>0?"PARTIAL_CLASSIFIED_EXPOSURE":"NO_CURRENT_EXACT_CLASSIFICATION");
+    out.put("sector_classified_portfolio_percent",pct(classified,total));
+    out.put("sector_classified_value",money(classified));
+    out.put("sector_unclassified_mapped_value",money(mapped.subtract(classified)));
+    out.put("sector_exposures",sectorRows.stream().limit(20).toList());
+    out.put("sector_count",sectorRows.size());
     List<Pair> pairs=new ArrayList<>();
     for(int a=0;a<selected.size();a++)for(int b=a+1;b<selected.size();b++){
       Composition x=selected.get(a).composition(),y=selected.get(b).composition();
@@ -157,6 +207,6 @@ final class PortfolioLookThrough {
   /** Full source weights are internal working evidence, not an expanded public API payload. */
   static void stripWorkingWeights(List<Map<String,Object>> holdings){
     for(var h:holdings)if(h.get("fund_thesis_evidence") instanceof JsonNode node&&
-        node.path("portfolio") instanceof com.fasterxml.jackson.databind.node.ObjectNode p)p.remove("exact_equity_weights");
+        node.path("portfolio") instanceof com.fasterxml.jackson.databind.node.ObjectNode p){p.remove("exact_equity_weights");p.remove("exact_sector_evidence");}
   }
 }
