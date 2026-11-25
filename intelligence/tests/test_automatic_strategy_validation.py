@@ -43,7 +43,7 @@ class AutomaticValidationTests(unittest.TestCase):
                 return db
             instant=datetime(2026,11,24,10,tzinfo=timezone.utc)
             result={"as_of":"2026-11-23","isin":"INE002A01018","replay_evidence_hash":"a"*64,"horizons":{"SWING":{"status":"REPLAY_OBSERVED",
-                "trades":3,"small_sample":True,"cost_scenarios":[],"history_provenance":{"status":"NO_COMPARABLE_PRIOR_CAPTURE","corporate_action_status":"NO_RECORDED_CROSSING_ACTION","calendar_continuity":{"status":"STORED_SESSIONS_MATCHED"}}}}}
+                "trades":3,"small_sample":True,"cost_scenarios":[],"history_provenance":{"status":"NO_COMPARABLE_PRIOR_CAPTURE","corporate_action_status":"NO_RECORDED_CROSSING_ACTION","calendar_continuity":{"status":"STORED_SESSIONS_MATCHED"},"listing_evidence":{"status":"RECORDED_LISTING_DATES_CONSISTENT"}}}}}
             with connect() as db:
                 _table(db)
                 db.execute("INSERT INTO strategy_validation VALUES(?,?,?,?,?,?,?)",
@@ -63,6 +63,11 @@ class AutomaticValidationTests(unittest.TestCase):
             read(connect,instant,snapshot=snapshot)
             self.assertEqual(items[0]["matched_strategy_replay"]["trades"],3)
             self.assertTrue(all("matched_strategy_replay" not in i for i in items[1:]))
+            result["horizons"]["SWING"]["history_provenance"]["listing_evidence"]["status"]="LISTING_EVIDENCE_UNAVAILABLE"
+            with connect() as db:
+                db.execute("UPDATE strategy_validation SET payload=?",(json.dumps(result),))
+            read(connect,instant,snapshot=snapshot)
+            self.assertNotIn("matched_strategy_replay",items[0])
 
     def test_regime_evidence_is_refreshed_and_cached_with_existing_replay(self):
         from datetime import date
@@ -76,7 +81,8 @@ class AutomaticValidationTests(unittest.TestCase):
             snapshot={"enabled":True,"sections":[{"section":"NSE","status":"READY","result":{"horizons":{}}}]}
             identity={"id":1,"symbol":"TEST","exchange":"NSE","isin":"INE002A01018",
                       "active":True,"listing_status":"ACTIVE","series":"EQ","instrument_type":"EQUITY",
-                      "latest_action_date":None,"corporate_action_context":"[]"}
+                      "latest_action_date":None,"corporate_action_context":"[]",
+                      "listed_on":"2020-01-01","delisted_on":None,"registry_source":"TEST","registry_revision":"r1"}
             today=date(2026,11,24)
             candles=[{"trade_date":(today-timedelta(days=500-i)).isoformat(),"open":100+i*.1,
                       "high":101+i*.1,"low":99+i*.1,"close":100.2+i*.1,"volume":200000,
@@ -111,6 +117,7 @@ class AutomaticValidationTests(unittest.TestCase):
             self.assertEqual(sum(path.endswith("strategy-benchmark") for path in calls),1)
             self.assertEqual(result["history_provenance"]["history_observations"],500)
             self.assertEqual(result["history_provenance"]["status"],"NO_COMPARABLE_PRIOR_CAPTURE")
+            self.assertEqual(result["history_provenance"]["listing_evidence"]["status"],"RECORDED_LISTING_DATES_CONSISTENT")
             self.assertNotIn("_history_manifest",result)
             # Same-date older revision is detected on the next ordinary pass.
             candles[0]["revision"]=2
@@ -140,4 +147,9 @@ class AutomaticValidationTests(unittest.TestCase):
                 report=read(connect,final)["horizons"]["SWING"]
                 self.assertEqual(report["counts"],{"RECORDED_ACTION_RECONCILIATION_REQUIRED":1})
                 self.assertEqual(report["items"],[])
+                identity["listed_on"]=candles[100]["trade_date"]
+                refresh(snapshot,connect,loader,final+timedelta(hours=25))
+                report=read(connect,final+timedelta(hours=25))["horizons"]["SWING"]
+                self.assertEqual(report["counts"],{"LISTING_CONTEXT_CONTRADICTION":1})
+                self.assertEqual(report["listing_withheld"][0]["listed_on"],identity["listed_on"])
 

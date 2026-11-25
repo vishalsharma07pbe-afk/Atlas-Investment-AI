@@ -16,7 +16,9 @@ public class MarketDataController {
   public Map<String,Object> candles(@PathVariable long id,@RequestParam(defaultValue="500") int limit){
     int safe=Math.max(1,Math.min(limit,2000));
     List<Map<String,Object>> instrument=jdbc.queryForList("""
-      SELECT i.id,e.code exchange,i.symbol,i.series,i.isin,i.security_name,i.listing_status
+      SELECT i.id,e.code exchange,i.symbol,i.series,i.isin,i.security_name,i.listing_status,i.active,i.instrument_type,
+        to_char(i.listed_on,'YYYY-MM-DD') AS listed_on,to_char(i.delisted_on,'YYYY-MM-DD') AS delisted_on,
+        i.source AS registry_source,i.source_revision AS registry_revision
       FROM instruments i JOIN exchanges e ON e.id=i.exchange_id WHERE i.id=?
       """,id);
     if(instrument.isEmpty())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Instrument not found");

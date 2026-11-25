@@ -60,7 +60,10 @@ class DataFoundationIntegrationTest {
       .andExpect(jsonPath("$.upstoxRegistry.records").value(0))
       .andExpect(jsonPath("$.upstoxDailyHistory.records").value(0))
       .andExpect(jsonPath("$.officialAmfiNav.records").value(0));
-    mvc.perform(get("/api/v1/market-data/instruments/1/candles")).andExpect(status().isOk()).andExpect(jsonPath("$.timeframe").value("1d")).andExpect(jsonPath("$.count").value(2)).andExpect(jsonPath("$.candles[0].adjustment_status").value("RAW_UNADJUSTED"));
+    mvc.perform(get("/api/v1/market-data/instruments/1/candles")).andExpect(status().isOk()).andExpect(jsonPath("$.timeframe").value("1d")).andExpect(jsonPath("$.count").value(2)).andExpect(jsonPath("$.candles[0].adjustment_status").value("RAW_UNADJUSTED"))
+      .andExpect(jsonPath("$.instrument.listed_on").value("1977-11-23"))
+      .andExpect(jsonPath("$.instrument.listing_status").value("ACTIVE"))
+      .andExpect(jsonPath("$.instrument.registry_revision").value("test-registry-1"));
   }
 
   @Test @Order(2) void historicalCalendarDistinguishesHolidayRegularAndUnknown() {

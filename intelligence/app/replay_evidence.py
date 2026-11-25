@@ -155,3 +155,44 @@ def session_audit(manifest,calendar,exchange,today):
         return result
     except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
         return result
+
+def listing_audit(selected,identity,manifest,today):
+    """Current registry consistency only; never infer historic universe membership."""
+    result={"status":"LISTING_EVIDENCE_UNAVAILABLE","listed_on":None,"delisted_on":None,
+            "registry_source":None,"registry_revision":None,"universe_basis":"CURRENT_ACTIVE_REGISTRY_SAMPLE",
+            "historical_universe_verified":False,
+            "notice":"Current registry dates and identity only. Historical membership, suspended/delisted securities and publication-time records are not verified. Survivorship and selection bias remain."}
+    try:
+        fields=("id","exchange","symbol","isin","series","instrument_type","active","listing_status",
+                "listed_on","delisted_on","registry_source","registry_revision")
+        if any(k not in selected or k not in identity for k in fields):
+            return result
+        if any(selected[k]!=identity[k] for k in fields):
+            result["status"]="LISTING_CONTEXT_CHANGED"
+            return result
+        if (identity["active"] is not True or identity["listing_status"]!="ACTIVE" or
+                identity["series"]!="EQ" or identity["instrument_type"] not in ("EQ","EQUITY","STOCK") or
+                not exact_isin(identity["isin"])):
+            result["status"]="LISTING_CONTEXT_CONTRADICTION"
+            return result
+        listed=identity["listed_on"]
+        delisted=identity["delisted_on"]
+        start=date.fromisoformat(listed) if listed is not None else None
+        end=date.fromisoformat(delisted) if delisted is not None else None
+        first=date.fromisoformat(manifest["first_date"])
+        last=date.fromisoformat(manifest["last_date"])
+        result.update(listed_on=start.isoformat() if start else None,delisted_on=end.isoformat() if end else None)
+        if (start is not None and (start>first or start>today)) or (end is not None and
+                (end<=today or end<=last or (start is not None and end<start))):
+            result["status"]="LISTING_CONTEXT_CONTRADICTION"
+            return result
+        source=identity["registry_source"]
+        revision=identity["registry_revision"]
+        if not isinstance(source,str) or not source.strip() or not isinstance(revision,str) or not revision.strip():
+            return result
+        result.update(registry_source=source[:120],registry_revision=revision[:120])
+        if start is not None:
+            result["status"]="RECORDED_LISTING_DATES_CONSISTENT"
+        return result
+    except (ValueError,TypeError,KeyError,AttributeError):
+        return result

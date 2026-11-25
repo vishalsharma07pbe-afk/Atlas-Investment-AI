@@ -152,3 +152,14 @@ it("explains withheld calendar evidence without simulated returns",async()=>{
  expect(screen.getByText(/Missing dates.*2026-10-01/)).toBeTruthy();
  expect(screen.getByText(/No usable replay results yet/)).toBeTruthy();
 });
+
+it("explains contradictory listing evidence without implying historical universe coverage",async()=>{
+ const strategy_validation={sample_count:1,horizons:{SWING:{counts:{LISTING_CONTEXT_CONTRADICTION:1},observed_instruments:0,items:[],
+ listing_withheld:[{exchange:"NSE",symbol:"LISTING",status:"LISTING_CONTEXT_CONTRADICTION",listed_on:"2026-10-01",delisted_on:null,registry_source:null,registry_revision:null,universe_basis:"CURRENT_ACTIVE_REGISTRY_SAMPLE",historical_universe_verified:false,notice:"Survivorship bias remains."}]}}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[section],strategy_validation})})));
+ render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+ fireEvent.click(await screen.findByText(/LISTING · NSE · listing evidence withheld/));
+ expect(screen.getByText(/Recorded listing: 2026-10-01/)).toBeTruthy();
+ expect(screen.getByText(/Historical universe not verified/)).toBeTruthy();
+ expect(screen.getByText("Survivorship bias remains.")).toBeTruthy();
+});
