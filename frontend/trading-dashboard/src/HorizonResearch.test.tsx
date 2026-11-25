@@ -177,3 +177,15 @@ it("shows reported deal sides without promoting a watch",async()=>{
  expect(screen.getByText(/sell quantity 1000/)).toBeTruthy();
  expect(screen.getByText(/event risk not verified/)).toBeTruthy();
 });
+
+it("shows unusual price volume research separately from technical picks",async()=>{
+ const pressure={status:"OBSERVED_PRICE_VOLUME_ONLY",as_of:"2026-11-23",relative_volume:3,change_percent:-4,findings:["HIGH_VOLUME_DECLINE_REVIEW"],adjustment_status:"RAW_UNADJUSTED",notice:"No institutional attribution."};
+ const market={...section,result:{...section.result,price_volume_review:{evaluated_count:4,flagged_count:1,downside_items:[{id:2,symbol:"DOWNTEST",exchange:"NSE",as_of:"2026-11-23",price_volume_pressure:pressure}],upside_items:[],notice:"Bounded diagnostic sample."}}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[market]})})));
+ render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+ fireEvent.click(await screen.findByText("NSE · unusual price and volume (1 of 4 assessed)"));
+ expect(screen.getByText("DOWNTEST")).toBeTruthy();
+ expect(screen.getByText("high volume decline review")).toBeTruthy();
+ expect(screen.getByText(/3× preceding median volume/)).toBeTruthy();
+ expect(screen.getByText("Technical watch candidates")).toBeTruthy();
+});
