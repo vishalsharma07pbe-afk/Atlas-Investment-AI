@@ -61,6 +61,7 @@ final class PortfolioLookThrough {
     var out=new LinkedHashMap<String,Object>();
     out.put("notice","Estimates combine recent recorded direct values and original reported fund NAV weights from the newest available common disclosure-date cohort. No normalization. Excludes missing, older-date, foreign, unmapped and indirect fund-unit exposures; unmodeled capital is not assumed risk-free. Same-date fund overlap sums minimum shared listed-equity weights with at least 80% exact coverage per scheme. Secondary disclosures may be outdated or inaccurate. Not a live exposure or a recommendation.");
     out.put("exposures",List.of());out.put("overlap_pairs",List.of());
+    out.put("risk_observations",List.of());out.put("risk_observation_count",0);
     BigDecimal total=ZERO,fundValue=ZERO,directValue=ZERO;
     Map<String,BigDecimal> direct=new TreeMap<>();
     Map<String,Fund> funds=new TreeMap<>();
@@ -114,9 +115,15 @@ final class PortfolioLookThrough {
     }
     var all=new TreeSet<>(direct.keySet());all.addAll(indirect.keySet());
     List<Exposure> exposures=new ArrayList<>();
+    List<PortfolioLevelRisk.Attention> risk=new ArrayList<>();
     for(String isin:all){
       BigDecimal d=direct.getOrDefault(isin,ZERO),i=indirect.getOrDefault(isin,ZERO),v=d.add(i);
       exposures.add(new Exposure(isin,money(d),money(i),money(v),pct(v,total),contributors.getOrDefault(isin,0)));
+      // Only flag hidden threshold crossings, not concentration already visible in direct holdings.
+      if(i.signum()>0&&d.multiply(HUNDRED).compareTo(total.multiply(BigDecimal.valueOf(25)))<=0&&
+          v.multiply(HUNDRED).compareTo(total.multiply(BigDecimal.valueOf(25)))>0)
+        risk.add(new PortfolioLevelRisk.Attention("HIDDEN_EQUITY_CONCENTRATION",isin+" combined equity exposure",
+          pct(v,total).doubleValue(),25,"PERCENT",cohort.toString()));
     }
     exposures.sort(Comparator.comparing(Exposure::estimatedValue).reversed().thenComparing(Exposure::isin));
     BigDecimal mapped=direct.values().stream().reduce(ZERO,BigDecimal::add).add(indirect.values().stream().reduce(ZERO,BigDecimal::add));
@@ -127,6 +134,10 @@ final class PortfolioLookThrough {
       var common=new HashSet<>(x.weights().keySet());common.retainAll(y.weights().keySet());
       BigDecimal shared=common.stream().map(k->x.weights().get(k).min(y.weights().get(k))).reduce(ZERO,BigDecimal::add);
       pairs.add(new Pair(x.code(),y.code(),x.fundId().equals(y.fundId()),common.size(),money(shared),money(x.coverage()),money(y.coverage())));
+      if(shared.compareTo(BigDecimal.valueOf(50))>=0)
+        risk.add(new PortfolioLevelRisk.Attention("HIGH_FUND_OVERLAP",x.code()+" / "+y.code()+
+          (x.fundId().equals(y.fundId())?" (same underlying fund)":" shared equity weight"),
+          money(shared).doubleValue(),50,"PERCENT",cohort.toString()));
     }
     pairs.sort(Comparator.comparing(Pair::sharedWeightPercent).reversed().thenComparing(Pair::schemeA).thenComparing(Pair::schemeB));
     out.put("status","DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE");
@@ -138,6 +149,8 @@ final class PortfolioLookThrough {
     out.put("matched_scheme_count",selected.size());out.put("mapped_equity_count",exposures.size());
     out.put("overlap_pair_count",pairs.size());out.put("exposures",exposures.stream().limit(20).toList());
     out.put("overlap_pairs",pairs.stream().limit(20).toList());
+    risk.sort(Comparator.comparing(PortfolioLevelRisk.Attention::kind).thenComparing(Comparator.comparingDouble(PortfolioLevelRisk.Attention::value).reversed()).thenComparing(PortfolioLevelRisk.Attention::label));
+    out.put("risk_observation_count",risk.size());out.put("risk_observations",risk.stream().limit(20).toList());
     return out;
   }
 
