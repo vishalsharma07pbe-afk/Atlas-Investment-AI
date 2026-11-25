@@ -119,6 +119,7 @@ def parse(payload,today):
             risk=None if "RISKOMETER_CONFLICT" in conflicts else risk
         key=plan.lower()
         fields={"scheme_code":code,"isin":isin,"plan":plan,"category":category,
+                "fund_id":_text(row.get("amfi_ssd_fund_id"),80),
                 "source":SOURCE,"source_url":URL,"status":"SECONDARY_REPORTED_NOT_INDEPENDENTLY_VERIFIED",
                 "aum_date":aum_date,"aum_cr_all_plans":_number(row["amfi_daily_fund_aum_cr_all_plans"],Decimal("100000000")) if aum_date and not row["amfi_daily_aum_flag"].strip() else None,
                 "benchmark":benchmark,"riskometer":risk,"ter_date":ter_date,
