@@ -327,6 +327,43 @@ class LiveFeedsDatabaseIntegrationTest {
   }finally{org.springframework.test.util.ReflectionTestUtils.setField(discovery,"accessToken","");}
  }
 
+ @Test
+ @org.springframework.transaction.annotation.Transactional
+ void discoveryRepairsKnownInteriorSessionDespiteCurrentLatestDate()throws Exception{
+  LocalDate end=LocalDate.of(2026,11,20),missing=LocalDate.of(2026,11,18);
+  String isin="INE000A01904";
+  db.update("UPDATE instruments SET active=false WHERE exchange_id=(SELECT id FROM exchanges WHERE code='BSE')");
+  db.update("INSERT INTO instruments(exchange_id,symbol,series,source,isin,instrument_type,active) VALUES ((SELECT id FROM exchanges WHERE code='BSE'),'GAPREPAIR','EQ','UPSTOX',?,'EQ',true)",isin);
+  db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,instrument_type,isin) VALUES (?,'BSE','GAPREPAIR','EQ',?)","BSE_EQ|"+isin,isin);
+  long id=db.queryForObject("SELECT id FROM instruments WHERE symbol='GAPREPAIR'",Long.class);
+  db.update("DELETE FROM market_sessions WHERE exchange_id=(SELECT id FROM exchanges WHERE code='BSE') AND session_date BETWEEN ? AND ?",end.minusMonths(12),end);
+  for(LocalDate day:List.of(missing,end)){
+    db.update("""
+      INSERT INTO market_sessions(exchange_id,session_date,session_type,is_trading_day,open_time,close_time)
+      VALUES ((SELECT id FROM exchanges WHERE code='BSE'),?,'REGULAR',true,?,?)
+      """,day,java.sql.Timestamp.from(day.atTime(9,15).atZone(MarketCalendarService.IST).toInstant()),
+      java.sql.Timestamp.from(day.atTime(15,30).atZone(MarketCalendarService.IST).toInstant()));
+  }
+  db.update("""
+    INSERT INTO market_candles(instrument_id,timeframe,candle_time,source_id,open,high,low,close,volume,is_complete,quality_status,adjustment_status)
+    SELECT ?,'1d',((?::date-g)::timestamp+interval '9 hours 15 minutes') AT TIME ZONE 'Asia/Kolkata',
+      (SELECT id FROM data_sources WHERE source_code='UPSTOX'),100,105,99,102,200,true,'PROVIDER_VALIDATED','RAW_UNADJUSTED'
+    FROM generate_series(0,220) g WHERE g<>2
+    """,id,end);
+  when(http.text(contains("/"+end+"/"+missing),eq("gap-test-token"),anyInt()))
+    .thenReturn("{\"status\":\"success\",\"data\":{\"candles\":[[\""+missing+"T09:15:00+05:30\",100,105,99,102,200]]}}");
+  org.springframework.test.util.ReflectionTestUtils.setField(discovery,"accessToken","gap-test-token");
+  try{
+    org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"refreshExchange","BSE",end);
+    verify(http).text(contains("/"+end+"/"+missing),eq("gap-test-token"),anyInt());
+    assertThat(db.queryForObject("SELECT count(*) FROM market_candles WHERE instrument_id=? AND (candle_time AT TIME ZONE 'Asia/Kolkata')::date=?",Long.class,id,missing)).isEqualTo(1);
+    db.update("UPDATE discovery_history_attempts SET next_attempt_at=now()-interval '1 second' WHERE instrument_id=?",id);
+    org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"refreshExchange","BSE",end);
+    verify(http,times(1)).text(contains("BSE_EQ%7C"+isin),eq("gap-test-token"),anyInt());
+    verifyNoInteractions(vault);
+  }finally{org.springframework.test.util.ReflectionTestUtils.setField(discovery,"accessToken","");}
+ }
+
  @Test void providerHistoryDoesNotOverwriteAdjustedManualCandle()throws Exception{
   db.update("INSERT INTO instruments(exchange_id,symbol,series,source,isin,instrument_type) VALUES ((SELECT id FROM exchanges WHERE code='NSE'),'ADJUSTEDTEST','EQ','MANUAL_CSV','INE000A01003','EQ')");
   db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,instrument_type,isin) VALUES ('NSE_EQ|INE000A01003','NSE','ADJUSTEDTEST','EQ','INE000A01003')");
