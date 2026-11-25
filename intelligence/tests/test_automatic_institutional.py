@@ -58,3 +58,42 @@ class AutomaticInstitutionalTests(unittest.TestCase):
         with patch.dict(os.environ,{"MARKET_DATA_ENTITLEMENT_CONFIRMED":"false"}):
             flows.refresh(research._connect,lambda *_:self.fail("unauthorized"),self.now)
             self.assertEqual(flows.read(research._connect,self.now)["status"],"DISABLED_OR_NOT_AUTHORIZED")
+
+    def test_flow_context_reports_matched_date_persistence_and_opposition(self):
+        def report(interval):
+            result=self.report(interval)
+            for participant in ("fii","dii"):
+                rows=[]
+                for i in range(20):
+                    buying=participant=="dii" or i>=15
+                    rows.append({"observed_at":(self.now-timedelta(days=i,hours=1)).isoformat(),
+                        "buy_amount":120 if buying else 80,"sell_amount":80 if buying else 120})
+                result["participants"][participant]["data"]=rows
+            return result
+        flows.refresh(research._connect,report,self.now)
+        context=flows.read(research._connect,self.now)["flow_context"]
+        self.assertEqual(context["status"],"MATCHED_PROVIDER_DATES_ONLY")
+        five,twenty=context["windows"]
+        self.assertEqual(five["observation_count"],5)
+        self.assertEqual(twenty["observation_count"],20)
+        self.assertEqual(twenty["fii_selling_dii_buying_dates"],15)
+        self.assertEqual(twenty["both_buying_dates"],5)
+        self.assertEqual(twenty["participants"]["FII"]["net_selling_dates"],15)
+        self.assertEqual(twenty["participants"]["FII"]["net_to_gross_percent"],-10)
+        self.assertEqual(twenty["participants"]["FII"]["direction_consistency"],"NET_SELLING_MAJORITY")
+        self.assertEqual(twenty["participants"]["DII"]["direction_consistency"],"NET_BUYING_MAJORITY")
+        self.assertTrue(twenty["latest_date_is_today"])
+
+    def test_context_withholds_missing_latest_dates_and_handles_zero_gross(self):
+        flows.refresh(research._connect,self.report,self.now)
+        result=flows.read(research._connect,self.now)
+        fii={r["trade_date"]:r for r in result["participants"]["FII"]["records"]}
+        dii={r["trade_date"]:r for r in result["participants"]["DII"]["records"]}
+        today=self.now.astimezone(flows.IST).date()
+        self.assertEqual(flows._paired_context(fii,{k:v for k,v in dii.items() if k!=max(dii)},today)["windows"],[])
+        zero={k:{**v,"buy_amount":"0","sell_amount":"0","net_amount":"0"} for k,v in fii.items()}
+        window=flows._paired_context(zero,dii,today)["windows"][0]
+        self.assertIsNone(window["participants"]["FII"]["net_to_gross_percent"])
+        self.assertEqual(window["one_or_both_balanced_dates"],5)
+        invalid={k:{**v,"net_amount":"999"} for k,v in fii.items()}
+        self.assertEqual(flows._paired_context(invalid,dii,today)["windows"],[])

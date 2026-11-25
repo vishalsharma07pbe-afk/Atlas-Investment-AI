@@ -127,10 +127,71 @@ def refresh(connect, loader=institutional_activity, instant=None):
                    ((instant.astimezone(IST).date()-timedelta(days=120)).isoformat(),))
 
 
+def _paired_context(fii,dii,today):
+    """Use matched provider observation dates, never assumed consecutive sessions.
+
+    Net/gross ratios are dimensionless within each participant; do not combine
+    participant amounts or infer market-wide buying pressure from the ratio.
+    """
+    windows=[]
+    common=sorted(fii.keys() & dii.keys(),reverse=True)
+    if not common or common[0]!=max(fii) or common[0]!=max(dii):
+        return {"status":"INSUFFICIENT_MATCHED_DATES","windows":[],"notice":NOTICE}
+    for count,max_age in ((5,14),(20,45)):
+        dates=common[:count]
+        if len(dates)!=count:
+            continue
+        try:
+            ages=[(today-datetime.fromisoformat(day).date()).days for day in dates]
+            if min(ages)<0 or max(ages)>max_age or ages[0]>4:
+                continue
+            participants={}
+            directions={}
+            for key,source in (("FII",fii),("DII",dii)):
+                amounts=[]
+                for day in dates:
+                    row=source[day]
+                    if _stamp(row["observed_at"]).astimezone(IST).date().isoformat()!=day:
+                        raise ValueError("OBSERVATION_DATE_MISMATCH")
+                    buy,sell=_amount(row["buy_amount"]),_amount(row["sell_amount"])
+                    net=buy-sell
+                    if Decimal(row["net_amount"])!=net:
+                        raise ValueError("NET_AMOUNT_MISMATCH")
+                    amounts.append((buy,sell,net))
+                gross=sum((a+b for a,b,_ in amounts),Decimal(0))
+                net=sum((n for _,_,n in amounts),Decimal(0))
+                signs=[1 if n>0 else -1 if n<0 else 0 for _,_,n in amounts]
+                directions[key]=signs
+                positive,negative=signs.count(1),signs.count(-1)
+                # Agreement between aggregate direction and majority date
+                # direction, not a prediction or market-regime classification.
+                persistence=("NET_BUYING_MAJORITY" if net>0 and positive>count/2
+                    else "NET_SELLING_MAJORITY" if net<0 and negative>count/2
+                    else "MIXED_OR_BALANCED")
+                participants[key]={"net_amount":str(net),"gross_amount":str(gross),
+                    "net_to_gross_percent":float(round(100*net/gross,4)) if gross>0 else None,
+                    "net_buying_dates":positive,"net_selling_dates":negative,
+                    "balanced_dates":signs.count(0),"direction_consistency":persistence}
+            pairs=list(zip(directions["FII"],directions["DII"]))
+            windows.append({"observation_count":count,"dates":dates,
+                "participants":participants,
+                "both_buying_dates":sum(a==b==1 for a,b in pairs),
+                "both_selling_dates":sum(a==b==-1 for a,b in pairs),
+                "fii_selling_dii_buying_dates":sum(a==-1 and b==1 for a,b in pairs),
+                "fii_buying_dii_selling_dates":sum(a==1 and b==-1 for a,b in pairs),
+                "one_or_both_balanced_dates":sum(a==0 or b==0 for a,b in pairs),
+                "latest_date_is_today":dates[0]==today.isoformat()})
+        except (ValueError,TypeError,KeyError,InvalidOperation,OverflowError):
+            continue
+    return {"status":"MATCHED_PROVIDER_DATES_ONLY" if windows else "INSUFFICIENT_MATCHED_DATES",
+        "windows":windows,"notice":"Matched reported dates only, not consecutive or verified completed trading sessions. Net/gross is net amount divided by total reported buying plus selling within each participant. Today's observation may be partial. Opposing flows do not establish direct counterparties, market support, price impact or future direction."}
+
+
 def read(connect, instant=None):
     instant = instant or datetime.now(timezone.utc)
     base = {"status":"DISABLED_OR_NOT_AUTHORIZED","market":SCOPE,"unit":UNIT,
             "participants":{},"paired_five_date_window":None,
+            "flow_context":{"status":"UNAVAILABLE","windows":[],"notice":NOTICE},
             "blockers":["AUTHORIZED_BULK_BLOCK_DEAL_FEED_MISSING","STOCK_LEVEL_INSTITUTIONAL_TRADES_UNVERIFIED","RETAIL_FLOW_FEED_MISSING"],
             "notice":NOTICE}
     if not permitted():
@@ -164,6 +225,7 @@ def read(connect, instant=None):
         base["paired_five_date_window"]={"dates":common,
             "fii_net":str(sum((Decimal(fii[d]["net_amount"]) for d in common),Decimal(0))),
             "dii_net":str(sum((Decimal(dii[d]["net_amount"]) for d in common),Decimal(0)))}
+    base["flow_context"]=_paired_context(fii,dii,today)
     active=sum(bool(s["records"]) for s in base["participants"].values())
     base["status"]="RECENT_PROVIDER_EVIDENCE" if active==2 else "PARTIAL_PROVIDER_EVIDENCE" if active else "AWAITING_RECENT_EVIDENCE"
     return base
