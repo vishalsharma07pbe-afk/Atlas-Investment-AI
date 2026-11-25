@@ -65,10 +65,20 @@ public class PortfolioHistoryController {
     Map<String,Object> totals=jdbc.queryForMap("""
       SELECT COALESCE(sum(quantity*last_price) FILTER(WHERE last_price IS NOT NULL),0) total_value,
       count(*) FILTER(WHERE last_price IS NOT NULL) priced,
-      count(*) FILTER(WHERE last_price IS NULL) unpriced
+      count(*) FILTER(WHERE last_price IS NULL) unpriced,
+      count(*) FILTER(WHERE last_price IS NOT NULL AND
+        (price_as_of IS NULL OR price_as_of>now() OR
+          (now() AT TIME ZONE 'Asia/Kolkata')::date-(price_as_of AT TIME ZONE 'Asia/Kolkata')::date>
+            CASE WHEN asset_type='MUTUAL_FUND' THEN 7 ELSE 5 END)) aged_or_undated
       FROM personal_holdings WHERE user_id=?
       """,user);
     LocalDate date=LocalDate.now(MarketCalendarService.IST);
+    if(((Number)totals.get("priced")).longValue()==0||((Number)totals.get("unpriced")).longValue()>0||
+        ((Number)totals.get("aged_or_undated")).longValue()>0){
+      Map<String,Object> result=new LinkedHashMap<>(totals);result.put("valuation_date",date);
+      result.put("recorded",false);result.put("reason","INCOMPLETE_OR_AGED_RECORDED_VALUATION");
+      return result;
+    }
     jdbc.update("""
       INSERT INTO portfolio_valuation_snapshots(user_id,valuation_date,total_value,priced_positions,unpriced_positions)
       VALUES (?,?,?,?,?) ON CONFLICT(user_id,valuation_date) DO UPDATE SET total_value=EXCLUDED.total_value,
