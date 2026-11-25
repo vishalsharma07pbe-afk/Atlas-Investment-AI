@@ -19,7 +19,8 @@ type Correlation={status:string;comparable_pairs?:number;attempted_pairs?:number
 type OpportunityContext={status:string;held_excluded_count:number;ready_sections:string[];blocked_sections:string[];notice:string;
  equities:{isin:string;symbol:string;exchange:string;horizon:string;as_of:string;sector:string|null;sector_weight_percent:number|null;context:string;identity_status:string;adjustment_status:string;blockers:string[]}[];
  funds:{scheme_code:string;name:string;category:string;as_of:string;cagr_3y_percent:number;drawdown_3y_percent:number;context:string;identity_status:string}[]};
-type Review={ownership_changed_count?:number;ownership_attention_count?:number;ownership_monitor_notice?:string;fund_thesis_changed_count?:number;fund_thesis_attention_count?:number;fund_monitor_notice?:string;thesis_changed_count?:number;thesis_monitor_notice?:string;benchmark_risk_estimate?:BenchmarkRisk;opportunity_context?:OpportunityContext;diversification?:Diversification;equity_correlation?:Correlation;thesis_review_count?:number;generated_at:string;holding_count:number;attention_count:number;data_gap_count:number;holdings:HoldingReview[];notice:string};
+type LevelRisk={benchmark_status:string;concentration_status:string;sector_status:string;attention:{kind:string;label:string;value:number;threshold:number;unit:string;evidenceThrough:string}[];notice:string};
+type Review={portfolio_level_risk?:LevelRisk;ownership_changed_count?:number;ownership_attention_count?:number;ownership_monitor_notice?:string;fund_thesis_changed_count?:number;fund_thesis_attention_count?:number;fund_monitor_notice?:string;thesis_changed_count?:number;thesis_monitor_notice?:string;benchmark_risk_estimate?:BenchmarkRisk;opportunity_context?:OpportunityContext;diversification?:Diversification;equity_correlation?:Correlation;thesis_review_count?:number;generated_at:string;holding_count:number;attention_count:number;data_gap_count:number;holdings:HoldingReview[];notice:string};
 const pct=(value:number|null)=>value==null?"—":(value>0?"+":"")+value.toFixed(2)+"%";
 const statuses={REVIEW_REQUIRED:"Needs review",MONITOR:"Monitor",EVIDENCE_GAP:"Data needed"};
 
@@ -119,6 +120,7 @@ export default function PortfolioDoctor({revision,onSettings,compact=false,onOpe
   {error?<p role="alert">Portfolio review unavailable. <button type="button" className="secondary" onClick={onSettings}>Check connections</button></p>:!review?<p role="status">Loading portfolio review…</p>:!review.holding_count?<p>No holdings recorded yet. Add investments in My Portfolio.</p>:<>
    <div className="doctor-stats"><div><span>Holdings reviewed</span><strong>{review.holding_count}</strong></div><div><span>Holdings needing review</span><strong>{attention.length}</strong></div><div><span>Core data gaps</span><strong>{review.data_gap_count}</strong></div></div>
    {attention.length?<ul className="doctor-compact-findings">{attention.slice(0,3).map(item=><li key={item.id}><strong>{item.symbol}</strong><span>{firstFinding(item)}</span></li>)}</ul>:<p>No review flags in the available observations. Missing evidence is not a clean bill of health.</p>}
+   {!!review.portfolio_level_risk?.attention.length&&<p><strong>Portfolio-level review:</strong> {review.portfolio_level_risk.attention.length} benchmark or concentration observations. Open full review for evidence.</p>}
    {attention.length>3&&<p className="muted tiny">{attention.length-3} more holdings need review in My Portfolio.</p>}
    <p className="muted tiny">Reviewed {new Date(review.generated_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})} IST · Research only.</p>
   </>}
@@ -150,6 +152,11 @@ export default function PortfolioDoctor({revision,onSettings,compact=false,onOpe
       {item.asset_type==="MUTUAL_FUND"&&<details><summary>Exact scheme historical evidence</summary>{item.fund_history_evidence?<><p>{item.fund_history_evidence.scheme_name} · NAV ₹{item.fund_history_evidence.nav.toFixed(2)} · {item.fund_history_evidence.nav_date}</p><dl><div><dt>3-year CAGR</dt><dd>{pct(item.fund_history_evidence.cagr_3y_percent)}</dd></div><div><dt>Observed drawdown</dt><dd>{pct(item.fund_history_evidence.drawdown_3y_percent)}</dd></div><div><dt>Weekly volatility proxy</dt><dd>{pct(item.fund_history_evidence.weekly_volatility_percent??null)}</dd></div></dl><p className="muted tiny">Sources: {item.fund_history_evidence.sources.join(" · ")}. {item.fund_history_evidence.notice}</p></>:<p>Exact-scheme history insufficient or unavailable.</p>}</details>}
     </article>)}</div>
     {review.holdings.length>5&&<button type="button" className="secondary" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}>{expanded?"Show fewer holdings":"Show all holdings"}</button>}
+    {review.portfolio_level_risk&&<section className="doctor-item" aria-label="Automatic portfolio-level risk"><h3>Portfolio-level risk monitoring</h3>
+     <p className="muted tiny">Benchmark: {review.portfolio_level_risk.benchmark_status.replace(/_/g," ").toLowerCase()} · Concentration: {review.portfolio_level_risk.concentration_status.replace(/_/g," ").toLowerCase()}.</p>
+     {review.portfolio_level_risk.attention.length?<ul>{review.portfolio_level_risk.attention.map((a,i)=><li key={a.kind+":"+i}>{a.label}: <strong>{a.value.toFixed(2)} {a.unit==="PP"?"pp":"%"}</strong> · review threshold {a.threshold}{a.unit==="PP"?" pp":"%"} · {a.evidenceThrough}</li>)}</ul>:<p>No supported portfolio-level review observations. Missing evidence is not a clean bill of health.</p>}
+     <p className="muted tiny">{review.portfolio_level_risk.notice}</p>
+    </section>}
     {review.benchmark_risk_estimate&&<PortfolioBenchmarkRisk report={review.benchmark_risk_estimate} compact/>}
     {review.diversification&&<DiversificationDigest report={review.diversification} correlation={review.equity_correlation}/>}
     {review.opportunity_context&&<OpportunityDigest report={review.opportunity_context}/>}
