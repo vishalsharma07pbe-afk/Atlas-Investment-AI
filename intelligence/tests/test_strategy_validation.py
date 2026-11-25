@@ -1,7 +1,7 @@
 import unittest
 from datetime import date,timedelta
 from unittest.mock import patch
-from app.strategy_validation import replay, _metrics
+from app.strategy_validation import replay, _metrics, attach_market_benchmark
 
 TODAY=date(2026,11,24)
 
@@ -71,3 +71,28 @@ class StrategyValidationTests(unittest.TestCase):
                 self.assertAlmostEqual(cost["net_same_stock_buy_hold_percent"],(reference-1)*100,places=3)
                 self.assertAlmostEqual(cost["net_difference_vs_same_stock_pp"],
                     cost["net_return_percent"]-cost["net_same_stock_buy_hold_percent"],places=3)
+
+    def test_nifty_price_index_exact_observed_interval_and_fail_closed(self):
+        data=history()
+        with patch("app.strategy_validation.evaluate",return_value={h:("TECHNICAL_WATCH",{}) for h in ("SWING","SHORT_TERM","LONG_TERM")}):
+            result=replay(data,TODAY)
+        rows=[{"trade_date":row["trade_date"],"open":200,"close":220,"revision":1,"source_code":"UPSTOX"}
+              for row in data["candles"][-250:]]
+        benchmark={"benchmark_key":"NSE_INDEX|Nifty 50","kind":"PRICE_INDEX","candles":rows}
+        attach_market_benchmark(result,data,benchmark,TODAY)
+        swing=result["horizons"]["SWING"]
+        self.assertEqual(swing["market_benchmark_status"],"MATCHED_PRICE_INDEX")
+        self.assertEqual(swing["market_benchmark_start"],data["candles"][301]["trade_date"])
+        self.assertEqual(swing["market_benchmark_observations"],199)
+        cost=swing["cost_scenarios"][0]
+        self.assertEqual(cost["gross_nifty50_price_index_percent"],10)
+        self.assertAlmostEqual(cost["net_difference_vs_nifty50_pp"],cost["net_return_percent"]-10,places=4)
+        for invalid in (None,{**benchmark,"benchmark_key":"OTHER"},
+                        {**benchmark,"candles":rows[:-1]},
+                        {**benchmark,"candles":rows[:100]+rows[101:]},
+                        {**benchmark,"candles":rows+[rows[-1]]},
+                        {**benchmark,"candles":[{**row,"source_code":"OTHER"} for row in rows]}):
+            attach_market_benchmark(result,data,invalid,TODAY)
+            self.assertEqual(swing["market_benchmark_status"],"UNAVAILABLE")
+            self.assertNotIn("gross_nifty50_price_index_percent",cost)
+            self.assertNotIn("net_difference_vs_nifty50_pp",cost)
