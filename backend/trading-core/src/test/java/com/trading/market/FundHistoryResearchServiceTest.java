@@ -69,6 +69,28 @@ class FundHistoryResearchServiceTest {
   assertNull(FundHistoryResearchService.metrics(rows.subList(0,100),end));
  }
 
+ @Test void downsideRiskAndRollingRangeUseObservedWeeklyAnchors(){
+  LocalDate end=LocalDate.of(2026,11,24);
+  List<Map<String,Object>> rows=new ArrayList<>();
+  for(int i=0;i<=156;i++)rows.add(Map.of("nav_date",end.minusWeeks(156-i),"nav",BigDecimal.valueOf(i%2==0?100:90)));
+  var risk=FundHistoryResearchService.weeklyRisk(rows,end);
+  assertEquals(50.0,risk.get("negative_week_percent"));
+  assertEquals(50.9902,(Double)risk.get("weekly_downside_deviation_percent"),0.0001);
+  assertEquals(0.0,risk.get("median_rolling_52w_annualized_percent"));
+  assertEquals(0.0,risk.get("best_rolling_52w_annualized_percent"));
+ }
+ @Test void underwaterDurationIncludesUnrecoveredObservedDecline(){
+  LocalDate end=LocalDate.of(2026,11,24);
+  List<Map<String,Object>> rows=new ArrayList<>();
+  for(int i=0;i<=1100;i++){
+    double nav=i<1090?100:90;
+    rows.add(Map.of("nav_date",end.minusDays(1100-i),"nav",BigDecimal.valueOf(nav),"source_code",i==1100?"AMFI":"MFAPI"));
+  }
+  var result=FundHistoryResearchService.metrics(rows,end);
+  assertNotNull(result);
+  assertEquals(11L,result.get("current_observed_underwater_days"));
+  assertEquals(11L,result.get("longest_observed_underwater_days"));
+ }
  @Test void weeklyRiskUsesBoundedAnchorsAndRejectsMissingWeeks(){
   LocalDate end=LocalDate.of(2026,11,24);
   List<Map<String,Object>> rows=new ArrayList<>();
