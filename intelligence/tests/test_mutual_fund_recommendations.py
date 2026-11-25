@@ -1,6 +1,6 @@
 import unittest
 from datetime import date
-from app.mutual_fund_recommendations import FundEvidence,rank_candidates,suitability,_official_history_candidates
+from app.mutual_fund_recommendations import FundEvidence,rank_candidates,suitability,_official_history_candidates,_research_reports
 
 def strong(**changes):
     values=dict(identifier="FUND-A",name="Fund A Direct Growth",category="LARGE_CAP",category_verified=True,
@@ -84,6 +84,42 @@ class RecommendationEngineTests(unittest.TestCase):
         history={"comparison_date":"2026-11-23","items":[row],
                  "research_candidates":[{**row,"scheme_code":123456+i,"isin_growth":f"INF000A{i:05d}"} for i in range(12)]}
         self.assertEqual(len(_official_history_candidates(history,"MULTI_CAP",date(2026,11,24))),12)
+
+    def test_integrated_report_retains_gates_and_exact_secondary_identity(self):
+        fund=strong(identifier="123456",expense_ratio=None,benchmark_hit_rate=None,
+                    riskometer=None,riskometer_date=None)
+        ranked=rank_candidates([fund],"LARGE_CAP",84,"HIGH")
+        report=_research_reports([fund],ranked,
+            [{"scheme_code":123456,"sources":["AMFI","MFAPI"]}],
+            [{"scheme_code":"123456","ter_percent":0.1}],
+            [{"scheme_code":"999999","portfolio_date":"2026-10-31"}])[0]
+        self.assertEqual(report["historical"]["returns_3y"],16)
+        self.assertEqual(report["historical"]["sources"],["AMFI","MFAPI"])
+        self.assertTrue(report["secondary_disclosure_available"])
+        self.assertFalse(report["secondary_portfolio_available"])
+        self.assertEqual(report["top_performer"]["status"],"WITHHELD")
+        self.assertIn("EXPENSE_RATIO",report["top_performer"]["missing"])
+        self.assertIn("BENCHMARK_HIT_RATE",report["top_performer"]["missing"])
+        self.assertEqual(report["growth_outlook"]["status"],"WITHHELD")
+        self.assertIsNone(report["top_performer"]["published_rank"])
+        self.assertEqual(ranked["top_performers"],[])
+        self.assertEqual(ranked["growth_outlook"],[])
+
+    def test_reports_distinguish_qualified_beyond_published_five_and_missing_metrics(self):
+        funds=[strong(identifier=str(i)) for i in range(6)]
+        ranked=rank_candidates(funds,"LARGE_CAP",84,"HIGH")
+        reports=_research_reports(list(reversed(funds)),ranked,[],[],[])
+        self.assertEqual([row["identifier"] for row in reports],list(map(str,range(6))))
+        self.assertEqual(reports[0]["top_performer"]["published_rank"],1)
+        self.assertEqual(reports[5]["top_performer"]["status"],"QUALIFIED")
+        self.assertIsNone(reports[5]["top_performer"]["published_rank"])
+        self.assertEqual(reports[5]["growth_outlook"]["status"],"WITHHELD")
+        self.assertEqual(reports,_research_reports(funds,ranked,[],[],[]))
+        incomplete=strong(identifier="123456",returns_3y=None,peer_percentile=None)
+        ranked=rank_candidates([incomplete],"LARGE_CAP",84,"HIGH")
+        report=_research_reports([incomplete],ranked,[],[],[])[0]
+        self.assertIsNone(report["historical"]["returns_3y"])
+        self.assertIsNone(report["historical"]["sample_peer_percentile"])
 
     def test_ties_are_reproducible_by_stable_identifier(self):
         result=rank_candidates([strong(identifier="B"),strong(identifier="A")],"LARGE_CAP",84,"HIGH")
