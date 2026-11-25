@@ -200,3 +200,14 @@ it("shows sector research questions separately from qualification",async()=>{
  expect(screen.getByText(/Missing relevant evidence: nasdaqcom/)).toBeTruthy();
  expect(screen.getByText(/event risk not verified/)).toBeTruthy();
 });
+
+it("shows current matching regime cohort without upgrading qualification",async()=>{
+ const item={...candidate,current_regime_replay:{status:"SMALL_HISTORICAL_SAMPLE",as_of:"2026-11-23",trend:"RISING",volatility_regime:"HIGH_HISTORICAL_VOLATILITY",trades:2,cost_scenarios:[{cost_bps_per_side:30,mean_trade_return_percent:-1,median_trade_return_percent:-1,worst_trade_return_percent:-4,worst_position_drawdown_percent:-6,win_rate_percent:50,wins:1,losses:1,flat:0}],notice:"Not a validated strategy."}};
+ const market={...section,result:{...section.result,horizons:{...section.result.horizons,SWING:{...section.result.horizons.SWING,candidates:[item]}}}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[market]})})));
+ render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+ fireEvent.click(await screen.findByText("Current regime historical comparison"));
+ expect(screen.getByText(/small historical sample/)).toBeTruthy();
+ expect(screen.getByText("-6%")).toBeTruthy();
+ expect(screen.getByText(/event risk not verified/)).toBeTruthy();
+});

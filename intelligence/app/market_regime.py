@@ -9,9 +9,10 @@ import json
 from .market_client import backend_json
 from .replay_evidence import session_audit
 from .strategy_validation import REGIME_LOOKBACK,REGIME_THRESHOLD
+from . import regime_features
 
 IST=ZoneInfo("Asia/Kolkata")
-HIGH_VOL=25.0
+HIGH_VOL=regime_features.HIGH_VOL
 MIN_BREADTH=30
 NOTICE=("Nifty 50 price-index trend uses the existing 60-session +/-5% replay thresholds; 20-session annualized historical volatility "
         "at least 25% is a descriptive high-volatility flag, not a calibrated risk boundary. Latest prior regular sessions match the stored calendar only. "
@@ -44,16 +45,11 @@ def analyze(benchmark,calendar,today):
         audit=session_audit({"first_date":dates[0].isoformat(),"observations":[d.isoformat() for d in dates]},calendar,"NSE",today)
         if audit["status"]!="STORED_SESSIONS_MATCHED":
             return empty(audit["status"])
-        closes=[indexed[d] for d in dates]
-        change=100*(closes[-1]/closes[0]-1)
-        returns=[log(b/a) for a,b in zip(closes[-21:-1],closes[-20:])]
-        volatility=100*pstdev(returns)*sqrt(252)
-        if not all(isfinite(v) for v in (change,volatility)):
+        features=regime_features.describe([d.isoformat() for d in dates],[indexed[d] for d in dates])
+        if features is None:
             return result
-        return {"status":"OBSERVED_BENCHMARK_REGIME","trend":"RISING" if change>=REGIME_THRESHOLD else "FALLING" if change<=-REGIME_THRESHOLD else "SIDEWAYS",
-                "volatility_regime":"HIGH_HISTORICAL_VOLATILITY" if volatility>=HIGH_VOL else "BELOW_HIGH_THRESHOLD",
+        return {"status":"OBSERVED_BENCHMARK_REGIME",**features,
                 "as_of":dates[-1].isoformat(),"previous_session":dates[-2].isoformat(),"first_session":dates[0].isoformat(),
-                "benchmark_change_60_percent":round(change,4),"volatility_20_annualized_percent":round(volatility,4),
                 "calendar_checked_on":today.isoformat(),"last_five_sessions":[d.isoformat() for d in reversed(dates[-5:])],"notice":NOTICE}
     except (ValueError,TypeError,KeyError,AttributeError,OverflowError,ZeroDivisionError):
         return result
@@ -146,6 +142,7 @@ def attach(snapshot,connect,instant):
         return snapshot
     report["breadth"]=_breadth(snapshot,report,instant.astimezone(IST).date())
     report["institutional"]=_institutional(snapshot,report)
+    _attach_strategy_context(snapshot,report)
     direction=report["breadth"].get("direction")
     trend=report["trend"]
     report["agreement"]="UNAVAILABLE" if direction is None else "MIXED_OR_DIFFERENT_HORIZONS"
@@ -154,3 +151,32 @@ def attach(snapshot,connect,instant):
     elif (trend,direction) in (("RISING","DECLINING_MAJORITY"),("FALLING","ADVANCING_MAJORITY")):
         report["agreement"]="OPPOSING_DAILY_BREADTH_REVIEW"
     return snapshot
+
+
+def _attach_strategy_context(snapshot,report):
+    """Use only already identity/provenance-matched replay for the same stock."""
+    from .automatic_company_evidence import identify
+    for item,_ in identify(snapshot):
+        if item.get("exchange")!="NSE" or item.get("as_of")!=report.get("as_of"):
+            continue
+        replay=item.get("matched_strategy_replay") or {}
+        if replay.get("status")!="REPLAY_OBSERVED" or replay.get("as_of")!=report["as_of"]:
+            continue
+        research=replay.get("joint_regime_research") or {}
+        latest=research.get("latest_benchmark_context") or {}
+        if (research.get("methodology")!=regime_features.VERSION or latest.get("as_of")!=report["as_of"]
+                or not report.get("benchmark_fingerprint") or latest.get("benchmark_fingerprint")!=report["benchmark_fingerprint"]
+                or latest.get("trend")!=report.get("trend") or latest.get("volatility_regime")!=report.get("volatility_regime")):
+            continue
+        groups=[g for g in research.get("groups",[]) if g.get("trend")==report["trend"]
+                and g.get("volatility_regime")==report["volatility_regime"]]
+        if len(groups)!=1:
+            continue
+        group=groups[0]
+        count=group.get("trades")
+        if type(count) is not int or count<0:
+            continue
+        item["current_regime_replay"]={"status":"NO_MATCHED_POSITIONS" if count==0 else "SMALL_HISTORICAL_SAMPLE" if count<30 else "DESCRIPTIVE_HISTORICAL_COHORT",
+            "as_of":report["as_of"],"trend":report["trend"],"volatility_regime":report["volatility_regime"],
+            "trades":count,"cost_scenarios":group.get("cost_scenarios",[]) if count else [],
+            "notice":"Same-stock historical positions in the matching signal-date trend and volatility category. Exact current benchmark fingerprint matched; outcomes do not validate future suitability or change qualification."}
