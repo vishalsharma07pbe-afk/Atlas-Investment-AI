@@ -348,6 +348,7 @@ class AuthIsolationIntegrationTest {
       .andExpect(jsonPath("$.fund_thesis_changed_count").value(0))
       .andExpect(jsonPath("$.fund_thesis_attention_count").value(0))
       .andExpect(jsonPath("$.diversification.allocation_research.status").value("INSUFFICIENT_RECENT_EXACT_VALUATIONS"))
+      .andExpect(jsonPath("$.diversification.exposure_stress.status").value("INSUFFICIENT_RECENT_VALUATIONS"))
       .andExpect(jsonPath("$.holdings[0].thesis_monitor_status").value("NO_CURRENT_DATED_TRENDS"))
       .andExpect(jsonPath("$.attention_count").value(1));
     mvc.perform(get("/api/v1/portfolio/review").header("Authorization",b))
