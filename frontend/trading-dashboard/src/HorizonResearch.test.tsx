@@ -76,3 +76,14 @@ it("shows the integrated stock conclusion and exact replay without manual analys
  expect(screen.getByText(/net simulated return -2%/)).toBeTruthy();
  expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+it("shows historical price geometry with explicit costs and no trade verdict",async()=>{
+ const enriched={...candidate,price_structure:{status:"HISTORICAL_STRUCTURE",scenario_status:"ILLUSTRATIVE_HISTORICAL_GEOMETRY",support:[{price:90,observed_on:"2026-11-10",confirmed_on:"2026-11-12"}],resistance:[{price:120,observed_on:"2026-11-15",confirmed_on:"2026-11-17"}],scenario:{reference_close:100,lower_reference:90,upper_reference:120,cost_bps_per_side:30,downside_percent:10.5,upside_percent:19.3,reward_to_risk:1.84},notice:"Historical geometry only."}};
+ const market={...section,result:{...section.result,horizons:{...section.result.horizons,SWING:{...section.result.horizons.SWING,candidates:[enriched]}}}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[market]})})));
+ render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+ fireEvent.click(await screen.findByText("Price structure & risk scenarios"));
+ expect(screen.getByText("1.84×")).toBeTruthy();
+ expect(screen.getByText("Assumed cost: 30 bps each side.")).toBeTruthy();
+ expect(screen.getByText("Historical geometry only.")).toBeTruthy();
+});

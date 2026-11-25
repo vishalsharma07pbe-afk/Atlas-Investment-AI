@@ -24,6 +24,13 @@ class IntradayResearchServiceTest {
   assertEquals("VOLUME_BREAKOUT_WATCH",IntradayResearchService.evaluate(bars(102,103),now).get("pattern"));
   assertEquals("FAILED_BREAKOUT_WATCH",IntradayResearchService.evaluate(bars(100,103),now).get("pattern"));
  }
+ @Test void openingRangeAndSessionReferencesUseCompletedBars(){
+  var result=IntradayResearchService.evaluate(bars(102,103),START.plusSeconds(6*900L));
+  assertEquals(101d,result.get("opening_range_high"));
+  assertEquals(99d,result.get("opening_range_low"));
+  assertEquals(99d,result.get("session_low_so_far"));
+  assertEquals(101d,result.get("prior_session_high_so_far"));
+ }
  @Test void neverRequestsWithoutEntitlement(){
   var jdbc=mock(JdbcTemplate.class);var stocks=mock(UpstoxFeedService.class);var calendar=mock(MarketCalendarService.class);
   var service=new IntradayResearchService(jdbc,stocks,calendar);

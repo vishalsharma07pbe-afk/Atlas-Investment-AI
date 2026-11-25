@@ -57,12 +57,20 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-          cache: maven
-          cache-dependency-path: backend/trading-core/pom.xml
+      # Separate immutable caches for the full suite and the bridge suite.
+      # Restore prior Maven artifacts, then save any newly resolved test plugins
+      # under a new key rather than repeatedly restoring an incomplete cache.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: atlas-maven-tests-v2-${{ runner.os }}-${{ runner.arch }}-backend-${{ hashFiles('backend/trading-core/pom.xml') }}
+          restore-keys: |
+            atlas-maven-tests-v2-${{ runner.os }}-${{ runner.arch }}-backend-
+            setup-java-Linux-x64-maven-
       # GitHub-hosted runners provide Docker. Testcontainers creates disposable
       # PostgreSQL instances and Flyway applies the real migration chain.
       # The cross-service HTTP test has its own job below.
-      - run: mvn -B -ntp -Dtest='*Test,!AiBridgeHttpIntegrationTest' test
+      - run: sh maven-build-retry.sh -Dtest='*Test,!AiBridgeHttpIntegrationTest' test
 
   api-compatibility:
     name: Existing API endpoint compatibility
@@ -107,8 +115,16 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-          cache: maven
-          cache-dependency-path: backend/trading-core/pom.xml
+      # Separate immutable caches for the full suite and the bridge suite.
+      # Restore prior Maven artifacts, then save any newly resolved test plugins
+      # under a new key rather than repeatedly restoring an incomplete cache.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: atlas-maven-tests-v2-${{ runner.os }}-${{ runner.arch }}-bridge-${{ hashFiles('backend/trading-core/pom.xml') }}
+          restore-keys: |
+            atlas-maven-tests-v2-${{ runner.os }}-${{ runner.arch }}-bridge-
+            setup-java-Linux-x64-maven-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -140,7 +156,7 @@ jobs:
         working-directory: backend/trading-core
         env:
           ATLAS_BRIDGE_CAPTURE_FILE: ${{ runner.temp }}/ai-bridge-capture.json
-        run: mvn -B -ntp -Dtest=AiBridgeHttpIntegrationTest test
+        run: sh maven-build-retry.sh -Dtest=AiBridgeHttpIntegrationTest test
 
 
   stack-http-contract:

@@ -24,7 +24,7 @@ def rsi(v,n=14):
     if len(v)<2:return [None]*len(v)
     gains=[0]+[max(v[i]-v[i-1],0) for i in range(1,len(v))]; losses=[0]+[max(v[i-1]-v[i],0) for i in range(1,len(v))]
     ag=wilder(gains[1:],n);al=wilder(losses[1:],n);out=[None]
-    for g,l in zip(ag,al): out.append(None if g is None else (100 if l==0 else 100-100/(1+g/l)))
+    for g,l in zip(ag,al): out.append(None if g is None else (50 if g==0 and l==0 else 100 if l==0 else 100-100/(1+g/l)))
     return out
 def true_ranges(c): return [c[0].high-c[0].low]+[max(x.high-x.low,abs(x.high-c[i-1].close),abs(x.low-c[i-1].close)) for i,x in enumerate(c[1:],1)] if c else []
 def atr(c,n=14): return wilder(true_ranges(c),n)

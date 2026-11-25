@@ -27,6 +27,9 @@ class TechnicalTests(unittest.TestCase):
         with patch.object(main,"backend_json",return_value=fixture): body=main.technical_analysis(7)
         self.assertEqual(body["status"],"INSUFFICIENT_HISTORY");self.assertIn("MIXED_ADJUSTMENT_STATUS",body["missing_data"])
         self.assertEqual(body["patterns"][0]["instrument"]["symbol"],"TEST")
+    def test_flat_market_rsi_is_neutral(self):
+        rows=[Candle(str(i),100,101,99,100,1000) for i in range(30)]
+        self.assertEqual(compute(rows)["rsi_14"][-1],50)
     def test_levels_are_bounded_and_deterministic(self): self.assertEqual(set(levels(rising(70))),{"support","resistance"})
 
 if __name__=="__main__":unittest.main()
