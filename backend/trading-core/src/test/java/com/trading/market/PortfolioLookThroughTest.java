@@ -81,4 +81,35 @@ class PortfolioLookThroughTest {
       .anyMatch(n->"HIGH_FUND_OVERLAP".equals(n.path("kind").asText())));
   }
 
+  private Map<String,Object> withSector(Map<String,Object> holding,String isin,String sector,Instant stamp){
+    var copy=json.<com.fasterxml.jackson.databind.node.ObjectNode>valueToTree(holding);
+    var portfolio=(com.fasterxml.jackson.databind.node.ObjectNode)copy.path("fund_thesis_evidence").path("portfolio");
+    var evidence=portfolio.putObject("exact_sector_evidence");
+    evidence.putObject(isin).put("sector",sector).put("provider","UPSTOX").put("retrieved_at",stamp.toString());
+    return json.convertValue(copy,new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>(){});
+  }
+  @Test void combinedSectorUsesWholePortfolioAndExactIdentityAcrossDirectAndIndirect(){
+    var rows=List.of(direct(200),withSector(fund("123456","fund:a",500,"2026-10-31",60,20),A," Energy ",now),
+      withSector(fund("123457","fund:b",300,"2026-10-31",30,60),B,"Finance",now));
+    var result=json.valueToTree(PortfolioLookThrough.assess(rows,json,now));
+    assertEquals(87.0,result.path("sector_classified_portfolio_percent").asDouble());
+    var sector=result.path("sector_exposures").get(0);
+    assertEquals("energy",sector.path("sector").asText());
+    assertEquals(200.0,sector.path("directValue").asDouble());
+    assertEquals(390.0,sector.path("indirectValue").asDouble());
+    assertEquals(59.0,sector.path("portfolioPercent").asDouble());
+    assertTrue(sector.path("reviewConcentration").asBoolean());
+    assertEquals(1,result.path("sector_review_count").asInt());
+  }
+  @Test void sectorConflictsAndStaleEvidenceRemainUnclassified(){
+    var rows=List.of(direct(200),withSector(fund("123456","fund:a",500,"2026-10-31",60,20),A,"Energy",now),
+      withSector(fund("123457","fund:b",300,"2026-10-31",30,60),A,"Finance",now));
+    var result=json.valueToTree(PortfolioLookThrough.assess(rows,json,now));
+    assertEquals("NO_CURRENT_EXACT_CLASSIFICATION",result.path("sector_status").asText());
+    assertEquals(870.0,result.path("sector_unclassified_mapped_value").asDouble());
+    var stale=withSector(fund("123456","fund:a",500,"2026-10-31",60,20),A,"Energy",now.minus(java.time.Duration.ofHours(25)));
+    result=json.valueToTree(PortfolioLookThrough.assess(List.of(direct(200),stale),json,now));
+    assertEquals(0,result.path("sector_exposures").size());
+  }
+
 }

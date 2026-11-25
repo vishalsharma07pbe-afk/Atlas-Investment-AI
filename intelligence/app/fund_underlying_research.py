@@ -56,6 +56,28 @@ def load(equities,instant):
     return result
 
 
+def exact_sector_evidence(equities,instant,reports):
+    """Private service working metadata; only fresh exact-ISIN provider profiles."""
+    result={}
+    for h in equities:
+        isin=h.get("isin")
+        raw=reports.get(isin)
+        if not isinstance(isin,str) or not re.fullmatch(r"INE[A-Z0-9]{9}",isin) or not isinstance(raw,dict) or raw.get("isin")!=isin:
+            continue
+        try:
+            stamp=datetime.fromisoformat(raw["retrieved_at"])
+            profile=raw["sections"]["profile"]
+            source=profile.get("source") or {}
+            sector=profile["data"]["sector"]
+            if (stamp.tzinfo is not None and instant-timedelta(hours=24)<=stamp<=instant
+                and profile.get("status")=="AVAILABLE" and source.get("provider")=="UPSTOX"
+                and isinstance(sector,str) and 0<len(sector.strip())<=180):
+                result[isin]={"sector":sector.strip(),"retrieved_at":stamp.isoformat(),"provider":"UPSTOX"}
+        except (ValueError,TypeError,KeyError,AttributeError):
+            continue
+    return result
+
+
 def summarize(equities,instant,reports=None):
     reports=load(equities,instant) if reports is None else reports
     today=instant.astimezone(IST).date()
