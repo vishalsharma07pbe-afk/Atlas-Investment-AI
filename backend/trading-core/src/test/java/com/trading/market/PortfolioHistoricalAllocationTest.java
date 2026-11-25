@@ -34,6 +34,11 @@ class PortfolioHistoricalAllocationTest {
     assertEquals(30,plans.get(2).oneWayTurnoverPercent(),1e-8);
     assertEquals(65,plans.get(1).largestWeightPercent(),1e-8);
     assertEquals(15,plans.get(1).oneWayTurnoverPercent(),1e-8);
+    var costs=(Map<?,?>)result.get("cost_sensitivity");
+    var rows=((List<?>)costs.get("scenarios")).stream().map(PortfolioRebalancingCosts.Row.class::cast).toList();
+    assertEquals(3,rows.size());
+    assertEquals(0,new BigDecimal("600").compareTo(rows.get(2).grossNotional()));
+    assertEquals(0,new BigDecimal("3").compareTo(rows.get(2).estimates().get(1).hypotheticalCost()));
   }
   @Test void incompleteCoverageAndMissingHistoryWithholdAlternatives(){
     assertEquals("INSUFFICIENT_RECENT_EXACT_DIRECT_EQUITY_COVERAGE",assess(Map.of(A,returns(1),B,returns(1)),false).get("status"));

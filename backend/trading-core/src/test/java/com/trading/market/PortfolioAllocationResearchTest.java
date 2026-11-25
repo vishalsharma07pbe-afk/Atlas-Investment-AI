@@ -19,6 +19,13 @@ class PortfolioAllocationResearchTest {
   @Test void singleIdentityRequiresThreeTimesCapitalOrThreeQuartersRedistribution(){
     var result=assess(true,"1000");
     assertEquals("HYPOTHETICAL_SCENARIOS_AVAILABLE",result.get("status"));
+    var costs=(Map<?,?>)result.get("cost_sensitivity");
+    var rows=((List<?>)costs.get("scenarios")).stream().map(PortfolioRebalancingCosts.Row.class::cast).toList();
+    assertEquals(4,rows.size());
+    equal("3000",rows.get(0).grossNotional());
+    equal("3015",rows.get(0).estimates().get(1).additionalCashIncludingCost());
+    equal("1500",rows.get(1).grossNotional());
+    equal("7.5",rows.get(1).estimates().get(1).additionalCashIncludingCost());
     for(int i=0;i<2;i++){
       var s=scenario(result,i);
       equal("3000",s.additionalCapital());equal("25",s.projectedLargestPercent());

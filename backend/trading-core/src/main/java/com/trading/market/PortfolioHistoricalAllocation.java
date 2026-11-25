@@ -87,6 +87,11 @@ final class PortfolioHistoricalAllocation {
     out.put(mixed?"recorded_value":"direct_equity_value",values.values().stream().reduce(BigDecimal.ZERO,BigDecimal::add));
     out.put("lowest_observed_variability",lowest.kind());
     out.put("chronological_validation",PortfolioAllocationValidation.assess(current,observations,dates));
+    BigDecimal recordedValue=values.values().stream().reduce(BigDecimal.ZERO,BigDecimal::add);
+    out.put("cost_sensitivity",PortfolioRebalancingCosts.assess(recordedValue,alternatives.stream().map(a->{
+      BigDecimal oneWay=recordedValue.multiply(BigDecimal.valueOf(a.oneWayTurnoverPercent()).movePointLeft(2));
+      return new PortfolioRebalancingCosts.Case(a.kind(),oneWay,oneWay);
+    }).toList()));
     if(mixed){
       out.put("alternatives",alternatives.stream().map(a->Map.of(
         "kind",a.kind(),"sampleMeanPercent",a.sampleMeanPercent(),"sampleVolatilityPercent",a.sampleVolatilityPercent(),
