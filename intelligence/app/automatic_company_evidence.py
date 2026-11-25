@@ -177,8 +177,9 @@ def refresh(snapshot, connect, loader=company_research, instant=None, *, explici
         # Avoid repeated requests across the universe when the provider rejects access.
         if any(r["status"]=="UNAVAILABLE" and r["attempted_at"]>(instant-timedelta(hours=1)).isoformat() for r in rows.values()):
             return
+        priority={isin:i for i,isin in enumerate(candidates)} if explicit_isins is not None else {}
         due=sorted((isin for isin in candidates if isin not in rows or rows[isin]["next_attempt_at"]<=stamp),
-                   key=lambda isin:(rows[isin]["attempted_at"] if isin in rows else "",isin))
+                   key=lambda isin:(rows[isin]["attempted_at"] if isin in rows else "",priority.get(isin,0),isin))
         if not due:
             if explicit_isins is not None:
                 return
