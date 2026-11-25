@@ -1,5 +1,6 @@
 import unittest
-from app.mutual_fund_recommendations import FundEvidence,rank_candidates,suitability
+from datetime import date
+from app.mutual_fund_recommendations import FundEvidence,rank_candidates,suitability,_official_history_candidates
 
 def strong(**changes):
     values=dict(identifier="FUND-A",name="Fund A Direct Growth",category="LARGE_CAP",category_verified=True,
@@ -22,6 +23,35 @@ class RecommendationEngineTests(unittest.TestCase):
           sector_driver_score=65,concentration_risk=25,liquidity_score=80)
         result=rank_candidates([fund],"LARGE_CAP",84,"MODERATE")
         self.assertEqual(result["growth_outlook"][0]["fund"]["identifier"],"FUND-A")
+
+    def test_exact_official_history_populates_only_supported_evidence(self):
+        row={"scheme_code":123456,"scheme_name":"Example Direct Growth",
+             "category":"Open Ended Schemes(Equity Scheme - Large Cap Fund)",
+             "amfi_plan":"DIRECT","amfi_option":"GROWTH","isin_growth":"INF179K01BB2",
+             "amfi_metadata_date":"2026-11-23","nav_date":"2026-11-23","nav":100.5,
+             "observations":700,"sources":["AMFI","MFAPI"],"cagr_1y_percent":12,
+             "cagr_3y_percent":14,"drawdown_3y_percent":-17,"weekly_volatility_percent":13,
+             "sample_peer_percentile":80,"worst_rolling_52w_annualized_percent":-8}
+        history={"comparison_date":"2026-11-23","items":[row]}
+        candidates=_official_history_candidates(history,"LARGE_CAP",date(2026,11,24))
+        self.assertEqual(len(candidates),1)
+        candidate=candidates[0]
+        self.assertEqual(candidate.identifier,"123456")
+        self.assertTrue(candidate.category_verified)
+        self.assertEqual(candidate.nav_age_days,1)
+        self.assertEqual(candidate.returns_3y,14)
+        self.assertIsNone(candidate.expense_ratio)
+        self.assertIsNone(candidate.benchmark_hit_rate)
+        ranked=rank_candidates(candidates,"LARGE_CAP",84,"HIGH")
+        self.assertEqual(ranked["top_performers"],[])
+        self.assertEqual(ranked["growth_outlook"],[])
+        self.assertIn("EXPENSE_RATIO",ranked["excluded"][0]["top_performer_missing"])
+        for changed in ({"amfi_plan":"REGULAR"},{"amfi_option":None},{"isin_growth":None},
+                        {"category":"Open Ended Schemes(Equity Scheme - Mid Cap Fund)"},
+                        {"nav_date":"2026-11-22"},{"amfi_metadata_date":"2026-11-01"},
+                        {"sources":["MFAPI"]}):
+            self.assertEqual(_official_history_candidates({**history,"items":[{**row,**changed}]},"LARGE_CAP",date(2026,11,24)),[])
+        self.assertEqual(_official_history_candidates({**history,"items":[row,row]},"LARGE_CAP",date(2026,11,24)),[])
 
     def test_36_month_goal_is_flagged_as_poor_fit(self):
         fit=suitability("LARGE_CAP",36,"HIGH")
