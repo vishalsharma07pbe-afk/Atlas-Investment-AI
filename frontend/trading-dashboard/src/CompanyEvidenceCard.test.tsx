@@ -26,3 +26,15 @@ it("shows comparable fundamentals and valuation without claiming fair value",()=
  expect(screen.getByText("FY2025: 15%")).toBeTruthy();
  expect(screen.getByText(/Fair value and valuation scenarios withheld/)).toBeTruthy();
 });
+
+it("renders bounded peer comparisons without implying sector leadership",()=>{
+ const missing={status:"UNAVAILABLE",data:null,source:null};
+ const evidence:CompanyEvidence={isin:"INE002A01018",retrieved_at:"2026-11-24T10:00:00Z",available_sections:1,total_sections:8,notice:"Provider reported.",sections:{profile:missing,ratios:missing,income_statement:missing,cash_flow:missing,balance_sheet:missing,shareholding:missing,corporate_actions:missing,competitors:missing},peer_research:{
+ status:"SAMPLED_PEER_COMPARISON",selected_peer_count:3,cached_same_sector_count:3,minimum_peers_per_metric:3,sample_limit:3,
+ metrics:[{metric:"REVENUE",period:"2026-03",unit:"INR_CRORE",company_value:100,peer_median:120,peer_count:3,peers_above:2,peers_below:1,peers:[]}],
+ notice:"Sample only; not market share."}};
+ render(<CompanyEvidenceCard evidence={evidence}/>);
+ expect(screen.getByText("2 above · 1 below · 3 peers")).toBeTruthy();
+ expect(screen.getByText("120 Cr")).toBeTruthy();
+ expect(screen.getByText("Sample only; not market share.")).toBeTruthy();
+});
