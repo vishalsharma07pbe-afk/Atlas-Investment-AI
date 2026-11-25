@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -24,6 +24,33 @@ class UpstoxLiveQuoteTests(unittest.TestCase):
         self.assertEqual(result["price"],"2500.25")
         self.assertTrue(result["live"])
         self.assertEqual(result["source"],"UPSTOX")
+
+    def test_stream_fallback_requires_exact_connected_fresh_key(self):
+        from app.upstox_quote_worker import QuoteCache
+        key="NSE_EQ|INE002A01018"
+        cache=QuoteCache()
+        cache.connected=True
+        cache.quotes[key]={"instrument_key":key,"last_traded_price":2500.25,
+                          "traded_at":datetime.now(timezone.utc).isoformat()}
+        worker=SimpleNamespace(running=True,active_keys={key},cache=cache)
+        with patch("app.upstox_live_quote.settings",configured()), \
+             patch("app.upstox_live_quote.quote_worker",worker), \
+             patch("app.upstox_live_quote.upstox_quote",side_effect=ProviderFailure("PROVIDER_RECOVERY_COOLDOWN")):
+            result=current_quote("RELIANCE",key)
+            self.assertTrue(result["fallback_used"])
+            self.assertTrue(result["live_feed_verified"])
+            self.assertEqual(result["transport"],"AUTHORIZED_UPSTOX_V3_STREAM")
+            cache.connected=False
+            with self.assertRaises(HTTPException):
+                current_quote("RELIANCE",key)
+            cache.connected=True
+            worker.active_keys.clear()
+            with self.assertRaises(HTTPException):
+                current_quote("RELIANCE",key)
+            worker.active_keys.add(key)
+            cache.quotes[key]["traded_at"]=(datetime.now(timezone.utc)-timedelta(minutes=5)).isoformat()
+            with self.assertRaises(HTTPException):
+                current_quote("RELIANCE",key)
 
     def test_current_quote_rejects_bad_mapping_and_provider_failure(self):
         with self.assertRaises(HTTPException) as invalid:
