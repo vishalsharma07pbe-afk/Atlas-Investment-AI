@@ -34,11 +34,14 @@ it("renders bounded peer comparisons without implying sector leadership",()=>{
  const missing={status:"UNAVAILABLE",data:null,source:null};
  const evidence:CompanyEvidence={isin:"INE002A01018",retrieved_at:"2026-11-24T10:00:00Z",available_sections:1,total_sections:8,notice:"Provider reported.",sections:{profile:missing,ratios:missing,income_statement:missing,cash_flow:missing,balance_sheet:missing,shareholding:missing,corporate_actions:missing,competitors:missing},peer_research:{
  status:"SAMPLED_PEER_COMPARISON",selected_peer_count:3,cached_same_sector_count:3,minimum_peers_per_metric:3,sample_limit:3,
+ valuation_research:{status:"UNDATED_PEER_MULTIPLES",same_industry_cached_count:3,metrics:[{metric:"PE",company_value:8,peer_median:20,peer_min:10,peer_max:30,peer_count:3,premium_discount_percent:-60,company_retrieved_at:"2026-11-25T10:00:00Z",observation_period:"UNVERIFIED",peers:[]}],review_prompt:"DISCOUNT_WITH_REPORTED_DETERIORATION_REVIEW",notice:"Not matched valuation dates."},
  metrics:[{metric:"REVENUE",period:"2026-03",unit:"INR_CRORE",company_value:100,peer_median:120,peer_count:3,peers_above:2,peers_below:1,peers:[]}],
  notice:"Sample only; not market share."}};
  render(<CompanyEvidenceCard evidence={evidence}/>);
  expect(screen.getByText("2 above · 1 below · 3 peers")).toBeTruthy();
  expect(screen.getByText("120 Cr")).toBeTruthy();
+ expect(screen.getByText("60% discount")).toBeTruthy();
+ expect(screen.getByText(/discount coincides with reported financial deterioration/)).toBeTruthy();
  expect(screen.getByText("Sample only; not market share.")).toBeTruthy();
 });
 
