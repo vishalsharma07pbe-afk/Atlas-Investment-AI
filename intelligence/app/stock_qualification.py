@@ -60,6 +60,12 @@ def assess(item,group,coverage,context,horizon,today):
                and _num(geometry.get("reward_to_risk")) and geometry["reward_to_risk"]>0)
     requirements=["LIVE_SPREAD_AND_EXECUTION_LIQUIDITY_REQUIRED","VALIDATED_EXECUTION_COSTS_REQUIRED"]
     if horizon=="SWING" and not geometric:requirements.append("BRACKETING_PRICE_STRUCTURE_REQUIRED")
+    sensitivity=structure.get("risk_sensitivity") or {}
+    if (geometric and sensitivity.get("status")=="ILLUSTRATIVE_COST_AND_GAP_STRESS"
+            and sensitivity.get("as_of")==item.get("as_of")):
+        base_cost=[r for r in sensitivity.get("scenarios",[]) if r.get("cost_bps_per_side")==30]
+        if len(base_cost)==1 and base_cost[0].get("reference_meets_stressed_ratio") is False:
+            warnings.add("ILLUSTRATIVE_GAP_STRESS_RATIO_BELOW_ASSUMPTION")
     gate("EXECUTION_AND_RISK",geometric,requirements)
 
     company=item.get("company_evidence") or {}

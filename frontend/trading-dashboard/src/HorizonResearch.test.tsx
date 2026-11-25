@@ -251,3 +251,15 @@ it("uses server-selected distinct watch references and retains company-level con
  fireEvent.click(screen.getByText("Company-level selection · company review required"));
  expect(screen.getByText("reported revenue decline")).toBeTruthy();
 });
+
+it("displays historical cost and gap stress without calling it a trade target",async()=>{
+ const item={...candidate,price_structure:{status:"HISTORICAL_STRUCTURE",scenario_status:"ILLUSTRATIVE_HISTORICAL_GEOMETRY",support:[],resistance:[],scenario:null,notice:"Historical evidence only.",risk_sensitivity:{status:"ILLUSTRATIVE_COST_AND_GAP_STRESS",observed_gap_count:29,worst_adverse_open_gap_percent:5,worst_adverse_gap_date:"2026-11-20",assumed_gap_floor_percent:2,stress_gap_percent:5,stressed_lower_reference:85,illustrative_ratio:2,scenarios:[{cost_bps_per_side:30,upside_percent:10,downside_percent:5,stressed_downside_percent:10,reward_to_risk:2,stressed_reward_to_risk:1,illustrative_price_ceiling:100,stressed_price_ceiling:null,reference_meets_ratio:true,reference_meets_stressed_ratio:false}],notice:"Mathematical geometry, not executable prices."}}};
+ const market={...section,result:{...section.result,horizons:{...section.result.horizons,SWING:{...section.result.horizons.SWING,candidates:[item]}}}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[market]})})));
+ render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+ fireEvent.click(await screen.findByText("Price structure & risk scenarios"));
+ expect(screen.getByRole("region",{name:"Historical cost and gap stress"})).toBeTruthy();
+ expect(screen.getByText(/largest adverse gap 5%/)).toBeTruthy();
+ expect(screen.getByText("1.00×")).toBeTruthy();
+ expect(screen.getByText("Mathematical geometry, not executable prices.")).toBeTruthy();
+});

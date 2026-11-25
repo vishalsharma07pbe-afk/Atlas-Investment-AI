@@ -53,3 +53,37 @@ class PriceStructureTests(unittest.TestCase):
         self.assertEqual(result["week_count"],20)
         self.assertEqual(result["last_observed_date"],rows[-6].date)
         self.assertEqual(result["trend"],"ABOVE_BOTH")
+
+
+    def test_cost_and_gap_stress_and_price_ceiling(self):
+        rows=fixture()
+        result=analyze(rows,compute(rows),"SWING",calendar_verified=True)
+        research=result["risk_sensitivity"]
+        self.assertEqual(research["status"],"ILLUSTRATIVE_COST_AND_GAP_STRESS")
+        self.assertEqual(research["observed_gap_count"],29)
+        self.assertAlmostEqual(research["worst_adverse_open_gap_percent"],100*(1-100/120),places=3)
+        self.assertEqual(research["worst_adverse_gap_date"],rows[21].date)
+        self.assertAlmostEqual(research["stressed_lower_reference"],89*(100/120),places=3)
+        self.assertEqual([r["cost_bps_per_side"] for r in research["scenarios"]],[15,30,60])
+        a,b,d=research["scenarios"]
+        self.assertAlmostEqual(b["upside_percent"],result["scenario"]["upside_percent"])
+        self.assertAlmostEqual(b["downside_percent"],result["scenario"]["downside_percent"])
+        self.assertGreater(b["stressed_downside_percent"],b["downside_percent"])
+        self.assertGreater(a["illustrative_price_ceiling"],d["illustrative_price_ceiling"])
+        self.assertAlmostEqual(b["illustrative_price_ceiling"],(121+2*89)*.997/(3*1.003),places=3)
+        self.assertLess(b["stressed_reward_to_risk"],b["reward_to_risk"])
+        # The base-cost stressed ceiling remains just inside the bracket.
+        expected_stressed=(121+2*89*(100/120))*.997/(3*1.003)
+        self.assertAlmostEqual(b["stressed_price_ceiling"],expected_stressed,places=3)
+        self.assertGreater(b["stressed_price_ceiling"],89)
+        # Higher friction pushes the ceiling outside the bracket.
+        self.assertLess((121+2*89*(100/120))*.994/(3*1.006),89)
+        self.assertIsNone(d["stressed_price_ceiling"])
+        self.assertFalse(b["reference_meets_stressed_ratio"])
+
+    def test_sensitivity_withheld_without_verified_adjusted_bracket(self):
+        for rows,verified in [(fixture("RAW_UNADJUSTED"),True),(fixture(),False)]:
+            self.assertIsNone(analyze(rows,compute(rows),"SWING",verified)["risk_sensitivity"])
+        rows=fixture()
+        rows[20]=Candle(rows[20].date,100,101,99,100,100000,"ADJUSTED")
+        self.assertIsNone(analyze(rows,compute(rows),"SWING",True)["risk_sensitivity"])
