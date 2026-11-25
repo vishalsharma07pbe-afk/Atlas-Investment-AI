@@ -119,7 +119,7 @@ public class IntradayResearchService {
   var today=now.atZone(MarketCalendarService.IST).toLocalDate();
   Instant expected=today.atTime(9,15).atZone(MarketCalendarService.IST).toInstant();
   double sumPV=0,sumV=0,priorVolume=0,priorHigh=0,range=0,first=0;
-  double close=0,high=0,volume=0;
+  double close=0,high=0,volume=0,sessionLow=Double.POSITIVE_INFINITY,openingHigh=0,openingLow=Double.POSITIVE_INFINITY;
   for(int n=0;n<rows.size();n++){
    var row=rows.get(n);
    Object timestamp=row.get("candle_time");
@@ -129,6 +129,8 @@ public class IntradayResearchService {
    double o=num(row,"open"),h=num(row,"high"),l=num(row,"low"),c=num(row,"close"),v=num(row,"volume");
    if(!Double.isFinite(o+h+l+c+v)||o<=0||l<=0||c<=0||h<Math.max(o,c)||l>Math.min(o,c)||v<=0)return null;
    if(n==0)first=o;
+   sessionLow=Math.min(sessionLow,l);
+   if(n<2){openingHigh=Math.max(openingHigh,h);openingLow=Math.min(openingLow,l);}
    sumPV+=(h+l+c)/3*v;sumV+=v;range+=h-l;
    if(n<rows.size()-1){priorVolume+=v;priorHigh=Math.max(priorHigh,h);}
    else{close=c;high=h;volume=v;}
@@ -143,6 +145,9 @@ public class IntradayResearchService {
   result.put("id",last.get("id"));result.put("symbol",last.get("symbol"));result.put("exchange",last.get("exchange"));
   result.put("pattern",pattern);result.put("bar_end",expected.toString());result.put("close",close);
   result.put("vwap_proxy",round(vwap));result.put("relative_volume",round(rv));result.put("session_change_percent",round(momentum));
+  result.put("opening_range_high",openingHigh);result.put("opening_range_low",openingLow);
+  result.put("session_low_so_far",sessionLow);
+  result.put("price_structure_notice","Observed first 30-minute range, session low and prior high; no verified overhead target or executable stop.");
   result.put("mean_bar_range_percent",round(rangePct));result.put("prior_session_high_so_far",priorHigh);result.put("bar_count",rows.size());
   return result;
  }
