@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from .market_client import backend_json
 from .screener import screen
 from .mutual_fund_recommendations import CATEGORIES, dashboard
-from . import fund_portfolios, fund_disclosures, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
+from . import automatic_deals, fund_portfolios, fund_disclosures, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
 
 SECTIONS = ("NSE", "BSE", *CATEGORIES)
 DEFAULT_INTERVAL = 900
@@ -234,6 +234,10 @@ def read_snapshot(include_ai=True):
         except (ValueError, OSError, sqlite3.Error):
             snapshot["institutional_activity"] = {"status":"UNAVAILABLE"}
         try:
+            automatic_deals.attach(snapshot,_connect,current)
+        except (ValueError,OSError,sqlite3.Error):
+            snapshot["institutional_activity"]["deal_reports"]={"status":"UNAVAILABLE"}
+        try:
             automatic_company_evidence.attach(snapshot, _connect)
         except (ValueError, OSError, sqlite3.Error):
             snapshot["automatic_company_status"] = "UNAVAILABLE"
@@ -268,6 +272,10 @@ def job_status():
 
 def _execute_job(job):
     """Dispatch existing bounded engines, with explicit evidence/config gates."""
+    if job=="DEAL_REPORTS":
+        if not automatic_deals.permitted():
+            return "DISABLED_OR_NOT_AUTHORIZED"
+        return "PASS_COMPLETED" if automatic_deals.refresh(_connect) else "WAITING_EVIDENCE"
     if job=="FUND_COMPANY_EVIDENCE":
         if not fund_portfolios.permitted() or not automatic_company_evidence.permitted():
             return "DISABLED_OR_NOT_AUTHORIZED"

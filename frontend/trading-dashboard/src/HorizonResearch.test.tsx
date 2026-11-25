@@ -166,3 +166,14 @@ it("explains contradictory listing evidence without implying historical universe
  expect(screen.getByText(/Historical universe not verified/)).toBeTruthy();
  expect(screen.getByText("Survivorship bias remains.")).toBeTruthy();
 });
+
+it("shows reported deal sides without promoting a watch",async()=>{
+ const item={...candidate,deal_evidence:{status:"LOCAL_REPORTED_ONLY",latest_date:"2026-11-23",groups:[{deal_type:"BULK",record_count:1,buy_quantity:"0",sell_quantity:"1000",buy_reported_value_inr:"0",sell_reported_value_inr:"100000"}],recent_records:[{trade_date:"2026-11-23",deal_type:"BULK",client_name:"Example Client",side:"SELL",quantity:"1000",price_inr:"100",source_report:"Example report"}],notice:"Not verified institutional activity."}};
+ const market={...section,result:{...section.result,horizons:{...section.result.horizons,SWING:{...section.result.horizons.SWING,candidates:[item]}}}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[market]})})));
+ render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+ fireEvent.click(await screen.findByText("Reported bulk / block deal observations"));
+ expect(screen.getByText("Example Client")).toBeTruthy();
+ expect(screen.getByText(/sell quantity 1000/)).toBeTruthy();
+ expect(screen.getByText(/event risk not verified/)).toBeTruthy();
+});
