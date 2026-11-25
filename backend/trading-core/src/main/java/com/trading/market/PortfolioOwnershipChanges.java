@@ -14,7 +14,18 @@ final class PortfolioOwnershipChanges {
   private static final BigDecimal ONE=BigDecimal.ONE;
   record Quarter(String date,Map<String,BigDecimal> weights){}
   record Change(String category,String previousDate,String currentDate,BigDecimal previousPercent,
-      BigDecimal currentPercent,BigDecimal changePp,String attention,String observedAt){}
+      BigDecimal currentPercent,BigDecimal changePp,String attention,String observedAt){
+    // JSON/database round trips may change decimal scale (20 vs 2E+1).
+    // Canonicalize without rounding so retained events remain value-identical.
+    Change {
+      previousPercent=canonical(previousPercent);
+      currentPercent=canonical(currentPercent);
+      changePp=canonical(changePp);
+    }
+    private static BigDecimal canonical(BigDecimal value){
+      return value==null?null:value.stripTrailingZeros();
+    }
+  }
   private static LocalDate date(String value){
     try{
       var d=LocalDate.parse(value);
