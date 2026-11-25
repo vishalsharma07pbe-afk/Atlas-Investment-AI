@@ -57,6 +57,19 @@ final class PortfolioEquityCorrelation {
   out.put("comparable_pairs",comparable);out.put("attempted_pairs",attempted);
   out.put("high_positive_pair_count",pairs.stream().filter(p->Boolean.TRUE.equals(p.get("high_positive_correlation"))).count());
   out.put("pairs",pairs);
+  // Allocation research must cover the entire positive direct-equity sleeve,
+  // never silently inherit the pairwise analysis's top-12 truncation.
+  boolean complete=true;
+  for(var row:rows){
+   if(!"EQUITY".equals(row.get("asset_type")))continue;
+   if(!(row.get("market_value") instanceof BigDecimal value)||value.signum()<0||
+       !Boolean.TRUE.equals(row.get("recorded_valuation_recent"))){complete=false;continue;}
+   if(value.signum()>0&&(!(row.get("isin") instanceof String isin)||!isin.matches("INE[A-Z0-9]{9}")||
+       !(row.get("instrument_id") instanceof Number)||!byIsin.containsKey(isin)))complete=false;
+  }
+  Map<String,BigDecimal> values=new TreeMap<>();Map<String,String> symbols=new TreeMap<>();
+  byIsin.forEach((isin,item)->{values.put(isin,item.value());symbols.put(isin,item.symbol());});
+  out.put("historical_allocation",PortfolioHistoricalAllocation.assess(values,symbols,series,today,complete));
   out.put("notice","Pearson correlation of matched consecutive observed return intervals from validated adjusted daily closes over the last 90 calendar days. At least 30 matched intervals, recent overlap and a single known source per series required. Up to 12 largest resolved priced direct equities. No fund look-through, future correlation or optimal allocation.");
   return out;
  }
