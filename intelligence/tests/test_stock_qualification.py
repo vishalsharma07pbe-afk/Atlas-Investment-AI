@@ -101,3 +101,15 @@ class StockQualificationTests(unittest.TestCase):
         self.assertEqual(selection["unique_company_count"],7)
         self.assertEqual(selection["ready_markets"],["NSE"])
         self.assertEqual([r["id"] for r in selection["watch_refs"]],[7,6,5,4,3])
+
+
+    def test_gap_stress_is_review_only_and_keeps_execution_blockers(self):
+        snap,item,_=fixture()
+        item["price_structure"]={"as_of":item["as_of"],"scenario_status":"ILLUSTRATIVE_HISTORICAL_GEOMETRY",
+            "scenario":{"reward_to_risk":2.5},"risk_sensitivity":{"status":"ILLUSTRATIVE_COST_AND_GAP_STRESS",
+                "as_of":item["as_of"],"scenarios":[{"cost_bps_per_side":30,"reference_meets_stressed_ratio":False}]}}
+        qualification.attach(snap,TODAY)
+        report=item["stock_qualification"]
+        self.assertIn("ILLUSTRATIVE_GAP_STRESS_RATIO_BELOW_ASSUMPTION",report["review_findings"])
+        self.assertIn("LIVE_SPREAD_AND_EXECUTION_LIQUIDITY_REQUIRED",report["blockers"])
+        self.assertEqual(snap["stock_qualification"]["horizons"]["SWING"]["recommendations"],[])
