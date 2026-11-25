@@ -381,4 +381,30 @@ class AuthIsolationIntegrationTest {
       .andExpect(status().isOk()).andExpect(jsonPath("$.unread_count").value(0));
   }
 
+  @Test void quarterlyOwnershipAlertIsDeduplicatedAndOwnerScoped()throws Exception{
+    String email="ownership-"+UUID.randomUUID()+"@example.test";
+    String a=create(email),b=create("ownership-other-"+UUID.randomUUID()+"@example.test");
+    UUID owner=jdbc.queryForObject("SELECT id FROM atlas_users WHERE email=?",UUID.class,email);
+    mvc.perform(post("/api/v1/portfolio/holdings").header("Authorization",a)
+      .contentType(MediaType.APPLICATION_JSON).content("{\"symbol\":\"OWNTEST\",\"assetType\":\"EQUITY\",\"quantity\":2,\"averageCost\":100}"))
+      .andExpect(status().isOk());
+    mvc.perform(get("/api/v1/portfolio/review").header("Authorization",a)).andExpect(status().isOk());
+    long holding=jdbc.queryForObject("SELECT id FROM personal_holdings WHERE user_id=? AND symbol='OWNTEST'",Long.class,owner);
+    var change=Map.of("category","promoters","currentDate","2026-09-30","attention","REVIEW");
+    var item=Map.of("id",holding,"symbol","OWNTEST","asset_type","EQUITY","isin","INE002A01018","exchange","NSE",
+      "ownership_changes",java.util.List.of(change));
+    jdbc.update("UPDATE portfolio_review_snapshots SET generated_at=now(),result=jsonb_set(result,'{holdings}',?::jsonb) WHERE user_id=?",
+      mapper.writeValueAsString(java.util.List.of(item)),owner);
+    riskNotifications.evaluate();riskNotifications.evaluate();
+    mvc.perform(get("/api/v1/research-workspace/notifications").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1))
+      .andExpect(jsonPath("$[0].title").value("Quarterly ownership review"));
+    mvc.perform(get("/api/v1/research-workspace/notifications").header("Authorization",b))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+    mvc.perform(delete("/api/v1/portfolio/holdings/"+holding).header("Authorization",a)).andExpect(status().isOk());
+    riskNotifications.evaluate();
+    mvc.perform(get("/api/v1/research-workspace/notifications").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
+  }
+
 }

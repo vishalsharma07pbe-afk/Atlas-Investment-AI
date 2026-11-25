@@ -126,3 +126,17 @@ it("prioritizes dated fund disclosure changes and does not treat lower fees as r
  expect(screen.getByText(/Observation only. Secondary reported evidence/)).toBeTruthy();
  expect(screen.getByText("Needs review")).toBeTruthy();
 });
+
+it("prioritizes recent quarterly ownership declines without implying trades",async()=>{
+ const base={asset_type:"EQUITY",exchange:"NSE",status:"MONITOR",weight_percent:50,recorded_return_percent:1,evidence_date:null,history_count:0,change_20_observations_percent:null,recent_peak_change_percent:null,findings:[],missing_evidence:[]};
+ const change={category:"promoters",previousDate:"2026-06-30",currentDate:"2026-09-30",previousPercent:50,currentPercent:48,changePp:-2,attention:"REVIEW",observedAt:"2026-11-25T10:00:00Z"};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-25T10:00:00Z",holding_count:2,attention_count:0,data_gap_count:0,ownership_changed_count:1,ownership_attention_count:1,notice:"Research only",holdings:[
+ {...base,id:1,symbol:"UNCHANGED"},
+ {...base,id:2,symbol:"OWNERSHIP",ownership_changes:[change]}
+ ]})})));
+ render(<PortfolioDoctor revision={0} onSettings={()=>{}}/>);
+ expect(await screen.findByText("Recently observed quarterly ownership changes")).toBeTruthy();
+ expect(screen.getAllByRole("article")[0].textContent).toContain("OWNERSHIP");
+ expect(screen.getByText(/50.00% \(2026-06-30\) → 48.00% \(2026-09-30\)/)).toBeTruthy();
+ expect(screen.getByText(/not proof of trades/)).toBeTruthy();
+});
