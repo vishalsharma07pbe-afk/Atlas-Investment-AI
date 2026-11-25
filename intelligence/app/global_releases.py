@@ -168,8 +168,9 @@ def read(connect,instant=None):
                         conflicts.add(e["id"])
                         continue
                     prev["topics"]=sorted(set(prev["topics"])|set(e["topics"]))
+                    prev["feed_ids"]=sorted(set(prev["feed_ids"])|{key})
                 else:
-                    events[e["id"]]=dict(e)
+                    events[e["id"]]={**e,"feed_ids":[key]}
     current=sum(s["status"] in ("CURRENT_FEED","NO_RECENT_RETURNED_HEADLINES") for s in sources)
     return {"status":"AVAILABLE" if current==len(sources) else "PARTIAL" if current else "UNAVAILABLE",
             "sources":sources,"events":sorted((e for k,e in events.items() if k not in conflicts),

@@ -104,3 +104,11 @@ it("keeps scheduled macro events separate from published announcements",async()=
  expect(screen.getByText(/schedule time passed release unverified/)).toBeTruthy();
  expect(screen.getByText("Scheduled time does not establish publication.")).toBeTruthy();
 });
+
+it("shows matched release evidence without claiming numeric results",async()=>{
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[],economic_calendar:{status:"CURRENT_SCHEDULE",source_url:"https://www.bls.gov/help/hlpiCAL.htm",events:[{id:"one",headline:"Consumer Price Index",topic:"INFLATION",scheduled_at:"2026-11-25T13:30:00+00:00",status:"SCHEDULE_TIME_PASSED_RELEASE_UNVERIFIED",review_window:false,release_match:{status:"MATCHED_OFFICIAL_RELEASE_HEADLINE",headline:"Published CPI announcement",source_url:"https://www.bls.gov/news.release/archives/cpi_11252026.htm",published_at:"2026-11-25T13:30:00+00:00",notice:"Review the actual release; numerical surprise unverified."}}],notice:"Scheduled time does not establish publication."}})})));
+ render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}}>{null}</AutonomousOverview>);
+ expect(await screen.findByRole("link",{name:"Published CPI announcement"})).toBeTruthy();
+ expect(screen.getByText("matched official release headline")).toBeTruthy();
+ expect(screen.getByText("Review the actual release; numerical surprise unverified.")).toBeTruthy();
+});
