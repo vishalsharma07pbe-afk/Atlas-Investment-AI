@@ -16,6 +16,8 @@ KEY=re.compile(r"^(NSE|BSE)_EQ\|(IN[A-Z0-9]{10})$")
 
 def sector(report):
     section=report.get("sections",{}).get("profile",{})
+    if section.get("status")!="AVAILABLE":
+        return None
     value=(section.get("data") or {}).get("sector")
     return " ".join(value.casefold().split()) if isinstance(value,str) and value.strip() else None
 
@@ -26,7 +28,8 @@ def selected(report):
         return []
     seen=set()
     result=[]
-    rows=report.get("sections",{}).get("competitors",{}).get("data") or []
+    block=report.get("sections",{}).get("competitors",{})
+    rows=block.get("data") or [] if block.get("status")=="AVAILABLE" else []
     for row in rows:
         if not isinstance(row,dict):
             continue
@@ -60,6 +63,14 @@ def _metric(report,key):
     if key in ("NET_MARGIN","OPERATING_MARGIN"):
         if row.get("unit")!="PERCENT":
             return None
+        # The derived margin must come from current same-period consolidated
+        # source trends, not just a coincidentally matching displayed label.
+        source_keys=("REVENUE","NET_PROFIT" if key=="NET_MARGIN" else "OPERATING_PROFIT")
+        source_rows=(report.get("financial_trends") or {}).get("items",[])
+        for source_key in source_keys:
+            source=[r for r in source_rows if r.get("metric")==source_key]
+            if len(source)!=1 or source[0].get("statement_type")!="consolidated" or source[0].get("latest_period_may_be_stale") is not False or source[0].get("period_basis")!="DECLARED_ANNUAL_MONTH_END" or source[0].get("latest_period")!=period:
+                return None
         value=row.get("latest_value")
         unit="PERCENT"
     else:
@@ -75,7 +86,7 @@ def _metric(report,key):
         return None
     if key=="REVENUE_GROWTH":
         prior=row.get("previous_period")
-        if not isinstance(prior,str) or not re.fullmatch(r"20\\d{2}-(0[1-9]|1[0-2])",prior):
+        if not isinstance(prior,str) or not re.fullmatch(r"20\d{2}-(0[1-9]|1[0-2])",prior):
             return None
         period=prior+" / "+period
     return period,unit,value
