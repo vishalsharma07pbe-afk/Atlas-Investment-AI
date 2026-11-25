@@ -90,7 +90,8 @@ function LookThroughDigest({report}:{report:LookThrough}){
  </section>;
 }
 function HistoricalAllocationDigest({report}:{report:HistoricalAllocation}){
- const label=(kind:string)=>({CURRENT_WEIGHTS:"Current weights",HALFWAY_TO_EQUAL:"Halfway to equal weights",EQUAL_WEIGHTS:"Equal weights"}[kind]??kind.replace(/_/g," ").toLowerCase());
+ const labels:Record<string,string>={CURRENT_WEIGHTS:"Current weights",HALFWAY_TO_EQUAL:"Halfway to equal weights",EQUAL_WEIGHTS:"Equal weights"};
+ const label=(kind:string)=>labels[kind]??kind.replace(/_/g," ").toLowerCase();
  return <section className="thesis-digest" aria-label="Historical allocation alternatives">
   <h4>Historical allocation alternatives</h4>
   {report.status==="HISTORICAL_COMPARISON_AVAILABLE"?<>
