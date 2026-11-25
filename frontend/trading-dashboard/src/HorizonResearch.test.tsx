@@ -76,14 +76,17 @@ it("shows prospective evidence gaps and candidate conflicts without implying cal
 });
 
 it("shows the integrated stock conclusion and exact replay without manual analysis",async()=>{
- const enriched={...candidate,research_conclusion:{status:"REVIEW_REQUIRED",summary:"Technical watch requires review.",blockers:["VALUATION_NOT_VERIFIED"],warnings:["MATCHED_REPLAY_NONPOSITIVE_AFTER_COSTS"],evidence:{technical:"WATCH_RULES_MET",valuation:"NOT_VERIFIED"},reassessment_conditions:["Reassess on new financial results."],notice:"Watch only."},
+ const enriched={...candidate,research_conclusion:{status:"REVIEW_REQUIRED",supporting_evidence:["REVENUE_THREE_ANNUAL_INCREASES"],next_evidence_checks:["DATED_VALUATION_AND_INDEPENDENT_FILING_EVIDENCE_REQUIRED"],qualification_status:"WATCH_ONLY_UNQUALIFIED",summary:"Technical watch requires review.",blockers:["VALUATION_NOT_VERIFIED"],warnings:["MATCHED_REPLAY_NONPOSITIVE_AFTER_COSTS"],evidence:{technical:"WATCH_RULES_MET",valuation:"NOT_VERIFIED"},reassessment_conditions:["Reassess on new financial results."],notice:"Watch only."},
  matched_strategy_replay:{as_of:"2026-11-23",trades:3,small_sample:true,cost_scenarios:[{cost_bps_per_side:30,net_return_percent:-2,max_drawdown_percent:-5}],notice:"Not a forecast."}};
  const market={...section,result:{...section.result,horizons:{...section.result.horizons,SWING:{...section.result.horizons.SWING,candidates:[enriched]}}}};
  vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[market]})})));
  render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
  expect(await screen.findByText("Technical watch requires review.")).toBeTruthy();
+ expect(screen.getByText("Supporting reported evidence")).toBeTruthy();
+ expect(screen.getByText("revenue three annual increases")).toBeTruthy();
  fireEvent.click(screen.getByText("Complete evidence & reassessment"));
  expect(screen.getByText("Reassess on new financial results.")).toBeTruthy();
+ expect(screen.getByText("dated valuation and independent filing evidence required")).toBeTruthy();
  fireEvent.click(screen.getByText(/Same-stock historical replay/));
  expect(screen.getByText(/net simulated return -2%/)).toBeTruthy();
  expect(fetch).toHaveBeenCalledTimes(1);

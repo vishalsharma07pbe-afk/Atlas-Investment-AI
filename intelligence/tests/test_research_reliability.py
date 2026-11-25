@@ -100,3 +100,36 @@ class ResearchReliabilityTests(unittest.TestCase):
         self.assertEqual(result["observed_outcomes"],1)
         self.assertEqual(result["legacy_or_unverified_observed"],1)
         self.assertEqual(result["coverage_percent"],50)
+
+    def test_conclusion_integrates_growth_discount_ownership_and_benchmark_conflicts(self):
+        from app.research_reliability import attach_conclusions
+        item={"isin":"INE002A01018","as_of":"2026-11-23",
+            "company_evidence":{"isin":"INE002A01018","fundamental_quality":{"warnings":["NET_MARGIN_DETERIORATION_REVIEW"],
+                "multi_year_quality":{"status":"REPORTED_MULTI_YEAR_EVIDENCE","metrics":[{"metric":"REVENUE","increasing_years":3,"nonpositive_years":0}]}},
+                "peer_research":{"valuation_research":{"status":"UNDATED_PEER_MULTIPLES","metrics":[{"metric":"PE"}],
+                    "review_prompt":"DISCOUNT_WITH_REPORTED_DETERIORATION_REVIEW"}},
+                "ownership_research":{"status":"COMPARABLE_QUARTERS","review_prompts":[{"category":"fii","change_pp":-2}],
+                    "blockers":["STOCK_LEVEL_TRANSACTION_DATA_UNVERIFIED"]}},
+            "matched_strategy_replay":{"status":"REPLAY_OBSERVED","as_of":"2026-11-23","cost_scenarios":[
+                {"cost_bps_per_side":30,"net_return_percent":2,"net_difference_vs_same_stock_pp":-1,"net_difference_vs_nifty50_pp":-2}]},
+            "price_structure":{"as_of":"2026-11-23","scenario_status":"ILLUSTRATIVE_HISTORICAL_GEOMETRY"}}
+        snapshot={"enabled":True,"sections":[{"section":"NSE","status":"READY","result":{"horizons":{
+            "SWING":{"blockers":["EVENT_RISK_NOT_VERIFIED"],"candidates":[item]}}}}]}
+        attach_conclusions(snapshot)
+        result=item["research_conclusion"]
+        self.assertEqual(result["qualification_status"],"WATCH_ONLY_UNQUALIFIED")
+        self.assertEqual(result["status"],"REVIEW_REQUIRED")
+        self.assertIn("REVENUE_THREE_ANNUAL_INCREASES",result["supporting_evidence"])
+        self.assertIn("PEER_DISCOUNT_WITH_FINANCIAL_DETERIORATION_REVIEW",result["warnings"])
+        self.assertIn("REPORTED_FII_OWNERSHIP_DECLINE_REVIEW",result["warnings"])
+        self.assertIn("MATCHED_REPLAY_LAGS_SAME_STOCK_AFTER_COSTS",result["warnings"])
+        self.assertIn("MATCHED_REPLAY_LAGS_PRICE_INDEX_AFTER_COSTS",result["warnings"])
+        self.assertIn("EVENT_RISK_NOT_VERIFIED",result["next_evidence_checks"])
+        self.assertIn("STOCK_LEVEL_TRANSACTION_DATA_UNVERIFIED",result["next_evidence_checks"])
+        self.assertEqual(result["evidence"]["institutional"],"STOCK_LEVEL_NOT_VERIFIED")
+        self.assertEqual(result["evidence"]["reported_ownership"],"COMPARABLE_QUARTERS")
+        item["company_evidence"]["isin"]="INE009A01021"
+        attach_conclusions(snapshot)
+        self.assertEqual(item["research_conclusion"]["supporting_evidence"],[])
+        self.assertNotIn("REPORTED_FII_OWNERSHIP_DECLINE_REVIEW",item["research_conclusion"]["warnings"])
+        self.assertIn("EXACT_COMPANY_IDENTITY_EVIDENCE_REQUIRED",item["research_conclusion"]["next_evidence_checks"])

@@ -169,6 +169,68 @@ def attach(snapshot, report, today):
     return snapshot
 
 
+def _report_context(item,company,replay_observed,horizon):
+    """Typed deterministic report facts; no provider prose or model verdicts."""
+    quality=company.get("fundamental_quality") or {}
+    ownership=company.get("ownership_research") or {}
+    peer=(company.get("peer_research") or {}).get("valuation_research") or {}
+    multi=quality.get("multi_year_quality") or {}
+    structure=item.get("price_structure") or {}
+    replay=item.get("matched_strategy_replay") or {}
+    supporting=[]
+    warnings=[]
+    priorities=[]
+    # A cached company report must not be attached to another instrument.
+    matched=exact_isin(item.get("isin")) and company.get("isin")==item["isin"]
+    if not matched:
+        return supporting,warnings,["EXACT_COMPANY_IDENTITY_EVIDENCE_REQUIRED"],{
+            "growth_consistency":"UNAVAILABLE","peer_valuation":"UNAVAILABLE",
+            "reported_ownership":"UNAVAILABLE","price_structure":"UNAVAILABLE"}
+    if multi.get("status")=="REPORTED_MULTI_YEAR_EVIDENCE":
+        for metric in multi.get("metrics",[]):
+            key=metric.get("metric")
+            if key in ("REVENUE","NET_PROFIT","OPERATING_PROFIT","OPERATING_CASH_FLOW") and metric.get("increasing_years")==3 and metric.get("nonpositive_years")==0:
+                supporting.append(key+"_THREE_ANNUAL_INCREASES")
+    else:
+        priorities.append("MATCHED_MULTI_YEAR_FINANCIAL_HISTORY_REQUIRED")
+    if multi.get("cash_conversion") is None:
+        priorities.append("MATCHED_CUMULATIVE_CASH_CONVERSION_REQUIRED")
+    if peer.get("status")=="UNDATED_PEER_MULTIPLES" and peer.get("metrics"):
+        if peer.get("review_prompt")=="DISCOUNT_WITH_REPORTED_DETERIORATION_REVIEW":
+            warnings.append("PEER_DISCOUNT_WITH_FINANCIAL_DETERIORATION_REVIEW")
+    else:
+        priorities.append("COMPARABLE_PEER_MULTIPLES_REQUIRED")
+    if ownership.get("status")=="COMPARABLE_QUARTERS":
+        for row in ownership.get("review_prompts",[]):
+            category=row.get("category")
+            change=row.get("change_pp")
+            if category in ("promoters","fii","other_dii","mutual_funds") and _finite(change) and change<=-1:
+                warnings.append("REPORTED_"+category.upper()+"_OWNERSHIP_DECLINE_REVIEW")
+    else:
+        priorities.append("COMPARABLE_QUARTERLY_OWNERSHIP_REQUIRED")
+    for code in ownership.get("blockers",[]):
+        if code in ("PROMOTER_PLEDGE_DATA_UNVERIFIED","BULK_BLOCK_DEAL_FEED_UNAVAILABLE","STOCK_LEVEL_TRANSACTION_DATA_UNVERIFIED"):
+            priorities.append(code)
+    if (structure.get("as_of")==item.get("as_of") and structure.get("scenario_status")=="ILLUSTRATIVE_HISTORICAL_GEOMETRY"):
+        price_status="ILLUSTRATIVE_HISTORICAL_GEOMETRY"
+    else:
+        price_status="UNAVAILABLE_OR_UNVERIFIED"
+    if horizon=="SWING" and price_status!="ILLUSTRATIVE_HISTORICAL_GEOMETRY":
+        priorities.append("VERIFIED_PRICE_STRUCTURE_EVIDENCE_REQUIRED")
+    if replay_observed:
+        for row in replay.get("cost_scenarios",[]):
+            if row.get("cost_bps_per_side")==30 and _finite(row.get("net_difference_vs_same_stock_pp")) and row["net_difference_vs_same_stock_pp"]<0:
+                warnings.append("MATCHED_REPLAY_LAGS_SAME_STOCK_AFTER_COSTS")
+            if row.get("cost_bps_per_side")==30 and _finite(row.get("net_difference_vs_nifty50_pp")) and row["net_difference_vs_nifty50_pp"]<0:
+                warnings.append("MATCHED_REPLAY_LAGS_PRICE_INDEX_AFTER_COSTS")
+    priorities.append("DATED_VALUATION_AND_INDEPENDENT_FILING_EVIDENCE_REQUIRED")
+    return supporting,warnings,priorities,{
+        "growth_consistency":"REPORTED_MULTI_YEAR_EVIDENCE" if multi.get("status")=="REPORTED_MULTI_YEAR_EVIDENCE" else "INCOMPLETE",
+        "peer_valuation":"UNDATED_PEER_MULTIPLES" if peer.get("status")=="UNDATED_PEER_MULTIPLES" and peer.get("metrics") else "UNAVAILABLE",
+        "reported_ownership":ownership.get("status","UNAVAILABLE"),
+        "price_structure":price_status}
+
+
 def attach_conclusions(snapshot):
     """A deterministic conclusion from the same current evidence shown in the report.
 
@@ -201,6 +263,8 @@ def attach_conclusions(snapshot):
                         warnings.append("MATCHED_REPLAY_NONPOSITIVE_AFTER_COSTS")
                     if replay.get("small_sample") is True:
                         warnings.append("MATCHED_REPLAY_SMALL_SAMPLE")
+                supporting,context_warnings,priorities,context_evidence=_report_context(item,company,replay_observed,horizon)
+                warnings.extend(context_warnings)
                 thesis="Technical watch meets the current horizon rules; a full investment verdict is withheld."
                 if warnings:
                     thesis="Technical watch meets the current horizon rules, but risk or conflicting evidence requires review."
@@ -213,6 +277,10 @@ def attach_conclusions(snapshot):
                 item["research_conclusion"]={
                     "status":"REVIEW_REQUIRED" if warnings else "WATCH_ONLY",
                     "summary":thesis,"blockers":blockers,"warnings":sorted(set(warnings)),
+                    "supporting_evidence":sorted(set(supporting)),
+                    "next_evidence_checks":sorted(set(priorities)|set(blockers)),
+                    "report_version":"STOCK-RESEARCH-CONCLUSION-2",
+                    "qualification_status":"WATCH_ONLY_UNQUALIFIED",
                     "evidence":{
                         "technical":"WATCH_RULES_MET",
                         "fundamentals":"REPORTED_TRENDS_AVAILABLE" if trends else "INCOMPLETE",
@@ -223,7 +291,7 @@ def attach_conclusions(snapshot):
                         "valuation":"SECTOR_COMPARISON_ONLY" if (quality.get("valuation") or {}).get("status")=="SECTOR_COMPARISON_ONLY" else "NOT_VERIFIED",
                         "peer_comparison":(company.get("peer_research") or {}).get("status","UNAVAILABLE"),
                         "business_quality":quality.get("status","UNAVAILABLE"),"institutional":"STOCK_LEVEL_NOT_VERIFIED",
-                        "market_regime":"NOT_VALIDATED"},
+                        "market_regime":"NOT_VALIDATED",**context_evidence},
                     "reassessment_conditions":conditions,
                     "notice":"Deterministic watch-only research conclusion; not a recommendation, target, stop-loss or calibrated probability."}
     return snapshot
