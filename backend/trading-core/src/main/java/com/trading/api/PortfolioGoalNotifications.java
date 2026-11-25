@@ -50,10 +50,31 @@ public class PortfolioGoalNotifications {
       case "STALE_RECORDED_BALANCE" -> new Attention("STALE_BALANCE","Goal balance needs an update","The reserved balance is older than 30 days. Forward funding estimates are withheld.");
       case "NO_REMAINING_MONTH_ENDS" -> new Attention("DEADLINE_GAP","Goal deadline funding gap","There are no remaining scheduled month ends and a recorded funding gap remains.");
       case "FUNDING_SHORTFALL" -> new Attention("SHORTFALL","Goal funding shortfall","Planned contributions fall short under unchanged-value assumptions. Review the required monthly amount.");
-      case "FUNDED_UNDER_ZERO_GROWTH" -> !goal.deadline().isAfter(today.plusDays(30))&&p.recordedGap()!=null&&p.recordedGap().signum()>0?
-        new Attention("DEADLINE_NEAR","Goal deadline approaching","The deadline is within 30 days and recorded funding is not yet complete. Planned contributions are not confirmed payments."):null;
+      case "FUNDED_UNDER_ZERO_GROWTH","RECORDED_TARGET_FUNDED" -> fundedAttention(goal,today);
       default -> null;
     };
+  }
+  private static Attention fundedAttention(PortfolioGoalController.Goal goal,LocalDate today){
+    // Keep the immediate deadline warning ahead of conditional market risk.
+    var p=goal.progress();
+    if("FUNDED_UNDER_ZERO_GROWTH".equals(p.status())&&!goal.deadline().isAfter(today.plusDays(30))&&
+        p.recordedGap()!=null&&p.recordedGap().signum()>0)
+      return new Attention("DEADLINE_NEAR","Goal deadline approaching","The deadline is within 30 days and recorded funding is not yet complete. Planned contributions are not confirmed payments.");
+    if(p.zeroGrowthShortfall()==null||p.zeroGrowthShortfall().signum()!=0)return null;
+    var risk=PortfolioGoalRisk.assess(goal,today);
+    if(!"ILLUSTRATIVE_STRESS_AVAILABLE".equals(risk.status()))return null;
+    var worst=risk.scenarios().stream().filter(s->s.projectedShortfall().signum()>0)
+      .max(Comparator.comparing(PortfolioGoalRisk.Scenario::projectedShortfall)
+        .thenComparingInt(s->s.equityDeclinePercent()+s.fundDeclinePercent()));
+    if(worst.isEmpty())return null;
+    var s=worst.get();
+    String shocks=(s.equityDeclinePercent()>0?"direct equity -"+s.equityDeclinePercent()+"%":"")
+      +(s.equityDeclinePercent()>0&&s.fundDeclinePercent()>0?", ":"")
+      +(s.fundDeclinePercent()>0?"fund NAV -"+s.fundDeclinePercent()+"%":"");
+    return new Attention("DOWNSIDE_SHORTFALL","Goal funding vulnerable to downside",
+      "Unchanged-value funding meets the target, but the illustrative "+shocks+
+      " shock creates a projected shortfall of INR "+s.projectedShortfall().toPlainString()+
+      ". This is not a forecast or verified withdrawal value. Planned contributions are not confirmed payments.");
   }
   public int evaluateOwner(UUID owner){
     Integer inserted=transaction.execute(status->{
