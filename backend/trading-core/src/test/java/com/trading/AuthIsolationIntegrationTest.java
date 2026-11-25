@@ -626,6 +626,22 @@ class AuthIsolationIntegrationTest {
       .andExpect(jsonPath("$.goalRisk['"+ids[0]+"'].scenarios[0].hypotheticalLoss").value(6000.0));
     mvc.perform(get(base).header("Authorization",b)).andExpect(status().isOk())
       .andExpect(jsonPath("$.goalRisk['"+ids[0]+"']").doesNotExist());
+    // The goal is exactly funded at recorded prices, but not under the equity shock.
+    String fundedBody=mapper.writeValueAsString(Map.of("name","Linked goal","targetAmount",70000,
+      "reservedAmount",40000,"balanceDate",today.toString(),"deadline",today.plusMonths(6).toString(),"monthlyContribution",0));
+    mvc.perform(put(base+"/"+ids[0]).header("Authorization",a).contentType(MediaType.APPLICATION_JSON)
+      .content(fundedBody)).andExpect(status().isOk());
+    org.junit.jupiter.api.Assertions.assertEquals(1,goalNotifications.evaluateOwner(owner));
+    org.junit.jupiter.api.Assertions.assertEquals(0,goalNotifications.evaluateOwner(owner));
+    org.junit.jupiter.api.Assertions.assertEquals(1,jdbc.queryForObject("""
+      SELECT count(*) FROM user_notification_history WHERE user_id=? AND source_code='ATLAS_GOAL_REVIEW'
+        AND source_reference=? AND details->>'kind'='DOWNSIDE_SHORTFALL'
+        AND message LIKE '%6000.00%'
+      """,Integer.class,owner,ids[0]));
+    org.junit.jupiter.api.Assertions.assertEquals(0,jdbc.queryForObject("""
+      SELECT count(*) FROM user_notification_history WHERE user_id=? AND source_code='ATLAS_GOAL_REVIEW'
+        AND source_reference=? AND details->>'kind'='DOWNSIDE_SHORTFALL'
+      """,Integer.class,other,ids[0]));
     jdbc.update("UPDATE personal_holdings SET price_as_of=now()-interval '8 days' WHERE id=?",id);
     mvc.perform(get(base).header("Authorization",a)).andExpect(status().isOk())
       .andExpect(jsonPath("$.goals[0].progress.status").value("INCOMPLETE_LINKED_VALUATION"))
