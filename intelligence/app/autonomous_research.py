@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from .market_client import backend_json
 from .screener import screen
 from .mutual_fund_recommendations import CATEGORIES, dashboard
-from . import research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
+from . import fund_disclosures, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
 
 SECTIONS = ("NSE", "BSE", *CATEGORIES)
 DEFAULT_INTERVAL = 900
@@ -268,6 +268,11 @@ def job_status():
 
 def _execute_job(job):
     """Dispatch existing bounded engines, with explicit evidence/config gates."""
+    if job=="FUND_DISCLOSURES":
+        if not fund_disclosures.permitted():
+            return "DISABLED_OR_NOT_AUTHORIZED"
+        fund_disclosures.refresh()
+        return "PASS_COMPLETED"
     if job=="CALENDAR_CONTEXT":
         research_calendar.refresh(_connect)
         return "PASS_COMPLETED"
@@ -333,7 +338,7 @@ def run_one_job(interval):
         outcome=_execute_job(job)
     except Exception:
         outcome="FAILED"
-    research_jobs.finish(_connect,job,token,now().timestamp(),research_calendar.POLL_SECONDS if job=="CALENDAR_CONTEXT" else interval,outcome)
+    research_jobs.finish(_connect,job,token,now().timestamp(),(research_calendar.POLL_SECONDS if job=="CALENDAR_CONTEXT" else fund_disclosures.INTERVAL if job=="FUND_DISCLOSURES" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else interval),outcome)
     return True
 
 

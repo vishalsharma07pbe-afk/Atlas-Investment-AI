@@ -25,3 +25,14 @@ it("distinguishes explicit AMFI scheme evidence from name-matched discovery with
  expect(await screen.findByText("Explicit AMFI Direct Growth evidence (sample)")).toBeTruthy();
  expect(screen.getAllByText("No fund currently qualifies")).toHaveLength(2);
 });
+
+it("shows dated secondary disclosures without enabling fund recommendations",async()=>{
+ const disclosed={...response,disclosure_evidence:{status:"SECONDARY_REPORTED",notice:"Not independently verified.",items:[{scheme_code:"118955",scheme_name:"Example Disclosure Fund",plan:"DIRECT",source:"TIGZIG_AMFI_DERIVED",source_url:"https://api.tigzig.com/mf/v1/download/scheme_details_latest.csv.gz",collected_at:"2026-11-25T04:00:00Z",aum_date:"2026-11-24",aum_cr_all_plans:3500,benchmark:"Nifty 100 TRI",riskometer:"VERY_HIGH",ter_date:"2026-11-24",ter_percent:0.7,base_expense_percent:0.5,document_date:"2026-10-01",fund_managers:"Example Manager",exit_load:"1% within one year",conflicts:[]}]}};
+ vi.stubGlobal("fetch",vi.fn(async(url:string)=>({ok:true,json:async()=>url.includes("historical-watch")?{category:"LARGE_CAP",items:[],universe_count:120,sample_count:20,eligible_count:0,automatic_collection_enabled:true,notice:"Historical only"}:disclosed})));
+ render(<MutualFundResearchDashboard onExplore={()=>{}}/>);
+ fireEvent.click(await screen.findByText("Reported fund disclosures (1)"));
+ expect(screen.getByText("Example Disclosure Fund")).toBeTruthy();
+ expect(screen.getByText("Not independently verified.")).toBeTruthy();
+ expect(screen.getByText("0.7% · 2026-11-24")).toBeTruthy();
+ expect(screen.getAllByText("No fund currently qualifies")).toHaveLength(2);
+});
