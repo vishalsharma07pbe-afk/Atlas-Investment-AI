@@ -51,3 +51,34 @@ class PortfolioThesisTests(unittest.TestCase):
         from app import autonomous_research
         with thesis.connect() as private,autonomous_research._connect() as public:
             self.assertNotEqual(private.execute("PRAGMA database_list").fetchone()[2],public.execute("PRAGMA database_list").fetchone()[2])
+
+    def test_fund_only_request_strict_schema_and_token(self):
+        client=TestClient(app)
+        headers={"X-Atlas-Service-Token":os.environ["INTERNAL_SERVICE_TOKEN"]}
+        fund={"scheme_code":118955,"isin_growth":"INF179K01BB2","amfi_plan":"REGULAR",
+              "amfi_option":"GROWTH","amfi_metadata_date":"2026-11-25","scheme_name":"Example",
+              "category":"Open Ended Schemes(Equity Scheme - Large Cap Fund)"}
+        payload={"identities":[],"funds":[fund]}
+        self.assertEqual(client.post("/api/v1/internal/portfolio-thesis",json=payload).status_code,401)
+        self.assertEqual(client.post("/api/v1/internal/portfolio-thesis",json={"identities":[],"funds":[{**fund,"quantity":100}]},headers=headers).status_code,422)
+        with patch.object(thesis,"fund_evidence",return_value={"118955":{"status":"SECONDARY_REPORTED_EVIDENCE"}}) as read:
+            response=client.post("/api/v1/internal/portfolio-thesis",json=payload,headers=headers)
+            self.assertEqual(response.status_code,200)
+            self.assertIn("118955",response.json()["fund_items"])
+            read.assert_called_once_with([fund])
+
+    def test_held_fund_reads_cache_without_category_sample(self):
+        from app import fund_disclosures, fund_portfolios
+        instant=datetime(2026,11,25,4,tzinfo=timezone.utc)
+        row={"scheme_code":118955,"amfi_option":"GROWTH","amfi_metadata_date":"2026-11-25"}
+        disclosure={"scheme_code":"118955","plan":"REGULAR"}
+        with patch.object(fund_disclosures,"permitted",return_value=True), \
+             patch.object(fund_disclosures,"matched",return_value=[disclosure]) as match, \
+             patch.object(fund_portfolios,"matched",return_value=[{"status":"SECONDARY_COMPOSITION_ONLY"}]) as composition:
+            result=thesis.fund_evidence([row,row],instant)
+            self.assertEqual(result["118955"]["portfolio"]["status"],"SECONDARY_COMPOSITION_ONLY")
+            match.assert_called_once()
+            composition.assert_called_once()
+            self.assertEqual(thesis.fund_evidence([{**row,"amfi_metadata_date":"2026-11-01"}],instant),{})
+        with patch.object(fund_disclosures,"permitted",return_value=False):
+            self.assertEqual(thesis.fund_evidence([row],instant),{})
