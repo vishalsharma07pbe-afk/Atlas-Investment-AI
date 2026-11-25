@@ -272,7 +272,7 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
     official=_official_history_candidates(historical,category,datetime.now(ZoneInfo("Asia/Kolkata")).date()) if historical else []
     coverage["explicit_amfi_history_candidates"]=len(official)
     official_ids={f.identifier for f in official}
-    disclosed=fund_disclosures.matched([row for row in historical["items"] if str(row.get("scheme_code")) in official_ids],datetime.now(ZoneInfo("Asia/Kolkata")).date()) if historical else []
+    disclosed=fund_disclosures.matched([row for row in historical["items"] if isinstance(row,dict) and str(row.get("scheme_code")) in official_ids],datetime.now(ZoneInfo("Asia/Kolkata")).date()) if historical else []
     coverage["secondary_disclosure_matches"]=len(disclosed)
     # Public catalog discovery remains separate from exact AMFI scheme evidence.
     # Unknown fee, benchmark, holdings and risk data still block recommendations.
