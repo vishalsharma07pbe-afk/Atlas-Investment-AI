@@ -50,9 +50,10 @@ class LiveFeedsMockHttpTest {
  }
  @Test void amfiParserAndHistoricalNavHttp()throws Exception{
   JdbcTemplate db=mock(JdbcTemplate.class);FeedHttp http=mock(FeedHttp.class);AmfiFeedService svc=new AmfiFeedService(db,http);
+  when(db.update(contains("INSERT INTO mutual_fund_schemes"),any(),any(),any(),any(),any(),any(),any(),any(),any())).thenReturn(1);
   assertThat(svc.importNav("123456;INF000A01001;;Example Growth;123.45;13-Nov-2026")).isEqualTo(1);
   assertThat(svc.importNav("123457;INF000A01002;-;Example Fund;Direct Plan;Growth Option;125.50;23-Nov-2026")).isEqualTo(1);
-  when(http.text(contains("api.mfapi.in/mf/123456"),isNull(),anyInt())).thenReturn("{\"data\":[{\"date\":\"13-11-2026\",\"nav\":\"123.45\"}]}");
+  when(http.text(contains("api.mfapi.in/mf/123456"),isNull(),anyInt())).thenReturn("{\"meta\":{\"scheme_code\":123456},\"data\":[{\"date\":\"13-11-2026\",\"nav\":\"123.45\"}]}");
   assertThat(svc.history(123456)).isEqualTo(1);
   verify(db,atLeastOnce()).update(contains("mutual_fund_nav"),any(),any(),any());
  }
