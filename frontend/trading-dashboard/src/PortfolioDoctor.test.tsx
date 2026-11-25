@@ -86,3 +86,16 @@ it("shows a compact risk-first summary without loading detailed research panels"
  expect(screen.queryByText("Company thesis & local AI review")).toBeNull();
  expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+it("surfaces newly reported financial deterioration ahead of unchanged holdings",async()=>{
+ const base={status:"MONITOR",asset_type:"EQUITY",exchange:"NSE",weight_percent:10,recorded_return_percent:2,evidence_date:null,history_count:0,change_20_observations_percent:null,recent_peak_change_percent:null,findings:[],missing_evidence:[]};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-25T10:00:00Z",holding_count:2,attention_count:0,data_gap_count:0,thesis_changed_count:1,notice:"Research only",holdings:[
+ {...base,id:1,symbol:"FIRST"},
+ {...base,id:2,symbol:"DETERIORATION",thesis_changes:[{metric:"NET_PROFIT",previous_period:"March 2025",current_period:"March 2026",previous_direction:"IMPROVING",current_direction:"DECLINING",observed_at:"2026-11-25T10:00:00Z"}]}
+ ]})})));
+ render(<PortfolioDoctor revision={0} onSettings={()=>{}}/>);
+ expect(await screen.findByText("Recently observed financial direction changes")).toBeTruthy();
+ expect(screen.getByText(/March 2025 \(improving\) → March 2026 \(declining\)/)).toBeTruthy();
+ expect(screen.getAllByRole("article")[0].textContent).toContain("DETERIORATION");
+ expect(screen.getByText("Needs review")).toBeTruthy();
+});
