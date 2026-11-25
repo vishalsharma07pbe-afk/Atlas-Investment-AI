@@ -4,6 +4,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
+import java.time.Instant;
+import com.trading.market.MarketCalendarService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -131,6 +133,15 @@ public class InternalFeedController {
   private void requireExchange(String exchange) {
     if(!Set.of("NSE","BSE").contains(exchange))
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Unsupported exchange");
+  }
+
+  @GetMapping("/session-context")
+  public Map<String,Object> sessionContext(HttpServletRequest request) {
+    requireServiceToken(request.getHeader("X-Atlas-Service-Token"));
+    Instant instant=Instant.now();
+    var calendar=new MarketCalendarService(jdbc);
+    return Map.of("observed_at",instant.toString(),"timezone","Asia/Kolkata",
+      "sessions",List.of(calendar.sessionContext("NSE",instant),calendar.sessionContext("BSE",instant)));
   }
 
   @GetMapping("/data-health/summary")
