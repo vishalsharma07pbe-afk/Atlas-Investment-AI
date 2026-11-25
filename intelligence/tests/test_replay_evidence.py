@@ -43,3 +43,38 @@ class ReplayEvidenceTests(unittest.TestCase):
         self.assertTrue(exact_isin("INE002A01018"))
         for value in ("INF002A01018","INE002A0101","TEST",None):
             self.assertFalse(exact_isin(value))
+
+    def test_full_manifest_detects_older_changes_and_retains_shared_hash(self):
+        from app.replay_evidence import full_manifest,revision_audit
+        data=history()
+        old=full_manifest(data,TODAY)
+        shared=fingerprint(data,TODAY)
+        data[0]["revision"]=2
+        new=full_manifest(data,TODAY)
+        self.assertEqual(shared,fingerprint(data,TODAY))
+        self.assertNotEqual(old["digest"],new["digest"])
+        audit=revision_audit(new,old)
+        self.assertEqual(audit["status"],"REVISIONS_DETECTED")
+        self.assertEqual(audit["changed_dates"],[data[0]["trade_date"]])
+        self.assertEqual(audit["overlap_observations"],500)
+        self.assertEqual(revision_audit(new,None)["status"],"NO_COMPARABLE_PRIOR_CAPTURE")
+        self.assertEqual(revision_audit(full_manifest(data[1:],TODAY),new)["status"],"OVERLAP_UNCHANGED")
+        data[0]["revision"]=0
+        self.assertIsNone(full_manifest(data,TODAY))
+        self.assertIsNotNone(fingerprint(data,TODAY))
+
+    def test_recorded_action_context_does_not_certify_crossing_history(self):
+        import json
+        from app.replay_evidence import full_manifest,corporate_action_status
+        manifest=full_manifest(history(),TODAY)
+        empty={"latest_action_date":None,"corporate_action_context":"[]"}
+        self.assertEqual(corporate_action_status(empty,manifest),"NO_RECORDED_CROSSING_ACTION")
+        self.assertEqual(corporate_action_status({},manifest),"ACTION_CONTEXT_UNAVAILABLE")
+        for kind in ("SPLIT","BONUS","DIVIDEND","RIGHTS"):
+            action={"ex_date":manifest["last_date"],"action_type":kind}
+            record={"latest_action_date":action["ex_date"],"corporate_action_context":json.dumps([action])}
+            self.assertEqual(corporate_action_status(record,manifest),"RECORDED_ACTION_RECONCILIATION_REQUIRED")
+            self.assertEqual(corporate_action_status({**record,"latest_action_date":None},manifest),"ACTION_CONTEXT_UNAVAILABLE")
+        action={"ex_date":manifest["first_date"],"action_type":"SPLIT"}
+        self.assertEqual(corporate_action_status({"latest_action_date":action["ex_date"],"corporate_action_context":json.dumps([action])},manifest),"NO_RECORDED_CROSSING_ACTION")
+        self.assertEqual(corporate_action_status({"latest_action_date":action["ex_date"],"corporate_action_context":json.dumps([action]*33)},manifest),"ACTION_CONTEXT_UNAVAILABLE")

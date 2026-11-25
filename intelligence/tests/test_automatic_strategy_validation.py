@@ -43,7 +43,7 @@ class AutomaticValidationTests(unittest.TestCase):
                 return db
             instant=datetime(2026,11,24,10,tzinfo=timezone.utc)
             result={"as_of":"2026-11-23","isin":"INE002A01018","replay_evidence_hash":"a"*64,"horizons":{"SWING":{"status":"REPLAY_OBSERVED",
-                "trades":3,"small_sample":True,"cost_scenarios":[]}}}
+                "trades":3,"small_sample":True,"cost_scenarios":[],"history_provenance":{"status":"NO_COMPARABLE_PRIOR_CAPTURE","corporate_action_status":"NO_RECORDED_CROSSING_ACTION"}}}}
             with connect() as db:
                 _table(db)
                 db.execute("INSERT INTO strategy_validation VALUES(?,?,?,?,?,?,?)",
@@ -75,7 +75,8 @@ class AutomaticValidationTests(unittest.TestCase):
             now=datetime(2026,11,24,10,tzinfo=timezone.utc)
             snapshot={"enabled":True,"sections":[{"section":"NSE","status":"READY","result":{"horizons":{}}}]}
             identity={"id":1,"symbol":"TEST","exchange":"NSE","isin":"INE002A01018",
-                      "active":True,"listing_status":"ACTIVE","series":"EQ","instrument_type":"EQUITY"}
+                      "active":True,"listing_status":"ACTIVE","series":"EQ","instrument_type":"EQUITY",
+                      "latest_action_date":None,"corporate_action_context":"[]"}
             today=date(2026,11,24)
             candles=[{"trade_date":(today-timedelta(days=500-i)).isoformat(),"open":100+i*.1,
                       "high":101+i*.1,"low":99+i*.1,"close":100.2+i*.1,"volume":200000,
@@ -100,3 +101,24 @@ class AutomaticValidationTests(unittest.TestCase):
             self.assertEqual(result["execution_research"]["notional_scenarios"][0]["within_proxy_limit"],19)
             self.assertEqual(result["chronological_validation"]["folds"][0]["market_benchmark_status"],"MATCHED_PRICE_INDEX")
             self.assertEqual(sum(path.endswith("strategy-benchmark") for path in calls),1)
+            self.assertEqual(result["history_provenance"]["history_observations"],500)
+            self.assertEqual(result["history_provenance"]["status"],"NO_COMPARABLE_PRIOR_CAPTURE")
+            self.assertNotIn("_history_manifest",result)
+            # Same-date older revision is detected on the next ordinary pass.
+            candles[0]["revision"]=2
+            later=now+timedelta(hours=25)
+            with patch("app.strategy_validation.evaluate",return_value={h:("TECHNICAL_WATCH",{}) for h in ("SWING","SHORT_TERM","LONG_TERM")}):
+                refresh(snapshot,connect,loader,later)
+                revised=read(connect,later)["horizons"]["SWING"]["items"][0]
+                self.assertEqual(revised["history_provenance"]["status"],"REVISIONS_DETECTED")
+                self.assertEqual(revised["history_provenance"]["changed_observations"],1)
+                # A newly recorded crossing event withholds even provider-labeled adjusted replay.
+                import json
+                identity["latest_action_date"]=candles[100]["trade_date"]
+                identity["corporate_action_context"]=json.dumps([{"ex_date":identity["latest_action_date"],"action_type":"SPLIT"}])
+                final=later+timedelta(hours=25)
+                refresh(snapshot,connect,loader,final)
+                report=read(connect,final)["horizons"]["SWING"]
+                self.assertEqual(report["counts"],{"RECORDED_ACTION_RECONCILIATION_REQUIRED":1})
+                self.assertEqual(report["items"],[])
+
