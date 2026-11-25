@@ -22,7 +22,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.PostgreSQLContainer;
 
-@SpringBootTest(properties={"ATLAS_JWT_SECRET=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","atlas.market.freshness.enabled=false","atlas.alerts.scheduler.enabled=false"})
+@SpringBootTest(properties={"ATLAS_JWT_SECRET=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","atlas.market.freshness.enabled=false","atlas.alerts.scheduler.enabled=false","atlas.broker.holdings.enabled=false"})
 @AutoConfigureMockMvc(addFilters=false)
 class LiveFeedsDatabaseIntegrationTest {
  static final String EXTERNAL=System.getenv("TEST_DATABASE_URL");
@@ -36,6 +36,7 @@ class LiveFeedsDatabaseIntegrationTest {
  }
  @Autowired JdbcTemplate db;
  @Autowired UpstoxFeedService stocks;
+ @Autowired BrokerHoldingsSyncService autoSync;
  @Autowired AmfiFeedService funds;
  @Autowired FundHistoryResearchService fundResearch;
  @Autowired DiscoveryHistoryScheduler discovery;
@@ -148,6 +149,78 @@ class LiveFeedsDatabaseIntegrationTest {
   LocalDate day=LocalDate.now(MarketCalendarService.IST).minusDays(1);
   assertThatThrownBy(()->stocks.dailyCandles(owner,"NSE_EQ|INE000A01009",day,day)).isInstanceOf(IllegalArgumentException.class);
   verifyNoInteractions(http);
+ }
+ @Test void optedInHoldingsSyncPausesOnRejectedTokenAndResumesOnReplacement()throws Exception{
+  UUID owner=UUID.randomUUID(),other=UUID.randomUUID();
+  db.update("INSERT INTO atlas_users(id,email,password_hash) VALUES (?,'auto-sync-owner@example.test','test'),(?,'auto-sync-other@example.test','test')",owner,other);
+  seedIdentity("AUTOSYNC","INE000A01011");
+  for(UUID id:List.of(owner,other))db.update("""
+    INSERT INTO broker_credentials(user_id,broker_name,encrypted_access_token,iv_nonce,token_expires_at,key_version)
+    VALUES (?,'UPSTOX',decode('01','hex'),decode(repeat('00',12),'hex'),now()+interval '1 hour',1)
+    """,id);
+  when(vault.decrypt(owner,"UPSTOX")).thenReturn("owner-test-token");
+  when(http.text(contains("long-term-holdings"),eq("owner-test-token"),anyInt()))
+    .thenThrow(new FeedHttp.ProviderHttpException(401));
+  assertThat(autoSync.status(owner)).containsEntry("enabled",false).containsEntry("status","DISABLED");
+  assertThat(autoSync.runOne()).isFalse();
+  try{
+   user(owner);
+   mvc.perform(put("/api/v1/broker/upstox/holdings-sync").contentType("application/json").content("{\"enabled\":true}"))
+     .andExpect(status().isOk()).andExpect(jsonPath("$.enabled").value(true));
+   assertThat(autoSync.runOne()).isTrue();
+   assertThat(autoSync.status(owner)).containsEntry("status","REAUTH_REQUIRED");
+   assertThat(autoSync.runOne()).isFalse();
+   verify(http,times(1)).text(contains("long-term-holdings"),eq("owner-test-token"),anyInt());
+   user(other);
+   mvc.perform(get("/api/v1/broker/upstox/holdings-sync")).andExpect(status().isOk()).andExpect(jsonPath("$.enabled").value(false));
+   db.update("UPDATE broker_credentials SET updated_at=updated_at+interval '1 second' WHERE user_id=?",owner);
+   when(vault.decrypt(owner,"UPSTOX")).thenReturn("replacement-test-token");
+   when(http.text(contains("long-term-holdings"),eq("replacement-test-token"),anyInt()))
+     .thenReturn("{\"status\":\"success\",\"data\":["+holdingRow("AUTOSYNC","INE000A01011",2,100)+"]}");
+   assertThat(autoSync.runOne()).isTrue();
+   assertThat(autoSync.status(owner)).containsEntry("status","SUCCESS");
+   assertThat(autoSync.status(owner).get("last_success_at")).isNotNull();
+   assertThat(db.queryForObject("SELECT count(*) FROM personal_holdings WHERE user_id=? AND symbol='AUTOSYNC'",Long.class,owner)).isEqualTo(1L);
+   assertThat(db.queryForObject("SELECT count(*) FROM personal_holdings WHERE user_id=?",Long.class,other)).isZero();
+   assertThat(autoSync.runOne()).isFalse();
+   db.update("UPDATE broker_credentials SET token_expires_at=now()-interval '1 second' WHERE user_id=?",owner);
+   assertThat(autoSync.status(owner)).containsEntry("status","TOKEN_EXPIRED");
+   assertThat(autoSync.runOne()).isFalse();
+   verify(vault,never()).decrypt(other,"UPSTOX");
+  }finally{autoSync.preference(owner,false);}
+ }
+
+ @Test void automaticSyncRecoversExpiredClaimAndRetainsRetryBackoff()throws Exception{
+  UUID owner=UUID.randomUUID();
+  db.update("INSERT INTO atlas_users(id,email,password_hash) VALUES (?,'sync-lease-owner@example.test','test')",owner);
+  db.update("""
+    INSERT INTO broker_credentials(user_id,broker_name,encrypted_access_token,iv_nonce,token_expires_at,key_version)
+    VALUES (?,'UPSTOX',decode('01','hex'),decode(repeat('00',12),'hex'),now()+interval '1 hour',1)
+    """,owner);
+  when(vault.decrypt(owner,"UPSTOX")).thenReturn("lease-test-token");
+  when(http.text(contains("long-term-holdings"),eq("lease-test-token"),anyInt()))
+    .thenThrow(new FeedHttp.ProviderHttpException(429));
+  try{
+   autoSync.preference(owner,true);
+   db.update("""
+     UPDATE broker_holdings_sync s SET status='RUNNING',claim_id=?,lease_until=now()-interval '1 second',
+       next_attempt_at=now()-interval '1 second',credential_updated_at=b.updated_at
+     FROM broker_credentials b WHERE s.user_id=? AND b.user_id=s.user_id
+     """,UUID.randomUUID(),owner);
+   assertThat(autoSync.status(owner)).containsEntry("status","RECOVERY_PENDING");
+   assertThat(autoSync.runOne()).isTrue();
+   assertThat(autoSync.status(owner)).containsEntry("status","RETRY").containsEntry("error_code","PROVIDER_RATE_LIMITED");
+   assertThat(autoSync.runOne()).isFalse();
+   assertThat(db.queryForObject("SELECT next_attempt_at>now() FROM broker_holdings_sync WHERE user_id=?",Boolean.class,owner)).isTrue();
+   verify(http,times(1)).text(contains("long-term-holdings"),eq("lease-test-token"),anyInt());
+  }finally{autoSync.preference(owner,false);}
+ }
+ @Test void staleOrRevokedHoldingsSyncClaimCannotAccessBroker()throws Exception{
+  UUID owner=UUID.randomUUID();
+  db.update("INSERT INTO atlas_users(id,email,password_hash) VALUES (?,'revoked-sync-owner@example.test','test')",owner);
+  autoSync.preference(owner,false);
+  assertThatThrownBy(()->stocks.syncClaimedHoldings(owner,UUID.randomUUID())).isInstanceOf(IllegalStateException.class);
+  verifyNoInteractions(http,vault);
  }
  @Test void historicalNavCalculatesCagrRollingAndDrawdown()throws Exception{
   long code=987654321L;
