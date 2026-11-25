@@ -225,7 +225,7 @@ class LiveFeedsDatabaseIntegrationTest {
  @Test void historicalNavCalculatesCagrRollingAndDrawdown()throws Exception{
   long code=987654321L;
   db.update("INSERT INTO mutual_fund_schemes(scheme_code,scheme_name) VALUES (?,'Historical Test Fund') ON CONFLICT DO NOTHING",code);
-  StringBuilder payload=new StringBuilder("{\"data\":[");
+  StringBuilder payload=new StringBuilder("{\"meta\":{\"scheme_code\":"+code+"},\"data\":[");
   LocalDate start=LocalDate.of(2020,1,1);
   for(int i=0;i<=72;i++){
    LocalDate date=start.plusMonths(i);
