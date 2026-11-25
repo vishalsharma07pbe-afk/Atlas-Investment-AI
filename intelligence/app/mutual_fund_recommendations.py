@@ -291,6 +291,84 @@ def _rolling_peer_context(row):
             "notice":"Overlapping matched NAV windows versus the other sampled funds, not official benchmark TRI or independent observations."}
 
 
+def _unique_match(rows,identifier):
+    matches=[r for r in rows if isinstance(r,dict) and r.get("scheme_code")==identifier]
+    return matches[0] if len(matches)==1 else {}
+
+
+def _fund_assessment(fund,source,disclosure,portfolio,top,growth,fit):
+    """Descriptive findings, never a substitute for the two qualification gates.
+
+    All inputs originate from existing local read models. Review thresholds are
+    explicit research prompts, not a calibrated risk score or category mandate.
+    """
+    supporting=[]
+    review=[]
+    gaps=set(top["missing"])|set(growth["missing"])
+    def finding(target,code,value,unit,source):
+        target.append({"code":code,"value":value,"unit":unit,"source":source})
+    def weight(value):
+        return type(value) in (int,float) and _bounded(value,0,100.5)
+    if _bounded(fund.returns_3y,-100) and fund.returns_3y>0:
+        finding(supporting,"POSITIVE_REPORTED_THREE_YEAR_CAGR",fund.returns_3y,"PERCENT","NAV_HISTORY")
+    if _bounded(fund.worst_rolling_return,-100) and fund.worst_rolling_return<0:
+        finding(review,"NEGATIVE_WORST_ROLLING_YEAR",fund.worst_rolling_return,"PERCENT","NAV_HISTORY")
+    rolling=_rolling_peer_context(source) if fund.category in COMPARABLE else None
+    if rolling:
+        n=rolling["matched_windows"]
+        if rolling["above_median_windows"]>n/2 and rolling["median_difference_pp"]>0:
+            finding(supporting,"ABOVE_PEER_MEDIAN_IN_MAJORITY_OF_MATCHED_WINDOWS",rolling["above_median_percent"],"PERCENT","MATCHED_NAV_PEER_SAMPLE")
+        elif rolling["below_median_windows"]>n/2 and rolling["median_difference_pp"]<0:
+            finding(review,"BELOW_PEER_MEDIAN_IN_MAJORITY_OF_MATCHED_WINDOWS",
+                    round(100*rolling["below_median_windows"]/n,4),"PERCENT","MATCHED_NAV_PEER_SAMPLE")
+    elif fund.category in COMPARABLE:
+        gaps.add("MATCHED_ROLLING_PEER_EVIDENCE_REQUIRED")
+    if not disclosure:
+        gaps.add("MATCHED_SECONDARY_DISCLOSURE_REQUIRED")
+    else:
+        if disclosure.get("conflicts"):
+            finding(review,"REPORTED_DISCLOSURE_CONFLICTS_REQUIRE_REVIEW",None,None,"SECONDARY_DISCLOSURE")
+        if disclosure.get("riskometer") in ("HIGH","VERY_HIGH") and fit.get("risk_tolerance")=="LOW":
+            finding(review,"REPORTED_HIGH_RISKOMETER_REVIEW_FOR_LOW_RISK_TOLERANCE",None,None,"SECONDARY_DISCLOSURE")
+    if not portfolio or portfolio.get("status")!="SECONDARY_COMPOSITION_ONLY":
+        gaps.add("MATCHED_REPORTED_PORTFOLIO_REQUIRED")
+    else:
+        underlying=portfolio.get("underlying_research") or {}
+        multi=underlying.get("multi_year_quality") or {}
+        exact=portfolio.get("exact_listed_equity_weight_percent")
+        assessed=multi.get("assessed_weight_percent")
+        flagged=multi.get("review_weight_percent")
+        if (multi.get("status")=="REPORTED_MULTI_YEAR_EXPOSURE" and all(weight(v) for v in (exact,assessed,flagged))
+                and 0<assessed<=exact and flagged<=assessed):
+            if flagged>0:
+                finding(review,"REPORTED_MULTI_YEAR_BUSINESS_REVIEW_EXPOSURE",flagged,"FUND_WEIGHT_PERCENT","REPORTED_PORTFOLIO_AND_COMPANY_HISTORY")
+            if exact-assessed>.0001:
+                gaps.add("PARTIAL_MULTI_YEAR_COMPANY_COVERAGE")
+        elif fund.category in COMPARABLE:
+            gaps.add("MATCHED_MULTI_YEAR_COMPANY_EVIDENCE_REQUIRED")
+        concentration=portfolio.get("concentration_research") or {}
+        if concentration.get("category")==fund.category:
+            gaps.update(g for g in concentration.get("missing_risk_evidence",[])
+                        if isinstance(g,str) and re.fullmatch(r"[A-Z_]{1,100}",g))
+            if concentration.get("status")=="EXACT_EQUITY_SUBSET_ONLY":
+                total=concentration.get("exact_equity_weight_percent")
+                if weight(total) and total==exact:
+                    largest=concentration.get("largest_equity_weight_percent")
+                    sector=concentration.get("largest_classified_sector_weight_percent")
+                    classified=concentration.get("sector_classified_weight_percent")
+                    if weight(largest) and 10<=largest<=total:
+                        finding(review,"LARGEST_EXACT_EQUITY_AT_LEAST_TEN_PERCENT",largest,"FUND_WEIGHT_PERCENT","REPORTED_PORTFOLIO")
+                    if weight(sector) and weight(classified) and 30<=sector<=classified<=total:
+                        finding(review,"CLASSIFIED_SECTOR_AT_LEAST_THIRTY_PERCENT",sector,"FUND_WEIGHT_PERCENT","REPORTED_PORTFOLIO_AND_COMPANY_PROFILES")
+        if underlying.get("relative_valuation"):
+            gaps.add("DATED_UNDERLYING_VALUATION_EVIDENCE_REQUIRED")
+    if fit.get("status")=="POOR_FIT":
+        finding(review,"SELECTED_HORIZON_OR_RISK_REQUIRES_REVIEW",None,None,"SUITABILITY")
+    return {"version":"FUND-ASSESSMENT-1","status":"REVIEW_REQUIRED" if review else "DESCRIPTIVE_EVIDENCE_ONLY",
+            "supporting_evidence":supporting,"review_findings":review,"next_evidence_checks":sorted(gaps),
+            "notice":"Historical and secondary reported observations only. The 10% holding and 30% sector review thresholds are descriptive prompts, not regulatory limits or calibrated risks. No predicted return, fund rating or qualification change."}
+
+
 def _research_reports(candidates, ranked, source_rows, disclosed, portfolios):
     """Build bounded, deterministic reports from the same exact-scheme evidence
     and qualification decisions used by the existing recommendation endpoint.
@@ -325,6 +403,8 @@ def _research_reports(candidates, ranked, source_rows, disclosed, portfolios):
                 "sample_peer_percentile":fund.peer_percentile,"worst_rolling_return":fund.worst_rolling_return,
                 "max_drawdown":fund.max_drawdown,"volatility":fund.volatility,
                 "rolling_peer_consistency":_rolling_peer_context(source_by_id.get(fund.identifier,{})) if fund.category in COMPARABLE else None},
+            "research_assessment":_fund_assessment(fund,source_by_id.get(fund.identifier,{}),
+                _unique_match(disclosed,fund.identifier),_unique_match(portfolios,fund.identifier),top,growth,ranked["suitability"]),
             "secondary_disclosure_available":fund.identifier in disclosure_ids,
             "secondary_portfolio_available":fund.identifier in portfolio_ids,
             "top_performer":top,"growth_outlook":growth,
