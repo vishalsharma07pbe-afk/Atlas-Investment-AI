@@ -144,8 +144,8 @@ public class PortfolioHistoryController {
         (BigDecimal)row.get("total_value"),complete(row))).toList(),adjustmentFlows);
     Map<String,Object> result=new LinkedHashMap<>();
     result.put("flow_adjusted_status",adjusted.status());
-    result.put("flow_adjusted_return_percent",adjusted.returnPercent()==null?null:round(adjusted.returnPercent()));
-    result.put("flow_adjusted_drawdown_percent",adjusted.drawdownPercent()==null?null:round(adjusted.drawdownPercent()));
+    result.put("flow_adjusted_return_percent",adjusted.returnPercent()==null?null:BigDecimal.valueOf(adjusted.returnPercent()).setScale(4,RoundingMode.HALF_UP));
+    result.put("flow_adjusted_drawdown_percent",adjusted.drawdownPercent()==null?null:BigDecimal.valueOf(adjusted.drawdownPercent()).setScale(4,RoundingMode.HALF_UP));
     result.put("flow_adjusted_interval_count",adjusted.intervals());
     result.put("flow_adjusted_cash_flow_count",adjusted.flowCount());
     result.put("flow_adjusted_max_interval_days",adjusted.maximumIntervalDays());
