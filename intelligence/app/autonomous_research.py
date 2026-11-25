@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from .market_client import backend_json
 from .screener import screen
 from .mutual_fund_recommendations import CATEGORIES, dashboard
-from . import research_jobs, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
+from . import research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
 
 SECTIONS = ("NSE", "BSE", *CATEGORIES)
 DEFAULT_INTERVAL = 900
@@ -254,11 +254,18 @@ def job_status():
     enabled,_=config()
     if not enabled:
         return {"status":"DISABLED","jobs":[]}
-    return research_jobs.status(_connect,research_jobs.definitions(SECTIONS),now().timestamp())
+    current=now()
+    result=research_jobs.status(_connect,research_jobs.definitions(SECTIONS),current.timestamp())
+    calendar_job=next(j for j in result["jobs"] if j["job"]=="CALENDAR_CONTEXT")
+    result["calendar"]=research_calendar.read(_connect,current) if calendar_job["status"]=="PASS_COMPLETED" else {"status":"CALENDAR_UNAVAILABLE_OR_PENDING","sessions":[]}
+    return result
 
 
 def _execute_job(job):
     """Dispatch existing bounded engines, with explicit evidence/config gates."""
+    if job=="CALENDAR_CONTEXT":
+        research_calendar.refresh(_connect)
+        return "PASS_COMPLETED"
     if job.startswith("SECTION:"):
         section=job.split(":",1)[1]
         if section not in SECTIONS:
@@ -321,7 +328,7 @@ def run_one_job(interval):
         outcome=_execute_job(job)
     except Exception:
         outcome="FAILED"
-    research_jobs.finish(_connect,job,token,now().timestamp(),interval,outcome)
+    research_jobs.finish(_connect,job,token,now().timestamp(),research_calendar.POLL_SECONDS if job=="CALENDAR_CONTEXT" else interval,outcome)
     return True
 
 
