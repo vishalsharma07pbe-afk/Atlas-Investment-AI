@@ -26,7 +26,8 @@ type OpportunityContext={status:string;held_excluded_count:number;ready_sections
  equities:{isin:string;symbol:string;exchange:string;horizon:string;as_of:string;sector:string|null;sector_weight_percent:number|null;context:string;identity_status:string;adjustment_status:string;blockers:string[]}[];
  funds:{scheme_code:string;name:string;category:string;as_of:string;cagr_3y_percent:number;drawdown_3y_percent:number;context:string;identity_status:string}[]};
 type LevelRisk={look_through_status?:string;benchmark_status:string;concentration_status:string;sector_status:string;attention:{kind:string;label:string;value:number;threshold:number;unit:string;evidenceThrough:string}[];notice:string};
-type Review={portfolio_level_risk?:LevelRisk;ownership_changed_count?:number;ownership_attention_count?:number;ownership_monitor_notice?:string;fund_thesis_changed_count?:number;fund_thesis_attention_count?:number;fund_monitor_notice?:string;thesis_changed_count?:number;thesis_monitor_notice?:string;benchmark_risk_estimate?:BenchmarkRisk;opportunity_context?:OpportunityContext;diversification?:Diversification;equity_correlation?:Correlation;thesis_review_count?:number;generated_at:string;holding_count:number;attention_count:number;data_gap_count:number;holdings:HoldingReview[];notice:string};
+type JournalLots={status:string;reconciled_count:number;holdings:{symbol:string;assetType:string;status:string;recordedQuantity:number|null;journalQuantity:number|null;journalOpenCost:number|null;recordedCost:number|null;openLots:{acquired:string;quantity:number;unitPrice:number;calendarDaysHeld:number}[]}[];notice:string};
+type Review={journal_lot_reconciliation?:JournalLots;portfolio_level_risk?:LevelRisk;ownership_changed_count?:number;ownership_attention_count?:number;ownership_monitor_notice?:string;fund_thesis_changed_count?:number;fund_thesis_attention_count?:number;fund_monitor_notice?:string;thesis_changed_count?:number;thesis_monitor_notice?:string;benchmark_risk_estimate?:BenchmarkRisk;opportunity_context?:OpportunityContext;diversification?:Diversification;equity_correlation?:Correlation;thesis_review_count?:number;generated_at:string;holding_count:number;attention_count:number;data_gap_count:number;holdings:HoldingReview[];notice:string};
 const pct=(value:number|null)=>value==null?"—":(value>0?"+":"")+value.toFixed(2)+"%";
 const statuses={REVIEW_REQUIRED:"Needs review",MONITOR:"Monitor",EVIDENCE_GAP:"Data needed"};
 
@@ -138,6 +139,19 @@ function HistoricalAllocationDigest({report,mixed=false}:{report:HistoricalAlloc
    </details>
    {mixed&&report.nav_sources&&<p className="muted tiny">NAV history sources: {Object.entries(report.nav_sources).map(([id,source])=>id+" · "+source).join("; ")}.</p>}
   </>:<p>{mixed?"Mixed-asset comparisons require complete recent valuations, exact Growth schemes and comparable single-source NAV and adjusted equity history across 2–12 investment identities.":report.status==="INSUFFICIENT_RECENT_EXACT_DIRECT_EQUITY_COVERAGE"?"Requires complete recent exact valuations for 2–12 direct-equity identities.":"Comparable adjusted return history is insufficient for a full direct-equity comparison."}</p>}
+  <p className="muted tiny">{report.notice}</p>
+ </section>;
+}
+function JournalLotsDigest({report}:{report:JournalLots}){
+ const money=(v:number|null)=>v==null?"Unavailable":new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",minimumFractionDigits:0,maximumFractionDigits:2}).format(v);
+ const labels:Record<string,string>={PROVISIONAL_JOURNAL_RECONCILED:"Provisionally reconciled",NO_RECORDED_TRADES:"No recorded trades",QUANTITY_MISMATCH:"Quantity mismatch",COST_BASIS_MISMATCH:"Cost basis mismatch",SALE_EXCEEDS_RECORDED_ACQUISITIONS:"Sale exceeds recorded acquisitions",AMBIGUOUS_SAME_DAY_TRADES:"Ambiguous same-day trades",AMBIGUOUS_SAME_DAY_ACQUISITIONS:"Ambiguous same-day acquisitions",INVALID_OR_UNRECONCILED_TRADE:"Invalid or unreconciled trade",DUPLICATE_SOURCE_REFERENCE:"Duplicate source reference",AMBIGUOUS_RECORDED_HOLDING:"Ambiguous recorded holding",OPEN_LOT_LIMIT_EXCEEDED:"Open lot limit exceeded"};
+ return <section className="doctor-item" aria-label="Recorded acquisition history">
+  <h3>Recorded acquisition history</h3>
+  <p>{report.reconciled_count} of {report.holdings.length} displayed holdings provisionally reconciled. No tax liability is calculated.</p>
+  {report.holdings.length?<div className="tablewrap"><table><thead><tr><th>Investment</th><th>Journal status</th><th>Recorded / reconstructed quantity</th><th>Recorded / reconstructed open cost</th></tr></thead><tbody>
+   {report.holdings.map((h,i)=><tr key={h.assetType+":"+h.symbol+":"+i}><td>{h.symbol}</td><td>{labels[h.status]??h.status.replace(/_/g," ").toLowerCase()}</td><td>{h.recordedQuantity??"—"} / {h.journalQuantity??"—"}</td><td>{money(h.recordedCost)} / {money(h.journalOpenCost)}</td></tr>)}
+  </tbody></table></div>:<p>{report.status==="JOURNAL_LIMIT_EXCEEDED"?"Recorded journal exceeds the supported reconstruction limit.":"No recorded acquisition analysis available."}</p>}
+  {report.holdings.filter(h=>h.openLots.length>0).map((h,i)=><details key={h.assetType+":"+h.symbol+":"+i}><summary>{h.symbol} · {h.openLots.length} provisional open lots</summary><div className="tablewrap"><table><thead><tr><th>Recorded acquisition date</th><th>Remaining quantity</th><th>Recorded unit price</th><th>Calendar days held</th></tr></thead><tbody>{h.openLots.map((l,j)=><tr key={l.acquired+":"+j}><td>{l.acquired}</td><td>{l.quantity}</td><td>{money(l.unitPrice)}</td><td>{l.calendarDaysHeld}</td></tr>)}</tbody></table></div></details>)}
   <p className="muted tiny">{report.notice}</p>
  </section>;
 }
@@ -278,6 +292,7 @@ export default function PortfolioDoctor({revision,onSettings,compact=false,onOpe
     </section>}
     {review.benchmark_risk_estimate&&<PortfolioBenchmarkRisk report={review.benchmark_risk_estimate} compact/>}
     {review.diversification&&<DiversificationDigest report={review.diversification} correlation={review.equity_correlation}/>}
+    {review.journal_lot_reconciliation&&<JournalLotsDigest report={review.journal_lot_reconciliation}/>}
     {review.opportunity_context&&<OpportunityDigest report={review.opportunity_context}/>}
     <p className="muted tiny">Reviewed {new Date(review.generated_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})} IST. {review.notice}</p>
   </>}
