@@ -110,3 +110,21 @@ class ReplayEvidenceTests(unittest.TestCase):
         audit=session_audit(full_manifest(data[:2]+data[3:],TODAY),calendar,"BSE",TODAY)
         self.assertEqual(audit["status"],"STORED_SESSIONS_MATCHED")
         self.assertEqual(audit["regular_sessions"],4)
+
+    def test_listing_audit_checks_recorded_dates_without_certifying_universe(self):
+        from app.replay_evidence import full_manifest,listing_audit
+        manifest=full_manifest(history(50),TODAY)
+        identity={"id":1,"exchange":"NSE","symbol":"TEST","isin":"INE002A01018","series":"EQ",
+                  "instrument_type":"EQUITY","active":True,"listing_status":"ACTIVE",
+                  "listed_on":manifest["first_date"],"delisted_on":None,
+                  "registry_source":"TEST","registry_revision":"r1"}
+        result=listing_audit(identity,identity,manifest,TODAY)
+        self.assertEqual(result["status"],"RECORDED_LISTING_DATES_CONSISTENT")
+        self.assertFalse(result["historical_universe_verified"])
+        for field,value in (("listed_on",None),("registry_revision",None),("listed_on","invalid")):
+            changed={**identity,field:value}
+            self.assertEqual(listing_audit(changed,changed,manifest,TODAY)["status"],"LISTING_EVIDENCE_UNAVAILABLE")
+        for field,value in (("listed_on",manifest["last_date"]),("delisted_on",manifest["last_date"]),("active",False)):
+            changed={**identity,field:value}
+            self.assertEqual(listing_audit(changed,changed,manifest,TODAY)["status"],"LISTING_CONTEXT_CONTRADICTION")
+        self.assertEqual(listing_audit(identity,{**identity,"registry_revision":"r2"},manifest,TODAY)["status"],"LISTING_CONTEXT_CHANGED")

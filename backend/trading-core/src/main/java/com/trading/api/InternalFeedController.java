@@ -80,6 +80,8 @@ public class InternalFeedController {
         FROM calendar_days
       )
       SELECT i.id,e.code AS exchange,i.symbol,i.series,i.isin,i.instrument_type,i.listing_status,i.active,
+             to_char(i.listed_on,'YYYY-MM-DD') AS listed_on,to_char(i.delisted_on,'YYYY-MM-DD') AS delisted_on,
+             i.source AS registry_source,i.source_revision AS registry_revision,
              count(*) OVER () AS recent_registry_count,calendar.expected_session,
              count(*) FILTER (WHERE (latest.candle_time AT TIME ZONE e.timezone)::date=calendar.expected_session) OVER () AS expected_session_count,
              (SELECT max(a.ex_date) FROM corporate_actions a

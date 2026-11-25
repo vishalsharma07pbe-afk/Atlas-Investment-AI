@@ -14,7 +14,8 @@ type RegimeResearch={status:string;lookback_observations:number;threshold_percen
 type ExecutionResearch={status:string;positions:number;lookback_observations:number;participation_limit_percent:number;zero_volume_endpoint_positions:number;notional_scenarios:{entry_notional_inr:number;within_proxy_limit:number;exceeds_proxy_limit:number;unknown:number}[];base_friction_bps_per_side:number;friction_scenarios:{extra_bps_per_side:number;total_bps_per_side:number;net_return_percent:number;max_drawdown_percent:number}[];notice:string};
 type ChronologicalValidation={status:string;eligible_folds:number;observed_folds:number;no_signal_folds:number;folds:{fold:number;status:string;exposure_start:string;test_end:string;trades:number;small_sample:boolean;cost_scenarios:{cost_bps_per_side:number;net_return_percent:number;net_same_stock_buy_hold_percent:number;gross_nifty50_price_index_percent?:number;net_difference_vs_nifty50_pp?:number;max_drawdown_percent:number}[]}[];cost_summaries:{cost_bps_per_side:number;positive_folds:number;negative_folds:number;flat_folds:number;worst_observed_return_percent:number;best_observed_return_percent:number}[];notice:string};
 type CalendarContinuity={status:string;calendar_days:number;regular_sessions:number;missing_sessions:number;unexpected_observations:number;unknown_days:number;special_days:number;missing_dates:string[];unexpected_dates:string[];unknown_dates:string[];special_dates:string[];notice:string};
-type HistoryProvenance={calendar_continuity?:CalendarContinuity;status:string;history_observations:number;first_date:string;last_date:string;overlap_observations:number;changed_observations:number;changed_dates:string[];corporate_action_status:string;notice:string};
+type ListingEvidence={status:string;listed_on:string|null;delisted_on:string|null;registry_source:string|null;registry_revision:string|null;universe_basis:string;historical_universe_verified:boolean;notice:string};
+type HistoryProvenance={listing_evidence?:ListingEvidence;calendar_continuity?:CalendarContinuity;status:string;history_observations:number;first_date:string;last_date:string;overlap_observations:number;changed_observations:number;changed_dates:string[];corporate_action_status:string;notice:string};
 type MatchedReplay={history_provenance?:HistoryProvenance;execution_research?:ExecutionResearch;chronological_validation?:ChronologicalValidation;market_regime_research?:RegimeResearch;market_benchmark_status?:string;as_of:string;trades:number;small_sample:boolean;cost_scenarios:{cost_bps_per_side:number;net_return_percent:number;max_drawdown_percent:number;gross_nifty50_price_index_percent?:number;net_difference_vs_nifty50_pp?:number}[];notice:string};
 type Pivot={price:number;observed_on:string;confirmed_on:string};
 type PriceStructure={status:string;scenario_status:string;support:Pivot[];resistance:Pivot[];indicators?:Record<string,number>;weekly?:{status:string;last_observed_date?:string;week_count?:number;trend?:string;sma_10?:number;sma_20?:number|null};scenario:{reference_close:number;lower_reference:number;upper_reference:number;cost_bps_per_side:number;downside_percent:number;upside_percent:number;reward_to_risk:number}|null;notice:string};
@@ -25,7 +26,7 @@ type ActionReview={normalized_preview_count:number;withheld_count:number;preview
 type Section={section:string;status:string;generated_at:string|null;result:{universe_size:number;eligible_count:number;corporate_action_review?:ActionReview;discovery_coverage?:{recent_registry_count:number;selected_count:number;calendar_status?:string;expected_session?:string|null;expected_session_count?:number|null};history_coverage?:Partial<Record<Horizon,{minimum_observations:number;eligible_histories:number}>>;skipped?:Record<string,number>;horizons?:Partial<Record<Horizon,HorizonResult>>}|null};
 type ReplayCost={gross_nifty50_price_index_percent?:number;net_difference_vs_nifty50_pp?:number;net_same_stock_buy_hold_percent?:number;net_difference_vs_same_stock_pp?:number;cost_bps_per_side:number;net_return_percent:number;matched_gross_exposure_return_percent:number;max_drawdown_percent:number;win_rate_percent:number|null;wins:number;losses:number;flat:number};
 type ReplayItem={history_provenance?:HistoryProvenance;execution_research?:ExecutionResearch;chronological_validation?:ChronologicalValidation;market_regime_research?:RegimeResearch;exchange:string;symbol:string;as_of:string;trades:number;holding_sessions:number;test_start:string;test_end:string;gross_buy_hold_percent:number;small_sample:boolean;cost_scenarios:ReplayCost[]};
-type Validation={status?:string;sample_count?:number;horizons?:Partial<Record<Horizon,{counts:Record<string,number>;observed_instruments:number;items:ReplayItem[];calendar_withheld?:(CalendarContinuity&{symbol:string;exchange:string})[]}>>;notice?:string};
+type Validation={status?:string;sample_count?:number;horizons?:Partial<Record<Horizon,{counts:Record<string,number>;observed_instruments:number;items:ReplayItem[];calendar_withheld?:(CalendarContinuity&{symbol:string;exchange:string})[];listing_withheld?:(ListingEvidence&{symbol:string;exchange:string})[]}>>;notice?:string};
 type ReliabilityCohort={status:string;selected_mature_watches:number;observed_outcomes:number;distinct_observed_isins:number;coverage_percent:number;overlap_excluded:number;immature_excluded:number;incompatible_excluded:number;invalid_excluded:number;blockers:string[];cost_scenarios:{cost_bps_per_side:number;mean_net_change_percent:number;median_net_change_percent:number;positive_count:number;negative_count:number;flat_count:number}[];notice:string};
 type Snapshot={research_reliability?:{status?:string;horizons?:Partial<Record<Horizon,ReliabilityCohort>>;notice?:string};strategy_validation?:Validation;enabled:boolean;sections:Section[];automatic_ai_status?:string;automatic_company_status?:string;automatic_news_status?:string};
 const titles:Record<Horizon,string>={INTRADAY:"Intraday research",SWING:"Swing trading research",SHORT_TERM:"Short-term equity research",LONG_TERM:"Long-term investment research"};
@@ -54,6 +55,16 @@ function CalendarAudit({audit}:{audit:CalendarContinuity}){
  </div>;
 }
 
+function ListingAudit({audit}:{audit:ListingEvidence}){
+ return <div><p>Listing evidence: {words(audit.status)}.</p>
+  <p>Recorded listing: {audit.listed_on??"Unavailable"} · Recorded delisting: {audit.delisted_on??"Not recorded"}.</p>
+  {audit.registry_source&&<p>Registry source: {audit.registry_source} · Revision: {audit.registry_revision??"Unavailable"}</p>}
+  {!audit.historical_universe_verified&&<p>Historical universe not verified — current active-registry sample only.</p>}
+  {audit.status==="LISTING_EVIDENCE_UNAVAILABLE"&&<p>Descriptive replay only; not attached to current stock watches.</p>}
+  <p className="muted tiny">{audit.notice}</p>
+ </div>;
+}
+
 function HistoryProvenanceDetails({audit}:{audit?:HistoryProvenance}){
  if(!audit)return null;
  return <details className="notice"><summary>Historical evidence provenance</summary>
@@ -62,6 +73,7 @@ function HistoryProvenanceDetails({audit}:{audit?:HistoryProvenance}){
   {audit.changed_dates.length>0&&<p>Changed dates (up to 10): {audit.changed_dates.join(", ")}. Revised results are not attached to current stock watches on this pass.</p>}
   <p>Corporate actions: {words(audit.corporate_action_status)}.</p>
   {audit.calendar_continuity&&<CalendarAudit audit={audit.calendar_continuity}/> }
+  {audit.listing_evidence&&<ListingAudit audit={audit.listing_evidence}/> }
   <p className="muted tiny">{audit.notice}</p>
  </details>;
 }
@@ -104,6 +116,7 @@ function StrategyValidation({data,horizon}:{data:Validation;horizon:Horizon}){
   <div className="sectionhead"><div><h3>Historical strategy replay</h3><p className="muted tiny">Existing fixed rules tested on later chronological data, not a forecast.</p></div><span className="tag">RESEARCH ONLY</span></div>
   <p>{data.sample_count??0} recently attempted registry instruments · {result?.observed_instruments??0} instruments with completed simulated positions</p>
   {result&&<p className="muted tiny">{Object.entries(result.counts).map(([state,count])=>words(state)+": "+count).join(" · ")}</p>}
+  {result?.listing_withheld?.map(item=><details className="notice" key={item.exchange+":"+item.symbol+":listing"}><summary>{item.symbol} · {item.exchange} · listing evidence withheld</summary><ListingAudit audit={item}/></details>)}
   {result?.calendar_withheld?.map(item=><details className="notice" key={item.exchange+":"+item.symbol}><summary>{item.symbol} · {item.exchange} · historical calendar evidence withheld</summary><CalendarAudit audit={item}/></details>)}
   {!result?.items.length?<p>No usable replay results yet. Adjusted, validated history, usable recorded corporate-action context, matched stored sessions and a sufficient holdout window are required.</p>:result.items.map(item=><details key={item.exchange+":"+item.symbol}><summary>{item.symbol} · {item.exchange} · {item.trades} simulated positions{item.small_sample?" · small sample":""}</summary>
    <p>{item.test_start} to {item.test_end} · {item.holding_sessions} session holding window · gross same-asset buy and hold {item.gross_buy_hold_percent}%.</p>
