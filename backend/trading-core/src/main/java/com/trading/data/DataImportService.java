@@ -122,7 +122,11 @@ public class DataImportService {
   }
 
   private ImportResult importActions(UUID run, long source, byte[] bytes) {
-    List<Map<String,String>> rows=CsvTable.parse(bytes,List.of("exchange","symbol","series","action_type","ex_date","ratio","cash_amount","source_revision"));
+    String header=new String(bytes,StandardCharsets.UTF_8).replace("\uFEFF","").lines().findFirst().orElse("");
+    boolean explicit=header.contains("ratio_basis");
+    List<Map<String,String>> rows=CsvTable.parse(bytes,explicit
+      ? List.of("exchange","symbol","series","isin","action_type","ex_date","ratio","cash_amount","source_revision","ratio_basis")
+      : List.of("exchange","symbol","series","action_type","ex_date","ratio","cash_amount","source_revision"));
     Set<String> keys=new HashSet<>(); int written=0; String revision=null;
     for(Map<String,String> row:rows){
       int line=line(row); long instrument=instrument(exchange(row,line),symbol(row,line),optional(row,"series"),line);
@@ -130,13 +134,24 @@ public class DataImportService {
       LocalDate exDate=requiredDate(row,"ex_date",line); BigDecimal ratio=decimal(optional(row,"ratio"),line,"ratio"); BigDecimal cash=decimal(optional(row,"cash_amount"),line,"cash_amount");
       if((ratio!=null&&ratio.signum()<0)||(cash!=null&&cash.signum()<0)) reject(line,"ratio and cash_amount cannot be negative");
       if(Set.of("SPLIT","BONUS","RIGHTS").contains(action)&&(ratio==null||ratio.signum()<=0)) reject(line,action+" requires a positive ratio");
+      String basis=explicit?required(row,"ratio_basis",line):null;
+      String isin=explicit?required(row,"isin",line):null;
+      if(explicit){
+        String registered=jdbc.queryForObject("SELECT isin FROM instruments WHERE id=?",String.class,instrument);
+        if(!isin.matches("IN[A-Z0-9]{10}")||!isin.equals(registered))reject(line,"corporate action ISIN does not match registry");
+        if(!Set.of("SPLIT","BONUS").contains(action)||!"POST_SHARES_PER_PRE_SHARE".equals(basis)
+            ||ratio==null||ratio.compareTo(BigDecimal.ONE)==0||ratio.compareTo(new BigDecimal("0.001"))<0
+            ||ratio.compareTo(new BigDecimal("1000"))>0||("BONUS".equals(action)&&ratio.compareTo(BigDecimal.ONE)<=0)
+            ||(cash!=null&&cash.signum()!=0))reject(line,"explicit normalization requires a valid share multiplier for split or bonus");
+      }
+      String context=explicit?toJson(Map.of("ratio_basis",basis,"isin",isin)):"{}";
       revision=required(row,"source_revision",line); String key=instrument+"|"+action+"|"+exDate+"|"+revision; if(!keys.add(key)) reject(line,"duplicate corporate action in file");
       written += jdbc.update("""
         INSERT INTO corporate_actions(instrument_id,issuer_id,action_type,ex_date,ratio,cash_amount,source_id,source_revision,raw_payload,ingestion_run_id,received_at)
-        SELECT id,issuer_id,?,?,?,?,?,?, '{}'::jsonb,?,now() FROM instruments WHERE id=?
+        SELECT id,issuer_id,?,?,?,?,?,?, ?::jsonb,?,now() FROM instruments WHERE id=?
         ON CONFLICT (instrument_id,action_type,ex_date,COALESCE(source_revision,'')) DO UPDATE SET ratio=EXCLUDED.ratio,cash_amount=EXCLUDED.cash_amount,
-        source_id=EXCLUDED.source_id,ingestion_run_id=EXCLUDED.ingestion_run_id,received_at=now()
-        """,action,exDate,ratio,cash,source,revision,run,instrument);
+        source_id=EXCLUDED.source_id,raw_payload=EXCLUDED.raw_payload,ingestion_run_id=EXCLUDED.ingestion_run_id,received_at=now()
+        """,action,exDate,ratio,cash,source,revision,context,run,instrument);
     }
     return new ImportResult(rows.size(),written,0,revision);
   }

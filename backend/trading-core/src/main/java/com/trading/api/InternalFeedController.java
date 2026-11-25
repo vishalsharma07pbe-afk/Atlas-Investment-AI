@@ -83,8 +83,15 @@ public class InternalFeedController {
              count(*) OVER () AS recent_registry_count,calendar.expected_session,
              count(*) FILTER (WHERE (latest.candle_time AT TIME ZONE e.timezone)::date=calendar.expected_session) OVER () AS expected_session_count,
              (SELECT max(a.ex_date) FROM corporate_actions a
-               WHERE a.instrument_id=i.id AND a.action_type IN ('SPLIT','BONUS','DIVIDEND')
-               AND a.ex_date <= (latest.candle_time AT TIME ZONE e.timezone)::date) AS latest_action_date
+               WHERE a.instrument_id=i.id
+               AND a.ex_date <= (latest.candle_time AT TIME ZONE e.timezone)::date) AS latest_action_date,
+             coalesce((SELECT jsonb_agg(jsonb_build_object('action_type',a.action_type,'ex_date',a.ex_date,
+                 'ratio',a.ratio::text,'cash_amount',a.cash_amount::text,'ratio_basis',a.raw_payload->>'ratio_basis',
+                 'isin',a.raw_payload->>'isin','source_revision',a.source_revision))
+               FROM (SELECT ca.action_type,ca.ex_date,ca.ratio,ca.cash_amount,ca.raw_payload,ca.source_revision
+                 FROM corporate_actions ca WHERE ca.instrument_id=i.id
+                   AND ca.ex_date <= (latest.candle_time AT TIME ZONE e.timezone)::date
+                 ORDER BY ca.ex_date DESC,ca.action_type,ca.source_revision LIMIT 33) a),'[]'::jsonb)::text AS corporate_action_context
       FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
       JOIN LATERAL (
         SELECT c.close,c.volume,c.candle_time FROM market_candles c

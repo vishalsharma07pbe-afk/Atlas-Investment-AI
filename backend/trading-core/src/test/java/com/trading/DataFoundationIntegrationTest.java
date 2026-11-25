@@ -84,6 +84,22 @@ class DataFoundationIntegrationTest {
     assertThat(jdbc.queryForObject("select count(*) from data_quality_events where event_type='FILE_REJECTED'",Long.class)).isEqualTo(1);
   }
 
+  @Test @Order(4) void explicitCorporateActionMultiplierRequiresExactIdentityAndPreservesRawPrices()throws Exception{
+    String header="exchange,symbol,series,isin,action_type,ex_date,ratio,cash_amount,source_revision,ratio_basis\n";
+    upload("corporate-actions","split.csv",header+"NSE,RELIANCE,EQ,INE002A01018,SPLIT,2026-11-11,2,,split-revision-1,POST_SHARES_PER_PRE_SHARE\n")
+      .andExpect(status().isOk()).andExpect(jsonPath("$.recordsWritten").value(1));
+    assertThat(jdbc.queryForObject("SELECT raw_payload->>'ratio_basis' FROM corporate_actions WHERE source_revision='split-revision-1'",String.class)).isEqualTo("POST_SHARES_PER_PRE_SHARE");
+    upload("corporate-actions","bad-identity.csv",header+"NSE,RELIANCE,EQ,INE000A01001,SPLIT,2026-11-11,2,,bad-split-1,POST_SHARES_PER_PRE_SHARE\n")
+      .andExpect(status().isBadRequest());
+    upload("corporate-actions","bad-bonus.csv",header+"NSE,RELIANCE,EQ,INE002A01018,BONUS,2026-11-11,1,,bad-bonus-1,POST_SHARES_PER_PRE_SHARE\n")
+      .andExpect(status().isBadRequest());
+    upload("corporate-actions","legacy.csv","exchange,symbol,series,action_type,ex_date,ratio,cash_amount,source_revision\nNSE,RELIANCE,EQ,BONUS,2026-11-11,1,,legacy-action-1\n")
+      .andExpect(status().isOk());
+    assertThat(jdbc.queryForObject("SELECT raw_payload->>'ratio_basis' FROM corporate_actions WHERE source_revision='legacy-action-1'",String.class)).isNull();
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM market_candles WHERE adjustment_status='RAW_UNADJUSTED'",Long.class)).isEqualTo(2L);
+    assertThat(jdbc.queryForObject("SELECT max(close) FROM market_candles",java.math.BigDecimal.class)).isEqualByComparingTo("140");
+  }
+
   private org.springframework.test.web.servlet.ResultActions upload(String type,String name,String content) throws Exception {
     MockMultipartFile file=new MockMultipartFile("file",name,"text/csv",content.stripIndent().getBytes());
     return mvc.perform(multipart("/api/v1/data-import/"+type).file(file));
