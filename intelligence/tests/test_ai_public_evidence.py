@@ -36,7 +36,7 @@ class PublicAiEvidenceTests(unittest.TestCase):
             self.assertIn("NSE_CASH_MARKET_LEVEL_REPORTED_FLOWS_NOT_STOCK_TRANSACTIONS",prompt)
             self.assertEqual(set(ids),set(supplied))
             return {"status":"MODEL_GROUNDED","provider":providers[0],"response":{"findings":[
-                {"statement":"Reported peer multiples have unverified observation periods.","evidence_ids":["VAL"]}]}}
+                {"statement":'{"path":"/VAL/basis","value":"UNDATED_PROVIDER_MULTIPLES_NOT_FAIR_VALUE"}',"evidence_ids":["VAL"]}]}}
         self.assertIsNotNone(review._review(pack,"OLLAMA",runner))
         self.assertEqual(review._committee(pack,["OLLAMA"],[{"provider":"OLLAMA","findings":[{"evidence_ids":["VAL"]}]}],{"OLLAMA"})["cited_domains"],["VAL"])
         before=review.identity(pack,["OLLAMA"])
