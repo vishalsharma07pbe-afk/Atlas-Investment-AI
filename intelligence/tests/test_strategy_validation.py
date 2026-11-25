@@ -96,3 +96,45 @@ class StrategyValidationTests(unittest.TestCase):
             self.assertEqual(swing["market_benchmark_status"],"UNAVAILABLE")
             self.assertNotIn("gross_nifty50_price_index_percent",cost)
             self.assertNotIn("net_difference_vs_nifty50_pp",cost)
+
+    def test_signal_regimes_use_only_matched_history_before_entry(self):
+        data=history()
+        positions={}
+        with patch("app.strategy_validation.evaluate",return_value={h:("TECHNICAL_WATCH",{}) for h in ("SWING","SHORT_TERM","LONG_TERM")}):
+            result=replay(data,TODAY,positions=positions)
+        rows=[{"trade_date":row["trade_date"],"open":100,"close":100+i*.2,"revision":1,"source_code":"UPSTOX"}
+              for i,row in enumerate(data["candles"][-300:])]
+        benchmark={"benchmark_key":"NSE_INDEX|Nifty 50","kind":"PRICE_INDEX","candles":rows}
+        attach_market_benchmark(result,data,benchmark,TODAY,positions=positions)
+        swing=result["horizons"]["SWING"]
+        regime=swing["market_regime_research"]
+        self.assertEqual(regime["status"],"MATCHED")
+        self.assertEqual(regime["classified_trades"],19)
+        rising=regime["groups"][0]
+        self.assertEqual(rising["regime"],"RISING")
+        self.assertEqual(rising["trades"],19)
+        self.assertEqual(rising["cost_scenarios"][1]["mean_trade_return_percent"],
+                         swing["cost_scenarios"][1]["mean_trade_return_percent"])
+        # Future index closes cannot change the first signal's classification.
+        from app.strategy_validation import _market_regimes, _history
+        equity=_history(data,TODAY)
+        first=positions["SWING"][:1]
+        signal=first[0][0]
+        index={row["trade_date"]:(row["open"],row["close"]) for row in rows}
+        changed={d:(o,c if d<=signal else 1) for d,(o,c) in index.items()}
+        self.assertEqual(_market_regimes(equity,index,first),_market_regimes(equity,changed,first))
+        for end,expected in ((90,"FALLING"),(100,"SIDEWAYS"),(110,"RISING")):
+            exact={c.date:(100,100) for c in equity[240:301]}
+            exact[signal]=(100,end)
+            self.assertEqual(next(g["regime"] for g in _market_regimes(equity,exact,first)["groups"] if g["trades"]),expected)
+        # Missing pre-signal observation withholds that cohort, not the replay.
+        gap={**benchmark,"candles":rows[:50]+rows[51:]}
+        attach_market_benchmark(result,data,gap,TODAY,positions=positions)
+        self.assertEqual(swing["market_regime_research"]["status"],"PARTIAL")
+        self.assertEqual(swing["market_benchmark_status"],"MATCHED_PRICE_INDEX")
+        self.assertGreater(swing["market_regime_research"]["groups"][-1]["trades"],0)
+        attach_market_benchmark(result,data,None,TODAY,positions=positions)
+        self.assertEqual(swing["market_regime_research"]["status"],"UNAVAILABLE")
+        self.assertEqual(swing["market_regime_research"]["groups"][-1]["trades"],19)
+        self.assertEqual(swing["market_regime_research"]["groups"][-1]["cost_scenarios"],[])
+        self.assertEqual(swing["trades"],19)

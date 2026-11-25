@@ -39,14 +39,18 @@ describe("horizon research",()=>{
 });
 
 it("displays automated historical replay without removing strategy research blockers",async()=>{
- const strategy_validation={sample_count:2,notice:"No validated forward performance.",horizons:{SWING:{counts:{REPLAY_OBSERVED:1,EVIDENCE_GAP:1},observed_instruments:1,items:[{exchange:"NSE",symbol:"REPLAY",as_of:"2026-11-23",trades:3,holding_sessions:10,test_start:"2026-01-01",test_end:"2026-11-23",gross_buy_hold_percent:8,small_sample:true,cost_scenarios:[{cost_bps_per_side:30,net_return_percent:2,matched_gross_exposure_return_percent:3,net_same_stock_buy_hold_percent:7.35,net_difference_vs_same_stock_pp:-5.35,gross_nifty50_price_index_percent:4.25,net_difference_vs_nifty50_pp:-2.25,max_drawdown_percent:-5,win_rate_percent:66.67,wins:2,losses:1,flat:0}]}]}}};
+ const strategy_validation={sample_count:2,notice:"No validated forward performance.",horizons:{SWING:{counts:{REPLAY_OBSERVED:1,EVIDENCE_GAP:1},observed_instruments:1,items:[{exchange:"NSE",symbol:"REPLAY",as_of:"2026-11-23",trades:3,holding_sessions:10,test_start:"2026-01-01",test_end:"2026-11-23",gross_buy_hold_percent:8,small_sample:true,market_regime_research:{status:"PARTIAL",lookback_observations:60,threshold_percent:5,classified_trades:2,total_trades:3,groups:[{regime:"RISING",trades:2,small_sample:true,cost_scenarios:[{cost_bps_per_side:30,mean_trade_return_percent:1.23,win_rate_percent:50,wins:1,losses:1,flat:0}]},{regime:"UNKNOWN",trades:1,small_sample:true,cost_scenarios:[]}],notice:"Cohort means are per-position."},cost_scenarios:[{cost_bps_per_side:30,net_return_percent:2,matched_gross_exposure_return_percent:3,net_same_stock_buy_hold_percent:7.35,net_difference_vs_same_stock_pp:-5.35,gross_nifty50_price_index_percent:4.25,net_difference_vs_nifty50_pp:-2.25,max_drawdown_percent:-5,win_rate_percent:66.67,wins:2,losses:1,flat:0}]}]}}};
  vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[section],strategy_validation})})));
  render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
  expect(await screen.findByRole("heading",{name:"Historical strategy replay"})).toBeTruthy();
  fireEvent.click(screen.getByText(/REPLAY · NSE · 3 simulated positions/));
- expect(screen.getByText("30 bps")).toBeTruthy();
+ expect(screen.getAllByText("30 bps")).toHaveLength(2);
  expect(screen.getByText("7.35%")).toBeTruthy();
  expect(screen.getByText("-5.35 pp")).toBeTruthy();
+ expect(screen.getByText("Signal-date market trend cohorts")).toBeTruthy();
+ expect(screen.getByText(/2\/3 positions classified/)).toBeTruthy();
+ expect(screen.getByText("1.23%")).toBeTruthy();
+ expect(screen.getByText("unknown")).toBeTruthy();
  expect(screen.getByText("4.25%")).toBeTruthy();
  expect(screen.getByText("-2.25 pp")).toBeTruthy();
  expect(screen.getByText("66.67%")).toBeTruthy();

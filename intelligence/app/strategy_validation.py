@@ -70,7 +70,44 @@ def _comparison(trades,cost_bps,entry,exit_price):
     metrics["net_difference_vs_same_stock_pp"]=round(metrics["net_return_percent"]-(reference-1)*100,4)
     return metrics
 
-def attach_market_benchmark(result,payload,benchmark,today):
+REGIME_LOOKBACK=60
+REGIME_THRESHOLD=5.0
+REGIMES=("RISING","FALLING","SIDEWAYS","UNKNOWN")
+
+def _market_regimes(equity,index,positions):
+    """Classify at the signal close, never with subsequent index returns."""
+    by_date={c.date:i for i,c in enumerate(equity)}
+    index_dates=sorted(index)
+    grouped={name:[] for name in REGIMES}
+    for signal,trade in positions:
+        regime="UNKNOWN"
+        i=by_date.get(signal)
+        if i is not None and i>=REGIME_LOOKBACK:
+            dates=[c.date for c in equity[i-REGIME_LOOKBACK:i+1]]
+            matched=[d for d in index_dates if dates[0]<=d<=signal]
+            if dates==matched:
+                change=(index[signal][1]/index[dates[0]][1]-1)*100
+                if isfinite(change):
+                    regime=("RISING" if change>=REGIME_THRESHOLD else
+                            "FALLING" if change<=-REGIME_THRESHOLD else "SIDEWAYS")
+        grouped[regime].append(trade)
+    groups=[]
+    for name,trades in grouped.items():
+        scenarios=[]
+        if trades and name!="UNKNOWN":
+            for cost in COSTS:
+                metrics=_metrics(trades,cost)
+                scenarios.append({key:metrics[key] for key in
+                    ("cost_bps_per_side","mean_trade_return_percent","win_rate_percent","wins","losses","flat")})
+        groups.append({"regime":name,"trades":len(trades),"small_sample":len(trades)<30,"cost_scenarios":scenarios})
+    classified=len(positions)-len(grouped["UNKNOWN"])
+    return {"status":"MATCHED" if classified==len(positions) and classified else
+            "PARTIAL" if classified else "UNAVAILABLE",
+            "lookback_observations":REGIME_LOOKBACK,"threshold_percent":REGIME_THRESHOLD,
+            "classified_trades":classified,"total_trades":len(positions),"groups":groups,
+            "notice":"Illustrative Nifty 50 price trend at the signal close, not a forecast or a verified full market regime. Cohort means are per-position, not portfolio returns."}
+
+def attach_market_benchmark(result,payload,benchmark,today,*,positions=None):
     """Compare net simulation with the non-tradable Nifty 50 price index.
 
     Require exactly the same observed dates throughout the exposure interval;
@@ -99,9 +136,12 @@ def attach_market_benchmark(result,payload,benchmark,today):
     except (ValueError,TypeError,KeyError,OverflowError):
         equity=[]
         index={}
-    for horizon in result.get("horizons",{}).values():
+    for name,horizon in result.get("horizons",{}).items():
         if horizon.get("status")!="REPLAY_OBSERVED":
             continue
+        horizon.pop("market_regime_research",None)
+        if positions is not None and len(positions.get(name,[]))==horizon["trades"]:
+            horizon["market_regime_research"]=_market_regimes(equity,index,positions[name])
         horizon["market_benchmark_status"]="UNAVAILABLE"
         for field in ("market_benchmark_start","market_benchmark_end","market_benchmark_observations"):
             horizon.pop(field,None)
@@ -125,7 +165,7 @@ def attach_market_benchmark(result,payload,benchmark,today):
         horizon["market_benchmark_end"]=dates[-1]
         horizon["market_benchmark_observations"]=len(dates)
 
-def replay(payload, today):
+def replay(payload, today, *, positions=None):
     try:
         candles=_history(payload,today)
     except (ValueError,TypeError,KeyError,OverflowError):
@@ -143,6 +183,7 @@ def replay(payload, today):
             results[horizon]={"status":"INSUFFICIENT_TEST_WINDOW","trades":0}
             continue
         trades=[]
+        signal_positions=[]
         examined=0
         i=start
         while i+hold<len(candles):
@@ -155,9 +196,13 @@ def replay(payload, today):
                 continue
             entry=candles[i+1]
             exit_candle=candles[i+hold]
-            trades.append((entry.open,exit_candle.close,[c.close for c in candles[i+1:i+hold+1]]))
+            trade=(entry.open,exit_candle.close,[c.close for c in candles[i+1:i+hold+1]])
+            trades.append(trade)
+            signal_positions.append((candles[i].date,trade))
             # No overlapping exposure within an instrument/horizon.
             i+=hold
+        if positions is not None:
+            positions[horizon]=signal_positions
         results[horizon]={"status":"REPLAY_OBSERVED" if trades else "NO_SIGNALS","trades":len(trades),
             "examined_signal_dates":examined,"holding_sessions":hold,"test_start":candles[start].date,
             "test_end":candles[-1].date,"cost_scenarios":[_comparison(trades,cost,candles[start+1].open,candles[-1].close) for cost in COSTS] if trades else [],

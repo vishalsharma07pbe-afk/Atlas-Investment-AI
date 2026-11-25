@@ -63,3 +63,36 @@ class AutomaticValidationTests(unittest.TestCase):
             read(connect,instant,snapshot=snapshot)
             self.assertEqual(items[0]["matched_strategy_replay"]["trades"],3)
             self.assertTrue(all("matched_strategy_replay" not in i for i in items[1:]))
+
+    def test_regime_evidence_is_refreshed_and_cached_with_existing_replay(self):
+        from datetime import date
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            def connect():
+                db=sqlite3.connect(directory+"/validation.sqlite")
+                db.row_factory=sqlite3.Row
+                return db
+            now=datetime(2026,11,24,10,tzinfo=timezone.utc)
+            snapshot={"enabled":True,"sections":[{"section":"NSE","status":"READY","result":{"horizons":{}}}]}
+            identity={"id":1,"symbol":"TEST","exchange":"NSE","isin":"INE002A01018",
+                      "active":True,"listing_status":"ACTIVE","series":"EQ","instrument_type":"EQUITY"}
+            today=date(2026,11,24)
+            candles=[{"trade_date":(today-timedelta(days=500-i)).isoformat(),"open":100+i*.1,
+                      "high":101+i*.1,"low":99+i*.1,"close":100.2+i*.1,"volume":200000,
+                      "adjustment_status":"ADJUSTED","quality_status":"PROVIDER_VALIDATED","source_code":"TEST","revision":1}
+                      for i in range(500)]
+            benchmark={"benchmark_key":"NSE_INDEX|Nifty 50","kind":"PRICE_INDEX",
+                       "candles":[{"trade_date":row["trade_date"],"open":100,"close":100+i*.2,
+                                   "revision":1,"source_code":"UPSTOX"} for i,row in enumerate(candles[-300:])]}
+            calls=[]
+            def loader(path):
+                calls.append(path)
+                if "discovery-universe" in path:return [identity]
+                if path.endswith("strategy-benchmark"):return benchmark
+                return {"instrument":identity,"candles":candles}
+            with patch("app.strategy_validation.evaluate",return_value={h:("TECHNICAL_WATCH",{}) for h in ("SWING","SHORT_TERM","LONG_TERM")}):
+                refresh(snapshot,connect,loader,now)
+                refresh(snapshot,connect,loader,now)
+            result=read(connect,now)["horizons"]["SWING"]["items"][0]
+            self.assertEqual(result["market_regime_research"]["classified_trades"],19)
+            self.assertEqual(sum(path.endswith("strategy-benchmark") for path in calls),1)
