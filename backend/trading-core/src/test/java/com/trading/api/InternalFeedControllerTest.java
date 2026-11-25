@@ -54,6 +54,18 @@ class InternalFeedControllerTest {
     verifyNoInteractions(jdbc);
   }
 
+  @Test void sessionContextRequiresInternalCredential() {
+    JdbcTemplate jdbc=mock(JdbcTemplate.class);
+    HttpServletRequest request=mock(HttpServletRequest.class);
+    var api=controller(jdbc,"service-secret");
+    assertThatThrownBy(()->api.sessionContext(request)).isInstanceOf(ResponseStatusException.class);
+    verifyNoInteractions(jdbc);
+    when(request.getHeader("X-Atlas-Service-Token")).thenReturn("service-secret");
+    var result=api.sessionContext(request);
+    assertThat(result).containsEntry("timezone","Asia/Kolkata");
+    assertThat((List<?>)result.get("sessions")).hasSize(2);
+  }
+
   @Test void protectsAndDelegatesReadOnlyResearchData() {
     JdbcTemplate jdbc=mock(JdbcTemplate.class);
     InstrumentController instruments=mock(InstrumentController.class);
