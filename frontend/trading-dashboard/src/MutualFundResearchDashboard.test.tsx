@@ -38,12 +38,15 @@ it("shows dated secondary disclosures without enabling fund recommendations",asy
 });
 
 it("shows portfolio composition separately from qualifying recommendations",async()=>{
- const item={scheme_code:"118955",scheme_name:"Composition Test Fund",portfolio_date:"2026-10-31",reported_weight_total_percent:100,asset_allocation_percent:{Equity:60,Cash:40},exact_listed_equity_weight_percent:60,top_10_exact_equity_weight_percent:60,exact_equity_count:1,cached_company_evidence_weight_percent:20,cached_company_count:1,top_holdings:[{isin:"INE002A01018",name:"Example Equity",weight_percent:60}],notice:"Secondary composition only."};
+ const item={scheme_code:"118955",scheme_name:"Composition Test Fund",concentration_research:{status:"EXACT_EQUITY_SUBSET_ONLY",category:"LARGE_CAP",exact_equity_weight_percent:60,largest_equity_weight_percent:60,top_three_equity_weight_percent:60,equity_subset_hhi:10000,equity_subset_effective_holdings:1,sector_classified_weight_percent:0,unclassified_exact_equity_weight_percent:60,sector_weights:[],largest_classified_sector_weight_percent:null,reported_equity_weight_percent:60,reported_debt_weight_percent:null,reported_money_market_weight_percent:null,missing_risk_evidence:["COMPLETE_SECTOR_AND_MARKET_CAP_COVERAGE_REQUIRED"],notice:"Subset only."},portfolio_date:"2026-10-31",reported_weight_total_percent:100,asset_allocation_percent:{Equity:60,Cash:40},exact_listed_equity_weight_percent:60,top_10_exact_equity_weight_percent:60,exact_equity_count:1,cached_company_evidence_weight_percent:20,cached_company_count:1,top_holdings:[{isin:"INE002A01018",name:"Example Equity",weight_percent:60}],notice:"Secondary composition only."};
  const result={...response,portfolio_evidence:{status:"SECONDARY_COMPOSITION_ONLY",notice:"Not a forward forecast.",items:[item]}};
  vi.stubGlobal("fetch",vi.fn(async(url:string)=>({ok:true,json:async()=>url.includes("historical-watch")?{category:"LARGE_CAP",items:[],universe_count:120,sample_count:20,eligible_count:0,automatic_collection_enabled:true,notice:"Historical only"}:result})));
  render(<MutualFundResearchDashboard onExplore={()=>{}}/>);
  fireEvent.click(await screen.findByText("Reported fund portfolios (1)"));
  expect(screen.getByText("Composition Test Fund")).toBeTruthy();
+ expect(screen.getByText("Exact equity subset HHI")).toBeTruthy();
+ expect(screen.getByText("10000.00")).toBeTruthy();
+ expect(screen.getByText("Unclassified exact equity weight")).toBeTruthy();
  expect(screen.getByText("Example Equity · 60.00%")).toBeTruthy();
  expect(screen.getByText("20.00% · 1 companies")).toBeTruthy();
  expect(screen.getAllByText("No fund currently qualifies")).toHaveLength(2);

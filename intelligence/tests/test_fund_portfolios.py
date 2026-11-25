@@ -108,3 +108,28 @@ class FundPortfoliosTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 portfolios.refresh()
             client.assert_not_called()
+
+    def test_concentration_is_subset_only_with_category_specific_gaps(self):
+        holdings=[{"isin":"INE002A01018","weight_percent":40},
+                  {"isin":"INE009A01021","weight_percent":30},
+                  {"isin":"INE242A01010","weight_percent":10}]
+        sectors={"INE002A01018":{"sector":"Banking"},"INE009A01021":{"sector":" banking "}}
+        result=portfolios.concentration(holdings,sectors,"Large Cap Fund",{"Equity":90,"Cash":10})
+        self.assertEqual(result["category"],"LARGE_CAP")
+        self.assertEqual(result["exact_equity_weight_percent"],80)
+        self.assertEqual(result["largest_equity_weight_percent"],40)
+        self.assertEqual(result["top_three_equity_weight_percent"],80)
+        self.assertEqual(result["equity_subset_hhi"],4062.5)
+        self.assertAlmostEqual(result["equity_subset_effective_holdings"],2.4615,places=4)
+        self.assertEqual(result["sector_classified_weight_percent"],70)
+        self.assertEqual(result["unclassified_exact_equity_weight_percent"],10)
+        self.assertEqual(result["largest_classified_sector_weight_percent"],70)
+        self.assertIsNone(result["risk_rating"])
+        debt=portfolios.concentration([],{},"Corporate Bond Fund",{"Debt":90})
+        self.assertEqual(debt["reported_debt_weight_percent"],90)
+        self.assertIn("MATURITY_AND_MODIFIED_DURATION_REQUIRED",debt["missing_risk_evidence"])
+        self.assertIsNone(debt["equity_subset_hhi"])
+        hybrid=portfolios.concentration(holdings,sectors,"Aggressive Hybrid Fund",{"Equity":80,"Debt":20})
+        self.assertIn("DEBT_CREDIT_AND_DURATION_REQUIRED",hybrid["missing_risk_evidence"])
+        self.assertIsNone(portfolios.concentration(holdings+[holdings[0]],sectors,"Large Cap Fund",{})["equity_subset_hhi"])
+        self.assertIsNone(portfolios.concentration(holdings,{},"Large Cap Fund",{})["largest_classified_sector_weight_percent"])
