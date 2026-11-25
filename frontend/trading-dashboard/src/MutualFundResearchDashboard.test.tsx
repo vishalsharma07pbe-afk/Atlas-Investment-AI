@@ -86,3 +86,24 @@ it("supports debt category navigation without implying an equity ranking",async(
  expect(await screen.findByText("Qualification evidence (0 sampled schemes)")).toBeTruthy();
  expect(screen.getAllByText("No fund currently qualifies")).toHaveLength(2);
 });
+
+it("opens an individual scheme report and preserves missing-evidence decisions",async()=>{
+ const report={identifier:"123456",name:"Example Integrated Fund",category:"LARGE_CAP",plan:"DIRECT",option:"GROWTH",nav:"100.50",nav_date:"2026-11-24",nav_age_days:1,
+  historical:{sources:["AMFI","MFAPI"],returns_1y:12,returns_3y:14,sample_peer_percentile:80,worst_rolling_return:-8,max_drawdown:-17,volatility:13},
+  secondary_disclosure_available:false,secondary_portfolio_available:false,
+  top_performer:{status:"WITHHELD",missing:["BENCHMARK_HIT_RATE"],published_rank:null},
+  growth_outlook:{status:"WITHHELD",missing:["FORWARD_EARNINGS_GROWTH"],published_rank:null},
+  suitability:{status:"POTENTIALLY_SUITABLE",flags:[]},conclusion:"Neither research list qualifies.",reassessment:"Re-evaluate when dated evidence is acquired."};
+ const result={...response,research_reports:[report]};
+ vi.stubGlobal("fetch",vi.fn(async(url:string)=>({ok:true,json:async()=>url.includes("historical-watch")?{category:"LARGE_CAP",items:[],universe_count:12,sample_count:10,eligible_count:1,automatic_collection_enabled:true,notice:"Historical only"}:result})));
+ render(<MutualFundResearchDashboard onExplore={()=>{}}/>);
+ await screen.findByText("Individual fund research reports (1)");
+ fireEvent.change(screen.getByLabelText("Research report"),{target:{value:"123456"}});
+ expect(screen.getByText("Example Integrated Fund",{selector:"h4"})).toBeTruthy();
+ expect(screen.getByText("12.00% / 14.00%")).toBeTruthy();
+ expect(screen.getByText("Top Performer: Withheld")).toBeTruthy();
+ expect(screen.getByText("Growth Outlook: Withheld")).toBeTruthy();
+ expect(screen.getByText("Missing evidence: Benchmark hit rate")).toBeTruthy();
+ expect(screen.getByText("No current matched secondary disclosure in this bounded snapshot.")).toBeTruthy();
+ expect(screen.getAllByText("No fund currently qualifies")).toHaveLength(2);
+});
