@@ -7,7 +7,7 @@ from .market_client import backend_json
 from .strategy_validation import replay, WINDOWS, attach_market_benchmark
 from .horizon_research import VERSION
 from .replay_evidence import VERSION as EVIDENCE_VERSION, exact_isin, fingerprint
-CACHE_VERSION = VERSION + ':' + EVIDENCE_VERSION + ':market-price-index-v1'
+CACHE_VERSION = VERSION + ':' + EVIDENCE_VERSION + ':market-price-index-v1:signal-regime-v1'
 
 IST=ZoneInfo("Asia/Kolkata")
 def _table(db):
@@ -54,13 +54,14 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
             if (identity["id"]!=i or identity["symbol"]!=selected["symbol"] or identity["exchange"]!=exchange
                     or identity.get("isin")!=selected["isin"]):
                 raise ValueError("IDENTITY_MISMATCH")
-            result=replay(payload,today)
+            positions={}
+            result=replay(payload,today,positions=positions)
             if result["status"]=="HISTORICAL_REPLAY_ONLY":
                 try:
                     benchmark=loader("/api/v1/market-data/strategy-benchmark")
                 except Exception:
                     benchmark=None
-                attach_market_benchmark(result,payload,benchmark,today)
+                attach_market_benchmark(result,payload,benchmark,today,positions=positions)
             result["isin"]=identity["isin"]
             result["replay_evidence_hash"]=fingerprint(payload["candles"],today)
         except Exception:
@@ -120,4 +121,4 @@ def read(connect,instant=None,*,snapshot=None):
                 items.append({"exchange":row["exchange"],"symbol":row["symbol"],"as_of":payload["as_of"],**result})
         horizons[horizon]={"counts":counts,"observed_instruments":len(items),"items":items[:10]}
     return {"methodology":VERSION,"evidence_version":EVIDENCE_VERSION,"sample_count":len(rows),"horizons":horizons,
-        "notice":"Bounded rotating current-registry sample, not selected by current watch score. Per-instrument replay only; results are not independent or a portfolio backtest. Nifty 50 price-index comparison is available only with matching observed dates; no prospective validation. No recommendation gate is lifted."}
+        "notice":"Bounded rotating current-registry sample, not selected by current watch score. Per-instrument replay only; results are not independent or a portfolio backtest. Nifty 50 price-index comparison and signal-date trend cohorts require matching observed dates; no prospective validation. No recommendation gate is lifted."}
