@@ -180,15 +180,18 @@ it("displays independent automatic exposure stress results and withheld scenario
 
 it("shows mapped combined equity exposure and same-date overlap without extra API calls",async()=>{
  const holding={id:1,symbol:"123456",asset_type:"MUTUAL_FUND",exchange:null,status:"MONITOR",weight_percent:100,recorded_return_percent:1,evidence_date:null,history_count:0,change_20_observations_percent:null,recent_peak_change_percent:null,findings:[],missing_evidence:[]};
- const look_through={status:"DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE",portfolio_date:"2026-10-31",risk_observation_count:3,matched_fund_value_percent:100,mapped_portfolio_percent:87,unmodeled_value:130,matched_scheme_count:2,mapped_equity_count:2,overlap_pair_count:1,exposures:[{isin:"INE002A01018",directValue:200,indirectValue:390,estimatedValue:590,portfolioPercent:59,contributingSchemes:2}],overlap_pairs:[{schemeA:"123456",schemeB:"123457",sameUnderlyingFund:false,commonEquities:2,sharedWeightPercent:50,coverageA:80,coverageB:90}],notice:"Dated secondary disclosures."};
+ const look_through={status:"DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE",portfolio_date:"2026-10-31",risk_observation_count:3,sector_status:"PARTIAL_CLASSIFIED_EXPOSURE",sector_classified_portfolio_percent:59,sector_unclassified_mapped_value:280,sector_count:1,sector_review_count:1,sector_exposures:[{sector:"energy",directValue:200,indirectValue:390,estimatedValue:590,portfolioPercent:59,reviewConcentration:true}],sector_notice:"Whole recorded portfolio denominator.",matched_fund_value_percent:100,mapped_portfolio_percent:87,unmodeled_value:130,matched_scheme_count:2,mapped_equity_count:2,overlap_pair_count:1,exposures:[{isin:"INE002A01018",directValue:200,indirectValue:390,estimatedValue:590,portfolioPercent:59,contributingSchemes:2}],overlap_pairs:[{schemeA:"123456",schemeB:"123457",sameUnderlyingFund:false,commonEquities:2,sharedWeightPercent:50,coverageA:80,coverageB:90}],notice:"Dated secondary disclosures."};
  const diversification={status:"PARTIAL_COVERAGE",unpriced_count:0,unresolved_identity_count:0,resolved_identity_count:1,top_three_resolved_weight_percent:100,asset_exposure:[],direct_equity_sector_exposure:[],fund_category_exposure:[],sector_coverage_percent:0,fund_category_coverage_percent:100,review_prompts:[],notice:"Recorded prices.",look_through};
  vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-25T10:00:00Z",holding_count:1,attention_count:0,data_gap_count:0,notice:"Research only",holdings:[holding],diversification})})));
  render(<PortfolioDoctor revision={0} onSettings={()=>{}}/>);
  expect(await screen.findByRole("heading",{name:"Combined equity exposure and fund overlap"})).toBeTruthy();
- expect(screen.getByText("₹590")).toBeTruthy();
- expect(screen.getByText("59.00%")).toBeTruthy();
+ expect(screen.getAllByText("₹590")).toHaveLength(2);
+ expect(screen.getAllByText("59.00%")).toHaveLength(2);
  expect(screen.getByText("50.00%")).toBeTruthy();
  expect(screen.getByText("Dated secondary disclosures.")).toBeTruthy();
  expect(screen.getByText("3 hidden concentration or high overlap review observations.")).toBeTruthy();
+ expect(screen.getByText("energy · Review")).toBeTruthy();
+ expect(screen.getByText("1 sectors exceed the illustrative 40% portfolio review threshold.")).toBeTruthy();
+ expect(screen.getByText("Whole recorded portfolio denominator.")).toBeTruthy();
  expect(fetch).toHaveBeenCalledTimes(1);
 });
