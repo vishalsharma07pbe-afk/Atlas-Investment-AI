@@ -52,12 +52,14 @@ public class PortfolioRefreshService {
   private Map<String,Object> refresh(List<Map<String,Object>> rows,boolean includeHistory){
     int updated=0,historySynced=0;
     List<Map<String,String>> skipped=new ArrayList<>();
+    Map<UUID,String> rejectedOwners=new HashMap<>();
     for(Map<String,Object> row:rows){
       long id=((Number)row.get("id")).longValue();
       UUID user=(UUID)row.get("user_id");
       String symbol=String.valueOf(row.get("symbol"));
       try{
         if("EQUITY".equals(row.get("asset_type"))){
+          if(rejectedOwners.containsKey(user)){skipped.add(issue(symbol,rejectedOwners.get(user)));continue;}
           List<String> keys=jdbc.queryForList("""
             SELECT m.instrument_key FROM upstox_instrument_map m JOIN exchanges e ON e.code=m.exchange_code
             JOIN instruments i ON i.exchange_id=e.id AND i.symbol=m.trading_symbol AND i.isin=m.isin
@@ -104,6 +106,9 @@ public class PortfolioRefreshService {
               LocalDate latest=raw instanceof java.sql.Date d?d.toLocalDate():raw instanceof LocalDate d?d:null;
               if(count<21||latest==null||latest.isBefore(today.minusDays(5)))
                 historySynced+=upstox.dailyCandles(user,key,today.minusMonths(6),end);
+            }catch(FeedHttp.ProviderHttpException ex){
+              if(Set.of(401,403,429).contains(ex.status()))rejectedOwners.put(user,ex.reason());
+              skipped.add(issue(symbol,ex.reason()));
             }catch(Exception ex){skipped.add(issue(symbol,"HISTORY_SYNC_FAILED"));}
           }
         }else if(symbol.matches("[0-9]{1,18}")){
@@ -119,6 +124,9 @@ public class PortfolioRefreshService {
             AND (price_as_of IS NULL OR price_as_of::date<=?::date)
             """,nav.get(0).get("nav"),previous,nav.get(0).get("nav_date"),id,user,symbol,nav.get(0).get("nav_date"));
         }else skipped.add(issue(symbol,"SCHEME_CODE_REQUIRED"));
+      }catch(FeedHttp.ProviderHttpException ex){
+        if(Set.of(401,403,429).contains(ex.status()))rejectedOwners.put(user,ex.reason());
+        skipped.add(issue(symbol,ex.reason()));
       }catch(Exception ex){
         // Never expose arbitrary exception messages, URLs, or provider credentials.
         String reason="Upstox credential unavailable".equals(ex.getMessage())?
