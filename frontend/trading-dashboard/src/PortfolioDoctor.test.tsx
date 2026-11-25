@@ -233,8 +233,8 @@ it("shows provisional recorded acquisition dates and reconciliation gaps",async(
  const base={status:"MONITOR",weight_percent:50,recorded_return_percent:10,evidence_date:null,history_count:0,change_20_observations_percent:null,recent_peak_change_percent:null,findings:[],missing_evidence:[]};
  const holdings=[{...base,id:1,symbol:"LOTTEST",asset_type:"EQUITY",exchange:"NSE"},{...base,id:2,symbol:"MISSING",asset_type:"EQUITY",exchange:"NSE"}];
  const sale_research={status:"SCENARIO_RESEARCH_AVAILABLE",scenarios:[
-  {scope:"DIRECT_EQUITY_ALLOCATION",kind:"EQUAL_WEIGHTS",status:"PROVISIONAL_SALE_EVIDENCE",grossProceeds:300,provisionalOpenCost:180,grossGainOrLoss:120,sales:[{identity:"INE002A01018",symbol:"LOTTEST",assetType:"EQUITY",hypotheticalQuantity:3,grossProceeds:300,provisionalOpenCost:180,grossGainOrLoss:120,youngestCalendarDays:100,oldestCalendarDays:400}],withheld:[]},
-  {scope:"CONCENTRATION_REDISTRIBUTION",kind:"5 new identities",status:"INSUFFICIENT_SALE_EVIDENCE",grossProceeds:null,provisionalOpenCost:null,grossGainOrLoss:null,sales:[],withheld:["MISSING: reconciled journal acquisition lots required"]}],notice:"No actual tax liability estimate."};
+  {scope:"DIRECT_EQUITY_ALLOCATION",kind:"EQUAL_WEIGHTS",status:"PROVISIONAL_SALE_EVIDENCE",grossProceeds:300,provisionalOpenCost:180,grossGainOrLoss:120,taxReference:{status:"CONDITIONAL_REFERENCE_ONLY",taxYear:"2026-27",shortPositiveGains:20,shortGrossLosses:0,longPositiveGains:100,longGrossLosses:0,baseTaxIfFullThresholdUnused:4,baseTaxIfThresholdAlreadyUsed:16.5,withheld:[]},sales:[{identity:"INE002A01018",symbol:"LOTTEST",assetType:"EQUITY",hypotheticalQuantity:3,grossProceeds:300,provisionalOpenCost:180,grossGainOrLoss:120,youngestCalendarDays:100,oldestCalendarDays:400}],withheld:[]},
+  {scope:"CONCENTRATION_REDISTRIBUTION",kind:"5 new identities",status:"INSUFFICIENT_SALE_EVIDENCE",grossProceeds:null,provisionalOpenCost:null,grossGainOrLoss:null,taxReference:{status:"INSUFFICIENT_SALE_EVIDENCE",taxYear:"2026-27",withheld:["Missing tax evidence"]},sales:[],withheld:["MISSING: reconciled journal acquisition lots required"]}],notice:"No actual tax liability estimate."};
  const journal_lot_reconciliation={status:"PARTIAL_JOURNAL_RECONCILIATION",reconciled_count:1,holdings:[
   {symbol:"LOTTEST",assetType:"EQUITY",status:"PROVISIONAL_JOURNAL_RECONCILED",recordedQuantity:2,journalQuantity:2,recordedCost:200,journalOpenCost:200,openLots:[{acquired:"2025-10-21",quantity:2,unitPrice:100,calendarDaysHeld:400}]},
   {symbol:"MISSING",assetType:"EQUITY",status:"NO_RECORDED_TRADES",recordedQuantity:3,journalQuantity:null,recordedCost:300,journalOpenCost:null,openLots:[]}],notice:"Provisional journal evidence, not verified tax lots."};
@@ -250,5 +250,8 @@ it("shows provisional recorded acquisition dates and reconciliation gaps",async(
  expect(screen.getAllByText("Withheld")).toHaveLength(3);
  expect(screen.getByText("MISSING: reconciled journal acquisition lots required")).toBeTruthy();
  expect(screen.getByText("100–400")).toBeTruthy();
+ expect(screen.getByText("Conditional listed-equity tax reference")).toBeTruthy();
+ expect(screen.getByText("₹16.5")).toBeTruthy();
+ expect(screen.getByText(/Missing tax evidence/)).toBeTruthy();
  expect(fetch).toHaveBeenCalledTimes(1);
 });
