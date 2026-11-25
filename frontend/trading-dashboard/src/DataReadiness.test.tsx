@@ -31,3 +31,13 @@ it("shows independently stored calendar states without asserting live connectivi
  expect(screen.getByText("CALENDAR UNVERIFIED")).toBeTruthy();
  expect(screen.getByText(/Live feed: not verified/)).toBeTruthy();
 });
+
+it("shows persistent provider cooldown separately from streaming verification",async()=>{
+ const provider_http_recovery={status:"PERSISTED_QUOTE_RECOVERY",providers:[{provider:"UPSTOX",state:"OPEN",retry_after_seconds:120,failures:2,last_error:"PROVIDER_RATE_LIMITED"},{provider:"POLYGON",state:"NOT_OBSERVED",retry_after_seconds:0,failures:0,last_error:null}]};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-25T02:30:00Z",provider_mode:"UPSTOX",automatic_research_enabled:true,live_market_data_connected:false,blockers:[],datasets:[],provider_http_recovery})})));
+ render(<DataReadiness/>);
+ expect(await screen.findByText("Provider HTTP recovery")).toBeTruthy();
+ expect(screen.getByText("120 s")).toBeTruthy();
+ expect(screen.getByText("NOT OBSERVED")).toBeTruthy();
+ expect(screen.getByText(/Live feed: not verified/)).toBeTruthy();
+});
