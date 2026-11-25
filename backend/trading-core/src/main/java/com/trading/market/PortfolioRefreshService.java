@@ -52,17 +52,25 @@ public class PortfolioRefreshService {
   private Map<String,Object> refresh(List<Map<String,Object>> rows,boolean includeHistory){
     int updated=0,historySynced=0;
     List<Map<String,String>> skipped=new ArrayList<>();
+    Map<UUID,String> rejectedOwners=new HashMap<>();
     for(Map<String,Object> row:rows){
       long id=((Number)row.get("id")).longValue();
       UUID user=(UUID)row.get("user_id");
       String symbol=String.valueOf(row.get("symbol"));
       try{
         if("EQUITY".equals(row.get("asset_type"))){
+          if(rejectedOwners.containsKey(user)){skipped.add(issue(symbol,rejectedOwners.get(user)));continue;}
           List<String> keys=jdbc.queryForList("""
-            SELECT instrument_key FROM upstox_instrument_map
-            WHERE upper(trading_symbol)=upper(?)
-            ORDER BY CASE WHEN exchange_code='NSE' THEN 0 ELSE 1 END,
-              CASE WHEN instrument_type='EQ' THEN 0 ELSE 1 END,instrument_key LIMIT 1
+            SELECT m.instrument_key FROM upstox_instrument_map m JOIN exchanges e ON e.code=m.exchange_code
+            JOIN instruments i ON i.exchange_id=e.id AND i.symbol=m.trading_symbol AND i.isin=m.isin
+            WHERE upper(m.trading_symbol)=upper(?) AND m.isin ~ '^IN[A-Z0-9]{10}$'
+              AND m.instrument_type IN ('EQ','EQUITY') AND i.active AND i.series='EQ'
+              AND i.listing_status='ACTIVE' AND i.instrument_type IN ('EQ','EQUITY','STOCK')
+              AND NOT EXISTS(SELECT 1 FROM instruments other JOIN exchanges venue ON venue.id=other.exchange_id
+                WHERE venue.code IN ('NSE','BSE') AND upper(other.symbol)=upper(m.trading_symbol)
+                  AND other.active AND other.series='EQ' AND other.listing_status='ACTIVE'
+                  AND other.isin IS DISTINCT FROM m.isin)
+            ORDER BY CASE WHEN m.exchange_code='NSE' THEN 0 ELSE 1 END,m.instrument_key LIMIT 1
             """,String.class,symbol);
           if(keys.isEmpty()){skipped.add(issue(symbol,"INSTRUMENT_NOT_MAPPED"));continue;}
           String key=keys.get(0);
@@ -71,10 +79,14 @@ public class PortfolioRefreshService {
             throw new IllegalStateException("INVALID_QUOTE");
           BigDecimal price=quote.path("ltp").decimalValue();
           BigDecimal previous=quote.path("previous_close").isNumber()?quote.path("previous_close").decimalValue():null;
+          Instant observed=Instant.parse(quote.path("as_of").asText());
+          if(observed.isAfter(Instant.now()))throw new IllegalStateException("INVALID_QUOTE_TIME");
+          var stamp=java.sql.Timestamp.from(observed);
           updated+=jdbc.update("""
-            UPDATE personal_holdings SET last_price=?,previous_close=?,price_as_of=now(),updated_at=now()
+            UPDATE personal_holdings SET last_price=?,previous_close=?,price_as_of=?,updated_at=now()
             WHERE id=? AND user_id=? AND symbol=? AND asset_type='EQUITY'
-            """,price,previous,id,user,symbol);
+            AND (price_as_of IS NULL OR price_as_of<=?)
+            """,price,previous,stamp,id,user,symbol,stamp);
           if(includeHistory){
             try{
               LocalDate today=LocalDate.now(MarketCalendarService.IST);
@@ -85,7 +97,8 @@ public class PortfolioRefreshService {
                 FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
                 LEFT JOIN market_candles c ON c.instrument_id=i.id AND c.timeframe='1d'
                   AND c.is_complete AND c.quality_status IN ('VALIDATED_MANUAL','PROVIDER_VALIDATED')
-                JOIN upstox_instrument_map m ON m.exchange_code=e.code AND m.trading_symbol=i.symbol
+                JOIN upstox_instrument_map m ON m.exchange_code=e.code AND m.trading_symbol=i.symbol AND m.isin=i.isin
+                AND i.series='EQ' AND i.active AND i.listing_status='ACTIVE'
                 WHERE m.instrument_key=? GROUP BY i.id
                 """,key);
               long count=((Number)history.get("candle_count")).longValue();
@@ -93,6 +106,9 @@ public class PortfolioRefreshService {
               LocalDate latest=raw instanceof java.sql.Date d?d.toLocalDate():raw instanceof LocalDate d?d:null;
               if(count<21||latest==null||latest.isBefore(today.minusDays(5)))
                 historySynced+=upstox.dailyCandles(user,key,today.minusMonths(6),end);
+            }catch(FeedHttp.ProviderHttpException ex){
+              if(Set.of(401,403,429).contains(ex.status()))rejectedOwners.put(user,ex.reason());
+              skipped.add(issue(symbol,ex.reason()));
             }catch(Exception ex){skipped.add(issue(symbol,"HISTORY_SYNC_FAILED"));}
           }
         }else if(symbol.matches("[0-9]{1,18}")){
@@ -108,6 +124,9 @@ public class PortfolioRefreshService {
             AND (price_as_of IS NULL OR price_as_of::date<=?::date)
             """,nav.get(0).get("nav"),previous,nav.get(0).get("nav_date"),id,user,symbol,nav.get(0).get("nav_date"));
         }else skipped.add(issue(symbol,"SCHEME_CODE_REQUIRED"));
+      }catch(FeedHttp.ProviderHttpException ex){
+        if(Set.of(401,403,429).contains(ex.status()))rejectedOwners.put(user,ex.reason());
+        skipped.add(issue(symbol,ex.reason()));
       }catch(Exception ex){
         // Never expose arbitrary exception messages, URLs, or provider credentials.
         String reason="Upstox credential unavailable".equals(ex.getMessage())?

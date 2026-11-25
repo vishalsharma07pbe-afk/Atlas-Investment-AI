@@ -26,6 +26,23 @@ class PortfolioRefreshServiceTest {
     verifyNoInteractions(provider);
   }
 
+  @Test void rejectedAuthorizationDoesNotRetryEachHoldingInSamePass()throws Exception{
+    JdbcTemplate jdbc=mock(JdbcTemplate.class);
+    UpstoxFeedService provider=mock(UpstoxFeedService.class);
+    UUID owner=UUID.randomUUID();
+    when(jdbc.queryForList(contains("SELECT id,user_id,symbol,asset_type"),eq(owner)))
+      .thenReturn(List.of(Map.of("id",7L,"user_id",owner,"symbol","ONE","asset_type","EQUITY"),
+        Map.of("id",8L,"user_id",owner,"symbol","TWO","asset_type","EQUITY")));
+    when(jdbc.queryForList(contains("SELECT m.instrument_key"),eq(String.class),eq("ONE")))
+      .thenReturn(List.of("NSE_EQ|INE002A01018"));
+    when(provider.quote(owner,"NSE_EQ|INE002A01018")).thenThrow(new FeedHttp.ProviderHttpException(401));
+    var result=new PortfolioRefreshService(jdbc,provider).refreshUser(owner,false);
+    assertEquals(0,result.get("updated"));
+    assertTrue(result.get("skipped").toString().contains("UPSTOX_REAUTHORIZATION_REQUIRED"));
+    verify(provider,times(1)).quote(eq(owner),anyString());
+    verify(jdbc,never()).queryForList(contains("SELECT m.instrument_key"),eq(String.class),eq("TWO"));
+  }
+
   @Test void boundedBackgroundBatchUsesOwnerFromClaimedRow(){
     JdbcTemplate jdbc=mock(JdbcTemplate.class);
     UpstoxFeedService provider=mock(UpstoxFeedService.class);

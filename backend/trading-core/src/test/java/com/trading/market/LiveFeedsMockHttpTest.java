@@ -14,8 +14,10 @@ class LiveFeedsMockHttpTest {
   JdbcTemplate db=mock(JdbcTemplate.class);FeedHttp http=mock(FeedHttp.class);
   UpstoxFeedService svc=new UpstoxFeedService(db,http,mock(VersionedVaultReader.class));
   try{
-   when(http.get(contains("NSE.json.gz"),isNull(),anyInt())).thenReturn("[{\"instrument_key\":\"NSE_EQ|INE002A01018\",\"trading_symbol\":\"RELIANCE\",\"name\":\"Reliance Industries Limited\",\"isin\":\"INE002A01018\"}]".getBytes());
-   when(http.get(contains("BSE.json.gz"),isNull(),anyInt())).thenReturn("[{\"instrument_key\":\"BSE_EQ|500325\",\"trading_symbol\":\"RELIANCE\",\"name\":\"Reliance Industries Limited\",\"isin\":\"INE002A01018\"}]".getBytes());
+   when(db.update(anyString(),any(),any(),any(),any(),any())).thenReturn(1);
+   when(db.update(anyString(),any(),any(),any(),any(),any(),any())).thenReturn(1);
+   when(http.get(contains("NSE.json.gz"),isNull(),anyInt())).thenReturn("[{\"instrument_key\":\"NSE_EQ|INE002A01018\",\"exchange\":\"NSE\",\"instrument_type\":\"EQ\",\"trading_symbol\":\"RELIANCE\",\"name\":\"Reliance Industries Limited\",\"isin\":\"INE002A01018\"}]".getBytes());
+   when(http.get(contains("BSE.json.gz"),isNull(),anyInt())).thenReturn("[{\"instrument_key\":\"BSE_EQ|500325\",\"exchange\":\"BSE\",\"exchange_token\":\"500325\",\"instrument_type\":\"A\",\"trading_symbol\":\"RELIANCE\",\"name\":\"Reliance Industries Limited\",\"isin\":\"INE002A01018\"}]".getBytes());
    assertThat(svc.syncMaster()).isEqualTo(2);
    verify(db,times(2)).update(contains("upstox_instrument_map"),any(),any(),any(),any(),any(),any());
   }catch(Exception e){throw new AssertionError(e);}
@@ -24,11 +26,27 @@ class LiveFeedsMockHttpTest {
   JdbcTemplate db=mock(JdbcTemplate.class);FeedHttp http=mock(FeedHttp.class);VersionedVaultReader vault=mock(VersionedVaultReader.class);
   UUID user=UUID.randomUUID();when(vault.decrypt(user,"UPSTOX")).thenReturn("test-only-token");
   when(db.queryForObject(contains("upstox_instrument_map"),eq(Integer.class),any())).thenReturn(1);
-  when(http.text(contains("market-quote/quotes"),eq("test-only-token"),anyInt())).thenReturn("{\"status\":\"success\",\"data\":{\"NSE_EQ:RELIANCE\":{\"last_price\":2500.50,\"ohlc\":{\"close\":2475.00}}}}");
+  when(http.text(contains("market-quote/quotes"),eq("test-only-token"),anyInt())).thenReturn("{\"status\":\"success\",\"data\":{\"NSE_EQ:RELIANCE\":{\"last_price\":2500.50,\"instrument_token\":\"NSE_EQ|INE002A01018\",\"last_trade_time\":\"1760000000000\",\"timestamp\":\"2025-10-09T12:00:00Z\",\"prev_close_price\":2475.00}}}");
   JsonNode result=new UpstoxFeedService(db,http,vault).quote(user,"NSE_EQ|INE002A01018");
   assertThat(result.path("ltp").decimalValue()).isEqualByComparingTo(new BigDecimal("2500.50"));
   assertThat(result.path("previous_close").decimalValue()).isEqualByComparingTo(new BigDecimal("2475.00"));
+  assertThat(result.path("as_of").asText()).isEqualTo(Instant.ofEpochMilli(1760000000000L).toString());
+  assertThat(result.path("timestamp_basis").asText()).isEqualTo("LAST_TRADE_TIME");
   verify(db).update(contains("market_quotes"),any(),any(),any());
+ }
+ @Test void quoteRejectsWrongIdentityOrMissingTradeTime()throws Exception{
+  JdbcTemplate db=mock(JdbcTemplate.class);FeedHttp http=mock(FeedHttp.class);VersionedVaultReader vault=mock(VersionedVaultReader.class);
+  UUID user=UUID.randomUUID();when(vault.decrypt(user,"UPSTOX")).thenReturn("test-only");
+  when(db.queryForObject(contains("upstox_instrument_map"),eq(Integer.class),any())).thenReturn(1);
+  var service=new UpstoxFeedService(db,http,vault);
+  for(String item:List.of(
+     "{\"instrument_token\":\"NSE_EQ|INE000A01001\",\"last_price\":100}",
+     "{\"instrument_token\":\"NSE_EQ|INE002A01018\",\"last_price\":100}")){
+   when(http.text(contains("/v3/market-quote/quotes"),eq("test-only"),anyInt()))
+     .thenReturn("{\"status\":\"success\",\"data\":{\"quote\":"+item+"}}");
+   assertThatThrownBy(()->service.quote(user,"NSE_EQ|INE002A01018")).isInstanceOf(IllegalStateException.class);
+  }
+  verify(db,never()).update(contains("market_quotes"),any(),any(),any());
  }
  @Test void amfiParserAndHistoricalNavHttp()throws Exception{
   JdbcTemplate db=mock(JdbcTemplate.class);FeedHttp http=mock(FeedHttp.class);AmfiFeedService svc=new AmfiFeedService(db,http);

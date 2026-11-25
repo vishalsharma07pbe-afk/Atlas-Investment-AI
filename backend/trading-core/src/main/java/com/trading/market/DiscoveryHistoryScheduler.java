@@ -49,7 +49,8 @@ public class DiscoveryHistoryScheduler {
       FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
       JOIN LATERAL (
         SELECT instrument_key FROM upstox_instrument_map
-        WHERE exchange_code=e.code AND trading_symbol=i.symbol
+        WHERE exchange_code=e.code AND trading_symbol=i.symbol AND isin=i.isin
+          AND isin ~ '^IN[A-Z0-9]{10}$'
           AND instrument_key LIKE e.code||'_EQ|%'
           AND instrument_type IN ('EQ','EQUITY')
         ORDER BY instrument_key LIMIT 1

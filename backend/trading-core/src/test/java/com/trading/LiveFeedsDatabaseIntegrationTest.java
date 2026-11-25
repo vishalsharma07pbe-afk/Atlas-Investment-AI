@@ -47,22 +47,22 @@ class LiveFeedsDatabaseIntegrationTest {
   SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(id,null,List.of()));
  }
  private long seedStock(){
-  db.update("INSERT INTO instruments(exchange_id,symbol,series,source) VALUES ((SELECT id FROM exchanges WHERE code='NSE'),'FEEDTEST','EQ','MANUAL_CSV') ON CONFLICT DO NOTHING");
-  db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol) VALUES ('NSE_EQ|FEEDTEST','NSE','FEEDTEST') ON CONFLICT DO NOTHING");
+  db.update("INSERT INTO instruments(exchange_id,symbol,series,source,isin,instrument_type) VALUES ((SELECT id FROM exchanges WHERE code='NSE'),'FEEDTEST','EQ','MANUAL_CSV','INE000A01001','EQ') ON CONFLICT DO NOTHING");
+  db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,isin,instrument_type) VALUES ('NSE_EQ|INE000A01001','NSE','FEEDTEST','INE000A01001','EQ') ON CONFLICT DO NOTHING");
   return db.queryForObject("SELECT id FROM instruments WHERE symbol='FEEDTEST'",Long.class);
  }
  @Test void dailyAndIntradayUpsertsDeduplicateTimestamps()throws Exception{
   long instrument=seedStock();UUID owner=UUID.randomUUID();
   when(vault.decrypt(owner,"UPSTOX")).thenReturn("only-in-memory");
   when(http.text(contains("historical-candle"),eq("only-in-memory"),anyInt()))
-   .thenReturn("{\"data\":{\"candles\":[[\"2026-11-13T09:15:00+05:30\",100,105,99,102,200]]}}");
+   .thenReturn("{\"status\":\"success\",\"data\":{\"candles\":[[\"2026-11-13T09:15:00+05:30\",100,105,99,102,200]]}}");
   LocalDate day=LocalDate.of(2026,11,13);
-  for(int i=0;i<2;i++)stocks.dailyCandles(owner,"NSE_EQ|FEEDTEST",day,day);
+  for(int i=0;i<2;i++)stocks.dailyCandles(owner,"NSE_EQ|INE000A01001",day,day);
   LocalDate recent=LocalDate.now(MarketCalendarService.IST).minusDays(1);
   when(http.text(contains("historical-candle"),eq("only-in-memory"),anyInt()))
-   .thenReturn("{\"data\":{\"candles\":[[\""+recent+"T09:15:00+05:30\",100,105,99,102,200]]}}");
+   .thenReturn("{\"status\":\"success\",\"data\":{\"candles\":[[\""+recent+"T09:15:00+05:30\",100,105,99,102,200]]}}");
   for(String tf:List.of("1minute","15minute"))for(int i=0;i<2;i++)
-   stocks.intradayCandles(owner,"NSE_EQ|FEEDTEST",tf,recent,recent);
+   stocks.intradayCandles(owner,"NSE_EQ|INE000A01001",tf,recent,recent);
   assertThat(db.queryForObject("SELECT count(*) FROM market_candles WHERE instrument_id=?",Long.class,instrument)).isEqualTo(3);
   assertThat(db.queryForObject("SELECT count(DISTINCT timeframe) FROM market_candles WHERE instrument_id=?",Long.class,instrument)).isEqualTo(3);
   assertThat(db.queryForObject("SELECT count(*) FROM instrument_source_freshness WHERE instrument_id=?",Long.class,instrument)).isEqualTo(1);
@@ -71,27 +71,35 @@ class LiveFeedsDatabaseIntegrationTest {
   long instrument=seedStock();UUID owner=UUID.randomUUID();
   when(vault.decrypt(owner,"UPSTOX")).thenReturn("only-in-memory");
   when(http.text(contains("historical-candle"),eq("only-in-memory"),anyInt()))
-   .thenReturn("{\"data\":{\"candles\":[[\"2026-11-13T09:15:00+05:30\",100,90,99,102,-1]]}}");
+   .thenReturn("{\"status\":\"success\",\"data\":{\"candles\":[[\"2026-11-13T09:15:00+05:30\",100,90,99,102,-1]]}}");
   LocalDate day=LocalDate.of(2026,11,13);
   long before=db.queryForObject("SELECT count(*) FROM market_candles WHERE instrument_id=?",Long.class,instrument);
 
-  assertThatThrownBy(()->stocks.dailyCandles(owner,"NSE_EQ|FEEDTEST",day,day))
+  assertThatThrownBy(()->stocks.dailyCandles(owner,"NSE_EQ|INE000A01001",day,day))
    .isInstanceOf(IllegalStateException.class)
    .hasMessage("Provider returned no valid candles");
   assertThat(db.queryForObject("SELECT count(*) FROM market_candles WHERE instrument_id=?",Long.class,instrument)).isEqualTo(before);
   assertThat(db.queryForObject("SELECT count(*) FROM data_quality_events WHERE instrument_id=? AND event_type='PROVIDER_CANDLE_REJECTED'",Long.class,instrument)).isGreaterThanOrEqualTo(1);
-  Map<String,Object> run=db.queryForMap("SELECT status,records_seen,records_written,failure_count FROM ingestion_runs WHERE source_revision=? ORDER BY started_at DESC LIMIT 1","UPSTOX_API:NSE_EQ|FEEDTEST:1d:2026-11-13:2026-11-13");
+  Map<String,Object> run=db.queryForMap("SELECT status,records_seen,records_written,failure_count FROM ingestion_runs WHERE source_revision=? ORDER BY started_at DESC LIMIT 1","UPSTOX_API:NSE_EQ|INE000A01001:1d:2026-11-13:2026-11-13");
   assertThat(run).containsEntry("status","FAILED");
   assertThat(((Number)run.get("records_seen")).longValue()).isEqualTo(1);
   assertThat(((Number)run.get("records_written")).longValue()).isZero();
   assertThat(((Number)run.get("failure_count")).longValue()).isEqualTo(1);
  }
+ private void seedIdentity(String symbol,String isin){
+  db.update("INSERT INTO instruments(exchange_id,symbol,series,source,isin,instrument_type) VALUES ((SELECT id FROM exchanges WHERE code='NSE'),?,'EQ','UPSTOX',?,'EQ')",symbol,isin);
+  db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,isin,instrument_type) VALUES (?,'NSE',?,?,'EQ')","NSE_EQ|"+isin,symbol,isin);
+ }
+ private static String holdingRow(String symbol,String isin,int qty,int price){
+  return "{\"trading_symbol\":\""+symbol+"\",\"isin\":\""+isin+"\",\"exchange\":\"NSE\",\"instrument_token\":\"NSE_EQ|"+isin+"\",\"quantity\":"+qty+",\"average_price\":"+price+"}";
+ }
  @Test void postHoldingsSyncIsScopedToAuthenticatedOwner()throws Exception{
   UUID a=UUID.randomUUID(),b=UUID.randomUUID();
   db.update("INSERT INTO atlas_users(id,email,password_hash) VALUES (?,'feed-owner-a@example.test','test'),(?,'feed-owner-b@example.test','test') ON CONFLICT DO NOTHING",a,b);
+  seedIdentity("OWNERTEST","INE000A01005");
   when(vault.decrypt(a,"UPSTOX")).thenReturn("owner-a-secret");
   when(http.text(contains("long-term-holdings"),eq("owner-a-secret"),anyInt()))
-   .thenReturn("{\"data\":[{\"trading_symbol\":\"OWNERTEST\",\"quantity\":3,\"average_price\":120}]}");
+   .thenReturn("{\"status\":\"success\",\"data\":["+holdingRow("OWNERTEST","INE000A01005",3,120)+"]}");
   user(a);
   mvc.perform(post("/api/v1/portfolio/sync/upstox")).andExpect(status().isOk()).andExpect(jsonPath("$.synced").value(1));
   assertThat(db.queryForObject("SELECT count(*) FROM personal_holdings WHERE user_id=? AND symbol='OWNERTEST'",Long.class,a)).isEqualTo(1);
@@ -103,14 +111,43 @@ class LiveFeedsDatabaseIntegrationTest {
   UUID owner=UUID.randomUUID();
   db.update("INSERT INTO atlas_users(id,email,password_hash) VALUES (?,'reconcile-owner@example.test','test')",owner);
   db.update("INSERT INTO personal_holdings(user_id,symbol,asset_type,quantity,average_cost,notes) VALUES (?,'KEEP','EQUITY',1,10,'UPSTOX_SYNC'),(?,'STALE','EQUITY',2,20,'UPSTOX_SYNC'),(?,'MANUAL','EQUITY',3,30,'user note')",owner,owner,owner);
+  seedIdentity("KEEP","INE000A01006");
   when(vault.decrypt(owner,"UPSTOX")).thenReturn("owner-secret");
   when(http.text(contains("long-term-holdings"),eq("owner-secret"),anyInt()))
-   .thenReturn("{\"data\":[{\"trading_symbol\":\"KEEP\",\"quantity\":5,\"average_price\":11}]}");
+   .thenReturn("{\"status\":\"success\",\"data\":["+holdingRow("KEEP","INE000A01006",5,11)+"]}");
 
   assertThat(stocks.syncHoldings(owner)).isEqualTo(1);
   assertThat(db.queryForObject("SELECT quantity FROM personal_holdings WHERE user_id=? AND symbol='KEEP'",BigDecimal.class,owner)).isEqualByComparingTo("5");
   assertThat(db.queryForObject("SELECT count(*) FROM personal_holdings WHERE user_id=? AND symbol='STALE'",Long.class,owner)).isZero();
   assertThat(db.queryForObject("SELECT count(*) FROM personal_holdings WHERE user_id=? AND symbol='MANUAL'",Long.class,owner)).isEqualTo(1);
+ }
+ @Test void malformedHoldingsAndManualConflictsPreserveEntirePortfolio()throws Exception{
+  UUID owner=UUID.randomUUID();
+  db.update("INSERT INTO atlas_users(id,email,password_hash) VALUES (?,'safe-sync-owner@example.test','test')",owner);
+  seedIdentity("SAFEKEEP","INE000A01007");seedIdentity("SAFEMANUAL","INE000A01008");
+  db.update("INSERT INTO personal_holdings(user_id,symbol,asset_type,quantity,average_cost,notes) VALUES (?,'SAFEKEEP','EQUITY',1,10,'UPSTOX_SYNC'),(?,'SAFESTALE','EQUITY',2,20,'UPSTOX_SYNC'),(?,'SAFEMANUAL','EQUITY',3,30,'user note')",owner,owner,owner);
+  when(vault.decrypt(owner,"UPSTOX")).thenReturn("safe-test-token");
+  String valid=holdingRow("SAFEKEEP","INE000A01007",5,11);
+  for(String payload:List.of("{\"status\":\"error\",\"data\":[]}",
+    "{\"status\":\"success\",\"data\":["+valid+",{\"trading_symbol\":\"INVALID\"}]}",
+    "{\"status\":\"success\",\"data\":["+valid+","+valid+"]}",
+    "{\"status\":\"success\",\"data\":["+valid+","+holdingRow("SAFEMANUAL","INE000A01008",5,11)+"]}")){
+   when(http.text(contains("long-term-holdings"),eq("safe-test-token"),anyInt())).thenReturn(payload);
+   assertThatThrownBy(()->stocks.syncHoldings(owner)).isInstanceOf(IllegalStateException.class);
+   assertThat(db.queryForObject("SELECT quantity FROM personal_holdings WHERE user_id=? AND symbol='SAFEKEEP'",BigDecimal.class,owner)).isEqualByComparingTo("1");
+   assertThat(db.queryForObject("SELECT count(*) FROM personal_holdings WHERE user_id=?",Long.class,owner)).isEqualTo(3L);
+  }
+  when(http.text(contains("long-term-holdings"),eq("safe-test-token"),anyInt())).thenReturn("{\"status\":\"success\",\"data\":[]}");
+  assertThat(stocks.syncHoldings(owner)).isZero();
+  assertThat(db.queryForList("SELECT symbol FROM personal_holdings WHERE user_id=?",String.class,owner)).containsExactly("SAFEMANUAL");
+ }
+ @Test void exactHistoryMappingRejectsWrongIsinBeforeProviderRequest()throws Exception{
+  seedIdentity("WRONGIDENTITY","INE000A01009");
+  db.update("UPDATE upstox_instrument_map SET isin='INE000A01010' WHERE instrument_key='NSE_EQ|INE000A01009'");
+  UUID owner=UUID.randomUUID();when(vault.decrypt(owner,"UPSTOX")).thenReturn("identity-test-token");
+  LocalDate day=LocalDate.now(MarketCalendarService.IST).minusDays(1);
+  assertThatThrownBy(()->stocks.dailyCandles(owner,"NSE_EQ|INE000A01009",day,day)).isInstanceOf(IllegalArgumentException.class);
+  verifyNoInteractions(http);
  }
  @Test void historicalNavCalculatesCagrRollingAndDrawdown()throws Exception{
   long code=987654321L;
@@ -135,12 +172,12 @@ class LiveFeedsDatabaseIntegrationTest {
  }
 
  @Test void discoveryBackfillsMappedEquityWithoutBorrowingOwnerToken()throws Exception{
-  db.update("INSERT INTO instruments(exchange_id,symbol,series,source) VALUES ((SELECT id FROM exchanges WHERE code='BSE'),'DISCOVERYTEST','EQ','UPSTOX')");
-  db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,instrument_type) VALUES ('BSE_EQ|DISCOVERYTEST','BSE','DISCOVERYTEST','EQ')");
+  db.update("INSERT INTO instruments(exchange_id,symbol,series,source,isin,instrument_type) VALUES ((SELECT id FROM exchanges WHERE code='BSE'),'DISCOVERYTEST','EQ','UPSTOX','INE000A01002','EQ')");
+  db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,instrument_type,isin) VALUES ('BSE_EQ|INE000A01002','BSE','DISCOVERYTEST','EQ','INE000A01002')");
   long instrument=db.queryForObject("SELECT id FROM instruments WHERE symbol='DISCOVERYTEST'",Long.class);
   LocalDate day=LocalDate.now(MarketCalendarService.IST).minusDays(1);
-  when(http.text(contains("BSE_EQ%7CDISCOVERYTEST"),eq("discovery-test-token"),anyInt()))
-    .thenReturn("{\"data\":{\"candles\":[[\""+day+"T09:15:00+05:30\",100,105,99,102,200]]}}");
+  when(http.text(contains("BSE_EQ%7CINE000A01002"),eq("discovery-test-token"),anyInt()))
+    .thenReturn("{\"status\":\"success\",\"data\":{\"candles\":[[\""+day+"T09:15:00+05:30\",100,105,99,102,200]]}}");
   org.springframework.test.util.ReflectionTestUtils.setField(discovery,"accessToken","discovery-test-token");
   try{
     org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"refreshExchange","BSE",day);
@@ -148,23 +185,23 @@ class LiveFeedsDatabaseIntegrationTest {
     assertThat(db.queryForMap("SELECT status,rows_written FROM discovery_history_attempts WHERE instrument_id=?",instrument))
       .containsEntry("status","SUCCESS").containsEntry("rows_written",1);
     org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"refreshExchange","BSE",day);
-    verify(http,times(1)).text(contains("BSE_EQ%7CDISCOVERYTEST"),eq("discovery-test-token"),anyInt());
+    verify(http,times(1)).text(contains("BSE_EQ%7CINE000A01002"),eq("discovery-test-token"),anyInt());
     verifyNoInteractions(vault);
   }finally{org.springframework.test.util.ReflectionTestUtils.setField(discovery,"accessToken","");}
  }
 
  @Test void providerHistoryDoesNotOverwriteAdjustedManualCandle()throws Exception{
-  db.update("INSERT INTO instruments(exchange_id,symbol,series,source) VALUES ((SELECT id FROM exchanges WHERE code='NSE'),'ADJUSTEDTEST','EQ','MANUAL_CSV')");
-  db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,instrument_type) VALUES ('NSE_EQ|ADJUSTEDTEST','NSE','ADJUSTEDTEST','EQ')");
+  db.update("INSERT INTO instruments(exchange_id,symbol,series,source,isin,instrument_type) VALUES ((SELECT id FROM exchanges WHERE code='NSE'),'ADJUSTEDTEST','EQ','MANUAL_CSV','INE000A01003','EQ')");
+  db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,instrument_type,isin) VALUES ('NSE_EQ|INE000A01003','NSE','ADJUSTEDTEST','EQ','INE000A01003')");
   long instrument=db.queryForObject("SELECT id FROM instruments WHERE symbol='ADJUSTEDTEST'",Long.class);
   LocalDate day=LocalDate.now(MarketCalendarService.IST).minusDays(1);
   var stamp=java.sql.Timestamp.from(day.atTime(9,15).atZone(MarketCalendarService.IST).toInstant());
   db.update("INSERT INTO market_candles(instrument_id,timeframe,candle_time,source_id,open,high,low,close,volume,is_complete,quality_status,adjustment_status) VALUES (?,'1d',?,(SELECT id FROM data_sources WHERE source_code='MANUAL_CSV'),100,110,95,105,200,true,'VALIDATED_MANUAL','ADJUSTED')",instrument,stamp);
   UUID owner=UUID.randomUUID();
   when(vault.decrypt(owner,"UPSTOX")).thenReturn("owner-test-token");
-  when(http.text(contains("NSE_EQ%7CADJUSTEDTEST"),eq("owner-test-token"),anyInt()))
-    .thenReturn("{\"data\":{\"candles\":[[\""+day+"T09:15:00+05:30\",200,210,190,205,300]]}}");
-  assertThatThrownBy(()->stocks.dailyCandles(owner,"NSE_EQ|ADJUSTEDTEST",day,day)).isInstanceOf(IllegalStateException.class);
+  when(http.text(contains("NSE_EQ%7CINE000A01003"),eq("owner-test-token"),anyInt()))
+    .thenReturn("{\"status\":\"success\",\"data\":{\"candles\":[[\""+day+"T09:15:00+05:30\",200,210,190,205,300]]}}");
+  assertThatThrownBy(()->stocks.dailyCandles(owner,"NSE_EQ|INE000A01003",day,day)).isInstanceOf(IllegalStateException.class);
   assertThat(db.queryForMap("SELECT close,adjustment_status FROM market_candles WHERE instrument_id=?",instrument))
     .containsEntry("adjustment_status","ADJUSTED");
   assertThat(db.queryForObject("SELECT close FROM market_candles WHERE instrument_id=?",BigDecimal.class,instrument)).isEqualByComparingTo("105");
@@ -207,9 +244,9 @@ class LiveFeedsDatabaseIntegrationTest {
  }
 
  @Test void currentSessionIngestionExcludesFormingBars()throws Exception{
-  String symbol="INTRADAYTEST",key="NSE_EQ|INTRADAYTEST";
-  db.update("INSERT INTO instruments(exchange_id,symbol,series,source) VALUES ((SELECT id FROM exchanges WHERE code='NSE'),?,'EQ','TEST')",symbol);
-  db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol) VALUES (?,'NSE',?)",key,symbol);
+  String symbol="INTRADAYTEST",key="NSE_EQ|INE000A01004";
+  db.update("INSERT INTO instruments(exchange_id,symbol,series,source,isin,instrument_type) VALUES ((SELECT id FROM exchanges WHERE code='NSE'),?,'EQ','TEST','INE000A01004','EQ')",symbol);
+  db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,isin,instrument_type) VALUES (?,'NSE',?,'INE000A01004','EQ')",key,symbol);
   LocalDate day=LocalDate.now(MarketCalendarService.IST);
   Instant cutoff=day.atTime(9,50).atZone(MarketCalendarService.IST).toInstant();
   String payload="{\"status\":\"success\",\"data\":{\"candles\":["
