@@ -454,4 +454,32 @@ class AuthIsolationIntegrationTest {
       .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2));
   }
 
+  @Test void portfolioLevelRiskAlertsAreWeeklyDeduplicatedAndOwnerScoped()throws Exception{
+    String email="level-risk-"+UUID.randomUUID()+"@example.test";
+    String a=create(email),b=create("level-risk-other-"+UUID.randomUUID()+"@example.test");
+    UUID owner=jdbc.queryForObject("SELECT id FROM atlas_users WHERE email=?",UUID.class,email);
+    mvc.perform(post("/api/v1/portfolio/holdings").header("Authorization",a)
+      .contentType(MediaType.APPLICATION_JSON).content("{\"symbol\":\"LEVELTEST\",\"assetType\":\"EQUITY\",\"quantity\":2,\"averageCost\":100}"))
+      .andExpect(status().isOk());
+    mvc.perform(get("/api/v1/portfolio/review").header("Authorization",a)).andExpect(status().isOk());
+    String day=LocalDate.now(com.trading.market.MarketCalendarService.IST).toString();
+    var benchmark=Map.of("kind","BENCHMARK_RELATIVE_LAG","label","13-week lag","value",-6,"threshold",-5,"unit","PP","evidenceThrough",day);
+    var concentration=Map.of("kind","TOP_THREE","label","Top three","value",80,"threshold",60,"unit","PERCENT","evidenceThrough",day);
+    var risk=Map.of("benchmark_status","COMPARABLE_PRICE_REFERENCE","concentration_status","RECENT_RECORDED_EXPOSURES",
+      "attention",java.util.List.of(benchmark,concentration));
+    String payload=mapper.writeValueAsString(risk);
+    jdbc.update("UPDATE portfolio_review_snapshots SET generated_at=now()-interval '6 minutes',result=jsonb_set(result,'{portfolio_level_risk}',?::jsonb) WHERE user_id=?",payload,owner);
+    riskNotifications.evaluate();
+    mvc.perform(get("/api/v1/research-workspace/notifications").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+    jdbc.update("UPDATE portfolio_review_snapshots SET generated_at=now() WHERE user_id=?",owner);
+    riskNotifications.evaluate();riskNotifications.evaluate();
+    mvc.perform(get("/api/v1/research-workspace/notifications").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2));
+    org.junit.jupiter.api.Assertions.assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM user_notification_history WHERE user_id=? AND title='Benchmark underperformance review'",Integer.class,owner));
+    org.junit.jupiter.api.Assertions.assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM user_notification_history WHERE user_id=? AND title='Portfolio concentration review'",Integer.class,owner));
+    mvc.perform(get("/api/v1/research-workspace/notifications").header("Authorization",b))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+  }
+
 }
