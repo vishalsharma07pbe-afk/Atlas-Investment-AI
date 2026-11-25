@@ -48,3 +48,13 @@ it("shows portfolio composition separately from qualifying recommendations",asyn
  expect(screen.getByText("20.00% · 1 companies")).toBeTruthy();
  expect(screen.getAllByText("No fund currently qualifies")).toHaveLength(2);
 });
+
+it("labels overlap as a lower bound rather than total portfolio overlap",async()=>{
+ const result={...response,portfolio_overlap:{status:"REPORTED_LOWER_BOUND",notice:"Zero does not prove no overlap.",pairs:[{scheme_a:"118955",name_a:"Alpha Fund",scheme_b:"118956",name_b:"Beta Fund",portfolio_date:"2026-10-31",common_equity_count:10,common_weight_lower_bound_percent:35,exact_weight_a_percent:82,exact_weight_b_percent:90}]}};
+ vi.stubGlobal("fetch",vi.fn(async(url:string)=>({ok:true,json:async()=>url.includes("historical-watch")?{category:"LARGE_CAP",items:[],universe_count:120,sample_count:20,eligible_count:0,automatic_collection_enabled:true,notice:"Historical only"}:result})));
+ render(<MutualFundResearchDashboard onExplore={()=>{}}/>);
+ fireEvent.click(await screen.findByText("Common equity exposure (1 comparable pairs)"));
+ expect(screen.getByText(/At least 35.00% shared reported exposure/)).toBeTruthy();
+ expect(screen.getByText("Zero does not prove no overlap.")).toBeTruthy();
+ expect(screen.getAllByText("No fund currently qualifies")).toHaveLength(2);
+});

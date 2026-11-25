@@ -177,3 +177,58 @@ def matched(disclosures,instant=None):
     except (OSError,sqlite3.Error,ValueError,TypeError,KeyError,AttributeError):
         return []
     return result
+
+
+def overlap(disclosures,instant=None):
+    """Compare full exact listed-equity weights on a shared disclosure date.
+    Sum of per-ISIN minimum weights is a lower bound on reported common exposure,
+    not normalized equity-only overlap or complete portfolio overlap.
+    """
+    if not permitted() or not disclosures:
+        return {"status":"NOT_AVAILABLE_OR_NOT_AUTHORIZED","pairs":[]}
+    instant=instant or datetime.now(timezone.utc)
+    today=instant.astimezone(IST).date()
+    portfolios={}
+    try:
+        with nav_catalog._LOCK,closing(nav_catalog._connect()) as db:
+            for item in disclosures[:5]:
+                fund=item.get("fund_id")
+                if not fund or fund in portfolios:
+                    continue
+                found=db.execute("SELECT payload,collected_at FROM fund_portfolio_snapshot WHERE fund_id=?",(fund,)).fetchone()
+                if not found or not fund_disclosures._day(found["collected_at"],today,2):
+                    continue
+                report=json.loads(found["payload"])
+                if report.get("fund_id")!=fund or not fund_disclosures._day(report["portfolio_date"],today,60):
+                    continue
+                weights={}
+                for equity in report["equities"]:
+                    key=equity["isin"]
+                    value=Decimal(str(equity["weight_percent"]))
+                    if not ISIN.fullmatch(key) or key in weights or not value.is_finite() or not 0<value<=100:
+                        raise ValueError("INVALID_EQUITY_WEIGHT")
+                    weights[key]=value
+                coverage=sum(weights.values(),Decimal(0))
+                if not Decimal("80")<=coverage<=Decimal("100.5"):
+                    continue
+                portfolios[fund]=(item,report["portfolio_date"],weights,coverage)
+        pairs=[]
+        values=list(portfolios.values())
+        for i,(a,day,aw,ac) in enumerate(values):
+            for b,bday,bw,bc in values[i+1:]:
+                if day!=bday:
+                    continue
+                common=sorted(aw.keys()&bw.keys(),key=lambda k:(-min(aw[k],bw[k]),k))
+                total=sum((min(aw[k],bw[k]) for k in common),Decimal(0))
+                pairs.append({"scheme_a":a["scheme_code"],"name_a":a["scheme_name"],
+                              "scheme_b":b["scheme_code"],"name_b":b["scheme_name"],
+                              "portfolio_date":day,"common_equity_count":len(common),
+                              "common_weight_lower_bound_percent":float(round(total,4)),
+                              "exact_weight_a_percent":float(round(ac,4)),
+                              "exact_weight_b_percent":float(round(bc,4)),
+                              "largest_shared_equities":[{"isin":k,"weight_a_percent":float(aw[k]),
+                                  "weight_b_percent":float(bw[k])} for k in common[:5]]})
+        return {"status":"REPORTED_LOWER_BOUND" if pairs else "INSUFFICIENT_COMPARABLE_PORTFOLIOS",
+                "pairs":pairs,"notice":"Same-date distinct funds with at least 80% exact listed equity coverage. Sum of minimum common weights in original fund NAV percentages; excludes unmapped, foreign, cash, debt and other exposures. Zero does not prove no overlap."}
+    except (OSError,sqlite3.Error,ValueError,TypeError,KeyError,AttributeError,InvalidOperation):
+        return {"status":"INSUFFICIENT_COMPARABLE_PORTFOLIOS","pairs":[]}

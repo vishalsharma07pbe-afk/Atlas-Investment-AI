@@ -123,10 +123,16 @@ public class FundHistoryResearchService {
     // them a cross-index risk-adjusted rank or category peer percentile.
     boolean comparable=!"INDEX".equals(category);
     if(comparable&&observations.size()>=5){
+      // The cohort median is descriptive, not an investable benchmark.
+      double[] cohort=observations.stream().mapToDouble(r->((Number)r.get("cagr_3y_percent")).doubleValue()).sorted().toArray();
+      double median=cohort.length%2==0?(cohort[cohort.length/2-1]+cohort[cohort.length/2])/2:cohort[cohort.length/2];
       for(var row:observations){
         double value=((Number)row.get("cagr_3y_percent")).doubleValue();
         long below=observations.stream().filter(r->((Number)r.get("cagr_3y_percent")).doubleValue()<value).count();
         long equal=observations.stream().filter(r->((Number)r.get("cagr_3y_percent")).doubleValue()==value).count();
+        row.put("sample_median_cagr_3y_percent",round(median));
+        row.put("sample_cagr_3y_difference_pp",round(value-median));
+        row.put("sample_peer_count",cohort.length);
         row.put("sample_peer_percentile",round(100.0*(below+(equal-1)/2.0)/(observations.size()-1)));
       }
     }
@@ -211,6 +217,24 @@ public class FundHistoryResearchService {
     double annual=((Number)result.get("cagr_3y_percent")).doubleValue();
     // No infinite ratio, and no ratio for effectively flat/no-drawdown histories.
     result.put("return_to_drawdown",annual>0&&drawdown<=-0.01?round(annual/(-100*drawdown)):null);
+    // Observed underwater period, not an interpolated daily path.
+    double previousPeak=0;
+    LocalDate peakDate=null,drawdownStart=null;
+    long longest=0;
+    for(var row:rows){
+      LocalDate day=date(row.get("nav_date"));
+      if(day.isBefore(target3))continue;
+      double value=((BigDecimal)row.get("nav")).doubleValue();
+      if(value>=previousPeak){
+        if(drawdownStart!=null)longest=Math.max(longest,ChronoUnit.DAYS.between(drawdownStart,day));
+        previousPeak=value;peakDate=day;drawdownStart=null;
+      }else{
+        if(drawdownStart==null)drawdownStart=peakDate;
+        longest=Math.max(longest,ChronoUnit.DAYS.between(drawdownStart,day));
+      }
+    }
+    result.put("longest_observed_underwater_days",longest);
+    result.put("current_observed_underwater_days",drawdownStart==null?0L:ChronoUnit.DAYS.between(drawdownStart,end));
     result.put("sources",rows.stream().map(r->String.valueOf(r.get("source_code"))).distinct().sorted().toList());
     return result;
   }
@@ -231,22 +255,37 @@ public class FundHistoryResearchService {
       if(point==null||point.getKey().isBefore(target.minusDays(3))||prior!=null&&!point.getKey().isAfter(prior))return Map.of();
       anchors.add(point.getValue());prior=point.getKey();
     }
-    double sum=0,sumSq=0,worst=Double.POSITIVE_INFINITY;int positive=0,rolling=0;
+    double sum=0,sumSq=0,downsideSq=0,worst=Double.POSITIVE_INFINITY;int positive=0,rolling=0,negativeWeeks=0;
+    List<Double> rollingReturns=new ArrayList<>();
     for(int i=1;i<anchors.size();i++){
       double r=anchors.get(i)/anchors.get(i-1)-1;sum+=r;sumSq+=r*r;
+      if(r<0){downsideSq+=r*r;negativeWeeks++;}
       if(i>=52){
         double annual=100*(Math.pow(anchors.get(i)/anchors.get(i-52),365.2425/364)-1);
         if(!Double.isFinite(annual))return Map.of();
-        worst=Math.min(worst,annual);if(annual>0)positive++;rolling++;
+        worst=Math.min(worst,annual);if(annual>0)positive++;rolling++;rollingReturns.add(annual);
       }
     }
     int n=anchors.size()-1;double variance=Math.max(0,(sumSq-sum*sum/n)/(n-1));
     double volatility=100*Math.sqrt(variance*52);
     if(!Double.isFinite(volatility))return Map.of();
-    return Map.of("weekly_volatility_percent",round(volatility),
-      "worst_rolling_52w_annualized_percent",round(worst),
-      "positive_rolling_52w_percent",round(100.0*positive/rolling),
-      "rolling_windows",rolling,"weekly_intervals",n);
+    rollingReturns.sort(Double::compare);
+    double downside=100*Math.sqrt(52*downsideSq/n);
+    double median=rollingReturns.size()%2==0
+        ? (rollingReturns.get(rolling/2-1)+rollingReturns.get(rolling/2))/2
+        : rollingReturns.get(rolling/2);
+    if(!Double.isFinite(downside)||!Double.isFinite(median))return Map.of();
+    Map<String,Object> result=new LinkedHashMap<>();
+    result.put("weekly_volatility_percent",round(volatility));
+    result.put("worst_rolling_52w_annualized_percent",round(worst));
+    result.put("median_rolling_52w_annualized_percent",round(median));
+    result.put("best_rolling_52w_annualized_percent",round(rollingReturns.getLast()));
+    result.put("positive_rolling_52w_percent",round(100.0*positive/rolling));
+    result.put("weekly_downside_deviation_percent",round(downside));
+    result.put("negative_week_percent",round(100.0*negativeWeeks/n));
+    result.put("rolling_windows",rolling);
+    result.put("weekly_intervals",n);
+    return result;
   }
   private static LocalDate date(Object d){return d instanceof java.sql.Date x?x.toLocalDate():d instanceof LocalDate x?x:null;}
   private static double round(double n){return Math.round(n*10000d)/10000d;}

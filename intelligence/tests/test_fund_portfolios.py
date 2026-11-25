@@ -61,6 +61,34 @@ class FundPortfoliosTests(unittest.TestCase):
             self.assertEqual(item["cached_company_count"],1)
             self.assertEqual(portfolios.matched([{**identity,"fund_id":"fund:456"}],INSTANT),[])
 
+    def test_overlap_uses_full_same_date_weights_and_distinct_funds(self):
+        a=row(pct_of_fund="80")
+        b=row(fund_code="SECOND",amfi_ssd_fund_id="fund:456",pct_of_fund="60")
+        other=row(fund_code="SECOND",amfi_ssd_fund_id="fund:456",isin="INE009A01021",
+                  isin_as_filed="INE009A01021",pct_of_fund="30")
+        cash_a={**CASH,"pct_of_fund":"20"}
+        cash_b={**CASH,"fund_code":"SECOND","amfi_ssd_fund_id":"fund:456","pct_of_fund":"10"}
+        portfolios.store(payload(a,cash_a,b,other,cash_b),TODAY,INSTANT.isoformat())
+        identities=[{"fund_id":"fund:123","scheme_code":"123456","scheme_name":"A"},
+                    {"fund_id":"fund:456","scheme_code":"123457","scheme_name":"B"},
+                    {"fund_id":"fund:123","scheme_code":"123458","scheme_name":"A other plan"}]
+        report=portfolios.overlap(identities,INSTANT)
+        self.assertEqual(report["status"],"REPORTED_LOWER_BOUND")
+        self.assertEqual(len(report["pairs"]),1)
+        pair=report["pairs"][0]
+        self.assertEqual(pair["common_weight_lower_bound_percent"],60)
+        self.assertEqual(pair["exact_weight_a_percent"],80)
+        self.assertEqual(pair["exact_weight_b_percent"],90)
+        self.assertEqual(pair["common_equity_count"],1)
+        portfolios.store(payload(a,cash_a,{**b,"month_end":"2026-09-30"},
+                                 {**other,"month_end":"2026-09-30"},
+                                 {**cash_b,"month_end":"2026-09-30"}),TODAY,INSTANT.isoformat())
+        self.assertEqual(portfolios.overlap(identities,INSTANT)["pairs"],[])
+        portfolios.store(payload(a,cash_a,{**b,"pct_of_fund":"40"},
+                                 {**other,"pct_of_fund":"30"},
+                                 {**cash_b,"pct_of_fund":"30"}),TODAY,INSTANT.isoformat())
+        self.assertEqual(portfolios.overlap(identities,INSTANT)["pairs"],[])
+
     def test_authorization_gate(self):
         with patch.dict("os.environ",{"MARKET_DATA_USAGE_RIGHTS_CONFIRMED":"false"}),patch.object(portfolios.httpx,"Client") as client:
             self.assertEqual(autonomous_research._execute_job("FUND_PORTFOLIOS"),"DISABLED_OR_NOT_AUTHORIZED")
