@@ -5,6 +5,7 @@ from math import isfinite
 from .technical import Candle, compute
 from .horizon_research import evaluate, summarize, MIN_HISTORY as HORIZON_MIN_HISTORY
 from .price_structure import analyze as price_structure
+from .corporate_action_normalization import preview as action_preview
 
 MIN_HISTORY = 21
 MAX_INSTRUMENTS = 20
@@ -15,6 +16,9 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
     today = as_of or date.today()
     rows = []
     horizon_evaluations = []
+    action_previews=[]
+    action_preview_count=0
+    action_preview_withheld=0
     history_coverage = {h:0 for h in HORIZON_MIN_HISTORY}
     skipped = {"NO_HISTORY": 0, "STALE": 0, "INVALID": 0, "MIXED_ADJUSTMENT": 0}
     if batch_loaded:
@@ -59,6 +63,13 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                 if (event is not None and candles[-1].adjustment_status=="RAW_UNADJUSTED"
                     and date.fromisoformat(candles[0].date)<date.fromisoformat(event)<=last_day):
                     skipped["RAW_CORPORATE_ACTION"] += 1
+                    normalized=action_preview(candles,instrument)
+                    if normalized["status"]=="KNOWN_ACTIONS_NORMALIZED_PRICE_ONLY":
+                        action_preview_count+=1
+                        if len(action_previews)<5:
+                            action_previews.append({"symbol":instrument["symbol"],"exchange":instrument["exchange"],**normalized})
+                    else:
+                        action_preview_withheld+=1
                     continue
             ind = compute(candles)
             close = candles[-1].close
@@ -105,6 +116,10 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
         )[:5],
         "notice": f"Bounded daily sample of up to {limit} registry instruments; not a full-market top-five ranking, live feed, intraday signal or recommendation.",
     }
+    if batch_loaded:
+        result["corporate_action_review"]={"normalized_preview_count":action_preview_count,
+            "withheld_count":action_preview_withheld,"previews":action_previews,
+            "notice":"Recorded split/bonus normalization diagnostics only. These histories remain excluded from rankings and backtesting."}
     if include_horizons:
         result["horizons"] = summarize(horizon_evaluations)
         result["history_coverage"] = {h:{"minimum_observations":minimum,"eligible_histories":history_coverage[h]}
