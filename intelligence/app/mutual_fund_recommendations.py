@@ -184,6 +184,7 @@ def rank_candidates(candidates:list[FundEvidence],category:str,horizon_months:in
         if fund.category!=category:continue
         top_missing=_missing_top(fund);growth_missing=_missing_growth(fund)
         if counts[fund.identifier]>1:
+            if any(row["identifier"]==fund.identifier for row in excluded):continue
             top_missing.append("DUPLICATE_SCHEME_IDENTITY");growth_missing.append("DUPLICATE_SCHEME_IDENTITY")
         if fit["status"]=="POOR_FIT":
             top_missing.append("SELECTED_HORIZON_OR_RISK_REVIEW_REQUIRED");growth_missing.append("SELECTED_HORIZON_OR_RISK_REVIEW_REQUIRED")
@@ -205,7 +206,7 @@ def rank_candidates(candidates:list[FundEvidence],category:str,horizon_months:in
     top.sort(key=lambda x:(-x["score"],x["fund"]["identifier"]));growth.sort(key=lambda x:(-x["score"],x["fund"]["identifier"]))
     for rows in (top,growth):
         for i,row in enumerate(rows[:5],1):row["rank"]=i
-    return {"top_performers":top[:5],"growth_outlook":growth[:5],"excluded":excluded,"suitability":fit}
+    return {"top_performers":top[:5],"growth_outlook":growth[:5],"top_eligible_count":len(top),"growth_eligible_count":len(growth),"excluded":excluded,"suitability":fit}
 
 def _catalog_candidates(category:str):
     with nav_catalog._LOCK,nav_catalog._connect() as db:
@@ -329,13 +330,13 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
           "sample_count":historical.get("sample_count"),"weekly_risk_eligible_count":historical.get("weekly_risk_eligible_count"),
           "items":historical["items"][:5]},
       "suitability":ranked["suitability"],"blockers":blockers,
-      "qualification_summary":{"evaluated_count":len(official),"top_eligible_count":len(ranked["top_performers"]),
-          "growth_eligible_count":len(ranked["growth_outlook"]),"excluded":ranked["excluded"]},
+      "qualification_summary":{"evaluated_count":len(official),"top_eligible_count":ranked["top_eligible_count"],
+          "growth_eligible_count":ranked["growth_eligible_count"],"excluded":ranked["excluded"]},
       "market_overview":[{"segment":x,"status":"UNAVAILABLE","benchmark":None,"period":None,
                           "last_available_date":None,"evidence":[],"blocker":"BENCHMARK_TRI_NOT_CONNECTED"}
                          for x in ("LARGE_CAP","MID_CAP","SMALL_CAP")],
       "recommendation_status":"QUALIFIED_RESEARCH_AVAILABLE" if ranked["top_performers"] or ranked["growth_outlook"] else "NO_QUALIFYING_FUNDS_INCOMPLETE_EVIDENCE",
-      "notice":"Zero picks is intentional: discovery records are not recommendations. Top Performer and Growth Outlook use independent evidence gates."}
+      "notice":"Discovery records are not recommendations. Top Performer and Growth Outlook use independent evidence gates; zero picks is allowed."}
     # The observation timestamp is metadata, not research evidence. Excluding it
     # keeps identical results idempotent and gives alerts a stable dedupe key.
     stable_payload={key:value for key,value in payload.items() if key!="generated_at"}
