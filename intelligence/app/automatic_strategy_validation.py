@@ -6,6 +6,8 @@ import json
 from .market_client import backend_json
 from .strategy_validation import replay, WINDOWS
 from .horizon_research import VERSION
+from .replay_evidence import VERSION as EVIDENCE_VERSION, exact_isin, fingerprint
+CACHE_VERSION = VERSION + ':' + EVIDENCE_VERSION
 
 IST=ZoneInfo("Asia/Kolkata")
 def _table(db):
@@ -27,7 +29,7 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
             registry={r["id"]:r for r in instruments if type(r.get("id")) is int and r["id"]>0
                 and r.get("active") is True and r.get("listing_status")=="ACTIVE"
                 and r.get("series")=="EQ" and r.get("exchange")==exchange
-                and r.get("instrument_type") in ("EQUITY","EQ","STOCK")}
+                and r.get("instrument_type") in ("EQUITY","EQ","STOCK") and exact_isin(r.get("isin"))}
         except Exception:
             continue
         if not registry:
@@ -37,7 +39,7 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
             _table(db)
             db.execute("BEGIN IMMEDIATE")
             existing={r["instrument_id"]:r for r in db.execute("SELECT * FROM strategy_validation WHERE exchange=?",(exchange,))}
-            due=[r for i,r in registry.items() if i not in existing or existing[i]["methodology"]!=VERSION
+            due=[r for i,r in registry.items() if i not in existing or existing[i]["methodology"]!=CACHE_VERSION
                 or existing[i]["attempted_at"]<=(instant-timedelta(hours=24)).isoformat()]
             if not due:
                 continue
@@ -45,13 +47,16 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
             i=selected["id"]
             db.execute("""INSERT INTO strategy_validation VALUES(?,?,?,?,?,'RUNNING',NULL)
                 ON CONFLICT(exchange,instrument_id) DO UPDATE SET symbol=excluded.symbol,methodology=excluded.methodology,
-                attempted_at=excluded.attempted_at,status='RUNNING',payload=NULL""",(exchange,i,selected["symbol"],VERSION,stamp))
+                attempted_at=excluded.attempted_at,status='RUNNING',payload=NULL""",(exchange,i,selected["symbol"],CACHE_VERSION,stamp))
         try:
             payload=loader(f"/api/v1/market-data/instruments/{i}/candles?limit=500")
             identity=payload["instrument"]
-            if identity["id"]!=i or identity["symbol"]!=selected["symbol"] or identity["exchange"]!=exchange:
+            if (identity["id"]!=i or identity["symbol"]!=selected["symbol"] or identity["exchange"]!=exchange
+                    or identity.get("isin")!=selected["isin"]):
                 raise ValueError("IDENTITY_MISMATCH")
             result=replay(payload,today)
+            result["isin"]=identity["isin"]
+            result["replay_evidence_hash"]=fingerprint(payload["candles"],today)
         except Exception:
             result={"status":"UNAVAILABLE","horizons":{}}
         with closing(connect()) as db,db:
@@ -65,7 +70,7 @@ def read(connect,instant=None,*,snapshot=None):
     with closing(connect()) as db:
         _table(db)
         rows=db.execute("""SELECT * FROM strategy_validation WHERE methodology=? AND attempted_at BETWEEN ? AND ?
-            ORDER BY exchange,instrument_id""",(VERSION,(instant-timedelta(hours=48)).isoformat(),instant.isoformat())).fetchall()
+            ORDER BY exchange,instrument_id""",(CACHE_VERSION,(instant-timedelta(hours=48)).isoformat(),instant.isoformat())).fetchall()
     if snapshot is not None and snapshot.get("enabled"):
         # Match the cached replay by registry ID, venue, symbol and observation
         # date, not by ticker alone or membership in the public top-ten sample.
@@ -75,15 +80,20 @@ def read(connect,instant=None,*,snapshot=None):
                 continue
             for horizon in WINDOWS:
                 for item in (section.get("result") or {}).get("horizons",{}).get(horizon,{}).get("candidates",[]):
+                    item.pop("matched_strategy_replay",None)
                     row=indexed.get((section["section"],item.get("id")))
                     if row is None or row["symbol"]!=item.get("symbol") or item.get("exchange")!=section["section"]:
                         continue
                     payload=json.loads(row["payload"] or "{}")
                     replay_result=payload.get("horizons",{}).get(horizon,{})
-                    if (payload.get("as_of")==item.get("as_of") and replay_result.get("status")=="REPLAY_OBSERVED"
+                    if (exact_isin(item.get("isin")) and item["isin"]==payload.get("isin")
+                            and item.get("replay_evidence_hash") is not None
+                            and item["replay_evidence_hash"]==payload.get("replay_evidence_hash")
+                            and item.get("adjustment_status")=="ADJUSTED"
+                            and payload.get("as_of")==item.get("as_of") and replay_result.get("status")=="REPLAY_OBSERVED"
                             and 1<=(today-date.fromisoformat(payload["as_of"])).days<=5):
                         item["matched_strategy_replay"]={"as_of":payload["as_of"],"attempted_at":row["attempted_at"],
-                            **replay_result,"notice":"Same-instrument historical replay, not a forward performance estimate."}
+                            **replay_result,"notice":"Exact ISIN and shared recent adjusted history match the cached replay; older replay observations may still have been revised. Not a forward performance estimate."}
     horizons={}
     for horizon in WINDOWS:
         items=[]
@@ -103,5 +113,5 @@ def read(connect,instant=None,*,snapshot=None):
             if result and status=="REPLAY_OBSERVED":
                 items.append({"exchange":row["exchange"],"symbol":row["symbol"],"as_of":payload["as_of"],**result})
         horizons[horizon]={"counts":counts,"observed_instruments":len(items),"items":items[:10]}
-    return {"methodology":VERSION,"sample_count":len(rows),"horizons":horizons,
+    return {"methodology":VERSION,"evidence_version":EVIDENCE_VERSION,"sample_count":len(rows),"horizons":horizons,
         "notice":"Bounded rotating current-registry sample, not selected by current watch score. Per-instrument replay only; results are not independent or a portfolio backtest. No market-index benchmark or prospective validation. No recommendation gate is lifted."}
