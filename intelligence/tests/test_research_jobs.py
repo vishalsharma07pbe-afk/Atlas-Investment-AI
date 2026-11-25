@@ -69,7 +69,8 @@ class DurableResearchJobsTests(unittest.TestCase):
             if exchange=="NSE":
                 raise RuntimeError("private-token-never-persist")
             return {"exchange":exchange}
-        with patch.object(research.research_calendar,"refresh"), \
+        with patch.object(research.fund_disclosures,"permitted",return_value=False), \
+             patch.object(research.research_calendar,"refresh"), \
              patch.object(research.portfolio_thesis,"enabled",return_value=False), \
              patch.object(research,"market_snapshot",side_effect=market), \
              patch.object(research,"fund_snapshot",side_effect=lambda c:{"category":c}), \
