@@ -29,9 +29,15 @@ public class PortfolioController {
     return jdbc.queryForList("""
       SELECT id,symbol,asset_type,quantity,average_cost,last_price,previous_close,price_as_of,notes,
       quantity*average_cost AS invested,
+      CASE WHEN last_price IS NULL THEN 'UNPRICED'
+        WHEN price_as_of IS NULL THEN 'UNDATED'
+        WHEN price_as_of > now() THEN 'FUTURE_DATED'
+        WHEN (now() AT TIME ZONE 'Asia/Kolkata')::date - (price_as_of AT TIME ZONE 'Asia/Kolkata')::date >
+          CASE WHEN asset_type='MUTUAL_FUND' THEN 7 ELSE 5 END THEN 'STALE'
+        ELSE 'RECENT_RECORDED' END AS valuation_status,
       CASE WHEN last_price IS NOT NULL THEN quantity*last_price ELSE NULL END AS market_value,
       CASE WHEN last_price IS NOT NULL THEN quantity*(last_price-average_cost) ELSE NULL END AS unrealized_pnl,
-      CASE WHEN last_price IS NOT NULL AND previous_close IS NOT NULL
+      CASE WHEN last_price IS NOT NULL AND previous_close > 0
         THEN quantity*(last_price-previous_close) ELSE NULL END AS one_day_change
       FROM personal_holdings WHERE user_id=? ORDER BY asset_type,symbol
       """,AuthSecurity.currentUser());
@@ -54,7 +60,7 @@ public class PortfolioController {
       VALUES (?,?,?,?,?,?,CASE WHEN ? THEN now() ELSE NULL END,?)
       ON CONFLICT(user_id,symbol,asset_type) DO UPDATE SET quantity=EXCLUDED.quantity,
       average_cost=EXCLUDED.average_cost,last_price=EXCLUDED.last_price,
-      price_as_of=EXCLUDED.price_as_of,notes=EXCLUDED.notes,updated_at=now()
+      price_as_of=EXCLUDED.price_as_of,previous_close=NULL,notes=EXCLUDED.notes,updated_at=now()
       """,AuthSecurity.currentUser(),symbol,input.assetType(),input.quantity(),input.averageCost(),input.lastPrice(),input.lastPrice()!=null,input.notes());
     return Map.of("saved",true,"symbol",symbol);
   }
@@ -116,13 +122,23 @@ public class PortfolioController {
   public Map<String,Object> analysis() {
     List<Map<String,Object>> rows=holdings();
     BigDecimal invested=BigDecimal.ZERO, valued=BigDecimal.ZERO, knownCost=BigDecimal.ZERO;
-    int unpriced=0;
+    int unpriced=0,recent=0,stale=0,undated=0,future=0;
+    BigDecimal recentValue=BigDecimal.ZERO;
     for(Map<String,Object> row:rows) {
       BigDecimal cost=(BigDecimal)row.get("invested"); invested=invested.add(cost);
-      if(row.get("market_value")!=null){valued=valued.add((BigDecimal)row.get("market_value"));knownCost=knownCost.add(cost);}else unpriced++;
+      if(row.get("market_value")!=null){
+        BigDecimal value=(BigDecimal)row.get("market_value");valued=valued.add(value);knownCost=knownCost.add(cost);
+        switch(String.valueOf(row.get("valuation_status"))){
+          case "RECENT_RECORDED" -> {recent++;recentValue=recentValue.add(value);}
+          case "STALE" -> stale++;
+          case "FUTURE_DATED" -> future++;
+          default -> undated++;
+        }
+      }else unpriced++;
     }
     List<String> flags=new ArrayList<>();
-    if(unpriced>0) flags.add(unpriced+" holding(s) have no manually entered price; valuation is incomplete.");
+    if(unpriced>0) flags.add(unpriced+" holding(s) have no recorded price; valuation is incomplete.");
+    if(stale+undated+future>0) flags.add((stale+undated+future)+" holding(s) have stale, undated or future-dated valuations; recorded totals are not a current market value.");
     if(rows.size()>0 && rows.size()<5) flags.add("Concentration watch: fewer than five holdings. Diversification needs review.");
     if(valued.signum()>0) for(Map<String,Object> row:rows) if(row.get("market_value")!=null) {
       BigDecimal weight=((BigDecimal)row.get("market_value")).divide(valued,8,java.math.RoundingMode.HALF_UP);
@@ -133,6 +149,12 @@ public class PortfolioController {
     result.put("pricedMarketValue",valued);result.put("pricedCostBasis",knownCost);
     result.put("pricedUnrealizedPnl",valued.subtract(knownCost));
     result.put("unpricedHoldings",unpriced);result.put("valuationComplete",unpriced==0);
+    result.put("recentRecordedHoldings",recent);result.put("stalePriceHoldings",stale);
+    result.put("undatedPriceHoldings",undated);result.put("futureDatedPriceHoldings",future);
+    result.put("recentRecordedMarketValue",recentValue);
+    result.put("recordedReturnPercent",knownCost.signum()>0?valued.subtract(knownCost).multiply(BigDecimal.valueOf(100)).divide(knownCost,4,java.math.RoundingMode.HALF_UP):null);
+    result.put("valuationFreshnessStatus",rows.isEmpty()?"NO_HOLDINGS":recent==rows.size()?"ALL_RECENT_RECORDED":"INCOMPLETE_OR_AGED");
+    result.put("valuationFreshnessNotice","Calendar-age diagnostics only (equity five days, fund seven days); recent recorded values are not independently verified live quotes.");
     result.put("riskFlags",flags);result.put("recommendationStatus","UNAVAILABLE_NO_VERIFIED_MARKET_DATA");
     return result;
   }
