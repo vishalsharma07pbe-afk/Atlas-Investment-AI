@@ -36,3 +36,15 @@ it("shows dated secondary disclosures without enabling fund recommendations",asy
  expect(screen.getByText("0.7% · 2026-11-24")).toBeTruthy();
  expect(screen.getAllByText("No fund currently qualifies")).toHaveLength(2);
 });
+
+it("shows portfolio composition separately from qualifying recommendations",async()=>{
+ const item={scheme_code:"118955",scheme_name:"Composition Test Fund",portfolio_date:"2026-10-31",reported_weight_total_percent:100,asset_allocation_percent:{Equity:60,Cash:40},exact_listed_equity_weight_percent:60,top_10_exact_equity_weight_percent:60,exact_equity_count:1,cached_company_evidence_weight_percent:20,cached_company_count:1,top_holdings:[{isin:"INE002A01018",name:"Example Equity",weight_percent:60}],notice:"Secondary composition only."};
+ const result={...response,portfolio_evidence:{status:"SECONDARY_COMPOSITION_ONLY",notice:"Not a forward forecast.",items:[item]}};
+ vi.stubGlobal("fetch",vi.fn(async(url:string)=>({ok:true,json:async()=>url.includes("historical-watch")?{category:"LARGE_CAP",items:[],universe_count:120,sample_count:20,eligible_count:0,automatic_collection_enabled:true,notice:"Historical only"}:result})));
+ render(<MutualFundResearchDashboard onExplore={()=>{}}/>);
+ fireEvent.click(await screen.findByText("Reported fund portfolios (1)"));
+ expect(screen.getByText("Composition Test Fund")).toBeTruthy();
+ expect(screen.getByText("Example Equity · 60.00%")).toBeTruthy();
+ expect(screen.getByText("20.00% · 1 companies")).toBeTruthy();
+ expect(screen.getAllByText("No fund currently qualifies")).toHaveLength(2);
+});
