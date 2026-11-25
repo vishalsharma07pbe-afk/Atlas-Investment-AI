@@ -11,12 +11,14 @@ VERSION="FUNDAMENTAL-EVIDENCE-1"
 ALIASES={
     "PE": {"p/e","pe","price to earnings","price earnings ratio","price to earnings ratio"},
     "PB": {"p/b","pb","price to book","price to book ratio"},
+    "ROA": {"roa","return on assets"},
+    "EV_EBITDA": {"ev/ebitda","enterprise value to ebitda"},
     "ROE": {"roe","return on equity"},
     "ROCE": {"roce","return on capital employed"},
     "DEBT_EQUITY": {"debt to equity","debt/equity","debt to equity ratio"},
     "INTEREST_COVERAGE": {"interest coverage","interest coverage ratio"},
 }
-REQUIRED_TRENDS=("REVENUE","NET_PROFIT","OPERATING_CASH_FLOW","TOTAL_ASSETS","TOTAL_LIABILITIES")
+REQUIRED_TRENDS=("REVENUE","NET_PROFIT","OPERATING_PROFIT","OPERATING_CASH_FLOW","TOTAL_ASSETS","TOTAL_LIABILITIES")
 
 
 def _number(value):
@@ -41,17 +43,17 @@ def _ratio_rows(report):
         if len(matches)!=1:
             continue
         row=matches[0]
-        expected="PERCENT" if key in ("ROE","ROCE") else "RATIO"
+        expected="PERCENT" if key in ("ROA","ROE","ROCE") else "RATIO"
         a,b=row.get("company_value"),row.get("sector_value")
         # Source normalization supplies a separate sector unit on new records.
         # Legacy records cannot establish matching units for percentage ratios.
         if row.get("unit")!=expected or row.get("sector_unit")!=expected or not _number(a) or not _number(b):
             continue
-        if key in ("PE","PB") and (a<=0 or b<=0):
+        if key in ("PE","PB","EV_EBITDA") and (a<=0 or b<=0):
             continue
         if key in ("DEBT_EQUITY","INTEREST_COVERAGE") and (a<0 or b<0):
             continue
-        relative=(a/b-1)*100 if key in ("PE","PB") else None
+        relative=(a/b-1)*100 if key in ("PE","PB","EV_EBITDA") else None
         delta=a-b
         if not _number(delta) or (relative is not None and not _number(relative)):
             continue
@@ -86,6 +88,8 @@ def _matched_ratio(trends,numerator,denominator,metric,scale):
         return None
     if (a["previous_year"],a["latest_year"])!=(b["previous_year"],b["latest_year"]):
         return None
+    if (a.get("previous_period"),a.get("latest_period"),a.get("statement_type"))!=(b.get("previous_period"),b.get("latest_period"),b.get("statement_type")):
+        return None
     if b["previous_value"]<=0 or b["latest_value"]<=0:
         return None
     previous=a["previous_value"]/b["previous_value"]*scale
@@ -93,6 +97,7 @@ def _matched_ratio(trends,numerator,denominator,metric,scale):
     if not all(_number(v) for v in (previous,latest,latest-previous)):
         return None
     return {"metric":metric,"previous_year":a["previous_year"],"latest_year":a["latest_year"],
+            "previous_period":a.get("previous_period"),"latest_period":a.get("latest_period"),
             "previous_value":round(previous,4),"latest_value":round(latest,4),
             "change":round(latest-previous,4),"unit":"PERCENT" if scale==100 else "RATIO",
             "source_metrics":[numerator,denominator],"sources":[a.get("source"),b.get("source")]}
@@ -104,6 +109,7 @@ def summarize(report,year):
     derived={}
     for num,den,key,scale in (
         ("NET_PROFIT","REVENUE","NET_MARGIN",100),
+        ("OPERATING_PROFIT","REVENUE","OPERATING_MARGIN",100),
         ("OPERATING_CASH_FLOW","NET_PROFIT","OPERATING_CASH_TO_PROFIT",1),
         ("TOTAL_LIABILITIES","TOTAL_ASSETS","REPORTED_LIABILITIES_TO_ASSETS",100)):
         if key=="REPORTED_LIABILITIES_TO_ASSETS" and num in trends and any(trends[num][k]<0 for k in ("previous_value","latest_value")):
@@ -113,25 +119,25 @@ def summarize(report,year):
             derived[key]=row
     warnings=[]
     strengths=[]
-    for key in ("REVENUE","NET_PROFIT","OPERATING_CASH_FLOW"):
+    for key in ("REVENUE","NET_PROFIT","OPERATING_PROFIT","OPERATING_CASH_FLOW"):
         row=trends.get(key)
         if row:
             if row["latest_value"]<0 or row["latest_value"]<row["previous_value"]:
                 warnings.append(key+"_DETERIORATION_REVIEW")
             elif row["latest_value"]>0 and row["latest_value"]>row["previous_value"]:
                 strengths.append(key+"_REPORTED_INCREASE")
-    for key in ("NET_MARGIN","OPERATING_CASH_TO_PROFIT"):
+    for key in ("NET_MARGIN","OPERATING_MARGIN","OPERATING_CASH_TO_PROFIT"):
         row=derived.get(key)
         if row and (row["latest_value"]<0 or row["change"]<0):
             warnings.append(key+"_DETERIORATION_REVIEW")
     # Financial institutions and industrial firms differ structurally. Do not
     # apply a universal cash-conversion, leverage or sector valuation threshold.
-    valuation=[ratios[k] for k in ("PE","PB") if k in ratios]
+    valuation=[ratios[k] for k in ("PE","PB","EV_EBITDA") if k in ratios]
     gaps=["INDEPENDENT_FILING_VERIFICATION_REQUIRED","RATIO_OBSERVATION_PERIOD_UNVERIFIED",
           "INTRINSIC_VALUATION_INPUTS_UNVERIFIED","MARKET_SHARE_AND_PEER_RANK_UNVERIFIED"]
     gaps.extend("MISSING_"+k for k in REQUIRED_TRENDS if k not in trends)
     gaps.extend("MISSING_"+k for k in ALIASES if k not in ratios)
-    gaps.extend("MISSING_"+k for k in ("NET_MARGIN","OPERATING_CASH_TO_PROFIT","REPORTED_LIABILITIES_TO_ASSETS") if k not in derived)
+    gaps.extend("MISSING_"+k for k in ("NET_MARGIN","OPERATING_MARGIN","OPERATING_CASH_TO_PROFIT","REPORTED_LIABILITIES_TO_ASSETS") if k not in derived)
     return {"methodology":VERSION,"status":"REVIEW_REQUIRED" if warnings else "PARTIAL_EVIDENCE" if trends or ratios else "UNAVAILABLE",
             "strengths":strengths,"warnings":warnings,"derived_metrics":list(derived.values()),
             "sector_comparisons":list(ratios.values()),"valuation":{"status":"SECTOR_COMPARISON_ONLY" if valuation else "UNAVAILABLE",

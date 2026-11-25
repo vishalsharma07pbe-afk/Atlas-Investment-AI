@@ -65,3 +65,19 @@ class FundamentalQualityTests(unittest.TestCase):
         self.assertEqual(result["status"],"UNAVAILABLE")
         self.assertEqual(result["strengths"],[])
         self.assertEqual(result["warnings"],[])
+
+    def test_year_end_and_scope_mismatch_cannot_create_margin(self):
+        revenue=trend("REVENUE",100,120)
+        profit=trend("NET_PROFIT",20,30)
+        revenue.update(previous_period="2024-03",latest_period="2025-03",statement_type="consolidated")
+        profit.update(previous_period="2024-12",latest_period="2025-12",statement_type="consolidated")
+        self.assertEqual(summarize(report([revenue,profit]),2026)["derived_metrics"],[])
+        profit.update(previous_period="2024-03",latest_period="2025-03",statement_type="standalone")
+        self.assertEqual(summarize(report([revenue,profit]),2026)["derived_metrics"],[])
+
+    def test_additional_documented_sector_metrics(self):
+        result=summarize(report(ratios=[ratio("ROA",5,10,"PERCENT","PERCENT"),ratio("EV/EBITDA",12,8)]),2026)
+        by={r["metric"]:r for r in result["sector_comparisons"]}
+        self.assertEqual(by["ROA"]["difference"],-5)
+        self.assertEqual(by["EV_EBITDA"]["premium_discount_percent"],50)
+        self.assertIsNone(result["valuation"]["fair_value"])

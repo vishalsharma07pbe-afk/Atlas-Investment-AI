@@ -6,12 +6,13 @@ a recommendation or establishes fair value.
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from math import isfinite
+from zoneinfo import ZoneInfo
 import json
 import os
 import re
 
 from .p1_research import company_research
-from .financial_trends import summarize as financial_trends
+from .financial_trends import summarize as financial_trends, earnings_evidence
 from .fundamental_quality import summarize as fundamental_quality
 
 ISIN = re.compile(r"^IN[A-Z0-9]{10}$")
@@ -100,7 +101,13 @@ def normalize(report, isin, instant):
         elif key in ("income_statement","cash_flow") and isinstance(raw,dict):
             rows=history(raw.get(key))
             if rows:
-                data={"units":text(raw.get("units_in")),"rows":rows}
+                data={"units":text(raw.get("units_in")),"rows":rows,
+                      "statement_type":text(raw.get("type")),"time_period":text(raw.get("time_period"))}
+                if key=="income_statement" and data["statement_type"]=="consolidated" and data["time_period"]=="yearly":
+                    # Full statement EPS lines have a different dimensional meaning
+                    # from the aggregate monetary statement. Do not apply crore units.
+                    data["eps_rows"]=[r for r in history(raw.get("full_statement"),category="particular")
+                                      if r["name"].strip().casefold() in ("eps - basic","eps - diluted")]
         elif key=="balance_sheet" and isinstance(raw,dict):
             rows=[]
             for point in raw.get("history",[])[:5] if isinstance(raw.get("history"),list) else []:
@@ -110,7 +117,8 @@ def normalize(report, isin, instant):
                 if any(v is not None for v in values.values()):
                     rows.append({"period":text(point["period"]),**values})
             if rows:
-                data={"units":text(raw.get("units_in")),"rows":rows}
+                data={"units":text(raw.get("units_in")),"rows":rows,
+                      "statement_type":text(raw.get("type")),"time_period":text(raw.get("time_period"))}
         elif key=="shareholding":
             data=history(raw)
         elif key in ("corporate_actions","competitors") and isinstance(raw,list):
@@ -192,7 +200,9 @@ def attach(snapshot,connect,instant=None):
         row=rows.get(isin)
         if row and row["payload"]:
             report=json.loads(row["payload"])
-            report["financial_trends"]=financial_trends(report,instant.year)
-            report["fundamental_quality"]=fundamental_quality(report,instant.year)
+            today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
+            report["financial_trends"]=financial_trends(report,today.year,as_of=today)
+            report["reported_earnings"]=earnings_evidence(report,today)
+            report["fundamental_quality"]=fundamental_quality(report,today.year)
             item["company_evidence"]=report
     return snapshot

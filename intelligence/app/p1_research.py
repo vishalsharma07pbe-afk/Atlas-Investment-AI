@@ -109,7 +109,7 @@ def company_research(isin: str, instrument_key: str | None = None) -> dict:
             lambda: _normalize_ratios(_get(f"/v2/fundamentals/{encoded_isin}/key-ratios"))),
         "income_statement": _safe_section("income_statement", f"/v2/fundamentals/{encoded_isin}/income-statement",
             lambda: _get(f"/v2/fundamentals/{encoded_isin}/income-statement",
-                         {"type": "consolidated", "time_period": "yearly", "fs": "false"})),
+                         {"type": "consolidated", "time_period": "yearly", "fs": "true"})),
         "balance_sheet": _safe_section("balance_sheet", f"/v2/fundamentals/{encoded_isin}/balance-sheet",
             lambda: _get(f"/v2/fundamentals/{encoded_isin}/balance-sheet",
                          {"type": "consolidated", "time_period": "yearly", "fs": "false"})),
