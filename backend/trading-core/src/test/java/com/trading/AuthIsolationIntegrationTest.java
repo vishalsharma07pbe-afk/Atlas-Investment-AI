@@ -234,6 +234,45 @@ class AuthIsolationIntegrationTest {
       .andExpect(jsonPath("$.drawdown_status").value("UNAVAILABLE_INCOMPLETE_VALUATION_HISTORY"));
   }
 
+  @Test void automaticValuationsAreOwnerScopedIdempotentAndDoNotOverwriteManualRecords()throws Exception{
+    String suffix=UUID.randomUUID().toString();
+    String email="auto-value-"+suffix+"@example.test",other="auto-manual-"+suffix+"@example.test",aged="auto-aged-"+suffix+"@example.test";
+    String a=create(email),b=create(other),c=create(aged);
+    UUID owner=jdbc.queryForObject("SELECT id FROM atlas_users WHERE email=?",UUID.class,email);
+    UUID manual=jdbc.queryForObject("SELECT id FROM atlas_users WHERE email=?",UUID.class,other);
+    UUID stale=jdbc.queryForObject("SELECT id FROM atlas_users WHERE email=?",UUID.class,aged);
+    for(String token:new String[]{a,b,c}){
+      mvc.perform(post("/api/v1/portfolio/holdings").header("Authorization",token)
+        .contentType(MediaType.APPLICATION_JSON)
+        .content("{\"symbol\":\"AUTOSNAP\",\"assetType\":\"EQUITY\",\"quantity\":2,\"averageCost\":100,\"lastPrice\":125}"))
+        .andExpect(status().isOk());
+    }
+    mvc.perform(post("/api/v1/portfolio/history/snapshots/current").header("Authorization",b))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.recorded").value(true));
+    jdbc.update("UPDATE personal_holdings SET last_price=999 WHERE user_id=?",manual);
+    jdbc.update("UPDATE personal_holdings SET price_as_of=now()-interval '10 days' WHERE user_id=?",stale);
+    var service=new com.trading.market.PortfolioValuationHistoryService(jdbc);
+    for(int i=0;i<30;i++){if(service.captureDue(5)==0)break;}
+    LocalDate today=LocalDate.now(com.trading.market.MarketCalendarService.IST);
+    mvc.perform(get("/api/v1/portfolio/history/performance").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.automatic_snapshot_count").value(1))
+      .andExpect(jsonPath("$.latest_capture_source").value("AUTO_RECORDED"))
+      .andExpect(jsonPath("$.latest_oldest_price_at").isNotEmpty());
+    mvc.perform(get("/api/v1/portfolio/history/performance").header("Authorization",b))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.automatic_snapshot_count").value(0))
+      .andExpect(jsonPath("$.latest_capture_source").value("MANUAL_RECORDED"));
+    mvc.perform(get("/api/v1/portfolio/history/performance").header("Authorization",c))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.snapshot_count").value(0));
+    jdbc.update("UPDATE personal_holdings SET last_price=900 WHERE user_id=?",owner);
+    service.captureDue(5);
+    for(UUID user:new UUID[]{owner,manual}){
+      org.junit.jupiter.api.Assertions.assertEquals(0,new java.math.BigDecimal("250").compareTo(
+        jdbc.queryForObject("SELECT total_value FROM portfolio_valuation_snapshots WHERE user_id=? AND valuation_date=?",java.math.BigDecimal.class,user,today)));
+      org.junit.jupiter.api.Assertions.assertEquals(1,jdbc.queryForObject(
+        "SELECT count(*) FROM portfolio_valuation_snapshots WHERE user_id=? AND valuation_date=?",Integer.class,user,today));
+    }
+  }
+
   @Test void agedHoldingsCannotReplaceRecordedValuation()throws Exception{
     String email="snapshot-integrity-"+UUID.randomUUID()+"@example.test";
     String a=create(email);
