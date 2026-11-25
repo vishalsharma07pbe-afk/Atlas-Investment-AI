@@ -80,3 +80,23 @@ it("withholds adjusted performance for sparse valuations",async()=>{
   render(<PortfolioPerformanceHistory/>);
   expect(await screen.findByText("Valuation intervals exceed seven calendar days.")).toBeTruthy();
 });
+
+it("distinguishes exact-date price reference from portfolio estimates and unavailable windows",async()=>{
+  vi.spyOn(globalThis,"fetch").mockResolvedValue(new Response(JSON.stringify({
+    transaction_count:0,snapshot_count:31,xirr_percent:null,maximum_drawdown_percent:null,
+    xirr_status:"UNAVAILABLE",drawdown_status:"UNAVAILABLE",
+    benchmark_reference:"NIFTY 50 price index (not TRI)",
+    rolling_performance:[
+      {days:30,status:"AVAILABLE_ESTIMATE",returnPercent:10,drawdownPercent:-2,benchmarkStatus:"AVAILABLE_PRICE_REFERENCE",benchmarkReturnPercent:5,relativePercentagePoints:5},
+      {days:90,status:"UNAVAILABLE_EXACT_START_DATE",returnPercent:null,drawdownPercent:null,benchmarkStatus:"UNAVAILABLE_PORTFOLIO_WINDOW"}
+    ],
+    weekly_risk_estimate:{status:"UNAVAILABLE_EXACT_WEEKLY_HISTORY",weeklyObservations:0},
+    methodology:"Recorded valuations."
+  }),{status:200}));
+  render(<PortfolioPerformanceHistory/>);
+  expect(await screen.findByText("10.00%")).toBeTruthy();
+  expect(screen.getByText("Index price return: 5.00%")).toBeTruthy();
+  expect(screen.getByText("Relative difference: 5.00 pp")).toBeTruthy();
+  expect(screen.getByText("Exact starting valuation missing.")).toBeTruthy();
+  expect(screen.getByText(/Insufficient contiguous weekly evidence/)).toBeTruthy();
+});

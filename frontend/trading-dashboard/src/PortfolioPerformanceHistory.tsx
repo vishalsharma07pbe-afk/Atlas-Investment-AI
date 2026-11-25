@@ -1,5 +1,7 @@
 import {FormEvent,useCallback,useEffect,useState} from "react";
 
+type RollingWindow={days:number;status:string;from:string|null;through:string|null;returnPercent:number|null;drawdownPercent:number|null;benchmarkStatus:string;benchmarkReturnPercent:number|null;relativePercentagePoints:number|null};
+type WeeklyRisk={status:string;weeklyObservations:number;annualizedVolatilityPercent:number|null;annualizedDownsideDeviationPercent:number|null;negativeWeekFrequencyPercent:number|null;from:string|null;through:string|null};
 type Performance={
   transaction_count:number;
   snapshot_count:number;
@@ -26,6 +28,10 @@ type Performance={
   flow_adjusted_from?:string|null;
   flow_adjusted_through?:string|null;
   flow_adjusted_methodology?:string;
+  rolling_performance?:RollingWindow[];
+  weekly_risk_estimate?:WeeklyRisk;
+  benchmark_reference?:string;
+  rolling_methodology?:string;
 };
 
 const empty:Performance={transaction_count:0,snapshot_count:0,xirr_percent:null,xirr_status:"UNAVAILABLE",maximum_drawdown_percent:null,drawdown_status:"UNAVAILABLE",methodology:""};
@@ -87,6 +93,25 @@ export default function PortfolioPerformanceHistory({revision=0}:{revision?:numb
       {performance.flow_adjusted_status!=="AVAILABLE_ESTIMATE"&&<p className="muted tiny">{adjustedStatus(performance.flow_adjusted_status)}</p>}
       {performance.flow_adjusted_from&&<p className="muted tiny">{performance.flow_adjusted_from} to {performance.flow_adjusted_through} · {performance.flow_adjusted_interval_count??0} intervals · {performance.flow_adjusted_cash_flow_count??0} external flows · longest gap {performance.flow_adjusted_max_interval_days??"unknown"} days.</p>}
       <p className="muted tiny">{performance.flow_adjusted_methodology}</p>
+    </section>}
+    {performance.rolling_performance&&<section aria-label="Trailing portfolio performance">
+      <h3>Trailing portfolio returns and benchmark reference</h3>
+      <p className="muted tiny">{performance.benchmark_reference} · Price reference only, not total return or a personalized benchmark.</p>
+      <div className="portfolio-history-metrics">
+      {performance.rolling_performance.map(window=><div key={window.days}><small>{window.days} DAYS</small><strong>{percent(window.returnPercent)}</strong>
+        <span>Adjusted drawdown: {percent(window.drawdownPercent)}</span>
+        <span>{window.status==="AVAILABLE_ESTIMATE"?"Linked Dietz estimate":window.status==="UNAVAILABLE_EXACT_START_DATE"?"Exact starting valuation missing.":adjustedStatus(window.status)}</span>
+        <span>Index price return: {percent(window.benchmarkReturnPercent)}</span>
+        <span>Relative difference: {window.relativePercentagePoints==null?"Unavailable":window.relativePercentagePoints.toFixed(2)+" pp"}</span>
+        {window.benchmarkStatus!=="AVAILABLE_PRICE_REFERENCE"&&<span>{window.benchmarkStatus==="UNAVAILABLE_BENCHMARK_QUALITY"?"Index evidence failed quality checks.":"Comparable dated index evidence unavailable."}</span>}
+      </div>)}
+      </div>
+      {performance.weekly_risk_estimate&&<><h3>Historical weekly risk estimate</h3><div className="portfolio-history-metrics">
+        <div><small>ANNUALIZED VOLATILITY</small><strong>{percent(performance.weekly_risk_estimate.annualizedVolatilityPercent)}</strong></div>
+        <div><small>DOWNSIDE DEVIATION</small><strong>{percent(performance.weekly_risk_estimate.annualizedDownsideDeviationPercent)}</strong></div>
+        <div><small>NEGATIVE WEEKS</small><strong>{percent(performance.weekly_risk_estimate.negativeWeekFrequencyPercent)}</strong></div>
+      </div><p className="muted tiny">{performance.weekly_risk_estimate.weeklyObservations}/13 exact weekly intervals. {performance.weekly_risk_estimate.status==="AVAILABLE_ESTIMATE"?"Historical estimate, not a forecast.":"Insufficient contiguous weekly evidence."}</p></>}
+      <p className="muted tiny">{performance.rolling_methodology}</p>
     </section>}
     {performance.valuation_through&&<p className="muted tiny">Performance through {performance.valuation_through} · {performance.external_flows_after_valuation??0} later external flows excluded · {performance.incomplete_snapshot_count??0} incomplete historical valuations · {performance.future_snapshot_count??0} future valuations excluded.</p>}
     {performance.automatic_snapshot_count!==undefined&&<div className="muted tiny"><p>Automatic evening valuation records: {performance.automatic_snapshot_count}. Automatic capture runs while the local backend is enabled and has sufficient recorded prices; missing days are not reconstructed.</p>{performance.latest_capture_source&&<p>Latest capture: {performance.latest_capture_source==="AUTO_RECORDED"?"Automatic":performance.latest_capture_source==="MANUAL_RECORDED"?"Manual":"Legacy recorded"}{performance.latest_oldest_price_at&&performance.latest_newest_price_at?` · Price observations: ${performance.latest_oldest_price_at} to ${performance.latest_newest_price_at}`:" · Price observation timestamps unavailable"}. Recorded values are not certified market closes.</p>}</div>}

@@ -234,6 +234,27 @@ class AuthIsolationIntegrationTest {
       .andExpect(jsonPath("$.drawdown_status").value("UNAVAILABLE_INCOMPLETE_VALUATION_HISTORY"));
   }
 
+  @Test void rollingPortfolioEstimatesAreOwnerScopedAndIndependentOfOldGaps()throws Exception{
+    String email="rolling-"+UUID.randomUUID()+"@example.test";
+    String a=create(email),b=create("rolling-other-"+UUID.randomUUID()+"@example.test");
+    UUID owner=jdbc.queryForObject("SELECT id FROM atlas_users WHERE email=?",UUID.class,email);
+    LocalDate end=LocalDate.now(com.trading.market.MarketCalendarService.IST).minusDays(1);
+    for(int i=0;i<=30;i++){
+      jdbc.update("INSERT INTO portfolio_valuation_snapshots(user_id,valuation_date,total_value,priced_positions,unpriced_positions) VALUES (?,?,?,1,0)",owner,end.minusDays(30-i),i==30?1100:1000);
+    }
+    jdbc.update("INSERT INTO portfolio_valuation_snapshots(user_id,valuation_date,total_value,priced_positions,unpriced_positions) VALUES (?,?,1000,1,0)",owner,end.minusDays(100));
+    mvc.perform(get("/api/v1/portfolio/history/performance").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.flow_adjusted_status").value("UNAVAILABLE_VALUATION_GAPS"))
+      .andExpect(jsonPath("$.rolling_performance[0].days").value(30))
+      .andExpect(jsonPath("$.rolling_performance[0].status").value("AVAILABLE_ESTIMATE"))
+      .andExpect(jsonPath("$.rolling_performance[0].returnPercent").value(org.hamcrest.Matchers.closeTo(10.0,0.001)))
+      .andExpect(jsonPath("$.rolling_performance[1].status").value("UNAVAILABLE_EXACT_START_DATE"))
+      .andExpect(jsonPath("$.weekly_risk_estimate.status").value("UNAVAILABLE_EXACT_WEEKLY_HISTORY"));
+    mvc.perform(get("/api/v1/portfolio/history/performance").header("Authorization",b))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.rolling_performance[0].status").value("UNAVAILABLE_REQUIRES_TWO_VALUATIONS"))
+      .andExpect(jsonPath("$.rolling_performance[0].returnPercent").isEmpty());
+  }
+
   @Test void linkedDietzSeparatesRecordedCapitalFlowsFromPerformance()throws Exception{
     String email="dietz-"+UUID.randomUUID()+"@example.test";
     String a=create(email),b=create("dietz-other-"+UUID.randomUUID()+"@example.test");
