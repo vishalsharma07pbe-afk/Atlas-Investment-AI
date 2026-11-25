@@ -46,6 +46,25 @@ class MarketSchedulerIntegrationTest {
    assertThat(jdbc.queryForObject("SELECT count(*) FROM exchange_holidays WHERE exchange_code=? AND holiday_date >= '2025-01-01' AND holiday_date < '2026-01-01'",Long.class,ex)).isEqualTo(14);
   }
  }
+ @Test
+ @org.springframework.transaction.annotation.Transactional
+ void storedSessionContextDistinguishesPhasesAndUnknown(){
+  LocalDate day=LocalDate.of(2026,11,25);
+  jdbc.update("DELETE FROM market_sessions WHERE exchange_id=(SELECT id FROM exchanges WHERE code='NSE') AND session_date=?",day);
+  Instant open=day.atTime(9,15).atZone(MarketCalendarService.IST).toInstant();
+  Instant close=day.atTime(15,30).atZone(MarketCalendarService.IST).toInstant();
+  assertThat(calendar.sessionContext("NSE",open).get("phase")).isEqualTo("CALENDAR_UNVERIFIED");
+  jdbc.update("""
+    INSERT INTO market_sessions(exchange_id,session_date,session_type,is_trading_day,open_time,close_time)
+    VALUES ((SELECT id FROM exchanges WHERE code='NSE'),?,'REGULAR',true,?,?)
+    """,day,java.sql.Timestamp.from(open),java.sql.Timestamp.from(close));
+  assertThat(calendar.sessionContext("NSE",open.minusSeconds(3600))).containsEntry("phase","PRE_MARKET").containsEntry("open_at",open.toString());
+  assertThat(calendar.sessionContext("NSE",open).get("phase")).isEqualTo("MARKET_HOURS");
+  assertThat(calendar.sessionContext("NSE",close).get("phase")).isEqualTo("POST_MARKET");
+  assertThat(calendar.sessionContext("NSE",LocalDate.of(2026,11,24).atTime(10,0).atZone(MarketCalendarService.IST).toInstant()).get("phase")).isEqualTo("CLOSED");
+  jdbc.update("INSERT INTO market_sessions(exchange_id,session_date,session_type,is_trading_day) VALUES ((SELECT id FROM exchanges WHERE code='NSE'),?,'SPECIAL',true)",day);
+  assertThat(calendar.sessionContext("NSE",open).get("phase")).isEqualTo("SPECIAL_SESSION_UNSUPPORTED");
+ }
  @Test void duplicateCandleTimestampCannotCreateSecondRow(){
   jdbc.update("INSERT INTO instruments(exchange_id,symbol,series,source) VALUES ((SELECT id FROM exchanges WHERE code='NSE'),'SCHEDTEST','EQ','MANUAL_CSV') ON CONFLICT DO NOTHING");
   long id=jdbc.queryForObject("SELECT id FROM instruments WHERE symbol='SCHEDTEST'",Long.class);
