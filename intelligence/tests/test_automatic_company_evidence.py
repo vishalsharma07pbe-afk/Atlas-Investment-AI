@@ -60,3 +60,23 @@ class CompanyEvidenceTests(unittest.TestCase):
     def test_no_failed_snapshot_enrichment(self):
         self.snapshot["sections"][0]["status"]="FAILED"
         company.refresh(self.snapshot,research._connect,lambda *a:self.fail("failed snapshot"),self.now)
+
+    def test_documented_provider_annual_response_is_consumed_end_to_end(self):
+        from datetime import datetime,timezone
+        def report(isin,key):
+            def block(data):
+                return {"status":"AVAILABLE","data":{"type":"consolidated","time_period":"yearly","units_in":"crore",**data}}
+            def row(category,a,b):
+                return {"category":category,"history":[{"period":"Mar 2026","value":b},{"period":"Mar 2025","value":a}]}
+            return {"isin":isin,"sections":{
+                "income_statement":block({"income_statement":[row("revenue",100,120),row("operating_profit",20,30),row("net_profit",10,12)]}),
+                "cash_flow":block({"cash_flow":[row("operating",15,18)]}),
+                "balance_sheet":block({"history":[{"period":"Mar 2026","total_asset":200,"total_liability":100},{"period":"Mar 2025","total_asset":150,"total_liability":60}]})}}
+        company.refresh(self.snapshot,research._connect,report,self.now)
+        company.attach(self.snapshot,research._connect,self.now)
+        evidence=self.item["company_evidence"]
+        self.assertEqual(evidence["financial_trends"]["status"],"AVAILABLE")
+        rows={r["metric"]:r for r in evidence["fundamental_quality"]["derived_metrics"]}
+        self.assertEqual(rows["OPERATING_MARGIN"]["latest_value"],25)
+        self.assertEqual(rows["OPERATING_CASH_TO_PROFIT"]["latest_value"],1.5)
+        self.assertEqual(rows["REPORTED_LIABILITIES_TO_ASSETS"]["latest_period"],"2026-03")
