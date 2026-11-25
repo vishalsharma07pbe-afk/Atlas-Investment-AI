@@ -107,6 +107,30 @@ def _market_regimes(equity,index,positions):
             "classified_trades":classified,"total_trades":len(positions),"groups":groups,
             "notice":"Illustrative Nifty 50 price trend at the signal close, not a forecast or a verified full market regime. Cohort means are per-position, not portfolio returns."}
 
+def _attach_index_interval(interval,equity,index):
+    interval["market_benchmark_status"]="UNAVAILABLE"
+    for field in ("market_benchmark_start","market_benchmark_end","market_benchmark_observations"):
+        interval.pop(field,None)
+    for cost in interval["cost_scenarios"]:
+        cost.pop("gross_nifty50_price_index_percent",None)
+        cost.pop("net_difference_vs_nifty50_pp",None)
+    dates=[c.date for c in equity if interval["test_start"]<c.date<=interval["test_end"]]
+    if not dates or dates[-1]!=interval["test_end"]:
+        return
+    matched=sorted(d for d in index if dates[0]<=d<=dates[-1])
+    if dates!=matched:
+        return
+    gross=(index[dates[-1]][1]/index[dates[0]][0]-1)*100
+    if not isfinite(gross):
+        return
+    for cost in interval["cost_scenarios"]:
+        cost["gross_nifty50_price_index_percent"]=round(gross,4)
+        cost["net_difference_vs_nifty50_pp"]=round(cost["net_return_percent"]-gross,4)
+    interval["market_benchmark_status"]="MATCHED_PRICE_INDEX"
+    interval["market_benchmark_start"]=dates[0]
+    interval["market_benchmark_end"]=dates[-1]
+    interval["market_benchmark_observations"]=len(dates)
+
 def attach_market_benchmark(result,payload,benchmark,today,*,positions=None):
     """Compare net simulation with the non-tradable Nifty 50 price index.
 
@@ -137,33 +161,76 @@ def attach_market_benchmark(result,payload,benchmark,today,*,positions=None):
         equity=[]
         index={}
     for name,horizon in result.get("horizons",{}).items():
-        if horizon.get("status")!="REPLAY_OBSERVED":
+        if horizon.get("status") not in ("REPLAY_OBSERVED","NO_SIGNALS"):
+            continue
+        if horizon["status"]=="NO_SIGNALS":
+            for fold in horizon.get("chronological_validation",{}).get("folds",[]):
+                if fold["status"]=="REPLAY_OBSERVED":
+                    _attach_index_interval(fold,equity,index)
             continue
         horizon.pop("market_regime_research",None)
         if positions is not None and len(positions.get(name,[]))==horizon["trades"]:
             horizon["market_regime_research"]=_market_regimes(equity,index,positions[name])
-        horizon["market_benchmark_status"]="UNAVAILABLE"
-        for field in ("market_benchmark_start","market_benchmark_end","market_benchmark_observations"):
-            horizon.pop(field,None)
-        for cost in horizon["cost_scenarios"]:
-            cost.pop("gross_nifty50_price_index_percent",None)
-            cost.pop("net_difference_vs_nifty50_pp",None)
-        dates=[c.date for c in equity if horizon["test_start"]<c.date<=horizon["test_end"]]
-        if not dates or dates[-1]!=horizon["test_end"]:
+        _attach_index_interval(horizon,equity,index)
+        for fold in horizon.get("chronological_validation",{}).get("folds",[]):
+            if fold["status"]=="REPLAY_OBSERVED":
+                _attach_index_interval(fold,equity,index)
+
+def _replay_interval(candles,signal_at,horizon,hold,start,end):
+    """One closed test interval; no position may exit after its end."""
+    trades=[]
+    signal_positions=[]
+    examined=0
+    i=start
+    while i+hold<=end:
+        examined+=1
+        if signal_at(i)[horizon][0]!="TECHNICAL_WATCH":
+            i+=1
             continue
-        matched=sorted(d for d in index if dates[0]<=d<=dates[-1])
-        if dates!=matched:
+        entry=candles[i+1]
+        exit_candle=candles[i+hold]
+        trade=(entry.open,exit_candle.close,[c.close for c in candles[i+1:i+hold+1]])
+        trades.append(trade)
+        signal_positions.append((candles[i].date,trade))
+        i+=hold
+    return {"status":"REPLAY_OBSERVED" if trades else "NO_SIGNALS","trades":len(trades),
+            "examined_signal_dates":examined,"holding_sessions":hold,"test_start":candles[start].date,
+            "test_end":candles[end].date,
+            "cost_scenarios":[_comparison(trades,cost,candles[start+1].open,candles[end].close) for cost in COSTS] if trades else [],
+            "small_sample":len(trades)<30,
+            "gross_buy_hold_percent":round((candles[end].close/candles[start+1].open-1)*100,4)},signal_positions
+
+def _chronological_validation(candles,signal_at,horizon,hold,start,end):
+    # At most three balanced consecutive folds. Exposure dates (start+1 to
+    # end inclusive) never overlap; the previous closing bar can be the next
+    # fold's first signal. A full holding window must fit in every fold.
+    count=min(3,(end-start)//hold)
+    result={"status":"INSUFFICIENT_REPEATED_WINDOWS","folds":[],"observed_folds":0,
+            "eligible_folds":0,"no_signal_folds":0,"cost_summaries":[],
+            "notice":"Fixed rules with expanding causal history; no fitting or parameter selection. Independent starting capital per fold, no exposure crossing boundaries. These historical partitions are not independent prospective tests."}
+    if count<2:
+        return result
+    for f in range(count):
+        left=start+(end-start)*f//count
+        right=start+(end-start)*(f+1)//count
+        fold,_=_replay_interval(candles,signal_at,horizon,hold,left,right)
+        fold["fold"]=f+1
+        fold["exposure_start"]=candles[left+1].date
+        fold["prior_observations"]=left+1
+        result["folds"].append(fold)
+    observed=[f for f in result["folds"] if f["status"]=="REPLAY_OBSERVED"]
+    result.update(status="REPEATED_WINDOWS_OBSERVED" if len(observed)>=2 else
+                  "INSUFFICIENT_OBSERVED_FOLDS",eligible_folds=count,
+                  observed_folds=len(observed),no_signal_folds=count-len(observed))
+    for i,cost in enumerate(COSTS):
+        if not observed:
             continue
-        gross=(index[dates[-1]][1]/index[dates[0]][0]-1)*100
-        if not isfinite(gross):
-            continue
-        for cost in horizon["cost_scenarios"]:
-            cost["gross_nifty50_price_index_percent"]=round(gross,4)
-            cost["net_difference_vs_nifty50_pp"]=round(cost["net_return_percent"]-gross,4)
-        horizon["market_benchmark_status"]="MATCHED_PRICE_INDEX"
-        horizon["market_benchmark_start"]=dates[0]
-        horizon["market_benchmark_end"]=dates[-1]
-        horizon["market_benchmark_observations"]=len(dates)
+        values=[f["cost_scenarios"][i]["net_return_percent"] for f in observed]
+        result["cost_summaries"].append({"cost_bps_per_side":cost,
+            "positive_folds":sum(v>0 for v in values),"negative_folds":sum(v<0 for v in values),
+            "flat_folds":sum(v==0 for v in values),"worst_observed_return_percent":min(values),
+            "best_observed_return_percent":max(values)})
+    return result
 
 def replay(payload, today, *, positions=None):
     try:
@@ -176,38 +243,22 @@ def replay(payload, today, *, positions=None):
     if split>=len(candles)-1:
         return {"status":"INSUFFICIENT_HISTORY","horizons":{}}
     ind=compute(candles)
+    signals={}
+    def signal_at(i):
+        if i not in signals:
+            signals[i]=evaluate(candles[:i+1],{k:v[:i+1] for k,v in ind.items()}, {})
+        return signals[i]
     results={}
     for horizon,hold in WINDOWS.items():
         start=max(split,MIN_HISTORY[horizon]-1)
         if start+hold>=len(candles):
             results[horizon]={"status":"INSUFFICIENT_TEST_WINDOW","trades":0}
             continue
-        trades=[]
-        signal_positions=[]
-        examined=0
-        i=start
-        while i+hold<len(candles):
-            examined+=1
-            # All indicators are causal and are sliced at the signal date.
-            prefix=candles[:i+1]
-            state,_=evaluate(prefix,{k:v[:i+1] for k,v in ind.items()}, {})[horizon]
-            if state!="TECHNICAL_WATCH":
-                i+=1
-                continue
-            entry=candles[i+1]
-            exit_candle=candles[i+hold]
-            trade=(entry.open,exit_candle.close,[c.close for c in candles[i+1:i+hold+1]])
-            trades.append(trade)
-            signal_positions.append((candles[i].date,trade))
-            # No overlapping exposure within an instrument/horizon.
-            i+=hold
+        result,signal_positions=_replay_interval(candles,signal_at,horizon,hold,start,len(candles)-1)
+        result["chronological_validation"]=_chronological_validation(candles,signal_at,horizon,hold,start,len(candles)-1)
         if positions is not None:
             positions[horizon]=signal_positions
-        results[horizon]={"status":"REPLAY_OBSERVED" if trades else "NO_SIGNALS","trades":len(trades),
-            "examined_signal_dates":examined,"holding_sessions":hold,"test_start":candles[start].date,
-            "test_end":candles[-1].date,"cost_scenarios":[_comparison(trades,cost,candles[start+1].open,candles[-1].close) for cost in COSTS] if trades else [],
-            "small_sample":len(trades)<30,
-            "gross_buy_hold_percent":round((candles[-1].close/candles[start+1].open-1)*100,4)}
+        results[horizon]=result
     return {"status":"HISTORICAL_REPLAY_ONLY","methodology":VERSION,
             "history_count":len(candles),"as_of":candles[-1].date,"horizons":results,
             "notice":"Fixed technical rules, chronological holdout, next-session open and fixed-session close. Costs are illustrative; cost-adjusted same-stock buy-and-hold uses the same test interval with one round trip; it and matched gross exposure are not market index benchmarks. Current registry selection and revised history can introduce bias. No validated forward performance or recommendation."}

@@ -7,7 +7,7 @@ from .market_client import backend_json
 from .strategy_validation import replay, WINDOWS, attach_market_benchmark
 from .horizon_research import VERSION
 from .replay_evidence import VERSION as EVIDENCE_VERSION, exact_isin, fingerprint
-CACHE_VERSION = VERSION + ':' + EVIDENCE_VERSION + ':market-price-index-v1:signal-regime-v1'
+CACHE_VERSION = VERSION + ':' + EVIDENCE_VERSION + ':market-price-index-v1:signal-regime-v1:chronological-folds-v1'
 
 IST=ZoneInfo("Asia/Kolkata")
 def _table(db):
@@ -121,4 +121,4 @@ def read(connect,instant=None,*,snapshot=None):
                 items.append({"exchange":row["exchange"],"symbol":row["symbol"],"as_of":payload["as_of"],**result})
         horizons[horizon]={"counts":counts,"observed_instruments":len(items),"items":items[:10]}
     return {"methodology":VERSION,"evidence_version":EVIDENCE_VERSION,"sample_count":len(rows),"horizons":horizons,
-        "notice":"Bounded rotating current-registry sample, not selected by current watch score. Per-instrument replay only; results are not independent or a portfolio backtest. Nifty 50 price-index comparison and signal-date trend cohorts require matching observed dates; no prospective validation. No recommendation gate is lifted."}
+        "notice":"Bounded rotating current-registry sample, not selected by current watch score. Per-instrument replay only; results are not independent or a portfolio backtest. Nifty 50 price-index comparison and signal-date trend cohorts require matching observed dates; Repeated fixed-rule test windows are descriptive; no prospective validation. No recommendation gate is lifted."}
