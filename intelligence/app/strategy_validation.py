@@ -61,6 +61,15 @@ def _metrics(trades, cost_bps):
             "mean_trade_return_percent":round(mean(returns)*100,4) if returns else None,
             "wins":sum(x>0 for x in returns),"losses":sum(x<0 for x in returns),"flat":sum(x==0 for x in returns)}
 
+def _comparison(trades,cost_bps,entry,exit_price):
+    metrics=_metrics(trades,cost_bps)
+    # Same holdout interval and starting capital. Buy and hold pays a single
+    # round trip; strategy pays the stated cost per simulated position.
+    reference=(exit_price/entry)*(1-cost_bps/10000)**2
+    metrics["net_same_stock_buy_hold_percent"]=round((reference-1)*100,4)
+    metrics["net_difference_vs_same_stock_pp"]=round(metrics["net_return_percent"]-(reference-1)*100,4)
+    return metrics
+
 def replay(payload, today):
     try:
         candles=_history(payload,today)
@@ -96,9 +105,9 @@ def replay(payload, today):
             i+=hold
         results[horizon]={"status":"REPLAY_OBSERVED" if trades else "NO_SIGNALS","trades":len(trades),
             "examined_signal_dates":examined,"holding_sessions":hold,"test_start":candles[start].date,
-            "test_end":candles[-1].date,"cost_scenarios":[_metrics(trades,cost) for cost in COSTS] if trades else [],
+            "test_end":candles[-1].date,"cost_scenarios":[_comparison(trades,cost,candles[start+1].open,candles[-1].close) for cost in COSTS] if trades else [],
             "small_sample":len(trades)<30,
             "gross_buy_hold_percent":round((candles[-1].close/candles[start+1].open-1)*100,4)}
     return {"status":"HISTORICAL_REPLAY_ONLY","methodology":VERSION,
             "history_count":len(candles),"as_of":candles[-1].date,"horizons":results,
-            "notice":"Fixed technical rules, chronological holdout, next-session open and fixed-session close. Costs are illustrative; gross same-asset buy-and-hold and matched gross exposure are not market index benchmarks. Current registry selection and revised history can introduce bias. No validated forward performance or recommendation."}
+            "notice":"Fixed technical rules, chronological holdout, next-session open and fixed-session close. Costs are illustrative; cost-adjusted same-stock buy-and-hold uses the same test interval with one round trip; it and matched gross exposure are not market index benchmarks. Current registry selection and revised history can introduce bias. No validated forward performance or recommendation."}
