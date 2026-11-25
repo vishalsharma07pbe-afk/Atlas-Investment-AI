@@ -103,7 +103,8 @@ final class PortfolioThesisSummary {
       }
     }
    }else gaps.add("Comparable complete quarterly ownership reports unavailable.");
-   gaps.add("Promoter pledges, bulk/block transactions, official filings, comparable financial periods, intrinsic valuation and company-specific institutional trades remain unverified.");
+   gaps.add("Official filings, comparable financial periods, intrinsic valuation and company-specific institutional flows remain unverified.");
+   gaps.add("Promoter pledges and bulk/block transactions remain unverified; ownership changes do not establish stock-specific trades.");
   }else if("MUTUAL_FUND".equals(row.path("asset_type").asText())){
    JsonNode history=row.path("fund_history_evidence");
    Double cagr=number(history,"cagr_3y_percent"),drawdown=number(history,"drawdown_3y_percent"),vol=number(history,"weekly_volatility_percent");
