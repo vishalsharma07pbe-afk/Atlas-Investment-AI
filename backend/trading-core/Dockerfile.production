@@ -1,7 +1,15 @@
+# Optional BuildKit named context maven-seed can supply cached Maven artifacts.
+# Normal local and release builds use this empty dependency seed stage.
+FROM maven:3.9-eclipse-temurin-21@sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320 AS maven-seed
+RUN mkdir -p /repository
+
 FROM maven:3.9-eclipse-temurin-21@sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320 AS build
 WORKDIR /workspace
 COPY pom.xml maven-build-retry.sh ./
-RUN sh maven-build-retry.sh -DskipTests dependency:go-offline
+RUN --mount=type=bind,from=maven-seed,source=/repository,target=/tmp/maven-seed,ro \
+    mkdir -p /root/.m2/repository \
+    && cp -a /tmp/maven-seed/. /root/.m2/repository/ \
+    && sh maven-build-retry.sh -DskipTests dependency:go-offline
 COPY src ./src
 RUN sh maven-build-retry.sh -DskipTests package
 
