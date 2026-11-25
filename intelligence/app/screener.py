@@ -3,7 +3,7 @@ from datetime import date, timedelta
 from math import isfinite
 
 from .technical import Candle, compute
-from .horizon_research import evaluate, summarize
+from .horizon_research import evaluate, summarize, MIN_HISTORY as HORIZON_MIN_HISTORY
 from .price_structure import analyze as price_structure
 
 MIN_HISTORY = 21
@@ -15,6 +15,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
     today = as_of or date.today()
     rows = []
     horizon_evaluations = []
+    history_coverage = {h:0 for h in HORIZON_MIN_HISTORY}
     skipped = {"NO_HISTORY": 0, "STALE": 0, "INVALID": 0, "MIXED_ADJUSTMENT": 0}
     if batch_loaded:
         skipped["RAW_CORPORATE_ACTION"] = 0
@@ -83,6 +84,9 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                         candidate["price_structure"]=price_structure(candles,ind,horizon,
                             calendar_verified=batch_loaded and expected_session is not None)
                 horizon_evaluations.append(evaluation)
+                for horizon,minimum in HORIZON_MIN_HISTORY.items():
+                    if len(candles)>=minimum:
+                        history_coverage[horizon]+=1
             rows.append(row)
         except (KeyError, TypeError, ValueError, OverflowError, ZeroDivisionError):
             skipped["INVALID"] += 1
@@ -103,4 +107,6 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
     }
     if include_horizons:
         result["horizons"] = summarize(horizon_evaluations)
+        result["history_coverage"] = {h:{"minimum_observations":minimum,"eligible_histories":history_coverage[h]}
+                                      for h,minimum in HORIZON_MIN_HISTORY.items()}
     return result
