@@ -106,6 +106,7 @@ services:
       ATLAS_AUTOMATIC_AI_REVIEW_ENABLED: ${ATLAS_AUTOMATIC_AI_REVIEW_ENABLED:-true}
       ATLAS_AUTOMATIC_COMPANY_RESEARCH_ENABLED: ${ATLAS_AUTOMATIC_COMPANY_RESEARCH_ENABLED:-true}
       ATLAS_AUTOMATIC_INSTITUTIONAL_ENABLED: ${ATLAS_AUTOMATIC_INSTITUTIONAL_ENABLED:-true}
+      ATLAS_DEAL_REPORTS_ENABLED: ${ATLAS_DEAL_REPORTS_ENABLED:-false}
       ATLAS_AUTOMATIC_NEWS_ENABLED: ${ATLAS_AUTOMATIC_NEWS_ENABLED:-true}
       ATLAS_PORTFOLIO_THESIS_ENABLED: ${ATLAS_PORTFOLIO_THESIS_ENABLED:-true}
       ATLAS_AUTOMATIC_EXTERNAL_AI_ALLOWED: ${ATLAS_AUTOMATIC_EXTERNAL_AI_ALLOWED:-false}
@@ -120,6 +121,7 @@ services:
       ATLAS_RESEARCH_JOURNAL_FILE: /app/journal/entries.json
     volumes:
       - ./data/entitlements:/app/entitlements:ro
+      - ./data/deal-reports:/app/deal-reports:ro
       - navcatalog:/app/nav-data
       - ingestionledger:/app/ingestion-data
       - flowledger:/app/flow-data
