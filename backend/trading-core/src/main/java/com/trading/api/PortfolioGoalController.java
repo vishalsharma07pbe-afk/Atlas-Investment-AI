@@ -39,7 +39,9 @@ public class PortfolioGoalController {
       ORDER BY p.symbol,p.id LIMIT 200
       """,(rs,row)->new AvailableHolding(rs.getLong("id"),rs.getString("symbol"),rs.getString("asset_type")),owner);
     List<Goal> goals=reader.read(owner,today);
-    return Map.of("as_of",today.toString(),"goals",goals,"availableHoldings",available,"notice",
+    Map<UUID,PortfolioGoalRisk.Research> risk=new LinkedHashMap<>();
+    for(Goal goal:goals)risk.put(goal.id(),PortfolioGoalRisk.assess(goal,today));
+    return Map.of("as_of",today.toString(),"goals",goals,"availableHoldings",available,"goalRisk",risk,"notice",
       "Recorded earmarked savings plus explicitly assigned whole holdings only. Reserved savings must exclude assigned investment values and other goals. Recent recorded prices are not verified live or liquidation values. Missing/stale assigned holdings withhold total progress and projections. Zero-growth assumes unchanged values and future month-end contributions through the deadline. No contribution presumed paid. Balances older than 30 days withhold forward estimates. No return forecast, taxes, fees, inflation, liquidity, affordability or bank connection.");
   }
   @PostMapping
