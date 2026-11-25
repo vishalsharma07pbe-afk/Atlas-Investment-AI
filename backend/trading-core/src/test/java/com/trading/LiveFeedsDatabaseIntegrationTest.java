@@ -52,6 +52,46 @@ class LiveFeedsDatabaseIntegrationTest {
   db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,isin,instrument_type) VALUES ('NSE_EQ|INE000A01001','NSE','FEEDTEST','INE000A01001','EQ') ON CONFLICT DO NOTHING");
   return db.queryForObject("SELECT id FROM instruments WHERE symbol='FEEDTEST'",Long.class);
  }
+ @Test void benchmarkHistoryUsesStoredSessionClosesAndNeverReplacesManualSource()throws Exception{
+  var service=new BenchmarkHistoryService(db,http,new org.springframework.transaction.support.TransactionTemplate(
+    new org.springframework.jdbc.datasource.DataSourceTransactionManager(Objects.requireNonNull(db.getDataSource()))));
+  LocalDate date=LocalDate.of(2025,1,6),unknown=date.plusDays(1);
+  long index=0;
+  boolean previouslyEnabled=Boolean.TRUE.equals(db.queryForObject("SELECT enabled FROM data_sources WHERE source_code='UPSTOX'",Boolean.class));
+  try{
+   db.update("UPDATE data_sources SET enabled=true WHERE source_code='UPSTOX'");
+   db.update("""
+     INSERT INTO instruments(exchange_id,symbol,series,source,instrument_type,exchange_token,listing_status,active)
+     VALUES ((SELECT id FROM exchanges WHERE code='NSE'),'NIFTY50','INDEX','UPSTOX','INDEX','NSE_INDEX|Nifty 50','ACTIVE',true)
+     ON CONFLICT DO NOTHING
+     """);
+   index=db.queryForObject("SELECT id FROM instruments WHERE exchange_token='NSE_INDEX|Nifty 50' AND instrument_type='INDEX'",Long.class);
+   // Choose an isolated stored session if no preexisting row has been supplied.
+   var open=java.sql.Timestamp.from(date.atTime(9,15).atZone(MarketCalendarService.IST).toInstant());
+   var close=java.sql.Timestamp.from(date.atTime(15,30).atZone(MarketCalendarService.IST).toInstant());
+   db.update("""
+     INSERT INTO market_sessions(exchange_id,session_date,session_type,open_time,close_time,is_trading_day)
+     VALUES ((SELECT id FROM exchanges WHERE code='NSE'),?,'REGULAR',?,?,true)
+     ON CONFLICT DO NOTHING
+     """,date,open,close);
+   when(http.text(contains("NSE_INDEX%7CNifty%2050/days/1"),eq("test-operator"),anyInt())).thenReturn("""
+     {"status":"success","data":{"candles":[["2025-01-06T00:00:00+05:30",100,110,90,105,0,0]]}}
+     """);
+   // The scheduled path uses the same public service. Invoke it via reflection only
+   // from this cross-package integration fixture.
+   var refresh=BenchmarkHistoryService.class.getDeclaredMethod("refresh",long.class,String.class,LocalDate.class,LocalDate.class);
+   refresh.setAccessible(true);
+   assertThat((Integer)refresh.invoke(service,index,"test-operator",date,date)).isEqualTo(1);
+   assertThat(db.queryForObject("SELECT close FROM market_candles WHERE instrument_id=? AND candle_time=?",BigDecimal.class,index,close)).isEqualByComparingTo("105");
+   db.update("UPDATE market_candles SET source_id=(SELECT id FROM data_sources WHERE source_code='MANUAL_CSV'),close=99 WHERE instrument_id=? AND candle_time=?",index,close);
+   assertThat((Integer)refresh.invoke(service,index,"test-operator",date,date)).isZero();
+   assertThat(db.queryForObject("SELECT close FROM market_candles WHERE instrument_id=? AND candle_time=?",BigDecimal.class,index,close)).isEqualByComparingTo("99");
+  }finally{
+   if(index!=0)db.update("DELETE FROM market_candles WHERE instrument_id=?",index);
+   db.update("UPDATE data_sources SET enabled=? WHERE source_code='UPSTOX'",previouslyEnabled);
+  }
+ }
+
  @Test void dailyAndIntradayUpsertsDeduplicateTimestamps()throws Exception{
   long instrument=seedStock();UUID owner=UUID.randomUUID();
   when(vault.decrypt(owner,"UPSTOX")).thenReturn("only-in-memory");
