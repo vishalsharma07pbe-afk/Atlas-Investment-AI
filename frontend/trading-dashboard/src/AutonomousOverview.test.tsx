@@ -112,3 +112,12 @@ it("shows matched release evidence without claiming numeric results",async()=>{
  expect(screen.getByText("matched official release headline")).toBeTruthy();
  expect(screen.getByText("Review the actual release; numerical surprise unverified.")).toBeTruthy();
 });
+
+it("shows observed benchmark regime with bounded sample breadth",async()=>{
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[],market_regime:{status:"OBSERVED_BENCHMARK_REGIME",trend:"RISING",as_of:"2026-11-24",benchmark_change_60_percent:8,volatility_20_annualized_percent:12,volatility_regime:"BELOW_HIGH_THRESHOLD",breadth:{status:"MATCHED_SAMPLE_ONLY",advancing:20,declining:30,unchanged:0,matched_count:50,selected_count:60},agreement:"OPPOSING_DAILY_BREADTH_REVIEW",notice:"Not a forecast or validated strategy."}})})));
+ render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}}>{null}</AutonomousOverview>);
+ expect(await screen.findByRole("region",{name:"Observed market regime"})).toBeTruthy();
+ expect(screen.getByText(/Nifty 50 · rising/)).toBeTruthy();
+ expect(screen.getByText(/20 advancing · 30 declining/)).toBeTruthy();
+ expect(screen.getByText(/opposing daily breadth review/)).toBeTruthy();
+});
