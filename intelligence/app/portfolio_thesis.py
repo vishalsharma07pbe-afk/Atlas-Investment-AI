@@ -217,7 +217,7 @@ def fund_evidence(rows,instant=None):
         if len(matches)!=1:
             continue
         disclosure=matches[0]
-        portfolios=fund_portfolios.matched([disclosure],instant)
+        portfolios=fund_portfolios.matched([disclosure],instant,include_exact_weights=True)
         result[str(code)]={"status":"SECONDARY_REPORTED_EVIDENCE",
             "disclosure":disclosure,"portfolio":portfolios[0] if len(portfolios)==1 else None,
             "notice":"Exact held scheme, secondary reported evidence only; official filings, benchmark history and forward growth remain unverified."}
