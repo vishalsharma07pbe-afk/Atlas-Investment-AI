@@ -83,7 +83,7 @@ function DiversificationDigest({report,correlation}:{report:Diversification;corr
  const weight=(value:number|null)=>value==null?"Not available":value.toFixed(2)+"%";
  return <section className="doctor-item" aria-label="Automatic diversification review">
   <h3>Diversification &amp; concentration</h3>
-  <p>{report.status==="NO_PRICED_VALUE"?"Recorded valuations unavailable.":report.status==="PARTIAL_COVERAGE"?"Partial classification or pricing coverage.":"Recorded positions classified; underlying fund exposures remain unknown."}</p>
+  <p>{report.status==="NO_PRICED_VALUE"?"Recorded valuations unavailable.":report.status==="PARTIAL_COVERAGE"?"Partial classification or pricing coverage.":"Recorded positions classified; direct allocation excludes fund underlying exposures."}</p>
   <div className="doctor-stats"><div><span>Resolved investment identities</span><strong>{report.resolved_identity_count}</strong></div><div><span>Top three resolved weights</span><strong>{weight(report.top_three_resolved_weight_percent)}</strong></div><div><span>Unpriced positions</span><strong>{report.unpriced_count}</strong></div></div>
   {report.allocation_research&&<AllocationResearchDigest report={report.allocation_research}/>}
   {report.exposure_stress&&<ExposureStressDigest report={report.exposure_stress}/>}
