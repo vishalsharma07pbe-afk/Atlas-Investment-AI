@@ -27,7 +27,8 @@ type OpportunityContext={status:string;held_excluded_count:number;ready_sections
  funds:{scheme_code:string;name:string;category:string;as_of:string;cagr_3y_percent:number;drawdown_3y_percent:number;context:string;identity_status:string}[]};
 type LevelRisk={look_through_status?:string;benchmark_status:string;concentration_status:string;sector_status:string;attention:{kind:string;label:string;value:number;threshold:number;unit:string;evidenceThrough:string}[];notice:string};
 type JournalLots={status:string;reconciled_count:number;holdings:{symbol:string;assetType:string;status:string;recordedQuantity:number|null;journalQuantity:number|null;journalOpenCost:number|null;recordedCost:number|null;openLots:{acquired:string;quantity:number;unitPrice:number;calendarDaysHeld:number}[]}[];notice:string};
-type Review={journal_lot_reconciliation?:JournalLots;portfolio_level_risk?:LevelRisk;ownership_changed_count?:number;ownership_attention_count?:number;ownership_monitor_notice?:string;fund_thesis_changed_count?:number;fund_thesis_attention_count?:number;fund_monitor_notice?:string;thesis_changed_count?:number;thesis_monitor_notice?:string;benchmark_risk_estimate?:BenchmarkRisk;opportunity_context?:OpportunityContext;diversification?:Diversification;equity_correlation?:Correlation;thesis_review_count?:number;generated_at:string;holding_count:number;attention_count:number;data_gap_count:number;holdings:HoldingReview[];notice:string};
+type SaleResearch={status:string;scenarios:{scope:string;kind:string;status:string;grossProceeds:number|null;provisionalOpenCost:number|null;grossGainOrLoss:number|null;sales:{identity:string;symbol:string;assetType:string;hypotheticalQuantity:number;grossProceeds:number;provisionalOpenCost:number;grossGainOrLoss:number;youngestCalendarDays:number;oldestCalendarDays:number}[];withheld:string[]}[];notice:string};
+type Review={sale_research?:SaleResearch;journal_lot_reconciliation?:JournalLots;portfolio_level_risk?:LevelRisk;ownership_changed_count?:number;ownership_attention_count?:number;ownership_monitor_notice?:string;fund_thesis_changed_count?:number;fund_thesis_attention_count?:number;fund_monitor_notice?:string;thesis_changed_count?:number;thesis_monitor_notice?:string;benchmark_risk_estimate?:BenchmarkRisk;opportunity_context?:OpportunityContext;diversification?:Diversification;equity_correlation?:Correlation;thesis_review_count?:number;generated_at:string;holding_count:number;attention_count:number;data_gap_count:number;holdings:HoldingReview[];notice:string};
 const pct=(value:number|null)=>value==null?"—":(value>0?"+":"")+value.toFixed(2)+"%";
 const statuses={REVIEW_REQUIRED:"Needs review",MONITOR:"Monitor",EVIDENCE_GAP:"Data needed"};
 
@@ -139,6 +140,24 @@ function HistoricalAllocationDigest({report,mixed=false}:{report:HistoricalAlloc
    </details>
    {mixed&&report.nav_sources&&<p className="muted tiny">NAV history sources: {Object.entries(report.nav_sources).map(([id,source])=>id+" · "+source).join("; ")}.</p>}
   </>:<p>{mixed?"Mixed-asset comparisons require complete recent valuations, exact Growth schemes and comparable single-source NAV and adjusted equity history across 2–12 investment identities.":report.status==="INSUFFICIENT_RECENT_EXACT_DIRECT_EQUITY_COVERAGE"?"Requires complete recent exact valuations for 2–12 direct-equity identities.":"Comparable adjusted return history is insufficient for a full direct-equity comparison."}</p>}
+  <p className="muted tiny">{report.notice}</p>
+ </section>;
+}
+function SaleResearchDigest({report}:{report:SaleResearch}){
+ const money=(v:number|null)=>v==null?"Withheld":new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",minimumFractionDigits:0,maximumFractionDigits:2}).format(v);
+ const label=(v:string)=>v.replace(/_/g," ").toLowerCase();
+ if(report.status==="NO_ELIGIBLE_ALLOCATION_SCENARIOS")return null;
+ return <section className="doctor-item" aria-label="Hypothetical sale gain and loss research">
+  <h3>Hypothetical sale gain and loss research</h3>
+  <p>Provisional recorded FIFO acquisition basis; before charges and taxes. Each scenario is separate and is not a sale instruction.</p>
+  <div className="tablewrap"><table><thead><tr><th>Allocation scenario</th><th>Gross proceeds</th><th>Provisional acquisition cost</th><th>Gross gain / loss</th></tr></thead><tbody>
+    {report.scenarios.map(s=><tr key={s.scope+":"+s.kind}><td>{label(s.scope)} · {label(s.kind)}{s.status==="NO_HYPOTHETICAL_SALE"?" · No sale":""}</td><td>{money(s.grossProceeds)}</td><td>{money(s.provisionalOpenCost)}</td><td>{money(s.grossGainOrLoss)}</td></tr>)}
+  </tbody></table></div>
+  {report.scenarios.filter(s=>s.sales.length>0||s.withheld.length>0).map(s=><details key={s.scope+":"+s.kind}><summary>{label(s.scope)} · {label(s.kind)} evidence</summary>
+   {s.withheld.length>0?<ul>{s.withheld.map((reason,i)=><li key={i}>{reason}</li>)}</ul>:<div className="tablewrap"><table><thead><tr><th>Investment</th><th>Hypothetical units</th><th>Proceeds</th><th>Cost</th><th>Gain / loss</th><th>Calendar days held (range)</th></tr></thead><tbody>
+    {s.sales.map(v=><tr key={v.identity}><td>{v.symbol}</td><td>{v.hypotheticalQuantity.toLocaleString("en-IN",{maximumFractionDigits:6})}</td><td>{money(v.grossProceeds)}</td><td>{money(v.provisionalOpenCost)}</td><td>{money(v.grossGainOrLoss)}</td><td>{v.youngestCalendarDays}–{v.oldestCalendarDays}</td></tr>)}
+   </tbody></table></div>}
+  </details>)}
   <p className="muted tiny">{report.notice}</p>
  </section>;
 }
@@ -293,6 +312,7 @@ export default function PortfolioDoctor({revision,onSettings,compact=false,onOpe
     {review.benchmark_risk_estimate&&<PortfolioBenchmarkRisk report={review.benchmark_risk_estimate} compact/>}
     {review.diversification&&<DiversificationDigest report={review.diversification} correlation={review.equity_correlation}/>}
     {review.journal_lot_reconciliation&&<JournalLotsDigest report={review.journal_lot_reconciliation}/>}
+    {review.sale_research&&<SaleResearchDigest report={review.sale_research}/>}
     {review.opportunity_context&&<OpportunityDigest report={review.opportunity_context}/>}
     <p className="muted tiny">Reviewed {new Date(review.generated_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})} IST. {review.notice}</p>
   </>}
