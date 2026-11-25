@@ -25,7 +25,8 @@ final class PortfolioEquityCorrelation {
   }
   var selected=byIsin.values().stream().sorted(Comparator.comparing(Identity::value).reversed().thenComparing(Identity::isin)).limit(MAX_IDENTITIES).toList();
   Map<String,Map<Interval,Double>> series=new HashMap<>();
-  if(selected.size()>=2)for(Identity item:selected){
+  boolean mixedCandidate=rows.stream().anyMatch(r->"MUTUAL_FUND".equals(r.get("asset_type"))&&r.get("market_value") instanceof BigDecimal v&&v.signum()>0);
+  if(selected.size()>=2||(selected.size()==1&&mixedCandidate))for(Identity item:selected){
    var history=jdbc.queryForList("""
      SELECT (candle_time AT TIME ZONE 'Asia/Kolkata')::date AS trade_date,
        close,source_id,adjustment_status FROM market_candles
@@ -70,6 +71,10 @@ final class PortfolioEquityCorrelation {
   Map<String,BigDecimal> values=new TreeMap<>();Map<String,String> symbols=new TreeMap<>();
   byIsin.forEach((isin,item)->{values.put(isin,item.value());symbols.put(isin,item.symbol());});
   out.put("historical_allocation",PortfolioHistoricalAllocation.assess(values,symbols,series,today,complete));
+  try{out.put("cross_asset_allocation",PortfolioCrossAssetAllocation.collect(jdbc,rows,series,today));}
+  catch(org.springframework.dao.DataAccessException ex){
+   out.put("cross_asset_allocation",Map.of("status","UNAVAILABLE_LOCAL_EVIDENCE","alternatives",List.of(),"notice","Local NAV history could not be read."));
+  }
   out.put("notice","Pearson correlation of matched consecutive observed return intervals from validated adjusted daily closes over the last 90 calendar days. At least 30 matched intervals, recent overlap and a single known source per series required. Up to 12 largest resolved priced direct equities. No fund look-through, future correlation or optimal allocation.");
   return out;
  }

@@ -208,3 +208,16 @@ it("shows historical fixed-weight alternatives and observed variability automati
  expect(screen.getByText("In-sample only.")).toBeTruthy();
  expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+it("renders mixed stock and fund allocation comparisons with their NAV sources",async()=>{
+ const holding={id:1,symbol:"TEST",asset_type:"EQUITY",exchange:"NSE",status:"MONITOR",weight_percent:80,recorded_return_percent:1,evidence_date:null,history_count:0,change_20_observations_percent:null,recent_peak_change_percent:null,findings:[],missing_evidence:[]};
+ const cross_asset_allocation={status:"HISTORICAL_COMPARISON_AVAILABLE",observations:40,first_date:"2026-10-15",last_date:"2026-11-24",equity_identity_count:1,fund_identity_count:1,nav_sources:{"AMFI:123456":"MFAPI"},lowest_observed_variability:"EQUAL_WEIGHTS",alternatives:[{kind:"EQUAL_WEIGHTS",sampleMeanPercent:0.11,sampleVolatilityPercent:0.72,largestWeightPercent:50,oneWayTurnoverPercent:30,weights:[{identity:"INE002A01018",symbol:"TEST",weightPercent:50},{identity:"AMFI:123456",symbol:"123456",weightPercent:50}]}],notice:"Mixed sample only."};
+ const diversification={status:"CLASSIFIED_PRICED_HOLDINGS",unpriced_count:0,unresolved_identity_count:0,resolved_identity_count:2,top_three_resolved_weight_percent:100,asset_exposure:[],direct_equity_sector_exposure:[],fund_category_exposure:[],sector_coverage_percent:100,fund_category_coverage_percent:100,review_prompts:[],notice:"Recorded prices."};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-25T10:00:00Z",holding_count:2,attention_count:0,data_gap_count:0,notice:"Research only",holdings:[holding,{...holding,id:2,symbol:"123456",asset_type:"MUTUAL_FUND",exchange:null,weight_percent:20}],diversification,equity_correlation:{status:"UNAVAILABLE",cross_asset_allocation,notice:"Adjusted history."}})})));
+ render(<PortfolioDoctor revision={0} onSettings={()=>{}}/>);
+ expect(await screen.findByRole("heading",{name:"Mixed stock and fund allocation alternatives"})).toBeTruthy();
+ expect(screen.getByText("0.72%")).toBeTruthy();
+ expect(screen.getByText(/NAV history sources: AMFI:123456 · MFAPI/)).toBeTruthy();
+ expect(screen.getByText("Mixed sample only.")).toBeTruthy();
+ expect(fetch).toHaveBeenCalledTimes(1);
+});
