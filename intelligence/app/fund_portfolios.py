@@ -232,3 +232,29 @@ def overlap(disclosures,instant=None):
                 "pairs":pairs,"notice":"Same-date distinct funds with at least 80% exact listed equity coverage. Sum of minimum common weights in original fund NAV percentages; excludes unmapped, foreign, cash, debt and other exposures. Zero does not prove no overlap."}
     except (OSError,sqlite3.Error,ValueError,TypeError,KeyError,AttributeError,InvalidOperation):
         return {"status":"INSUFFICIENT_COMPARABLE_PORTFOLIOS","pairs":[]}
+
+
+def research_identities(instant=None):
+    """Public disclosed equity identifiers only, no personal portfolio data."""
+    if not permitted():
+        return []
+    instant=instant or datetime.now(timezone.utc)
+    today=instant.astimezone(IST).date()
+    weights={}
+    try:
+        with nav_catalog._LOCK,closing(nav_catalog._connect()) as db:
+            rows=db.execute("SELECT fund_id,payload,collected_at FROM fund_portfolio_snapshot ORDER BY fund_id LIMIT 100").fetchall()
+            for row in rows:
+                if not fund_disclosures._day(row["collected_at"],today,2):
+                    continue
+                report=json.loads(row["payload"])
+                if report.get("fund_id")!=row["fund_id"] or not fund_disclosures._day(report["portfolio_date"],today,60):
+                    continue
+                for holding in report["equities"]:
+                    isin=holding["isin"]
+                    weight=Decimal(str(holding["weight_percent"]))
+                    if ISIN.fullmatch(isin) and weight.is_finite() and 0<weight<=100:
+                        weights[isin]=max(weights.get(isin,Decimal(0)),weight)
+    except (OSError,sqlite3.Error,ValueError,TypeError,KeyError,AttributeError,InvalidOperation):
+        return []
+    return sorted(weights,key=lambda isin:(-weights[isin],isin))[:200]
