@@ -193,6 +193,20 @@ jobs:
             echo "::add-mask::$value"
             echo "$key=$value" >> "$GITHUB_ENV"
           done
+      # Reuse resolved dependencies from the native Spring test cache on cold
+      # Docker builds. Do not copy application binaries, settings or credentials.
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository
+          key: atlas-maven-tests-v2-${{ runner.os }}-${{ runner.arch }}-backend-${{ hashFiles('backend/trading-core/pom.xml') }}
+          restore-keys: |
+            atlas-maven-tests-v2-${{ runner.os }}-${{ runner.arch }}-backend-
+            setup-java-Linux-x64-maven-
+      - name: Prepare optional Maven dependency seed
+        run: |
+          mkdir -p "$RUNNER_TEMP/atlas-maven-seed/repository" "$HOME/.m2/repository"
+          cp -a "$HOME/.m2/repository/." "$RUNNER_TEMP/atlas-maven-seed/repository/"
+          find "$RUNNER_TEMP/atlas-maven-seed/repository" -name '*.lastUpdated' -delete
       # Build the real development Dockerfile, retaining its dependency layers
       # between CI runs. Do not reuse a stale application image.
       - uses: docker/setup-buildx-action@v3
@@ -201,6 +215,7 @@ jobs:
         with:
           context: backend/trading-core
           file: backend/trading-core/Dockerfile
+          build-contexts: maven-seed=${{ runner.temp }}/atlas-maven-seed
           load: true
           tags: atlas-ci-contract-backend:latest
           cache-from: type=gha,scope=atlas-local-backend-v1
