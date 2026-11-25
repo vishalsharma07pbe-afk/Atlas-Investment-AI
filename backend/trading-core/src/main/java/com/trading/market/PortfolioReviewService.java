@@ -45,6 +45,10 @@ public class PortfolioReviewService {
     var rows=jdbc.queryForList("""
       SELECT p.id,p.symbol,p.asset_type,p.quantity*p.average_cost AS invested,
         p.quantity*p.last_price AS market_value,p.price_as_of,
+        (p.last_price IS NOT NULL AND p.last_price>=0 AND p.price_as_of IS NOT NULL
+          AND p.price_as_of<=now()
+          AND (now() AT TIME ZONE 'Asia/Kolkata')::date-(p.price_as_of AT TIME ZONE 'Asia/Kolkata')::date
+            <= CASE WHEN p.asset_type='MUTUAL_FUND' THEN 7 ELSE 5 END) AS recorded_valuation_recent,
         i.exchange,i.id AS instrument_id,i.isin,s.scheme_code AS exact_scheme_code,s.category AS scheme_category,
         CASE WHEN p.asset_type='EQUITY' THEN eq.n ELSE mf.n END AS history_count,
         CASE WHEN p.asset_type='EQUITY' THEN eq.latest_date ELSE mf.latest_date END AS evidence_date,
@@ -117,6 +121,7 @@ public class PortfolioReviewService {
     report=PortfolioThesisChanges.attach(thesis.enrich(report),previous,json,now);
     report=PortfolioFundThesisChanges.attach(report,previous,json,now);
     report=PortfolioOwnershipChanges.attach(report,previous,json,now);
+    report.put("portfolio_level_risk",PortfolioLevelRisk.assess(report,json,today));
     report.put("thesis_monitor_version","ANNUAL_DIRECTION_V1");
     try{
       jdbc.update("""
@@ -190,6 +195,7 @@ public class PortfolioReviewService {
       Map<String,Object> item=new LinkedHashMap<>();
       item.put("id",r.get("id"));item.put("symbol",r.get("symbol"));item.put("asset_type",r.get("asset_type"));
       item.put("exchange",r.get("exchange"));item.put("isin",r.get("isin"));item.put("status",status);item.put("weight_percent",weight);
+      item.put("recorded_valuation_recent",Boolean.TRUE.equals(r.get("recorded_valuation_recent")));
       item.put("recorded_market_value",value);item.put("exact_scheme_code",r.get("exact_scheme_code"));item.put("scheme_category",r.get("scheme_category"));item.put("recorded_return_percent",returnPct);item.put("evidence_date",observed==null?null:observed.toString());
       item.put("history_count",count);item.put("change_20_observations_percent",momentum);
       item.put("recent_peak_change_percent",drawdown);item.put("findings",findings);item.put("missing_evidence",missing);
