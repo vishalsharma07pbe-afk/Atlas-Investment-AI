@@ -78,6 +78,66 @@ def exact_sector_evidence(equities,instant,reports):
     return result
 
 
+MULTI_METRICS=("REVENUE","NET_PROFIT","OPERATING_PROFIT","OPERATING_CASH_FLOW")
+
+
+def _multi_year_exposure(holdings):
+    """Aggregate only per-company diagnostics produced by the shared quality engine.
+
+    Keep distinct fiscal windows separate, and use original reported fund weights
+    rather than reweighting the researched subset to 100%.
+    """
+    metrics=defaultdict(lambda:{"coverage":0.0,"consistent_increases":0.0,
+                                "repeated_declines":0.0,"nonpositive_observations":0.0})
+    cash=defaultdict(lambda:{"coverage":0.0,"below_profit":0.0,"negative_cash_years":0.0})
+    covered=flagged=cash_covered=0.0
+    for weight,quality in holdings:
+        assessed=review=False
+        for row in quality.get("metrics",[]):
+            key=row["metric"]
+            if key not in MULTI_METRICS:
+                continue
+            periods=[p["period"] for p in row["observations"]]
+            if len(periods)!=4 or any(not PERIOD.fullmatch(p) for p in periods):
+                continue
+            bucket=metrics[(key,*periods)]
+            bucket["coverage"]+=weight
+            assessed=True
+            if row["increasing_years"]==3 and row["nonpositive_years"]==0:
+                bucket["consistent_increases"]+=weight
+            if row["decreasing_years"]>=2:
+                bucket["repeated_declines"]+=weight
+                review=True
+            if row["nonpositive_years"]>0:
+                bucket["nonpositive_observations"]+=weight
+                review=True
+        conversion=quality.get("cash_conversion")
+        if conversion is not None:
+            key=(conversion["first_period"],conversion["last_period"])
+            bucket=cash[key]
+            bucket["coverage"]+=weight
+            cash_covered+=weight
+            assessed=True
+            if conversion["cumulative_operating_cash"]<conversion["cumulative_net_profit"]:
+                bucket["below_profit"]+=weight
+                review=True
+            if conversion["negative_cash_years"]>0:
+                bucket["negative_cash_years"]+=weight
+                review=True
+        if assessed:
+            covered+=weight
+        if review:
+            flagged+=weight
+    def rounded(row):
+        return {k:round(v,4) for k,v in row.items()}
+    return {"status":"REPORTED_MULTI_YEAR_EXPOSURE" if covered else "INSUFFICIENT_MULTI_YEAR_EVIDENCE",
+        "assessed_weight_percent":round(covered,4),"review_weight_percent":round(flagged,4),
+        "cash_conversion_coverage_percent":round(cash_covered,4),
+        "metrics":[{"metric":k[0],"periods":list(k[1:]),**rounded(v)} for k,v in sorted(metrics.items())],
+        "cash_conversion":[{"first_period":k[0],"last_period":k[1],**rounded(v)} for k,v in sorted(cash.items())],
+        "notice":"Original reported fund weights, not normalized equity weights. Review categories can overlap; total review weight counts each holding once. Four-year historical provider reports, not forecasts or independently verified business quality. Cash conversion is not free cash flow and differs by sector."}
+
+
 def summarize(equities,instant,reports=None):
     reports=load(equities,instant) if reports is None else reports
     today=instant.astimezone(IST).date()
@@ -88,11 +148,14 @@ def summarize(equities,instant,reports=None):
     valuation=defaultdict(lambda:{"coverage":0.0,"above":0.0,"below":0.0,"equal":0.0})
     seen=set()
     covered=0.0
+    exact_weight=0.0
+    multi_year=[]
     for h in equities:
         isin,w=h.get("isin"),h.get("weight_percent")
         if not isinstance(isin,str) or not re.fullmatch(r"INE[A-Z0-9]{9}",isin) or not _number(w) or not 0<w<=100 or isin in seen:
             return {"status":"INVALID_HOLDING_IDENTITIES","notice":"No metrics calculated for conflicting holding weights."}
         seen.add(isin)
+        exact_weight+=w
         raw=reports.get(isin)
         if not isinstance(raw,dict) or raw.get("isin")!=isin:
             continue
@@ -132,12 +195,17 @@ def summarize(equities,instant,reports=None):
                 bucket[{"ABOVE_SECTOR":"above","BELOW_SECTOR":"below","AT_SECTOR":"equal"}[ratio["position"]]]+=w
             if raw.get("available_sections",0)>0:
                 covered+=w
+                multi_year.append((w,report["fundamental_quality"]["multi_year_quality"]))
         except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
             # A malformed cached report cannot supply an outlook.
             continue
     def rounded(data):
         return {k:round(v,4) for k,v in data.items()}
+    multi=_multi_year_exposure(multi_year)
+    multi["exact_equity_weight_percent"]=round(exact_weight,4)
+    multi["unassessed_exact_equity_weight_percent"]=round(max(0.0,exact_weight-multi["assessed_weight_percent"]),4)
     return {"status":"REPORTED_HISTORICAL_DRIVERS_ONLY" if covered else "COLLECTING_COMPANY_EVIDENCE",
+        "multi_year_quality":multi,
         "cached_report_weight_percent":round(covered,4),
         "sector_classified_weight_percent":round(sum(sectors.values()),4),
         "sector_weights":[{"sector":k,"weight_percent":round(v,4)} for k,v in sorted(sectors.items(),key=lambda kv:(-kv[1],kv[0]))],

@@ -57,3 +57,31 @@ class FundUnderlyingResearchTests(unittest.TestCase):
         with patch.object(coordinator.fund_portfolios,"permitted",return_value=True),patch.object(coordinator.automatic_company_evidence,"permitted",return_value=True),patch.object(coordinator.fund_portfolios,"research_identities",return_value=[A,B]),patch.object(coordinator.automatic_company_evidence,"refresh") as refresh:
             self.assertEqual(coordinator._execute_job("FUND_COMPANY_EVIDENCE"),"PASS_COMPLETED")
             refresh.assert_called_once_with({"enabled":True,"sections":[]},coordinator._connect,explicit_isins=[A,B])
+
+    def test_multi_year_exposure_uses_distinct_holdings_and_fiscal_windows(self):
+        def four(isin,profits,cash,month="Mar"):
+            row=report(isin)
+            def series(name,values):
+                return {"name":name,"history":[{"period":f"{month} {y}","value":v}
+                    for y,v in zip(range(2023,2027),values)]}
+            block={"statement_type":"consolidated","time_period":"yearly","units":"crore"}
+            row["sections"]["income_statement"]["data"]={**block,"rows":[
+                series("revenue",[100,110,120,130]),series("net profit",profits)]}
+            row["sections"]["cash_flow"]={"status":"AVAILABLE","data":{**block,"rows":[series("operating",cash)]}}
+            return row
+        holdings=[{"isin":A,"weight_percent":40},{"isin":B,"weight_percent":25},{"isin":C,"weight_percent":10}]
+        reports={A:four(A,[10,20,30,40],[20,30,40,50]),B:four(B,[40,30,20,10],[10,-5,5,1],"Jun")}
+        result=research.summarize(holdings,NOW,reports)["multi_year_quality"]
+        self.assertEqual(result["assessed_weight_percent"],65)
+        self.assertEqual(result["review_weight_percent"],25)
+        self.assertEqual(result["cash_conversion_coverage_percent"],65)
+        self.assertEqual(result["exact_equity_weight_percent"],75)
+        self.assertEqual(result["unassessed_exact_equity_weight_percent"],10)
+        profit=[r for r in result["metrics"] if r["metric"]=="NET_PROFIT"]
+        self.assertEqual(len(profit),2)
+        self.assertEqual(profit[0]["consistent_increases"],40)
+        self.assertEqual(profit[1]["repeated_declines"],25)
+        self.assertEqual(result["cash_conversion"][1]["below_profit"],25)
+        self.assertEqual(result["cash_conversion"][1]["negative_cash_years"],25)
+        self.assertEqual(research.summarize(holdings,NOW,{})["multi_year_quality"]["status"],"INSUFFICIENT_MULTI_YEAR_EVIDENCE")
+        self.assertEqual(research.summarize(holdings,NOW,{})["multi_year_quality"]["unassessed_exact_equity_weight_percent"],75)

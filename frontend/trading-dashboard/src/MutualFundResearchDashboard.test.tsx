@@ -60,7 +60,7 @@ it("labels overlap as a lower bound rather than total portfolio overlap",async()
 });
 
 it("distinguishes reported underlying fundamentals from a qualified growth outlook",async()=>{
- const item={scheme_code:"118955",scheme_name:"Underlying Test Fund",portfolio_date:"2026-10-31",reported_weight_total_percent:100,asset_allocation_percent:{Equity:80,Cash:20},exact_listed_equity_weight_percent:80,top_10_exact_equity_weight_percent:45,exact_equity_count:3,cached_company_evidence_weight_percent:65,cached_company_count:2,top_holdings:[],notice:"Secondary composition.",underlying_research:{status:"REPORTED_HISTORICAL_DRIVERS_ONLY",annual_statement_weight_percent:65,deterioration_review_weight_percent:25,sector_weights:[{sector:"Example sector",weight_percent:65}],annual_trends:[{metric:"NET_PROFIT",previous_period:"2025-03",latest_period:"2026-03",coverage:65,increased:40,decreased:25,unchanged:0,negative_latest:25}],relative_valuation:[{metric:"PE",coverage:65,above:40,below:25,equal:0,period_status:"UNVERIFIED"}],notice:"No forecast or qualified Growth Outlook."}};
+ const item={scheme_code:"118955",scheme_name:"Underlying Test Fund",portfolio_date:"2026-10-31",reported_weight_total_percent:100,asset_allocation_percent:{Equity:80,Cash:20},exact_listed_equity_weight_percent:80,top_10_exact_equity_weight_percent:45,exact_equity_count:3,cached_company_evidence_weight_percent:65,cached_company_count:2,top_holdings:[],notice:"Secondary composition.",underlying_research:{status:"REPORTED_HISTORICAL_DRIVERS_ONLY",multi_year_quality:{status:"REPORTED_MULTI_YEAR_EXPOSURE",assessed_weight_percent:65,review_weight_percent:25,cash_conversion_coverage_percent:65,exact_equity_weight_percent:80,unassessed_exact_equity_weight_percent:15,metrics:[{metric:"NET_PROFIT",periods:["2023-03","2024-03","2025-03","2026-03"],coverage:65,consistent_increases:40,repeated_declines:25,nonpositive_observations:0}],cash_conversion:[{first_period:"2023-03",last_period:"2026-03",coverage:65,below_profit:25,negative_cash_years:25}],notice:"Original reported fund weights."},annual_statement_weight_percent:65,deterioration_review_weight_percent:25,sector_weights:[{sector:"Example sector",weight_percent:65}],annual_trends:[{metric:"NET_PROFIT",previous_period:"2025-03",latest_period:"2026-03",coverage:65,increased:40,decreased:25,unchanged:0,negative_latest:25}],relative_valuation:[{metric:"PE",coverage:65,above:40,below:25,equal:0,period_status:"UNVERIFIED"}],notice:"No forecast or qualified Growth Outlook."}};
  const result={...response,portfolio_evidence:{status:"SECONDARY_COMPOSITION_ONLY",notice:"Reported data only.",items:[item]}};
  vi.stubGlobal("fetch",vi.fn(async(url:string)=>({ok:true,json:async()=>url.includes("historical-watch")?{category:"LARGE_CAP",items:[],universe_count:120,sample_count:20,eligible_count:0,automatic_collection_enabled:true,notice:"Historical only"}:result})));
  render(<MutualFundResearchDashboard onExplore={()=>{}}/>);
@@ -68,6 +68,10 @@ it("distinguishes reported underlying fundamentals from a qualified growth outlo
  fireEvent.click(screen.getByText("Underlying company fundamentals"));
  expect(screen.getByText("Weight with dated annual statements")).toBeTruthy();
  expect(screen.getByText(/coverage 65.00% · increased 40.00%/)).toBeTruthy();
+ expect(screen.getByText("Multi-year underlying business quality")).toBeTruthy();
+ expect(screen.getByText("Exact equity weight without four-year evidence")).toBeTruthy();
+ fireEvent.click(screen.getByText("Four-year financial consistency by fiscal period"));
+ expect(screen.getByText(/repeated declines 25.00%/)).toBeTruthy();
  expect(screen.getByText("No forecast or qualified Growth Outlook.")).toBeTruthy();
  expect(screen.getAllByText("No fund currently qualifies")).toHaveLength(2);
 });
