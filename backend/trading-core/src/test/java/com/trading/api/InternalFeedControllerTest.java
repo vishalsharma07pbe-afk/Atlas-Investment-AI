@@ -54,6 +54,19 @@ class InternalFeedControllerTest {
     verifyNoInteractions(jdbc);
   }
 
+  @Test void strategyBenchmarkRequiresCredentialAndUsesFixedPublicIndex() {
+    JdbcTemplate jdbc=mock(JdbcTemplate.class);
+    HttpServletRequest request=mock(HttpServletRequest.class);
+    var api=controller(jdbc,"service-secret");
+    assertThatThrownBy(()->api.strategyBenchmark(request)).isInstanceOf(ResponseStatusException.class);
+    verifyNoInteractions(jdbc);
+    when(request.getHeader("X-Atlas-Service-Token")).thenReturn("service-secret");
+    when(jdbc.queryForList(contains("NSE_INDEX|Nifty 50"))).thenReturn(List.of(Map.of("close",100)));
+    assertThat(api.strategyBenchmark(request)).containsEntry("benchmark_key","NSE_INDEX|Nifty 50")
+      .containsEntry("kind","PRICE_INDEX").doesNotContainKeys("user_id","quantity");
+    verify(jdbc).queryForList(contains("NSE_INDEX|Nifty 50"));
+  }
+
   @Test void sessionContextRequiresInternalCredential() {
     JdbcTemplate jdbc=mock(JdbcTemplate.class);
     HttpServletRequest request=mock(HttpServletRequest.class);

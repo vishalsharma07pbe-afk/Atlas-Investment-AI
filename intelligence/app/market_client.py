@@ -21,6 +21,8 @@ def _internal_path(path:str)->str:
             return "/api/v1/internal/feed/fund-history?category="+category
     if path == "/api/v1/portfolio-research-identities":
         return "/api/v1/internal/feed/portfolio-research-identities"
+    if path == "/api/v1/market-data/strategy-benchmark":
+        return "/api/v1/internal/feed/strategy-benchmark"
     if path == "/api/v1/market-data/session-context":
         return "/api/v1/internal/feed/session-context"
     if path == "/api/v1/data-health/summary":

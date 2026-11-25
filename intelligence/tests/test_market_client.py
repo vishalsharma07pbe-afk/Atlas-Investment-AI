@@ -42,6 +42,12 @@ class MarketClientTest(unittest.TestCase):
         with self.assertRaises(HTTPException):
             market_client._internal_path("/api/v1/market-data/session-context?exchange=OTHER")
 
+    def test_strategy_benchmark_uses_fixed_internal_route(self):
+        self.assertEqual(market_client._internal_path("/api/v1/market-data/strategy-benchmark"),
+                         "/api/v1/internal/feed/strategy-benchmark")
+        with self.assertRaises(HTTPException):
+            market_client._internal_path("/api/v1/market-data/strategy-benchmark?key=OTHER")
+
     def test_rejects_unapproved_backend_route(self):
         with patch.dict("os.environ",{"INTERNAL_SERVICE_TOKEN":"service-secret"}):
             with self.assertRaises(HTTPException) as raised:

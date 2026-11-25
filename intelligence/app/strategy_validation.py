@@ -70,6 +70,61 @@ def _comparison(trades,cost_bps,entry,exit_price):
     metrics["net_difference_vs_same_stock_pp"]=round(metrics["net_return_percent"]-(reference-1)*100,4)
     return metrics
 
+def attach_market_benchmark(result,payload,benchmark,today):
+    """Compare net simulation with the non-tradable Nifty 50 price index.
+
+    Require exactly the same observed dates throughout the exposure interval;
+    never interpolate missing dates or treat an absent index as a flat return.
+    """
+    try:
+        equity=_history(payload,today)
+        if not isinstance(benchmark,dict) or benchmark.get("benchmark_key")!="NSE_INDEX|Nifty 50" or benchmark.get("kind")!="PRICE_INDEX":
+            raise ValueError("INDEX_IDENTITY")
+        rows=benchmark["candles"]
+        if not isinstance(rows,list) or len(rows)>400:
+            raise ValueError("INDEX_HISTORY")
+        index={}
+        for row in rows:
+            if not isinstance(row,dict):
+                raise ValueError("INDEX_ROW")
+            day=date.fromisoformat(row["trade_date"])
+            if day>=today or day.isoformat() in index or row.get("source_code")!="UPSTOX":
+                raise ValueError("INDEX_DATE_OR_SOURCE")
+            if type(row.get("revision")) is not int or row["revision"]<1:
+                raise ValueError("INDEX_REVISION")
+            o,c=float(row["open"]),float(row["close"])
+            if not all(isfinite(x) and x>0 for x in (o,c)):
+                raise ValueError("INDEX_PRICE")
+            index[day.isoformat()]=(o,c)
+    except (ValueError,TypeError,KeyError,OverflowError):
+        equity=[]
+        index={}
+    for horizon in result.get("horizons",{}).values():
+        if horizon.get("status")!="REPLAY_OBSERVED":
+            continue
+        horizon["market_benchmark_status"]="UNAVAILABLE"
+        for field in ("market_benchmark_start","market_benchmark_end","market_benchmark_observations"):
+            horizon.pop(field,None)
+        for cost in horizon["cost_scenarios"]:
+            cost.pop("gross_nifty50_price_index_percent",None)
+            cost.pop("net_difference_vs_nifty50_pp",None)
+        dates=[c.date for c in equity if horizon["test_start"]<c.date<=horizon["test_end"]]
+        if not dates or dates[-1]!=horizon["test_end"]:
+            continue
+        matched=sorted(d for d in index if dates[0]<=d<=dates[-1])
+        if dates!=matched:
+            continue
+        gross=(index[dates[-1]][1]/index[dates[0]][0]-1)*100
+        if not isfinite(gross):
+            continue
+        for cost in horizon["cost_scenarios"]:
+            cost["gross_nifty50_price_index_percent"]=round(gross,4)
+            cost["net_difference_vs_nifty50_pp"]=round(cost["net_return_percent"]-gross,4)
+        horizon["market_benchmark_status"]="MATCHED_PRICE_INDEX"
+        horizon["market_benchmark_start"]=dates[0]
+        horizon["market_benchmark_end"]=dates[-1]
+        horizon["market_benchmark_observations"]=len(dates)
+
 def replay(payload, today):
     try:
         candles=_history(payload,today)
