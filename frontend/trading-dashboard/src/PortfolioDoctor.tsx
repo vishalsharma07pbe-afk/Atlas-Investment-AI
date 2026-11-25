@@ -9,7 +9,8 @@ type FundHistory={scheme_name:string;nav:number;nav_date:string;cagr_3y_percent:
 type ThesisFinding={statement:string;source:string};
 type ThesisSummary={status:string;risks:ThesisFinding[];observations:ThesisFinding[];review_prompts:ThesisFinding[];gaps:string[];notice:string};
 type ThesisChange={metric:string;previous_period:string;current_period:string;previous_direction:string;current_direction:string;observed_at:string};
-type HoldingReview={thesis_changes?:ThesisChange[];thesis_monitor_status?:string;thesis_summary?:ThesisSummary;thesis_evidence?:Thesis;fund_history_evidence?:FundHistory;id:number;symbol:string;asset_type:string;exchange:string|null;status:"REVIEW_REQUIRED"|"MONITOR"|"EVIDENCE_GAP";weight_percent:number|null;recorded_return_percent:number|null;evidence_date:string|null;history_count:number;change_20_observations_percent:number|null;recent_peak_change_percent:number|null;findings:string[];missing_evidence:string[]};
+type FundThesisEvidence={status:string;notice:string;disclosure:{scheme_name:string;source:string;plan:string;ter_percent?:number|null;ter_date?:string|null;riskometer?:string|null;benchmark?:string|null;aum_cr_all_plans?:number|null;aum_date?:string|null;fund_managers?:string|null;exit_load?:string|null;document_date?:string|null;conflicts?:string[]};portfolio?:{portfolio_date:string;source:string;exact_listed_equity_weight_percent:number;top_10_exact_equity_weight_percent:number;top_holdings?:{isin:string;name:string;weight_percent:number}[];underlying_research?:{status:string;annual_statement_weight_percent?:number;deterioration_review_weight_percent?:number;notice:string};notice:string}|null};
+type HoldingReview={fund_thesis_evidence?:FundThesisEvidence;thesis_changes?:ThesisChange[];thesis_monitor_status?:string;thesis_summary?:ThesisSummary;thesis_evidence?:Thesis;fund_history_evidence?:FundHistory;id:number;symbol:string;asset_type:string;exchange:string|null;status:"REVIEW_REQUIRED"|"MONITOR"|"EVIDENCE_GAP";weight_percent:number|null;recorded_return_percent:number|null;evidence_date:string|null;history_count:number;change_20_observations_percent:number|null;recent_peak_change_percent:number|null;findings:string[];missing_evidence:string[]};
 type Exposure={label:string;weight_percent:number};
 type Diversification={status:string;unpriced_count:number;unresolved_identity_count:number;resolved_identity_count:number;top_three_resolved_weight_percent:number|null;asset_exposure:Exposure[];direct_equity_sector_exposure:Exposure[];fund_category_exposure:Exposure[];sector_coverage_percent:number|null;fund_category_coverage_percent:number|null;review_prompts:string[];notice:string};
 type Correlation={status:string;comparable_pairs?:number;attempted_pairs?:number;high_positive_pair_count?:number;pairs?:{first_symbol:string;second_symbol:string;first_isin:string;second_isin:string;correlation:number;observations:number;first_date:string;last_date:string;high_positive_correlation:boolean}[];notice:string};
@@ -61,6 +62,25 @@ function OpportunityDigest({report}:{report:OpportunityContext}){
   {(report.equities.length>5||report.funds.length>5)&&<button type="button" className="secondary" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}>{expanded?"Show fewer watches":"Show all watches"}</button>}
   <p className="muted tiny">{report.notice}</p>
  </section>;
+}
+
+function HeldFundEvidence({evidence}:{evidence:FundThesisEvidence}){
+ const d=evidence.disclosure,p=evidence.portfolio,u=p?.underlying_research;
+ return <div><h4>{d.scheme_name} · {d.plan}</h4>
+  <dl><div><dt>Reported TER</dt><dd>{d.ter_percent==null?"Unavailable":d.ter_percent.toFixed(2)+"%"} {d.ter_date||""}</dd></div>
+  <div><dt>Reported Riskometer</dt><dd>{d.riskometer?.replace(/_/g," ")||"Unavailable"}</dd></div>
+  <div><dt>Reported benchmark name</dt><dd>{d.benchmark||"Unavailable"}</dd></div>
+  <div><dt>AUM (all plans)</dt><dd>{d.aum_cr_all_plans==null?"Unavailable":"₹"+d.aum_cr_all_plans.toFixed(2)+" cr"} {d.aum_date||""}</dd></div>
+  <div><dt>Reported managers</dt><dd>{d.fund_managers||"Unavailable"}</dd></div>
+  <div><dt>Reported exit load</dt><dd>{d.exit_load||"Unavailable"}</dd></div></dl>
+  {d.document_date&&<p className="muted tiny">Document date: {d.document_date}</p>}
+  {!!d.conflicts?.length&&<p>Conflicting disclosures: {d.conflicts.join(", ")}</p>}
+  <p className="muted tiny">Source: {d.source}. Secondary reported data, not independently verified.</p>
+  {p?<><h4>Reported composition · {p.portfolio_date}</h4><p>Exact listed equity weight: {p.exact_listed_equity_weight_percent.toFixed(2)}% · Top ten: {p.top_10_exact_equity_weight_percent.toFixed(2)}%</p>
+   {!!p.top_holdings?.length&&<ul>{p.top_holdings.map(h=><li key={h.isin}>{h.name} · {h.weight_percent.toFixed(2)}%</li>)}</ul>}
+   {u&&<p>Annual statement evidence: {u.annual_statement_weight_percent==null?"Unavailable":u.annual_statement_weight_percent.toFixed(2)+"%"} · Underlying deterioration observations: {u.deterioration_review_weight_percent==null?"Unavailable":u.deterioration_review_weight_percent.toFixed(2)+"%"}</p>}
+   <p className="muted tiny">{u?.notice} {p.notice}</p></>:<p>Current reported holdings composition unavailable.</p>}
+  <p className="muted tiny">{evidence.notice}</p></div>;
 }
 
 function ThesisDigest({summary}:{summary:ThesisSummary}){
@@ -118,6 +138,7 @@ export default function PortfolioDoctor({revision,onSettings,compact=false,onOpe
        <AutomaticCompanyNews evidence={item.thesis_evidence?.news_evidence??undefined} status={item.thesis_evidence?"ENABLED":undefined}/>
        {item.thesis_evidence?.ai_review?<><h4>Local AI · {item.thesis_evidence.ai_review.provider}</h4><ul>{item.thesis_evidence.ai_review.findings.map((f,i)=><li key={i}>{f.statement} <small>[{f.evidence_ids.join(", ")}]</small></li>)}</ul><p className="muted tiny">{item.thesis_evidence.ai_review.notice}</p></>:<p className="muted tiny">Local AI evidence pending or local model not configured. No external fallback.</p>}
       </details>}
+      {item.asset_type==="MUTUAL_FUND"&&<details><summary>Fund disclosures and portfolio quality</summary>{item.fund_thesis_evidence?<HeldFundEvidence evidence={item.fund_thesis_evidence}/>:<p>Current exact-scheme secondary disclosures unavailable.</p>}</details>}
       {item.asset_type==="MUTUAL_FUND"&&<details><summary>Exact scheme historical evidence</summary>{item.fund_history_evidence?<><p>{item.fund_history_evidence.scheme_name} · NAV ₹{item.fund_history_evidence.nav.toFixed(2)} · {item.fund_history_evidence.nav_date}</p><dl><div><dt>3-year CAGR</dt><dd>{pct(item.fund_history_evidence.cagr_3y_percent)}</dd></div><div><dt>Observed drawdown</dt><dd>{pct(item.fund_history_evidence.drawdown_3y_percent)}</dd></div><div><dt>Weekly volatility proxy</dt><dd>{pct(item.fund_history_evidence.weekly_volatility_percent??null)}</dd></div></dl><p className="muted tiny">Sources: {item.fund_history_evidence.sources.join(" · ")}. {item.fund_history_evidence.notice}</p></>:<p>Exact-scheme history insufficient or unavailable.</p>}</details>}
     </article>)}</div>
     {review.holdings.length>5&&<button type="button" className="secondary" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}>{expanded?"Show fewer holdings":"Show all holdings"}</button>}
