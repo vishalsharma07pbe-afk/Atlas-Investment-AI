@@ -36,6 +36,12 @@ class MarketClientTest(unittest.TestCase):
         self.assertEqual(captured["token"],"service-secret")
         self.assertEqual(captured["timeout"],10)
 
+    def test_calendar_context_uses_only_fixed_internal_read_route(self):
+        self.assertEqual(market_client._internal_path("/api/v1/market-data/session-context"),
+                         "/api/v1/internal/feed/session-context")
+        with self.assertRaises(HTTPException):
+            market_client._internal_path("/api/v1/market-data/session-context?exchange=OTHER")
+
     def test_rejects_unapproved_backend_route(self):
         with patch.dict("os.environ",{"INTERNAL_SERVICE_TOKEN":"service-secret"}):
             with self.assertRaises(HTTPException) as raised:
