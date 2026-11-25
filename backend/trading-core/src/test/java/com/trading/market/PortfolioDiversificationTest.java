@@ -39,4 +39,18 @@ class PortfolioDiversificationTest {
   var result=PortfolioDiversification.summarize(List.of(equity("A","INE002A01018",50,"Energy"),equity("B","INE002A01018",50,"Finance")),json);
   assertEquals(new BigDecimal("0.00"),result.get("sector_coverage_percent"));
  }
+ @Test void automaticAllocationUsesAggregatedIdentitiesAndRecentValuations(){
+  var first=equity("FIRST","INE002A01018",60,"Energy");
+  var duplicate=equity("SECOND","INE002A01018",40,"Energy");
+  first.put("recorded_valuation_recent",true);duplicate.put("recorded_valuation_recent",true);
+  var rows=List.of(first,duplicate);
+  var result=PortfolioDiversification.summarize(rows,json);
+  var plan=(Map<?,?>)result.get("allocation_research");
+  assertEquals("HYPOTHETICAL_SCENARIOS_AVAILABLE",plan.get("status"));
+  assertEquals(0,new BigDecimal("100").compareTo((BigDecimal)plan.get("current_largest_percent")));
+  duplicate.put("recorded_valuation_recent",false);
+  var stale=(Map<?,?>)PortfolioDiversification.summarize(rows,json).get("allocation_research");
+  assertEquals("INSUFFICIENT_RECENT_EXACT_VALUATIONS",stale.get("status"));
+ }
+
 }
