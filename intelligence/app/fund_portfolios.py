@@ -14,6 +14,7 @@ from decimal import Decimal,InvalidOperation
 from zoneinfo import ZoneInfo
 import httpx
 from . import nav_catalog,fund_disclosures
+from .fund_categories import LABELS, DEBT, COMPARABLE
 
 URL="https://api.tigzig.com/downloads/mf_portfolio_holdings.csv"
 INTERVAL=86400
@@ -151,6 +152,66 @@ def company_coverage(equities,instant):
             "cached_company_count":len(found)}
 
 
+def concentration(equities,sector_evidence,category,allocations):
+    """Descriptive concentration of the identifiable subset, never full-fund risk."""
+    label=category.strip().casefold() if isinstance(category,str) else ""
+    kind=next((k for k,v in LABELS.items() if v==label),"UNKNOWN")
+    if kind in DEBT:
+        gaps=["ISSUER_AND_CREDIT_RATING_COVERAGE_REQUIRED","MATURITY_AND_MODIFIED_DURATION_REQUIRED",
+              "CREDIT_SPREAD_AND_LIQUIDITY_EVIDENCE_REQUIRED"]
+    elif kind=="AGGRESSIVE_HYBRID":
+        gaps=["EQUITY_DEBT_ALLOCATION_RECONCILIATION_REQUIRED","DEBT_CREDIT_AND_DURATION_REQUIRED",
+              "DERIVATIVE_AND_LIQUIDITY_EVIDENCE_REQUIRED"]
+    elif kind=="INDEX":
+        gaps=["INDEX_CONSTITUENT_AND_WEIGHT_VERIFICATION_REQUIRED","BENCHMARK_TRI_AND_TRACKING_EVIDENCE_REQUIRED"]
+    elif kind in COMPARABLE:
+        gaps=["COMPLETE_SECTOR_AND_MARKET_CAP_COVERAGE_REQUIRED","HOLDING_LIQUIDITY_AND_DERIVATIVE_EVIDENCE_REQUIRED"]
+    else:
+        gaps=["EXACT_CATEGORY_REQUIRED"]
+    result={"status":"INSUFFICIENT_EXACT_EQUITY_EVIDENCE","category":kind,
+            "exact_equity_weight_percent":None,"largest_equity_weight_percent":None,
+            "top_three_equity_weight_percent":None,"equity_subset_hhi":None,
+            "equity_subset_effective_holdings":None,"sector_classified_weight_percent":None,
+            "unclassified_exact_equity_weight_percent":None,"sector_weights":[],
+            "largest_classified_sector_weight_percent":None,
+            "reported_equity_weight_percent":allocations.get("Equity"),
+            "reported_debt_weight_percent":allocations.get("Debt"),
+            "reported_money_market_weight_percent":allocations.get("Money market"),
+            "missing_risk_evidence":gaps,"risk_rating":None,
+            "notice":"Concentration is descriptive, not a risk rating. HHI and effective holdings normalize only the exact listed-equity subset; other percentages are original fund weights. Sector classifications use current matched provider profiles, not historical filing classifications. Unclassified holdings and other assets may change actual concentration."}
+    weights={}
+    for row in equities:
+        try:
+            isin=row["isin"]
+            w=Decimal(str(row["weight_percent"]))
+            if not isinstance(isin,str) or not ISIN.fullmatch(isin) or isin in weights or not w.is_finite() or not 0<w<=100:
+                return result
+            weights[isin]=w
+        except (KeyError,TypeError,ValueError,InvalidOperation):
+            return result
+    total=sum(weights.values(),Decimal(0))
+    if not 0<total<=Decimal("100.5"):
+        return result
+    def rounded(value):
+        return float(round(value,4))
+    ordered=sorted(weights.values(),reverse=True)
+    hhi=sum((v/total)**2 for v in ordered)
+    sectors=defaultdict(Decimal)
+    for isin,weight in weights.items():
+        row=sector_evidence.get(isin,{})
+        sector=row.get("sector")
+        if isinstance(sector,str) and sector.strip():
+            sectors[" ".join(sector.casefold().split())]+=weight
+    classified=sum(sectors.values(),Decimal(0))
+    sector_rows=[{"sector":key,"weight_percent":rounded(weight)} for key,weight in sorted(sectors.items(),key=lambda kv:(-kv[1],kv[0]))]
+    result.update(status="EXACT_EQUITY_SUBSET_ONLY",exact_equity_weight_percent=rounded(total),
+        largest_equity_weight_percent=rounded(ordered[0]),top_three_equity_weight_percent=rounded(sum(ordered[:3])),
+        equity_subset_hhi=rounded(hhi*10000),equity_subset_effective_holdings=rounded(1/hhi),
+        sector_classified_weight_percent=rounded(classified),unclassified_exact_equity_weight_percent=rounded(total-classified),
+        sector_weights=sector_rows,largest_classified_sector_weight_percent=sector_rows[0]["weight_percent"] if sector_rows else None)
+    return result
+
+
 def matched(disclosures,instant=None,*,include_exact_weights=False):
     if not permitted() or not disclosures:
         return []
@@ -171,9 +232,11 @@ def matched(disclosures,instant=None,*,include_exact_weights=False):
                     continue
                 equities=report.pop("equities")
                 from .fund_underlying_research import summarize, load, exact_sector_evidence
-                reports=load(equities,instant) if include_exact_weights else None
+                reports=load(equities,instant)
+                sector_evidence=exact_sector_evidence(equities,instant,reports)
                 item_report={**report,**company_coverage(equities,instant),
                     "underlying_research":summarize(equities,instant,reports),
+                    "concentration_research":concentration(equities,sector_evidence,item.get("category"),report["asset_allocation_percent"]),
                     "scheme_code":item["scheme_code"],"scheme_name":item["scheme_name"],
                     "collected_at":found["collected_at"],"top_holdings":equities[:10],
                     "status":"SECONDARY_COMPOSITION_ONLY"}
@@ -181,7 +244,7 @@ def matched(disclosures,instant=None,*,include_exact_weights=False):
                 # Do not silently truncate large portfolios or normalize reported weights.
                 if include_exact_weights and len(equities)<=500:
                     item_report["exact_equity_weights"]={h["isin"]:h["weight_percent"] for h in equities}
-                    item_report["exact_sector_evidence"]=exact_sector_evidence(equities,instant,reports)
+                    item_report["exact_sector_evidence"]=sector_evidence
                 result.append(item_report)
     except (OSError,sqlite3.Error,ValueError,TypeError,KeyError,AttributeError):
         return []
