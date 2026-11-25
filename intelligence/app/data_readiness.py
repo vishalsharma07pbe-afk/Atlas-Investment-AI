@@ -117,7 +117,7 @@ def readiness(now: datetime | None = None, health_loader=None):
             "automatic_collection_enabled": code == "MUTUAL_FUND_NAV" and nav_auto_refresh.config()["enabled"],
             "usable_as_live_market_data": False,
         })
-    from .autonomous_research import config as research_config, read_snapshot
+    from .autonomous_research import config as research_config, read_snapshot, job_status
     automatic, interval = research_config()
     try:
         health = (health_loader or backend_json)("/api/v1/data-health/summary")
@@ -135,6 +135,7 @@ def readiness(now: datetime | None = None, health_loader=None):
     if not isinstance(health, dict):
         blockers.append("BACKEND_EVIDENCE_UNAVAILABLE")
     research_sections = []
+    research_jobs = {"status":"DISABLED","jobs":[]}
     if automatic:
         try:
             snapshot = read_snapshot(include_ai=False)
@@ -142,6 +143,12 @@ def readiness(now: datetime | None = None, health_loader=None):
                                  for row in snapshot["sections"]]
         except (OSError, ValueError, sqlite3.Error):
             blockers.append("RESEARCH_SNAPSHOT_UNAVAILABLE")
+    if automatic:
+        try:
+            research_jobs=job_status()
+        except (OSError, ValueError, sqlite3.Error):
+            research_jobs={"status":"UNAVAILABLE","jobs":[]}
+            blockers.append("RESEARCH_JOB_LEDGER_UNAVAILABLE")
     return {
         "generated_at": now.isoformat(),
         "status": "AUTOMATIC_RESEARCH_CONFIGURED" if automatic else "AUTOMATIC_RESEARCH_DISABLED",
@@ -151,6 +158,7 @@ def readiness(now: datetime | None = None, health_loader=None):
         "provider_mode": settings.provider,
         "research_interval_seconds": interval,
         "research_sections": research_sections,
+        "research_jobs": research_jobs,
         "blockers": blockers,
         "datasets": datasets,
         "backend_evidence": provider_rows,
