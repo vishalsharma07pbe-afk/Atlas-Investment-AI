@@ -23,12 +23,23 @@ public class PortfolioReviewService {
       """,String.class,owner);
   }
 
+  // Journal records are insert/delete only. Keep this revision separate from
+  // the holdings hash used by the existing risk notification pipeline.
+  private String journalRevision(UUID owner){
+    return jdbc.queryForObject("""
+      SELECT md5(coalesce(string_agg(id::text,',' ORDER BY id),''))
+      FROM (SELECT id FROM portfolio_transactions WHERE user_id=?
+        AND transaction_type IN ('BUY','SELL') ORDER BY id LIMIT 5001) journal
+      """,String.class,owner);
+  }
+
   public Map<String,Object> current(UUID owner){
     String revision=revision(owner);
     var cached=jdbc.queryForList("""
       SELECT result::text FROM portfolio_review_snapshots WHERE user_id=?
         AND holdings_revision=? AND generated_at>=now()-interval '5 minutes'
-      """,String.class,owner,revision);
+        AND result->>'journal_revision'=?
+      """,String.class,owner,revision,journalRevision(owner));
     if(!cached.isEmpty()){
       try{return json.readValue(cached.get(0),new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>(){});}
       catch(com.fasterxml.jackson.core.JsonProcessingException ignored){/* Rebuild corrupted cache. */}
@@ -38,6 +49,7 @@ public class PortfolioReviewService {
 
   public Map<String,Object> refresh(UUID owner){
     String revision=revision(owner);
+    String journalRevision=journalRevision(owner);
     Instant now=Instant.now();
     LocalDate today=now.atZone(MarketCalendarService.IST).toLocalDate();
     // Read only this owner's holdings; market history is shared public evidence.
@@ -103,6 +115,7 @@ public class PortfolioReviewService {
       WHERE p.user_id=? ORDER BY p.id
       """,today,today,owner);
     Map<String,Object> report=assess(rows,today,now);
+    report.put("journal_revision",journalRevision);
     try{report.put("journal_lot_reconciliation",PortfolioJournalLots.collect(jdbc,owner,rows,today));}
     catch(org.springframework.dao.DataAccessException ex){
       report.put("journal_lot_reconciliation",Map.of("status","UNAVAILABLE_LOCAL_JOURNAL","holdings",List.of(),
