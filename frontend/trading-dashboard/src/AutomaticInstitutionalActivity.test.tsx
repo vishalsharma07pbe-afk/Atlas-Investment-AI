@@ -34,3 +34,11 @@ it("shows matched flow direction and opposition without implying consecutive ses
  expect(screen.getByText(/potentially partial observation/)).toBeTruthy();
  expect(screen.getByText(/Not consecutive or verified completed trading sessions/)).toBeTruthy();
 });
+
+it("shows withheld trading-session windows rather than substituting older observations",()=>{
+ render(<AutomaticInstitutionalActivity data={{status:"RECENT_PROVIDER_EVIDENCE",session_flow_context:{status:"SESSION_EVIDENCE_INCOMPLETE",windows:[{session_count:10,status:"MISSING_OR_UNCONFIRMED_SESSION_FLOWS",latest_session:"2026-11-23",first_session:"2026-11-10",missing_count:1,missing_dates:["2026-11-18"],metrics:null}],notice:"Prior IST dates only; totals not certified."}}}/>);
+ expect(screen.getByText("Prior trading-session flow windows")).toBeTruthy();
+ expect(screen.getByText(/1 missing or unconfirmed/)).toBeTruthy();
+ expect(screen.getByText(/2026-11-18/)).toBeTruthy();
+ expect(screen.getAllByText("Unavailable")).toHaveLength(2);
+});

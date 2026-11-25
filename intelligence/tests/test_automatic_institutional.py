@@ -97,3 +97,46 @@ class AutomaticInstitutionalTests(unittest.TestCase):
         self.assertEqual(window["one_or_both_balanced_dates"],5)
         invalid={k:{**v,"net_amount":"999"} for k,v in fii.items()}
         self.assertEqual(flows._paired_context(invalid,dii,today)["windows"],[])
+
+    def test_prior_sessions_exclude_closed_and_today_and_never_skip_missing(self):
+        today=self.now.astimezone(flows.IST).date()
+        days=[today-timedelta(days=i) for i in range(1,30)]
+        regular=[d for d in days if d.weekday()<5 and d!=today-timedelta(days=6)]
+        def calendar(path):
+            self.assertEqual(path,"/api/v1/market-data/strategy-calendar?exchange=NSE")
+            return {"exchange":"NSE","through":days[0].isoformat(),"days":[
+                {"trade_date":d.isoformat(),"state":"REGULAR" if d in regular else "CLOSED"} for d in days]}
+        def report(interval):
+            result=self.report(interval)
+            records=[{"observed_at":d.isoformat()+"T10:00:00+00:00","buy_amount":120,"sell_amount":100}
+                     for d in [today,*regular] if d!=regular[5]]
+            for participant in ("fii","dii"):
+                result["participants"][participant]["data"]=records
+            return result
+        flows.refresh(research._connect,report,self.now,calendar_loader=calendar)
+        result=flows.read(research._connect,self.now)["session_flow_context"]
+        windows={w["session_count"]:w for w in result["windows"]}
+        self.assertEqual(windows[1]["status"],"STORED_REGULAR_SESSIONS_MATCHED")
+        self.assertEqual(windows[5]["metrics"]["dates"],[d.isoformat() for d in regular[:5]])
+        self.assertEqual(windows[5]["metrics"]["participants"]["FII"]["net_amount"],"100")
+        self.assertEqual(windows[10]["status"],"MISSING_OR_UNCONFIRMED_SESSION_FLOWS")
+        self.assertEqual(windows[10]["missing_dates"],[regular[5].isoformat()])
+        self.assertIsNone(windows[10]["metrics"])
+        self.assertEqual(windows[250]["status"],"CALENDAR_INCOMPLETE")
+        self.assertEqual(flows.read(research._connect,self.now+timedelta(hours=3))["session_flow_context"]["status"],"CALENDAR_UNAVAILABLE")
+
+    def test_same_day_capture_not_completed_flow_and_unknown_date_blocks_window(self):
+        today=self.now.astimezone(flows.IST).date()
+        prior=(today-timedelta(days=1)).isoformat()
+        calendar={"exchange":"NSE","through":prior,"days":[{"trade_date":prior,"state":"REGULAR"}]}
+        row={"observed_at":prior+"T09:00:00+00:00","retrieved_at":prior+"T10:00:00+00:00",
+             "buy_amount":"120","sell_amount":"100","net_amount":"20"}
+        records={key:{prior:row} for key in flows.PARTICIPANTS}
+        result=flows._session_context(calendar,records,today,self.now)
+        self.assertEqual(result["windows"][0]["status"],"MISSING_OR_UNCONFIRMED_SESSION_FLOWS")
+        row["retrieved_at"]=self.now.isoformat()
+        self.assertEqual(flows._session_context(calendar,records,today,self.now)["windows"][0]["status"],"STORED_REGULAR_SESSIONS_MATCHED")
+        calendar["days"][0]["state"]="SPECIAL_SESSION_UNSUPPORTED"
+        self.assertEqual(flows._session_context(calendar,records,today,self.now)["windows"][0]["status"],"CALENDAR_INCOMPLETE")
+        calendar["through"]=today.isoformat()
+        self.assertEqual(flows._session_context(calendar,records,today,self.now)["status"],"CALENDAR_UNAVAILABLE")
