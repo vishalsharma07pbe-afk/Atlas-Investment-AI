@@ -20,3 +20,5 @@ Returns `SAFE_OFFLINE`, implemented router capabilities, configured adapter coun
 ## Tests
 `cd intelligence && python -m unittest discover -s tests`
 `cd frontend/trading-dashboard && npm run build`
+
+The Java shared operator Upstox daily, benchmark and intraday collectors now use one persistent PostgreSQL cooldown before new work. Numeric Retry-After, bounded exponential delays and fixed sanitized failure codes protect repeated requests. Personal owner vault operations, unauthenticated public feeds and Python transports are intentionally isolated; independent same-market provider redundancy remains unverified. The existing data-health summary exposes the operator cooldown, which is not a live-feed or entitlement certificate.

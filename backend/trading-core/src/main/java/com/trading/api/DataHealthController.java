@@ -32,6 +32,10 @@ public class DataHealthController {
     out.put("liveMarketDataConnected",false);
     out.put("liveConnectionScope","NOT_OBSERVED_BY_BACKEND");
     out.put("scheduledFeedsEnabled",scheduledFeeds);
+    out.put("operatorFeedCooldown",jdbc.queryForList("""
+      SELECT scope,failure_code,failure_count,last_failure_at,blocked_until,
+        blocked_until>now() AS blocked FROM operator_feed_cooldown
+      """));
     out.put("upstoxRegistry",registry);out.put("officialAmfiNav",nav);out.put("upstoxDailyHistory",daily);
     out.put("instrumentCount",jdbc.queryForObject("SELECT count(*) FROM instruments",Long.class));
     out.put("candleCount",jdbc.queryForObject("SELECT count(*) FROM market_candles WHERE timeframe='1d'",Long.class));

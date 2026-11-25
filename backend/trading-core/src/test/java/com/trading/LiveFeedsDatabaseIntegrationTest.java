@@ -364,6 +364,28 @@ class LiveFeedsDatabaseIntegrationTest {
   }finally{org.springframework.test.util.ReflectionTestUtils.setField(discovery,"accessToken","");}
  }
 
+ @Test
+ @org.springframework.transaction.annotation.Transactional
+ void operatorHistoryCooldownPersistsAndBlocksOtherVenue(){
+  db.update("DELETE FROM operator_feed_cooldown");
+  db.update("UPDATE instruments SET active=false WHERE exchange_id=(SELECT id FROM exchanges WHERE code='NSE')");
+  String isin="INE000A01905";
+  db.update("INSERT INTO instruments(exchange_id,symbol,series,source,isin,instrument_type,active) VALUES ((SELECT id FROM exchanges WHERE code='NSE'),'COOLDOWNTEST','EQ','UPSTOX',?,'EQ',true)",isin);
+  db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,instrument_type,isin) VALUES (?,'NSE','COOLDOWNTEST','EQ',?)","NSE_EQ|"+isin,isin);
+  LocalDate end=LocalDate.now(MarketCalendarService.IST).minusDays(1);
+  when(http.text(contains("NSE_EQ%7C"+isin),eq("cooldown-test-token"),anyInt()))
+    .thenThrow(new FeedHttp.ProviderHttpException(429,600));
+  org.springframework.test.util.ReflectionTestUtils.setField(discovery,"accessToken","cooldown-test-token");
+  try{
+    org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"refreshExchange","NSE",end);
+    assertThat(db.queryForMap("SELECT failure_code,failure_count,blocked_until>now() AS blocked FROM operator_feed_cooldown"))
+      .containsEntry("failure_code","PROVIDER_RATE_LIMITED").containsEntry("failure_count",1).containsEntry("blocked",true);
+    org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"refreshExchange","BSE",end);
+    verify(http,times(1)).text(anyString(),eq("cooldown-test-token"),anyInt());
+    verifyNoInteractions(vault);
+  }finally{org.springframework.test.util.ReflectionTestUtils.setField(discovery,"accessToken","");}
+ }
+
  @Test void providerHistoryDoesNotOverwriteAdjustedManualCandle()throws Exception{
   db.update("INSERT INTO instruments(exchange_id,symbol,series,source,isin,instrument_type) VALUES ((SELECT id FROM exchanges WHERE code='NSE'),'ADJUSTEDTEST','EQ','MANUAL_CSV','INE000A01003','EQ')");
   db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,instrument_type,isin) VALUES ('NSE_EQ|INE000A01003','NSE','ADJUSTEDTEST','EQ','INE000A01003')");

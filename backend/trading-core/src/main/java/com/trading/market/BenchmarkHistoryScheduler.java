@@ -30,6 +30,7 @@ public class BenchmarkHistoryScheduler {
     refresh(end);
   }
   void refresh(LocalDate end){
+    if(OperatorFeedCooldown.blocked(jdbc))return;
     if(!Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM data_sources WHERE source_code='UPSTOX' AND enabled)",Boolean.class)))return;
     Long id=history.ensureIndex();
     if(id==null)return;
@@ -42,14 +43,17 @@ public class BenchmarkHistoryScheduler {
       """,id);
     if(claimed!=1)return;
     int written=0;
-    try{written=history.refresh(id,token,end.minusDays(370),end);}catch(Exception ignored){
+    try{written=history.refresh(id,token,end.minusDays(370),end);}catch(Exception ex){
       // Never persist provider bodies, URLs or credentials.
+      OperatorFeedCooldown.record(jdbc,ex);
     }
-    if(written>0)jdbc.update("""
+    if(written>0){
+      OperatorFeedCooldown.recovered(jdbc);
+      jdbc.update("""
       UPDATE discovery_history_attempts SET status='SUCCESS',rows_written=?,
         next_attempt_at=now()+interval '12 hours' WHERE instrument_id=?
       """,written,id);
-    else jdbc.update("""
+    }else jdbc.update("""
       UPDATE discovery_history_attempts SET status='FAILED',rows_written=0,
         next_attempt_at=now()+interval '6 hours' WHERE instrument_id=?
       """,id);

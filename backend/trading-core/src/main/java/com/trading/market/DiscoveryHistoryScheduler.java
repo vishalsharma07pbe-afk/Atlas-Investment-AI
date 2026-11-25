@@ -47,6 +47,7 @@ public class DiscoveryHistoryScheduler {
 
   void refreshExchange(String exchange,LocalDate end){
     if(!Set.of("NSE","BSE").contains(exchange))throw new IllegalArgumentException("exchange");
+    if(OperatorFeedCooldown.blocked(jdbc))return;
     // Keep only active cash equities with explicit mappings. Skip adjusted
     // series rather than create a mixed adjustment history.
     var rows=jdbc.queryForList("""
@@ -111,6 +112,7 @@ public class DiscoveryHistoryScheduler {
       ORDER BY position,workload LIMIT 2
       """,exchange,end.minusMonths(BACKFILL_MONTHS),end,end.minusMonths(BACKFILL_MONTHS),end,end,exchange,REQUIRED_DAILY_CANDLES,end);
     for(var row:rows){
+      if(OperatorFeedCooldown.blocked(jdbc))return;
       long id=((Number)row.get("id")).longValue();
       long count=((Number)row.get("candle_count")).longValue();
       LocalDate latest=localDate(row.get("latest_date"));
@@ -132,13 +134,15 @@ public class DiscoveryHistoryScheduler {
         if(missing!=null&&!missing.isBefore(floor)&&!missing.isAfter(end)&&missing.isBefore(from))from=missing;
         if(from.isAfter(end))from=floor;
         int written=stocks.discoveryDailyCandles(accessToken,(String)row.get("instrument_key"),from,end);
-        if(written>0)
+        if(written>0){
           jdbc.update("UPDATE discovery_history_attempts SET status='SUCCESS',rows_written=?,next_attempt_at=now()+interval '12 hours' WHERE instrument_id=?",written,id);
-        else
+          OperatorFeedCooldown.recovered(jdbc);
+        }else
           jdbc.update("UPDATE discovery_history_attempts SET status='FAILED',rows_written=0,next_attempt_at=now()+interval '6 hours' WHERE instrument_id=?",id);
       }catch(Exception ex){
         // Never store provider response bodies, URLs or credentials.
         jdbc.update("UPDATE discovery_history_attempts SET status='FAILED',rows_written=0,next_attempt_at=now()+interval '6 hours' WHERE instrument_id=?",id);
+        if(OperatorFeedCooldown.record(jdbc,ex))return;
       }
     }
   }

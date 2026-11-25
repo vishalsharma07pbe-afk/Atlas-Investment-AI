@@ -78,6 +78,33 @@ class DiscoveryHistorySchedulerTest {
     verify(db).update(contains("status='SUCCESS'"),eq(1),eq(7L));
   }
 
+  @Test void sharedCooldownSkipsClaimsAndRequests(){
+    JdbcTemplate db=mock(JdbcTemplate.class);
+    UpstoxFeedService stocks=mock(UpstoxFeedService.class);
+    DiscoveryHistoryScheduler scheduler=new DiscoveryHistoryScheduler(db,stocks,mock(MarketCalendarService.class));
+    when(db.queryForObject(contains("operator_feed_cooldown"),eq(Boolean.class))).thenReturn(true);
+    scheduler.refreshExchange("NSE",LocalDate.of(2026,11,20));
+    verifyNoInteractions(stocks);
+    verify(db,never()).update(anyString(),anyLong());
+  }
+
+  @Test void providerRejectionStopsRemainingInstrumentRequests()throws Exception{
+    JdbcTemplate db=mock(JdbcTemplate.class);
+    UpstoxFeedService stocks=mock(UpstoxFeedService.class);
+    DiscoveryHistoryScheduler scheduler=new DiscoveryHistoryScheduler(db,stocks,mock(MarketCalendarService.class));
+    scheduler.accessToken="test-only";
+    LocalDate end=LocalDate.of(2026,11,20);
+    when(db.queryForList(contains("LIMIT 2"),eq("NSE"),eq(end.minusMonths(12)),eq(end),eq(end.minusMonths(12)),eq(end),eq(end),eq("NSE"),eq(200),eq(end)))
+      .thenReturn(List.of(Map.of("id",7L,"instrument_key","NSE_EQ|FIRST","candle_count",0L),
+        Map.of("id",8L,"instrument_key","NSE_EQ|SECOND","candle_count",0L)));
+    when(db.update(contains("INSERT INTO discovery_history_attempts"),eq(7L))).thenReturn(1);
+    when(stocks.discoveryDailyCandles("test-only","NSE_EQ|FIRST",end.minusMonths(12),end))
+      .thenThrow(new FeedHttp.ProviderHttpException(429,600));
+    scheduler.refreshExchange("NSE",end);
+    verify(stocks,never()).discoveryDailyCandles(eq("test-only"),eq("NSE_EQ|SECOND"),any(),any());
+    verify(db).update(contains("INSERT INTO operator_feed_cooldown"),eq("PROVIDER_RATE_LIMITED"),eq(600L),eq(60));
+  }
+
   @Test void emptyBackfillCannotBeMarkedSuccessful()throws Exception{
     JdbcTemplate db=mock(JdbcTemplate.class);
     UpstoxFeedService stocks=mock(UpstoxFeedService.class);

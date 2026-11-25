@@ -30,6 +30,7 @@ public class IntradayResearchService {
  }
 
  void refreshExchange(String exchange,Instant now){
+  if(OperatorFeedCooldown.blocked(jdbc))return;
   LocalDate today=now.atZone(MarketCalendarService.IST).toLocalDate();
   LocalDate last;
   try{last=calendar.lastTradingDay(exchange,today);}catch(IllegalStateException ex){return;}
@@ -57,6 +58,7 @@ public class IntradayResearchService {
     ORDER BY a.attempted_at ASC NULLS FIRST,l.id LIMIT 2
     """,last,exchange);
   for(var row:sample){
+   if(OperatorFeedCooldown.blocked(jdbc))return;
    long id=((Number)row.get("id")).longValue();
    int claimed=jdbc.update("""
      INSERT INTO intraday_research_attempts(instrument_id,attempted_at,next_attempt_at,status)
@@ -66,10 +68,12 @@ public class IntradayResearchService {
      """,id);
    if(claimed!=1)continue;
    try{
-    stocks.discoveryIntradayCandles(token,(String)row.get("instrument_key"),now);
+    int written=stocks.discoveryIntradayCandles(token,(String)row.get("instrument_key"),now);
     jdbc.update("UPDATE intraday_research_attempts SET status='SUCCESS' WHERE instrument_id=?",id);
+    if(written>0)OperatorFeedCooldown.recovered(jdbc);
    }catch(Exception ex){
     jdbc.update("UPDATE intraday_research_attempts SET status='FAILED',next_attempt_at=now()+interval '15 minutes' WHERE instrument_id=?",id);
+    OperatorFeedCooldown.record(jdbc,ex);
     break;
    }
   }
