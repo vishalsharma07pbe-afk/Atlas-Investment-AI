@@ -43,7 +43,7 @@ public class PortfolioRiskNotifications {
       FROM attention
       ON CONFLICT DO NOTHING
       """);
-    return digest+ownershipChanges();
+    return digest+ownershipChanges()+thesisChanges();
   }
 
   private int ownershipChanges(){
@@ -81,6 +81,82 @@ public class PortfolioRiskNotifications {
         jsonb_build_object('holding_id',holding_id,'quarter',quarter,'categories',categories),
         'portfolio-ownership:'||holding_id||':'||exchange||':'||isin||':'||quarter,'IN_APP','DELIVERED'
       FROM changes
+      ON CONFLICT DO NOTHING
+      """);
+  }
+
+  /** Only the lifecycle monitors' current visible changes are eligible.
+   * One event per holding identity, metric and reported period, not per poll.
+   */
+  private int thesisChanges(){
+    return jdbc.update("""
+      WITH fresh AS (
+        SELECT s.user_id,s.generated_at,s.result
+        FROM portfolio_review_snapshots s
+        WHERE s.generated_at BETWEEN now()-interval '5 minutes' AND now()
+          AND s.holdings_revision=(
+            SELECT md5(coalesce(string_agg(h.id::text||':'||h.updated_at::text,',' ORDER BY h.id),''))
+            FROM personal_holdings h WHERE h.user_id=s.user_id
+          )
+          AND s.result->>'methodology'='PORTFOLIO_REVIEW_V1'
+      ), holdings AS (
+        SELECT f.user_id,f.generated_at,item
+        FROM fresh f CROSS JOIN LATERAL jsonb_array_elements(
+          CASE WHEN jsonb_typeof(f.result->'holdings')='array' THEN f.result->'holdings' ELSE '[]'::jsonb END
+        ) item
+        WHERE item->>'id' ~ '^[0-9]+$' AND length(item->>'symbol') BETWEEN 1 AND 120
+      ), financial AS (
+        SELECT h.user_id,h.generated_at,item->>'id' AS holding_id,item->>'symbol' AS symbol,
+          (item->>'exchange')||':'||(item->>'isin') AS identity,
+          change->>'metric' AS metric,change->>'current_period' AS period,
+          'FINANCIAL_DIRECTION' AS kind,
+          change->>'current_direction' AS direction
+        FROM holdings h CROSS JOIN LATERAL jsonb_array_elements(
+          CASE WHEN jsonb_typeof(item->'thesis_changes')='array' THEN item->'thesis_changes' ELSE '[]'::jsonb END
+        ) change
+        WHERE item->>'asset_type'='EQUITY'
+          AND item->>'exchange' IN ('NSE','BSE') AND item->>'isin' ~ '^IN[A-Z0-9]{10}$'
+          AND change->>'metric' IN ('REVENUE','NET_PROFIT','OPERATING_PROFIT','OPERATING_CASH_FLOW')
+          AND change->>'current_direction' IN ('NEGATIVE','DECLINING')
+          AND change->>'previous_direction' IN ('NEGATIVE','DECLINING','IMPROVING','UNCHANGED')
+          AND change->>'previous_direction'<>change->>'current_direction'
+          AND length(change->>'current_period') BETWEEN 1 AND 80
+          AND length(change->>'previous_period') BETWEEN 1 AND 80
+          AND change->>'current_period'<>change->>'previous_period'
+      ), funds AS (
+        SELECT h.user_id,h.generated_at,item->>'id' AS holding_id,item->>'symbol' AS symbol,
+          item->>'fund_monitor_identity' AS identity,
+          change->>'metric' AS metric,change->>'currentDate' AS period,
+          'FUND_DISCLOSURE' AS kind,'REVIEW' AS direction
+        FROM holdings h CROSS JOIN LATERAL jsonb_array_elements(
+          CASE WHEN jsonb_typeof(item->'fund_thesis_changes')='array' THEN item->'fund_thesis_changes' ELSE '[]'::jsonb END
+        ) change
+        WHERE item->>'asset_type'='MUTUAL_FUND'
+          AND item->>'exact_scheme_code' ~ '^[1-9][0-9]{5,8}$'
+          AND item->>'fund_monitor_identity' ~ '^[1-9][0-9]{5,8}:IN[A-Z0-9]{10}:(DIRECT|REGULAR):TIGZIG_AMFI_DERIVED$'
+          AND split_part(item->>'fund_monitor_identity',':',1)=item->>'exact_scheme_code'
+          AND change->>'metric' IN ('TER','RISKOMETER','BENCHMARK','MANAGERS','EXIT_LOAD')
+          AND change->>'attention'='REVIEW'
+          AND change->>'currentDate' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+          AND change->>'previousDate' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+          AND change->>'currentDate'>change->>'previousDate'
+      ), events AS (
+        SELECT * FROM financial UNION ALL SELECT * FROM funds
+      )
+      INSERT INTO user_notification_history(user_id,event_type,title,message,source_code,
+        source_reference,occurred_at,details,dedupe_key,delivery_channel,delivery_status)
+      SELECT user_id,'PORTFOLIO_RISK',
+        CASE kind WHEN 'FINANCIAL_DIRECTION' THEN 'Financial thesis review' ELSE 'Fund disclosure review' END,
+        CASE kind WHEN 'FINANCIAL_DIRECTION' THEN
+          symbol||': reported '||replace(lower(metric),'_',' ')||' direction is '||lower(direction)||
+          ' for '||period||'. Review dated financial evidence and verify official filings.'
+        ELSE symbol||': reported '||replace(lower(metric),'_',' ')||' change dated '||period||
+          ' needs review. Secondary evidence; verify official disclosure.' END,
+        'ATLAS_PORTFOLIO_REVIEW',holding_id||':'||metric||':'||period,generated_at,
+        jsonb_build_object('holding_id',holding_id,'metric',metric,'period',period,'kind',kind,'direction',direction),
+        'portfolio-thesis:'||md5(jsonb_build_array(holding_id,identity,kind,metric,period)::text),
+        'IN_APP','DELIVERED'
+      FROM events
       ON CONFLICT DO NOTHING
       """);
   }
