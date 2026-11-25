@@ -39,3 +39,17 @@ it("explains performance exclusions, refuses aged snapshots and clears stale res
   expect(await screen.findByRole("alert")).toBeTruthy();
   expect(screen.queryByText("12.00%")).toBeNull();
 });
+
+it("shows automatic capture provenance without presenting recorded prices as market closes",async()=>{
+  vi.spyOn(globalThis,"fetch").mockResolvedValue(new Response(JSON.stringify({
+    transaction_count:0,snapshot_count:2,xirr_percent:null,maximum_drawdown_percent:null,
+    xirr_status:"UNAVAILABLE",drawdown_status:"UNAVAILABLE",methodology:"Recorded valuations.",
+    automatic_snapshot_count:1,latest_capture_source:"AUTO_RECORDED",
+    latest_oldest_price_at:"2026-11-24T10:00:00Z",latest_newest_price_at:"2026-11-25T10:00:00Z",
+    valuation_through:"2026-11-25"
+  }),{status:200}));
+  render(<PortfolioPerformanceHistory/>);
+  expect(await screen.findByText(/Automatic evening valuation records: 1/)).toBeTruthy();
+  expect(screen.getByText(/Latest capture: Automatic/)).toBeTruthy();
+  expect(screen.getByText(/not certified market closes/)).toBeTruthy();
+});
