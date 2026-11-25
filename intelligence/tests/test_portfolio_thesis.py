@@ -78,7 +78,7 @@ class PortfolioThesisTests(unittest.TestCase):
             result=thesis.fund_evidence([row,row],instant)
             self.assertEqual(result["118955"]["portfolio"]["status"],"SECONDARY_COMPOSITION_ONLY")
             match.assert_called_once()
-            composition.assert_called_once()
+            composition.assert_called_once_with([disclosure],instant,include_exact_weights=True)
             self.assertEqual(thesis.fund_evidence([{**row,"amfi_metadata_date":"2026-11-01"}],instant),{})
         with patch.object(fund_disclosures,"permitted",return_value=False):
             self.assertEqual(thesis.fund_evidence([row],instant),{})
