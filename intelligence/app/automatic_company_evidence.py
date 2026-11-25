@@ -6,6 +6,7 @@ a recommendation or establishes fair value.
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from math import isfinite
+from zoneinfo import ZoneInfo
 import json
 import os
 import re
@@ -100,7 +101,8 @@ def normalize(report, isin, instant):
         elif key in ("income_statement","cash_flow") and isinstance(raw,dict):
             rows=history(raw.get(key))
             if rows:
-                data={"units":text(raw.get("units_in")),"rows":rows}
+                data={"units":text(raw.get("units_in")),"rows":rows,
+                      "statement_type":text(raw.get("type")),"time_period":text(raw.get("time_period"))}
         elif key=="balance_sheet" and isinstance(raw,dict):
             rows=[]
             for point in raw.get("history",[])[:5] if isinstance(raw.get("history"),list) else []:
@@ -192,7 +194,8 @@ def attach(snapshot,connect,instant=None):
         row=rows.get(isin)
         if row and row["payload"]:
             report=json.loads(row["payload"])
-            report["financial_trends"]=financial_trends(report,instant.year)
-            report["fundamental_quality"]=fundamental_quality(report,instant.year)
+            today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
+            report["financial_trends"]=financial_trends(report,today.year,as_of=today)
+            report["fundamental_quality"]=fundamental_quality(report,today.year)
             item["company_evidence"]=report
     return snapshot
