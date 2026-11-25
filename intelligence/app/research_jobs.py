@@ -16,7 +16,7 @@ AUXILIARY=("PORTFOLIO_REVIEW","INSTITUTIONAL_FLOWS","WATCH_OUTCOMES",
 
 
 def definitions(sections):
-    return {"PORTFOLIO_REVIEW":0, **{"SECTION:"+s:10+i for i,s in enumerate(sections)},
+    return {"CALENDAR_CONTEXT":-10,"PORTFOLIO_REVIEW":0, **{"SECTION:"+s:10+i for i,s in enumerate(sections)},
             "INSTITUTIONAL_FLOWS":30,"WATCH_OUTCOMES":31,"COMPANY_EVIDENCE":32,
             "COMPANY_NEWS":33,"STRATEGY_REPLAY":34,"AI_REVIEW":40}
 
