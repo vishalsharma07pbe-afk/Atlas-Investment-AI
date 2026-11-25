@@ -6,7 +6,7 @@ type Progress={status:string;remainingMonthEnds:number;recordedProgressPercent:n
 type Goal={id:string;name:string;targetAmount:number;reservedAmount:number;balanceDate:string;deadline:string;monthlyContribution:number;progress:Progress};
 type Report={as_of:string;goals:Goal[];notice:string};
 const endpoint="/api/v1/portfolio/goals";
-const money=(n:number|null)=>n==null?"Unavailable":new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",maximumFractionDigits:2}).format(n);
+const money=(n:number|null)=>n==null?"Unavailable":new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",minimumFractionDigits:0,maximumFractionDigits:2}).format(n);
 const blank=(date:string):Input=>({name:"",targetAmount:"",reservedAmount:"0",balanceDate:date,deadline:"",monthlyContribution:"0"});
 const labels:Record<string,string>={RECORDED_TARGET_FUNDED:"Recorded target funded",FUNDED_UNDER_ZERO_GROWTH:"Funded under zero-growth assumptions",FUNDING_SHORTFALL:"Funding shortfall",NO_REMAINING_MONTH_ENDS:"No remaining contribution dates",STALE_RECORDED_BALANCE:"Update recorded balance"};
 export default function GoalMonitor(){
