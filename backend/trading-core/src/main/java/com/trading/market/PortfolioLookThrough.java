@@ -12,7 +12,7 @@ final class PortfolioLookThrough {
   private static final BigDecimal ZERO=BigDecimal.ZERO,HUNDRED=BigDecimal.valueOf(100),TOLERANCE=new BigDecimal("0.0001");
   private record Composition(String code,String fundId,LocalDate date,Map<String,BigDecimal> weights,BigDecimal coverage){}
   private record Fund(Composition composition,BigDecimal value){}
-  private record Sector(String sector,BigDecimal directValue,BigDecimal indirectValue,BigDecimal estimatedValue,BigDecimal portfolioPercent){}
+  private record Sector(String sector,BigDecimal directValue,BigDecimal indirectValue,BigDecimal estimatedValue,BigDecimal portfolioPercent,boolean reviewConcentration){}
   private record Exposure(String isin,BigDecimal directValue,BigDecimal indirectValue,BigDecimal estimatedValue,BigDecimal portfolioPercent,int contributingSchemes){}
   private record Pair(String schemeA,String schemeB,boolean sameUnderlyingFund,int commonEquities,BigDecimal sharedWeightPercent,BigDecimal coverageA,BigDecimal coverageB){}
   private static BigDecimal number(JsonNode n){
@@ -168,7 +168,8 @@ final class PortfolioLookThrough {
     for(String sector:directSectors.keySet()){
       BigDecimal d=directSectors.get(sector),i=indirectSectors.get(sector),v=d.add(i);
       classified=classified.add(v);
-      sectorRows.add(new Sector(sector,money(d),money(i),money(v),pct(v,total)));
+      sectorRows.add(new Sector(sector,money(d),money(i),money(v),pct(v,total),
+        v.multiply(HUNDRED).compareTo(total.multiply(BigDecimal.valueOf(40)))>0));
     }
     sectorRows.sort(Comparator.comparing(Sector::estimatedValue).reversed().thenComparing(Sector::sector));
     out.put("sector_status",classified.signum()>0?"PARTIAL_CLASSIFIED_EXPOSURE":"NO_CURRENT_EXACT_CLASSIFICATION");
@@ -177,6 +178,8 @@ final class PortfolioLookThrough {
     out.put("sector_unclassified_mapped_value",money(mapped.subtract(classified)));
     out.put("sector_exposures",sectorRows.stream().limit(20).toList());
     out.put("sector_count",sectorRows.size());
+    out.put("sector_review_count",sectorRows.stream().filter(Sector::reviewConcentration).count());
+    out.put("sector_notice","Sector weights use the entire recorded portfolio, not only classified equity. Fresh provider labels may be incomplete or inconsistent; unknown exposures are not assigned to sectors. Above 40% is an illustrative review observation, not a personalized target.");
     List<Pair> pairs=new ArrayList<>();
     for(int a=0;a<selected.size();a++)for(int b=a+1;b<selected.size();b++){
       Composition x=selected.get(a).composition(),y=selected.get(b).composition();
