@@ -179,6 +179,20 @@ public class FundHistoryResearchService {
     return grouped;
   }
 
+  /** Exact catalog metadata, independent of whether three years of NAV history exist. */
+  public Map<String,Object> holdingIdentity(long schemeCode){
+    LocalDate today=LocalDate.now(MarketCalendarService.IST);
+    var rows=jdbc.queryForList("""
+      SELECT scheme_code,scheme_name,category,amfi_plan,amfi_option,
+        amfi_metadata_date::text AS amfi_metadata_date,isin_growth
+      FROM mutual_fund_schemes WHERE scheme_code=? AND amfi_option='GROWTH'
+        AND amfi_plan IN ('DIRECT','REGULAR') AND isin_growth ~ '^IN[A-Z0-9]{10}$'
+        AND amfi_metadata_date BETWEEN ?::date-7 AND ?::date
+        AND length(scheme_name) BETWEEN 1 AND 300 AND length(category) BETWEEN 1 AND 300
+      """,schemeCode,today,today);
+    return rows.size()==1?rows.getFirst():null;
+  }
+
   /** Exact saved scheme only; not a category ranking or forward recommendation. */
   public Map<String,Object> holdingEvidence(long schemeCode){
     LocalDate today=LocalDate.now(MarketCalendarService.IST);

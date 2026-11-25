@@ -1231,17 +1231,32 @@ class PortfolioThesisIdentity(BaseModel):
     model_config = {"extra":"forbid"}
 
 
+class PortfolioThesisFund(BaseModel):
+    scheme_code: int = Field(ge=100000, le=999999999, strict=True)
+    isin_growth: str = Field(pattern=r"^IN[A-Z0-9]{10}$")
+    amfi_plan: Literal["DIRECT","REGULAR"]
+    amfi_option: Literal["GROWTH"]
+    amfi_metadata_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    scheme_name: str = Field(min_length=1,max_length=300)
+    category: str = Field(min_length=1,max_length=300)
+    model_config = {"extra":"forbid"}
+
+
 class PortfolioThesisRead(BaseModel):
     identities: list[PortfolioThesisIdentity] = Field(max_length=100)
+    funds: list[PortfolioThesisFund] = Field(default_factory=list,max_length=20)
     model_config = {"extra":"forbid"}
 
 
 @app.post("/api/v1/internal/portfolio-thesis")
 def internal_portfolio_thesis(request: FastAPIRequest, body: PortfolioThesisRead):
     _require_internal_service(request)
-    from .portfolio_thesis import read
+    from .portfolio_thesis import read, fund_evidence
     try:
-        return read([item.model_dump() for item in body.identities])
+        result=read([item.model_dump() for item in body.identities]) if body.identities else {"items":{},"status":"NO_EQUITY_IDENTITIES"}
+        if body.funds:
+            result["fund_items"]=fund_evidence([item.model_dump() for item in body.funds])
+        return result
     except (ValueError, OSError, sqlite3.Error) as exc:
         raise HTTPException(status_code=503,detail="Portfolio evidence unavailable") from exc
 

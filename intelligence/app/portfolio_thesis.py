@@ -192,3 +192,33 @@ def read(rows,db_connect=connect,instant=None):
                     result["ai_review"]={"provider":"OLLAMA","reviewed_at":cached["attempted_at"],"findings":json.loads(cached["payload"]),"notice":NOTICE}
             output[key]=result
     return {"items":output,"status":"ENABLED"}
+
+
+def fund_evidence(rows,instant=None):
+    """Exact held Growth scheme metadata, read only from authorized bulk caches.
+
+    No additional provider/model requests, no owner information, no ranking-sample
+    restriction. Each scheme keeps the existing disclosure and composition gates.
+    """
+    from . import fund_disclosures, fund_portfolios
+    from zoneinfo import ZoneInfo
+    if not enabled() or not fund_disclosures.permitted():
+        return {}
+    instant=instant or datetime.now(timezone.utc)
+    today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
+    result={}
+    for row in rows[:20]:
+        code=row.get("scheme_code")
+        if type(code) is not int or str(code) in result or row.get("amfi_option")!="GROWTH":
+            continue
+        if not fund_disclosures._day(row.get("amfi_metadata_date"),today,7):
+            continue
+        matches=fund_disclosures.matched([row],today)
+        if len(matches)!=1:
+            continue
+        disclosure=matches[0]
+        portfolios=fund_portfolios.matched([disclosure],instant)
+        result[str(code)]={"status":"SECONDARY_REPORTED_EVIDENCE",
+            "disclosure":disclosure,"portfolio":portfolios[0] if len(portfolios)==1 else None,
+            "notice":"Exact held scheme, secondary reported evidence only; official filings, benchmark history and forward growth remain unverified."}
+    return result

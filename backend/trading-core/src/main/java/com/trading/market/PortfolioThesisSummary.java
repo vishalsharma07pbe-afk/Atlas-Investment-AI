@@ -106,7 +106,27 @@ final class PortfolioThesisSummary {
     add(drawdown<=-20?review:observations,statement+(drawdown<=-20?" Review tolerance for a 20% or greater historical decline.":""),source);
    }
    if(vol!=null&&vol>=0)add(observations,"Annualized weekly volatility proxy: "+fmt(vol)+"%.",source);
-   gaps.add("Official benchmark TRI, expenses, holdings overlap and Riskometer remain unverified.");
+   JsonNode evidence=row.path("fund_thesis_evidence"),disclosure=evidence.path("disclosure"),composition=evidence.path("portfolio");
+   if("SECONDARY_REPORTED_EVIDENCE".equals(evidence.path("status").asText())){
+    String disclosureSource="Secondary AMFI-derived disclosure; not independently verified";
+    Double ter=number(disclosure,"ter_percent");
+    if(ter!=null&&ter>=0&&ter<=100)add(observations,"Reported plan TER: "+fmt(ter)+"% as of "+disclosure.path("ter_date").asText()+".",disclosureSource);
+    String risk=disclosure.path("riskometer").asText();
+    if(Set.of("LOW","LOW_TO_MODERATE","MODERATE","MODERATELY_HIGH","HIGH","VERY_HIGH").contains(risk)){
+      add(Set.of("HIGH","VERY_HIGH").contains(risk)?review:observations,"Reported Riskometer: "+risk.replace('_',' ')+". Review suitability against your investment horizon and tolerance.",disclosureSource);
+    }
+    for(JsonNode conflict:disclosure.path("conflicts"))if(Set.of("BENCHMARK_CONFLICT","RISKOMETER_CONFLICT").contains(conflict.asText()))
+      gaps.add("Conflicting secondary disclosure: "+conflict.asText()+".");
+    JsonNode underlying=composition.path("underlying_research");
+    Double covered=number(underlying,"annual_statement_weight_percent"),flagged=number(underlying,"deterioration_review_weight_percent");
+    if("SECONDARY_COMPOSITION_ONLY".equals(composition.path("status").asText())&&
+      "REPORTED_HISTORICAL_DRIVERS_ONLY".equals(underlying.path("status").asText())&&
+      covered!=null&&flagged!=null&&covered>0&&covered<=100.5&&flagged>=0&&flagged<=covered){
+      String statement=fmt(flagged)+"% of reported fund weight has underlying annual financial deterioration observations; "+fmt(covered)+"% has annual statement evidence. Uncovered holdings are unknown.";
+      add(flagged>=20?review:observations,statement,"Secondary AMC-derived holdings and cached historical company reports; portfolio dated "+composition.path("portfolio_date").asText());
+    }else gaps.add("Comparable underlying company financial evidence is unavailable or incomplete.");
+   }else gaps.add("No current exact-scheme secondary disclosure match.");
+   gaps.add("Official benchmark TRI history, primary expenses, holdings overlap and Riskometer remain independently unverified.");
   }else gaps.add("Unsupported holding type for thesis evidence.");
   for(JsonNode m:row.path("missing_evidence"))if(m.isTextual()){
    String detail=m.asText();

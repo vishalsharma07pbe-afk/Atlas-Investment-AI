@@ -57,6 +57,17 @@ class PortfolioThesisSummaryTest {
   assertEquals("REVIEW_EVIDENCE",result.get("status"));
   assertTrue(result.get("review_prompts").toString().contains("Net margin changed from 20.00% to 15.00%"));
  }
+ @Test void heldFundDeteriorationUsesReportedFundWeightAndCoverage(){
+  var underlying=Map.of("status","REPORTED_HISTORICAL_DRIVERS_ONLY","annual_statement_weight_percent",60,
+    "deterioration_review_weight_percent",25);
+  var evidence=Map.of("status","SECONDARY_REPORTED_EVIDENCE","disclosure",Map.of("ter_percent",0.7,"ter_date","2026-11-24","riskometer","VERY_HIGH"),
+    "portfolio",Map.of("status","SECONDARY_COMPOSITION_ONLY","portfolio_date","2026-10-31","underlying_research",underlying));
+  var report=PortfolioThesisSummary.summarize(Map.of("asset_type","MUTUAL_FUND","fund_thesis_evidence",evidence),json);
+  assertEquals("REVIEW_EVIDENCE",report.get("status"));
+  assertTrue(report.get("review_prompts").toString().contains("25.00% of reported fund weight"));
+  assertTrue(report.get("review_prompts").toString().contains("60.00% has annual statement evidence"));
+  assertTrue(report.get("observations").toString().contains("0.70%"));
+ }
  @Test void missingEvidenceNeverProducesPositiveVerdict(){
   var result=PortfolioThesisSummary.summarize(Map.of("asset_type","EQUITY"),json);
   assertEquals("INSUFFICIENT_FOR_VERDICT",result.get("status"));
