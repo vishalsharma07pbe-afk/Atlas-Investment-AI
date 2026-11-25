@@ -96,6 +96,25 @@ class AutonomousResearchTests(unittest.TestCase):
         self.assertEqual(len(calls),11)
         self.assertEqual(len(result["top_gainers"]),5)
 
+    def test_session_coverage_is_distinct_from_usable_history_depth(self):
+        from datetime import date,timedelta
+        instruments=[{"id":i,"exchange":"NSE","symbol":f"T{i}","active":True,
+                      "listing_status":"ACTIVE","series":"EQ","instrument_type":"EQ",
+                      "recent_registry_count":4,"expected_session":"2026-11-23",
+                      "expected_session_count":3} for i in range(1,4)]
+        last=date(2026,11,23)
+        candles=[{"instrument_id":i,"trade_date":(last-timedelta(days=n-1-d)).isoformat(),
+                  "open":100+d,"high":102+d,"low":99+d,"close":101+d,"volume":100000,
+                  "adjustment_status":"RAW_UNADJUSTED"}
+                 for i,n in [(1,50),(2,100),(3,200)] for d in range(n)]
+        with patch.object(research,"now",return_value=datetime(2026,11,24,12,tzinfo=timezone.utc)), \
+             patch.object(research,"backend_json",side_effect=[instruments,candles]):
+            result=research.market_snapshot("NSE")
+        self.assertEqual(result["discovery_coverage"]["expected_session_count"],3)
+        self.assertEqual(result["history_coverage"]["SWING"]["eligible_histories"],3)
+        self.assertEqual(result["history_coverage"]["SHORT_TERM"]["eligible_histories"],2)
+        self.assertEqual(result["history_coverage"]["LONG_TERM"]["eligible_histories"],1)
+
     def test_batch_rejects_unrequested_history(self):
         row={"id":1,"exchange":"NSE","symbol":"TEST","active":True,"listing_status":"ACTIVE",
              "series":"EQ","instrument_type":"EQ","recent_registry_count":1}

@@ -90,6 +90,10 @@ def market_snapshot(exchange):
     expected_session=date.fromisoformat(expected) if expected is not None else None
     if expected_session is not None and not 1<=(today-expected_session).days<=14:
         raise ValueError("INVALID_DISCOVERY_CALENDAR")
+    matching_counts={row.get("expected_session_count") for row in instruments}
+    matching=next(iter(matching_counts)) if len(matching_counts)==1 else None
+    if expected_session is not None and (type(matching) is not int or not 0<=matching<=recent_count):
+        raise ValueError("INVALID_SESSION_COVERAGE")
     histories={identifier:[] for identifier in ids}
     # At most ten local batch requests per exchange; no provider requests.
     for offset in range(0,len(ids),20):
@@ -107,7 +111,8 @@ def market_snapshot(exchange):
     result = screen(instruments, lambda identifier:{"candles":histories[identifier]}, as_of=today,
                     universe_limit=200, max_age_days=4, include_horizons=True, batch_loaded=True, expected_session=expected_session)
     result["discovery_coverage"]={"recent_registry_count":recent_count,"selected_count":len(ids),
-        "selection_limit":200,"selection_method":"LATEST_COMPLETED_DAILY_TRADED_VALUE",
+        "selection_limit":200,"selection_method":"EXPECTED_SESSION_THEN_DAILY_TRADED_VALUE",
+        "expected_session_count":matching if expected_session else None,
         "history_batch_size":20,"calendar_status":"PUBLISHED_SESSION" if expected_session else "CALENDAR_UNVERIFIED",
         "expected_session":expected,"calendar_checked_on":today.isoformat()}
     # Attach registry identity, not ticker-based guesses, for company evidence.
@@ -118,7 +123,7 @@ def market_snapshot(exchange):
             record = registry.get(candidate["id"])
             if record and record.get("symbol") == candidate["symbol"] and record.get("exchange") == candidate["exchange"]:
                 candidate["isin"] = record.get("isin")
-    result["notice"] = ("Automatically refreshed daily observations from up to 200 recent active cash equities per exchange, ordered by latest completed daily traded value. "
+    result["notice"] = ("Automatically refreshed daily observations from up to 200 recent active cash equities per exchange, prioritizing the expected completed session, then latest daily traded value. "
                         "Not live intraday signals, full-exchange rankings, or recommendations.")
     return result
 

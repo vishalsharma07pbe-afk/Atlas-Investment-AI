@@ -36,6 +36,7 @@ public class DiscoveryHistoryScheduler {
     for(String exchange:List.of("NSE","BSE")){
       LocalDate end;
       try{end=calendar.lastTradingDay(exchange,today);}catch(IllegalStateException ex){continue;}
+      if(end.isBefore(today.minusDays(7)))continue;
       refreshExchange(exchange,end);
     }
   }
@@ -45,7 +46,9 @@ public class DiscoveryHistoryScheduler {
     // Keep only active cash equities with explicit mappings. Skip adjusted
     // series rather than create a mixed adjustment history.
     var rows=jdbc.queryForList("""
-      SELECT i.id,m.instrument_key,h.candle_count,h.latest_date
+      WITH candidates AS (
+      SELECT i.id,m.instrument_key,h.candle_count,h.latest_date,a.attempted_at,
+        CASE WHEN h.candle_count>=200 THEN 0 ELSE 1 END AS workload
       FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
       JOIN LATERAL (
         SELECT instrument_key FROM upstox_instrument_map
@@ -57,7 +60,11 @@ public class DiscoveryHistoryScheduler {
       ) m ON true
       LEFT JOIN discovery_history_attempts a ON a.instrument_id=i.id
       CROSS JOIN LATERAL (
-        SELECT count(*) candle_count,max((c.candle_time AT TIME ZONE 'Asia/Kolkata')::date) latest_date,
+        SELECT count(DISTINCT (c.candle_time AT TIME ZONE 'Asia/Kolkata')::date)
+                 FILTER (WHERE c.candle_time >= ?::date::timestamp AT TIME ZONE 'Asia/Kolkata'
+                   AND c.candle_time < (?::date+1)::timestamp AT TIME ZONE 'Asia/Kolkata') candle_count,
+               max((c.candle_time AT TIME ZONE 'Asia/Kolkata')::date)
+                 FILTER (WHERE c.candle_time < (?::date+1)::timestamp AT TIME ZONE 'Asia/Kolkata') latest_date,
                bool_or(c.adjustment_status='ADJUSTED') has_adjusted
         FROM market_candles c WHERE c.instrument_id=i.id AND c.timeframe='1d'
           AND c.is_complete AND c.quality_status IN ('VALIDATED_MANUAL','PROVIDER_VALIDATED')
@@ -67,9 +74,14 @@ public class DiscoveryHistoryScheduler {
         AND NOT coalesce(h.has_adjusted,false)
         AND (h.candle_count<? OR h.latest_date IS NULL OR h.latest_date<?)
         AND (a.next_attempt_at IS NULL OR a.next_attempt_at<=now())
-      ORDER BY a.attempted_at ASC NULLS FIRST,i.id
-      LIMIT 2
-      """,exchange,REQUIRED_DAILY_CANDLES,end);
+      ), ranked AS (
+        SELECT *,row_number() OVER (PARTITION BY workload ORDER BY attempted_at ASC NULLS FIRST,
+          candle_count DESC,id) AS position
+        FROM candidates
+      )
+      SELECT id,instrument_key,candle_count,latest_date FROM ranked
+      ORDER BY position,workload LIMIT 2
+      """,end.minusMonths(BACKFILL_MONTHS),end,end,exchange,REQUIRED_DAILY_CANDLES,end);
     for(var row:rows){
       long id=((Number)row.get("id")).longValue();
       long count=((Number)row.get("candle_count")).longValue();
@@ -90,7 +102,10 @@ public class DiscoveryHistoryScheduler {
         LocalDate from=count<REQUIRED_DAILY_CANDLES||latest==null||latest.isBefore(floor)?floor:latest.plusDays(1);
         if(from.isAfter(end))from=floor;
         int written=stocks.discoveryDailyCandles(accessToken,(String)row.get("instrument_key"),from,end);
-        jdbc.update("UPDATE discovery_history_attempts SET status='SUCCESS',rows_written=?,next_attempt_at=now()+interval '1 day' WHERE instrument_id=?",written,id);
+        if(written>0)
+          jdbc.update("UPDATE discovery_history_attempts SET status='SUCCESS',rows_written=?,next_attempt_at=now()+interval '12 hours' WHERE instrument_id=?",written,id);
+        else
+          jdbc.update("UPDATE discovery_history_attempts SET status='FAILED',rows_written=0,next_attempt_at=now()+interval '6 hours' WHERE instrument_id=?",id);
       }catch(Exception ex){
         // Never store provider response bodies, URLs or credentials.
         jdbc.update("UPDATE discovery_history_attempts SET status='FAILED',rows_written=0,next_attempt_at=now()+interval '6 hours' WHERE instrument_id=?",id);

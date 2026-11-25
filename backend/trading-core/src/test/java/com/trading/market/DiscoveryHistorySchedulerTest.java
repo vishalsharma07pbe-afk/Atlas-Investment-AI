@@ -24,7 +24,7 @@ class DiscoveryHistorySchedulerTest {
     DiscoveryHistoryScheduler scheduler=new DiscoveryHistoryScheduler(db,stocks,mock(MarketCalendarService.class));
     scheduler.accessToken="test-only";
     LocalDate end=LocalDate.of(2026,11,20);
-    when(db.queryForList(contains("LIMIT 2"),eq("NSE"),eq(200),eq(end))).thenReturn(List.of(
+    when(db.queryForList(contains("LIMIT 2"),eq(end.minusMonths(12)),eq(end),eq(end),eq("NSE"),eq(200),eq(end))).thenReturn(List.of(
       Map.of("id",7L,"instrument_key","NSE_EQ|TEST","candle_count",0L)));
     when(db.update(contains("INSERT INTO discovery_history_attempts"),eq(7L))).thenReturn(1);
     when(stocks.discoveryDailyCandles("test-only","NSE_EQ|TEST",end.minusMonths(12),end)).thenReturn(100);
@@ -39,7 +39,7 @@ class DiscoveryHistorySchedulerTest {
     DiscoveryHistoryScheduler scheduler=new DiscoveryHistoryScheduler(db,stocks,mock(MarketCalendarService.class));
     scheduler.accessToken="test-only";
     LocalDate end=LocalDate.of(2026,11,20);
-    when(db.queryForList(contains("h.candle_count<?"),eq("NSE"),eq(200),eq(end))).thenReturn(List.of(
+    when(db.queryForList(contains("h.candle_count<?"),eq(end.minusMonths(12)),eq(end),eq(end),eq("NSE"),eq(200),eq(end))).thenReturn(List.of(
       Map.of("id",7L,"instrument_key","NSE_EQ|TEST","candle_count",120L,"latest_date",end)));
     when(db.update(contains("INSERT INTO discovery_history_attempts"),eq(7L))).thenReturn(1);
     when(stocks.discoveryDailyCandles("test-only","NSE_EQ|TEST",end.minusMonths(12),end)).thenReturn(230);
@@ -53,7 +53,7 @@ class DiscoveryHistorySchedulerTest {
     DiscoveryHistoryScheduler scheduler=new DiscoveryHistoryScheduler(db,stocks,mock(MarketCalendarService.class));
     scheduler.accessToken="test-only";
     LocalDate end=LocalDate.of(2026,11,20);
-    when(db.queryForList(contains("LIMIT 2"),eq("NSE"),eq(200),eq(end))).thenReturn(List.of(
+    when(db.queryForList(contains("LIMIT 2"),eq(end.minusMonths(12)),eq(end),eq(end),eq("NSE"),eq(200),eq(end))).thenReturn(List.of(
       Map.of("id",7L,"instrument_key","NSE_EQ|TEST","candle_count",220L,"latest_date",end.minusDays(2))));
     when(db.update(contains("INSERT INTO discovery_history_attempts"),eq(7L))).thenReturn(1);
     when(stocks.discoveryDailyCandles("test-only","NSE_EQ|TEST",end.minusDays(1),end)).thenReturn(2);
@@ -61,12 +61,26 @@ class DiscoveryHistorySchedulerTest {
     verify(stocks).discoveryDailyCandles("test-only","NSE_EQ|TEST",end.minusDays(1),end);
   }
 
+  @Test void emptyBackfillCannotBeMarkedSuccessful()throws Exception{
+    JdbcTemplate db=mock(JdbcTemplate.class);
+    UpstoxFeedService stocks=mock(UpstoxFeedService.class);
+    DiscoveryHistoryScheduler scheduler=new DiscoveryHistoryScheduler(db,stocks,mock(MarketCalendarService.class));
+    scheduler.accessToken="test-only";
+    LocalDate end=LocalDate.of(2026,11,20);
+    when(db.queryForList(contains("LIMIT 2"),eq(end.minusMonths(12)),eq(end),eq(end),eq("NSE"),eq(200),eq(end)))
+      .thenReturn(List.of(Map.of("id",7L,"instrument_key","NSE_EQ|TEST","candle_count",0L)));
+    when(db.update(contains("INSERT INTO discovery_history_attempts"),eq(7L))).thenReturn(1);
+    scheduler.refreshExchange("NSE",end);
+    verify(db).update(contains("status='FAILED'"),eq(7L));
+    verify(db,never()).update(contains("status='SUCCESS'"),anyInt(),anyLong());
+  }
+
   @Test void anotherWorkerClaimPreventsDuplicateRequest(){
     JdbcTemplate db=mock(JdbcTemplate.class);
     UpstoxFeedService stocks=mock(UpstoxFeedService.class);
     DiscoveryHistoryScheduler scheduler=new DiscoveryHistoryScheduler(db,stocks,mock(MarketCalendarService.class));
     LocalDate end=LocalDate.of(2026,11,20);
-    when(db.queryForList(contains("LIMIT 2"),eq("BSE"),eq(200),eq(end))).thenReturn(List.of(
+    when(db.queryForList(contains("LIMIT 2"),eq(end.minusMonths(12)),eq(end),eq(end),eq("BSE"),eq(200),eq(end))).thenReturn(List.of(
       Map.of("id",7L,"instrument_key","BSE_EQ|TEST","candle_count",0L)));
     scheduler.refreshExchange("BSE",end);
     verifyNoInteractions(stocks);
