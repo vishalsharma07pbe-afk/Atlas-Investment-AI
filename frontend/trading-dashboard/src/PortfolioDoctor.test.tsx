@@ -228,3 +228,19 @@ it("renders mixed stock and fund allocation comparisons with their NAV sources",
  expect(screen.getByText("Mixed sample only.")).toBeTruthy();
  expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+it("shows provisional recorded acquisition dates and reconciliation gaps",async()=>{
+ const base={status:"MONITOR",weight_percent:50,recorded_return_percent:10,evidence_date:null,history_count:0,change_20_observations_percent:null,recent_peak_change_percent:null,findings:[],missing_evidence:[]};
+ const holdings=[{...base,id:1,symbol:"LOTTEST",asset_type:"EQUITY",exchange:"NSE"},{...base,id:2,symbol:"MISSING",asset_type:"EQUITY",exchange:"NSE"}];
+ const journal_lot_reconciliation={status:"PARTIAL_JOURNAL_RECONCILIATION",reconciled_count:1,holdings:[
+  {symbol:"LOTTEST",assetType:"EQUITY",status:"PROVISIONAL_JOURNAL_RECONCILED",recordedQuantity:2,journalQuantity:2,recordedCost:200,journalOpenCost:200,openLots:[{acquired:"2025-10-21",quantity:2,unitPrice:100,calendarDaysHeld:400}]},
+  {symbol:"MISSING",assetType:"EQUITY",status:"NO_RECORDED_TRADES",recordedQuantity:3,journalQuantity:null,recordedCost:300,journalOpenCost:null,openLots:[]}],notice:"Provisional journal evidence, not verified tax lots."};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-25T10:00:00Z",holding_count:2,attention_count:0,data_gap_count:0,notice:"Research only",holdings,journal_lot_reconciliation})})));
+ render(<PortfolioDoctor revision={0} onSettings={()=>{}}/>);
+ expect(await screen.findByRole("heading",{name:"Recorded acquisition history"})).toBeTruthy();
+ expect(screen.getByText("Provisionally reconciled")).toBeTruthy();
+ expect(screen.getByText("No recorded trades")).toBeTruthy();
+ expect(screen.getByText("2025-10-21")).toBeTruthy();
+ expect(screen.getByText("Provisional journal evidence, not verified tax lots.")).toBeTruthy();
+ expect(fetch).toHaveBeenCalledTimes(1);
+});
