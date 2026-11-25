@@ -111,3 +111,18 @@ it("shows exact held fund secondary disclosures and composition without a recomm
  expect(screen.getByText(/Example Company · 10.00%/)).toBeTruthy();
  expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+it("prioritizes dated fund disclosure changes and does not treat lower fees as recovery",async()=>{
+ const base={asset_type:"MUTUAL_FUND",exchange:null,status:"MONITOR",weight_percent:50,recorded_return_percent:1,evidence_date:null,history_count:0,change_20_observations_percent:null,recent_peak_change_percent:null,findings:[],missing_evidence:[]};
+ const change={metric:"TER",previousDate:"2026-11-24",currentDate:"2026-11-25",previousValue:"0.7",currentValue:"0.9",attention:"REVIEW",observedAt:"2026-11-25T10:00:00Z"};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-25T10:00:00Z",holding_count:2,attention_count:0,data_gap_count:0,fund_thesis_changed_count:2,fund_thesis_attention_count:1,notice:"Research only",holdings:[
+ {...base,id:1,symbol:"LOWERFEE",fund_thesis_changes:[{...change,previousValue:"0.9",currentValue:"0.7",attention:"OBSERVE"}]},
+ {...base,id:2,symbol:"HIGHERFEE",fund_thesis_changes:[change]}
+ ]})})));
+ render(<PortfolioDoctor revision={0} onSettings={()=>{}}/>);
+ expect(await screen.findByText("HIGHERFEE")).toBeTruthy();
+ expect(screen.getAllByRole("article")[0].textContent).toContain("HIGHERFEE");
+ expect(screen.getByText(/0.7% \(2026-11-24\) → 0.9% \(2026-11-25\)/)).toBeTruthy();
+ expect(screen.getByText(/Observation only. Secondary reported evidence/)).toBeTruthy();
+ expect(screen.getByText("Needs review")).toBeTruthy();
+});
