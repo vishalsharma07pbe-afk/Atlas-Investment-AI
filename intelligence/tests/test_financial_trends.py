@@ -46,3 +46,30 @@ class FinancialTrendsTests(unittest.TestCase):
         self.assertEqual(items["TOTAL_LIABILITIES"]["change_percent"],25)
         self.assertIsNone(items["OPERATING_CASH_FLOW"]["change_percent"])
         self.assertEqual(items["OPERATING_CASH_FLOW"]["direction"],"DECREASED")
+
+    def test_documented_month_year_labels_cash_flow_and_cagr(self):
+        from datetime import date
+        def section(rows):
+            return {"status":"AVAILABLE","data":{"units":"crore","statement_type":"consolidated","time_period":"yearly","rows":rows}}
+        sample={"sections":{
+            "income_statement":section([{"name":"operating_profit","history":points(("Mar 2022",100),("Mar 2023",110),("Mar 2024",121),("Mar 2025",133.1))}]),
+            "cash_flow":section([{"name":"operating","history":points(("Mar 2024",50),("Mar 2025",60))}])}}
+        result=summarize(sample,2026,as_of=date(2026,5,1))
+        by={r["metric"]:r for r in result["items"]}
+        self.assertEqual(by["OPERATING_PROFIT"]["latest_period"],"2025-03")
+        self.assertEqual(by["OPERATING_PROFIT"]["cagr_3y_percent"],10)
+        self.assertEqual(by["OPERATING_CASH_FLOW"]["change_percent"],20)
+        self.assertFalse(by["OPERATING_PROFIT"]["latest_period_may_be_stale"])
+        self.assertTrue(summarize(sample,2026,as_of=date(2026,11,25))["items"][0]["latest_period_may_be_stale"])
+
+    def test_annual_scope_month_end_and_mixed_year_end_guard(self):
+        from datetime import date
+        for labels in [(("Mar 2024",100),("Dec 2025",120)),(("Mar 2025",100),("Mar 2026",120))]:
+            sample=report(points(*labels))
+            block=sample["sections"]["income_statement"]["data"]
+            block.update(statement_type="consolidated",time_period="yearly")
+            self.assertEqual(summarize(sample,2026,as_of=date(2026,2,28))["status"],"UNAVAILABLE")
+        sample=report(points(("Mar 2024",100),("Mar 2025",120)))
+        self.assertEqual(summarize(sample,2026)["status"],"UNAVAILABLE")
+        sample["sections"]["income_statement"]["data"].update(statement_type="standalone",time_period="yearly")
+        self.assertEqual(summarize(sample,2026)["status"],"UNAVAILABLE")
