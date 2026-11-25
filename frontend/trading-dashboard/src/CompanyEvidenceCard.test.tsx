@@ -38,3 +38,17 @@ it("renders bounded peer comparisons without implying sector leadership",()=>{
  expect(screen.getByText("120 Cr")).toBeTruthy();
  expect(screen.getByText("Sample only; not market share.")).toBeTruthy();
 });
+
+it("shows reported quarterly ownership changes without treating them as trades",()=>{
+ const missing={status:"UNAVAILABLE",data:null,source:null};
+ const evidence:CompanyEvidence={isin:"INE002A01018",retrieved_at:"2026-11-24T10:00:00Z",available_sections:1,total_sections:8,notice:"Provider reported.",sections:{profile:missing,ratios:missing,income_statement:missing,cash_flow:missing,balance_sheet:missing,shareholding:missing,corporate_actions:missing,competitors:missing},
+ ownership_research:{status:"COMPARABLE_QUARTERS",latest_period:"2026-09-30",previous_period:"2026-06-30",
+ categories:[{category:"promoters",latest_percent:48,previous_percent:50,change_pp:-2}],
+ review_prompts:[{category:"promoters",change_pp:-2,reason:"REPORTED_OWNERSHIP_DECLINE_AT_LEAST_ONE_PP"}],
+ notice:"Quarterly ownership changes are not proof of buying or selling.",blockers:["PROMOTER_PLEDGE_DATA_UNVERIFIED"]}};
+ render(<CompanyEvidenceCard evidence={evidence}/>);
+ expect(screen.getByText("48%")).toBeTruthy();
+ expect(screen.getByText("-2 pp")).toBeTruthy();
+ expect(screen.getByText(/Review reported declines/)).toBeTruthy();
+ expect(screen.getByText(/not proof of buying or selling/)).toBeTruthy();
+});
