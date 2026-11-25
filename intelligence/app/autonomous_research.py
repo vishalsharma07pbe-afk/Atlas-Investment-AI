@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from .market_client import backend_json
 from .screener import screen
 from .mutual_fund_recommendations import CATEGORIES, dashboard
-from . import automatic_deals, fund_portfolios, fund_disclosures, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
+from . import global_fx, automatic_deals, fund_portfolios, fund_disclosures, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
 
 SECTIONS = ("NSE", "BSE", *CATEGORIES)
 DEFAULT_INTERVAL = 900
@@ -234,6 +234,10 @@ def read_snapshot(include_ai=True):
         except (ValueError, OSError, sqlite3.Error):
             snapshot["institutional_activity"] = {"status":"UNAVAILABLE"}
         try:
+            snapshot["global_fx"]=global_fx.read(_connect,current) if enabled else {"status":"AUTOMATION_DISABLED","items":[],"notice":global_fx.NOTICE}
+        except (ValueError,OSError,sqlite3.Error):
+            snapshot["global_fx"]={"status":"UNAVAILABLE","items":[],"notice":global_fx.NOTICE}
+        try:
             automatic_deals.attach(snapshot,_connect,current)
         except (ValueError,OSError,sqlite3.Error):
             snapshot["institutional_activity"]["deal_reports"]={"status":"UNAVAILABLE"}
@@ -272,6 +276,11 @@ def job_status():
 
 def _execute_job(job):
     """Dispatch existing bounded engines, with explicit evidence/config gates."""
+    if job=="GLOBAL_FX":
+        if not global_fx.permitted():
+            return "DISABLED_OR_NOT_AUTHORIZED"
+        global_fx.refresh(_connect)
+        return "PASS_COMPLETED"
     if job=="DEAL_REPORTS":
         if not automatic_deals.permitted():
             return "DISABLED_OR_NOT_AUTHORIZED"
@@ -359,7 +368,7 @@ def run_one_job(interval):
         outcome=_execute_job(job)
     except Exception:
         outcome="FAILED"
-    research_jobs.finish(_connect,job,token,now().timestamp(),(research_calendar.POLL_SECONDS if job=="CALENDAR_CONTEXT" else fund_disclosures.INTERVAL if job in ("FUND_DISCLOSURES","FUND_PORTFOLIOS") and outcome!="DISABLED_OR_NOT_AUTHORIZED" else interval),outcome)
+    research_jobs.finish(_connect,job,token,now().timestamp(),(research_calendar.POLL_SECONDS if job=="CALENDAR_CONTEXT" else global_fx.INTERVAL if job=="GLOBAL_FX" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else fund_disclosures.INTERVAL if job in ("FUND_DISCLOSURES","FUND_PORTFOLIOS") and outcome!="DISABLED_OR_NOT_AUTHORIZED" else interval),outcome)
     return True
 
 
