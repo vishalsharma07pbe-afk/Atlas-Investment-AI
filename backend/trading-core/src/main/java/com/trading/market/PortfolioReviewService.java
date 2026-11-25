@@ -115,13 +115,15 @@ public class PortfolioReviewService {
       if(previous==null)previous=prior;
     }catch(com.fasterxml.jackson.core.JsonProcessingException ignored){/* Invalid cache has no baseline. */}
     report=PortfolioThesisChanges.attach(thesis.enrich(report),previous,json,now);
+    report=PortfolioFundThesisChanges.attach(report,previous,json,now);
     report.put("thesis_monitor_version","ANNUAL_DIRECTION_V1");
     try{
       jdbc.update("""
         INSERT INTO portfolio_review_snapshots(user_id,holdings_revision,generated_at,result)
-        VALUES (?,?,now(),?::jsonb) ON CONFLICT(user_id) DO UPDATE SET
+        VALUES (?,?,?,?::jsonb) ON CONFLICT(user_id) DO UPDATE SET
         holdings_revision=EXCLUDED.holdings_revision,generated_at=EXCLUDED.generated_at,result=EXCLUDED.result
-        """,owner,revision,json.writeValueAsString(report));
+        WHERE portfolio_review_snapshots.generated_at<=EXCLUDED.generated_at
+        """,owner,revision,java.sql.Timestamp.from(now),json.writeValueAsString(report));
     }catch(com.fasterxml.jackson.core.JsonProcessingException ex){
       throw new IllegalStateException("Portfolio review serialization failed",ex);
     }
