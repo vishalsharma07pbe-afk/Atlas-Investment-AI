@@ -1,10 +1,16 @@
 import unittest
+import tempfile
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 from app import multi_provider_quotes as multi
 
 class MultiProviderTests(unittest.TestCase):
     def setUp(self):
+        root=tempfile.TemporaryDirectory()
+        self.addCleanup(root.cleanup)
+        env=patch.dict('os.environ',{'ATLAS_QUOTE_RECOVERY_DB':root.name+'/recovery.sqlite'})
+        env.start()
+        self.addCleanup(env.stop)
         stub=patch.object(multi,"quote_breaker",multi.CircuitBreaker())
         stub.start()
         self.addCleanup(stub.stop)
