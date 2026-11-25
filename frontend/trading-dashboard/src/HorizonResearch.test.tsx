@@ -111,3 +111,19 @@ it("keeps split normalization diagnostics separate from technical candidates",as
  expect(screen.getByText("Excluded from rankings and backtesting.")).toBeTruthy();
  expect(screen.getByText("TEST")).toBeTruthy();
 });
+
+it("shows historical liquidity diagnostics separately from executable recommendations",async()=>{
+ const enriched={...candidate,matched_strategy_replay:{as_of:"2026-11-23",trades:3,small_sample:true,cost_scenarios:[],notice:"Watch only.",
+ execution_research:{status:"HISTORICAL_PROXY_ONLY",positions:3,lookback_observations:20,participation_limit_percent:.5,zero_volume_endpoint_positions:1,
+ notional_scenarios:[{entry_notional_inr:100000,within_proxy_limit:1,exceeds_proxy_limit:1,unknown:1}],
+ base_friction_bps_per_side:30,friction_scenarios:[{extra_bps_per_side:75,total_bps_per_side:105,net_return_percent:-6.12,max_drawdown_percent:-9.23}],notice:"Not verified execution."}}};
+ const market={...section,result:{...section.result,horizons:{...section.result.horizons,SWING:{...section.result.horizons.SWING,candidates:[enriched]}}}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[market]})})));
+ render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+ fireEvent.click(await screen.findByText(/Same-stock historical replay/));
+ fireEvent.click(screen.getByText("Historical liquidity and execution stress"));
+ expect(screen.getByText(/1 with zero-volume entry or exit/)).toBeTruthy();
+ expect(screen.getByText("105 bps")).toBeTruthy();
+ expect(screen.getByText("-6.12%")).toBeTruthy();
+ expect(screen.getByText("Not verified execution.")).toBeTruthy();
+});

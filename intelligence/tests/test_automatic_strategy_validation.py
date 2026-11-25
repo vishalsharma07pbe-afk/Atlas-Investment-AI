@@ -96,5 +96,7 @@ class AutomaticValidationTests(unittest.TestCase):
             result=read(connect,now)["horizons"]["SWING"]["items"][0]
             self.assertEqual(result["market_regime_research"]["classified_trades"],19)
             self.assertEqual(result["chronological_validation"]["observed_folds"],3)
+            self.assertEqual(result["execution_research"]["positions"],19)
+            self.assertEqual(result["execution_research"]["notional_scenarios"][0]["within_proxy_limit"],19)
             self.assertEqual(result["chronological_validation"]["folds"][0]["market_benchmark_status"],"MATCHED_PRICE_INDEX")
             self.assertEqual(sum(path.endswith("strategy-benchmark") for path in calls),1)

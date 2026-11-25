@@ -7,7 +7,7 @@ from .market_client import backend_json
 from .strategy_validation import replay, WINDOWS, attach_market_benchmark
 from .horizon_research import VERSION
 from .replay_evidence import VERSION as EVIDENCE_VERSION, exact_isin, fingerprint
-CACHE_VERSION = VERSION + ':' + EVIDENCE_VERSION + ':market-price-index-v1:signal-regime-v1:chronological-folds-v1'
+CACHE_VERSION = VERSION + ':' + EVIDENCE_VERSION + ':market-price-index-v1:signal-regime-v1:chronological-folds-v1:execution-proxy-v1'
 
 IST=ZoneInfo("Asia/Kolkata")
 def _table(db):
