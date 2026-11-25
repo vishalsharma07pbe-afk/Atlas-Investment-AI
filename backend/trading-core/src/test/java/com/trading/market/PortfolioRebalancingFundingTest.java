@@ -29,7 +29,7 @@ class PortfolioRebalancingFundingTest {
     eq("120",e.conditionalCashIfThresholdUnused());eq("245",e.conditionalCashIfThresholdUsed());
   }
   @Test void fundTaxIsNotInferredEvenWhenCurrentExitLoadIsAvailable(){
-    var load=new PortfolioFundExitLoad.Scenario("MIXED_ALLOCATION","EQUAL_WEIGHTS","CONDITIONAL_CURRENT_TERMS",n("25"),List.of());
+    var load=new PortfolioFundExitLoad.Scenario("MIXED_ALLOCATION","EQUAL_WEIGHTS","CONDITIONAL_CURRENT_TERMS",n("25"),List.of(new PortfolioFundExitLoad.Fund("TEST","CONDITIONAL_CURRENT_TERMS","2026-10-31","Example terms",n("25"),n("9975"),null)));
     var c=PortfolioRebalancingFunding.compare("MIXED_ALLOCATION","EQUAL_WEIGHTS",cost("EQUAL_WEIGHTS","10000","10000"),
       sale("MIXED_ALLOCATION","MUTUAL_FUND","10000"),load);
     assertEquals("PARTIAL_COMPONENTS",c.status());
