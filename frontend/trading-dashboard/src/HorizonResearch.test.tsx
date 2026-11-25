@@ -237,3 +237,17 @@ it("separates strict investment qualification from technical watches",async()=>{
  expect(screen.getByText("partial context")).toBeTruthy();
  expect(screen.getByText("Technical watch candidates")).toBeTruthy();
 });
+
+it("uses server-selected distinct watch references and retains company-level conflicts",async()=>{
+ const first={...candidate,isin:"INE002A01018",selection_company_context:{status:"COMPANY_REVIEW_REQUIRED",listing_count:2,venues:["BSE","NSE"],blockers:["VALUATION_NOT_VERIFIED"],review_findings:["REPORTED_REVENUE_DECLINE"]}};
+ const other={...candidate,id:2,isin:first.isin,exchange:"BSE",symbol:"DUPLICATE",rank_score:100};
+ const market={...section,result:{...section.result,horizons:{...section.result.horizons,SWING:{...section.result.horizons.SWING,candidates:[first]}}}};
+ const second={...market,section:"BSE",result:{...market.result,horizons:{...market.result.horizons,SWING:{...market.result.horizons.SWING,candidates:[other]}}}};
+ const qualification={horizons:{SWING:{status:"NO_QUALIFIED_IN_REVIEWED_SAMPLE",reviewed_count:2,review_required_count:1,qualified_count:0,recommendations:[],leading_blockers:[],notice:"Bounded sample.",selection:{unique_company_count:1,unidentified_listing_count:0,conflicting_listing_count:0,cross_venue_company_count:1,review_company_count:1,ready_markets:["BSE","NSE"],watch_refs:[{exchange:"NSE",id:1,isin:first.isin}],notice:"Distinct company shortlist."}}}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[market,second],stock_qualification:qualification})})));
+ render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+ expect(await screen.findByText("TEST")).toBeTruthy();
+ expect(screen.queryByText("DUPLICATE")).toBeNull();
+ fireEvent.click(screen.getByText("Company-level selection · company review required"));
+ expect(screen.getByText("reported revenue decline")).toBeTruthy();
+});

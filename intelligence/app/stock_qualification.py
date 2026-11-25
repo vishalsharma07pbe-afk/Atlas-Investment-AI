@@ -10,6 +10,7 @@ from datetime import date
 from math import isfinite
 from .horizon_research import HORIZONS, MIN_HISTORY, BLOCKERS, VERSION as TECH_VERSION
 from .replay_evidence import exact_isin
+from . import stock_selection
 
 VERSION="STOCK-QUALIFICATION-1"
 NOTICE=("Strict evidence assessment of the already shortlisted daily watches only. Descriptive, reported and simulated evidence "
@@ -129,7 +130,9 @@ def attach(snapshot,today):
                 "review_required_count":0,"qualified_count":None,"recommendations":[],"leading_blockers":[],"notice":NOTICE}
             continue
         reviewed={}
+        observations=[]
         groups=0
+        ready_markets=set()
         for section in snapshot.get("sections",[]):
             market=section.get("section")
             if not enabled or market not in ("NSE","BSE") or section.get("status")!="READY":
@@ -139,21 +142,25 @@ def attach(snapshot,today):
             if not isinstance(group,dict):
                 continue
             groups+=1
+            ready_markets.add(market)
             for item in group.get("candidates",[]):
                 if item.get("exchange")!=market or type(item.get("id")) is not int or item["id"]<=0:
                     continue
                 decision=assess(item,group,result.get("discovery_coverage") or {},snapshot,horizon,today)
                 item["stock_qualification"]=decision
+                observations.append((item,decision))
                 key=(market,item["id"])
                 if key in reviewed:
                     # Duplicate observations must never inflate coverage.
                     continue
                 reviewed[key]=decision
+        selection=stock_selection.summarize(observations,ready_markets)
         counts=Counter(code for decision in reviewed.values() for code in decision["blockers"])
         report["horizons"][horizon]={"status":"DISABLED" if not enabled else
             "NO_QUALIFIED_IN_REVIEWED_SAMPLE" if reviewed else "NO_TECHNICAL_WATCHES" if groups else "AWAITING_RESEARCH",
             "reviewed_count":len(reviewed),"review_required_count":sum(bool(d["review_findings"]) for d in reviewed.values()),
             "qualified_count":0 if groups else None,"recommendations":[],
+            "selection":selection,
             "leading_blockers":[{"code":k,"count":v} for k,v in sorted(counts.items(),key=lambda x:(-x[1],x[0]))[:8]],
             "notice":NOTICE}
     return snapshot

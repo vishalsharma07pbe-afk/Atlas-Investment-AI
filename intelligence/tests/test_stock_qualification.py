@@ -51,3 +51,53 @@ class StockQualificationTests(unittest.TestCase):
         qualification.attach(snap,TODAY)
         self.assertNotIn("stock_qualification",item)
         self.assertIsNone(snap["stock_qualification"]["horizons"]["SWING"]["qualified_count"])
+
+    def test_cross_venue_selection_preserves_all_review_findings(self):
+        from copy import deepcopy
+        snap,item,group=fixture()
+        other=deepcopy(item)
+        other.update(exchange="BSE",id=2,rank_score=99)
+        other["research_conclusion"]["warnings"]=["REPORTED_REVENUE_DECLINE"]
+        result=deepcopy(snap["sections"][0]["result"])
+        result["horizons"]["SWING"]["candidates"]=[other]
+        snap["sections"].append({"section":"BSE","status":"READY","result":result})
+        qualification.attach(snap,TODAY)
+        summary=snap["stock_qualification"]["horizons"]["SWING"]
+        selection=summary["selection"]
+        self.assertEqual(selection["unique_company_count"],1)
+        self.assertEqual(selection["cross_venue_company_count"],1)
+        self.assertEqual(selection["watch_refs"],[{"exchange":"BSE","id":2,"isin":item["isin"]}])
+        self.assertIn("REPORTED_REVENUE_DECLINE",item["selection_company_context"]["review_findings"])
+        self.assertEqual(summary["recommendations"],[])
+        self.assertEqual(summary["qualified_count"],0)
+
+    def test_invalid_or_conflicting_identity_excluded(self):
+        from copy import deepcopy
+        snap,item,group=fixture()
+        duplicate=deepcopy(item)
+        duplicate["isin"]="INE009A01021"
+        unidentified=deepcopy(item)
+        unidentified.update(id=3,isin="UNKNOWN")
+        group["candidates"].extend([duplicate,unidentified])
+        qualification.attach(snap,TODAY)
+        selection=snap["stock_qualification"]["horizons"]["SWING"]["selection"]
+        self.assertEqual(selection["conflicting_listing_count"],1)
+        self.assertEqual(selection["unidentified_listing_count"],1)
+        self.assertEqual(selection["watch_refs"],[])
+
+    def test_top_five_distinct_and_stale_venue_excluded(self):
+        from copy import deepcopy
+        snap,item,group=fixture()
+        group["candidates"]=[]
+        for i in range(7):
+            row=deepcopy(item)
+            row.update(id=i+1,symbol="TEST"+str(i),isin="INE000A0101"+str(i),rank_score=i)
+            group["candidates"].append(row)
+        stale=deepcopy(snap["sections"][0])
+        stale.update(section="BSE",status="STALE")
+        snap["sections"].append(stale)
+        qualification.attach(snap,TODAY)
+        selection=snap["stock_qualification"]["horizons"]["SWING"]["selection"]
+        self.assertEqual(selection["unique_company_count"],7)
+        self.assertEqual(selection["ready_markets"],["NSE"])
+        self.assertEqual([r["id"] for r in selection["watch_refs"]],[7,6,5,4,3])

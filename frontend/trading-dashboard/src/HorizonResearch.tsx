@@ -32,8 +32,11 @@ type DealEvidence={same_date_groups?:{deal_type:string;buy_quantity:string;sell_
 type GlobalExposure={status:string;sector?:string;industry?:string;questions:{factor:string;indicator:string;as_of:string;change:{start_date:string;end_date:string;value:number;unit:string};question:string}[];missing_factors:string[];notice:string};
 type QualificationGate={domain:string;status:string;requirements:string[]};
 type StockQualification={status:string;gates:QualificationGate[];blockers:string[];review_findings:string[];notice:string};
-type QualificationSummary={status:string;reviewed_count:number;review_required_count:number;qualified_count:number;recommendations:unknown[];leading_blockers:{code:string;count:number}[];notice:string};
-type Candidate={stock_qualification?:StockQualification;current_regime_replay?:CurrentRegimeReplay;global_exposure?:GlobalExposure;price_volume_pressure?:Pressure;deal_evidence?:DealEvidence;price_structure?:PriceStructure;research_conclusion?:ResearchConclusion;matched_strategy_replay?:MatchedReplay;research_reliability?:CandidateReliability;news_evidence?:NewsEvidence;company_evidence?:CompanyEvidence;ai_review?:AiReview;id:number;symbol:string;exchange:string;as_of:string;close:number;rank_score:number;review_horizon:string;history_count:number;atr_percent:number;median_daily_traded_value:number;reasons:string[];warnings:string[]};
+type WatchReference={exchange:string;id:number;isin:string};
+type CompanySelection={unique_company_count:number;unidentified_listing_count:number;conflicting_listing_count:number;cross_venue_company_count:number;review_company_count:number;ready_markets:string[];watch_refs:WatchReference[];notice:string};
+type CompanyContext={listing_count:number;venues:string[];blockers:string[];review_findings:string[];status:string};
+type QualificationSummary={selection?:CompanySelection;status:string;reviewed_count:number;review_required_count:number;qualified_count:number|null;recommendations:unknown[];leading_blockers:{code:string;count:number}[];notice:string};
+type Candidate={isin?:string;selection_company_context?:CompanyContext;stock_qualification?:StockQualification;current_regime_replay?:CurrentRegimeReplay;global_exposure?:GlobalExposure;price_volume_pressure?:Pressure;deal_evidence?:DealEvidence;price_structure?:PriceStructure;research_conclusion?:ResearchConclusion;matched_strategy_replay?:MatchedReplay;research_reliability?:CandidateReliability;news_evidence?:NewsEvidence;company_evidence?:CompanyEvidence;ai_review?:AiReview;id:number;symbol:string;exchange:string;as_of:string;close:number;rank_score:number;review_horizon:string;history_count:number;atr_percent:number;median_daily_traded_value:number;reasons:string[];warnings:string[]};
 type HorizonResult={status:string;candidates:Candidate[];matched_count:number;evaluated_count:number;blockers:string[];exclusions:Record<string,number>};
 type ActionPreview={symbol:string;exchange:string;first_date:string;as_of:string;observations:number;actions:{ex_date:string;action_type:string;post_shares_per_pre_share:string}[];change_1d_percent:number|null;change_20_observation_percent:number|null;window_price_change_percent:number;notice:string};
 type ActionReview={normalized_preview_count:number;withheld_count:number;previews:ActionPreview[];notice:string};
@@ -163,7 +166,9 @@ export default function HorizonResearch({horizon,children,onSettings}:{horizon:H
  },[horizon]);
  const sections=data?.sections.filter(s=>s.section==="NSE"||s.section==="BSE")||[];
  const ready=sections.filter(s=>s.status==="READY"&&data?.enabled&&!error&&s.result?.horizons?.[horizon]);
- const ranked=ready.flatMap(s=>s.result!.horizons![horizon]!.candidates).sort((a,b)=>b.rank_score-a.rank_score||a.exchange.localeCompare(b.exchange)||a.symbol.localeCompare(b.symbol)).slice(0,5);
+ const available=ready.flatMap(s=>s.result!.horizons![horizon]!.candidates);
+ const selection=data?.stock_qualification?.horizons[horizon]?.selection;
+ const ranked=selection?selection.watch_refs.flatMap(ref=>{const matches=available.filter(c=>c.exchange===ref.exchange&&c.id===ref.id&&c.isin===ref.isin);return matches.length===1?matches:[];}).slice(0,5):available.sort((a,b)=>b.rank_score-a.rank_score||a.exchange.localeCompare(b.exchange)||a.symbol.localeCompare(b.symbol)).slice(0,5);
  const blockers=[...new Set(ready.flatMap(s=>s.result!.horizons![horizon]!.blockers))];
  return <section className="horizon-workspace" aria-label={titles[horizon]}>
   <section className="panel glass horizon-hero">
@@ -180,12 +185,13 @@ export default function HorizonResearch({horizon,children,onSettings}:{horizon:H
   </section>
   {horizon==="INTRADAY"?<IntradayResearch/>:<section className="panel glass horizon-results">
    {data?.enabled&&!error&&data.stock_qualification?.horizons[horizon]&&<QualificationSummaryView report={data.stock_qualification.horizons[horizon]!}/>}
-   <div className="sectionhead"><div><h3>Technical watch candidates</h3><p className="muted tiny">Up to five observations across the available NSE/BSE samples.</p></div></div>
+   <div className="sectionhead"><div><h3>Technical watch candidates</h3><p className="muted tiny">{selection?"Up to five distinct ISINs from the available NSE/BSE shortlists; research watches, not recommendations.":"Up to five observations across the available NSE/BSE samples."}</p></div></div>
    {ranked.length?<div className="horizon-cards">{ranked.map((candidate,index)=><article className="horizon-card" key={candidate.exchange+":"+candidate.id}>
     <header><div><small>#{index+1} · {candidate.exchange}</small><h3>{candidate.symbol}</h3></div><strong>{money(candidate.close)}</strong></header>
     <p className="muted tiny">Daily close · {candidate.as_of}</p><p>{candidate.review_horizon}</p>
     <dl><div><dt>ATR / price</dt><dd>{candidate.atr_percent.toFixed(2)}%</dd></div><div><dt>History</dt><dd>{candidate.history_count} sessions</dd></div></dl>
     <details><summary>Why this appears &amp; risks</summary><ul>{candidate.reasons.map(reason=><li key={reason}>{reason}</li>)}</ul><p>{candidate.warnings.join(" ")}</p><p className="muted tiny">Median historical daily traded value: {money(candidate.median_daily_traded_value)}</p></details>
+    {candidate.selection_company_context&&<CompanyContextView report={candidate.selection_company_context}/>}
     {candidate.stock_qualification&&<StockQualificationView report={candidate.stock_qualification}/>}
     {candidate.price_volume_pressure&&<PressureDetails pressure={candidate.price_volume_pressure} deals={candidate.deal_evidence}/>}
     {candidate.price_structure&&<PriceStructureDetails evidence={candidate.price_structure}/>}
@@ -265,8 +271,12 @@ function ClaimAuditView({report}:{report:ClaimComparison}){
 }
 
 function QualificationSummaryView({report}:{report:QualificationSummary}){
- return <section className="notice" aria-label="Investment qualification results"><strong>Qualified investment opportunities</strong><p>{report.qualified_count} qualified · {report.reviewed_count} technical watches assessed · {report.review_required_count} with review findings</p><p>{words(report.status)}. No technical watch is promoted automatically.</p>{report.leading_blockers.length>0&&<details><summary>Leading qualification requirements</summary><ul>{report.leading_blockers.map(g=><li key={g.code}>{words(g.code)} · {g.count} watches</li>)}</ul></details>}<p className="muted tiny">{report.notice}</p></section>;
+ return <section className="notice" aria-label="Investment qualification results"><strong>Qualified investment opportunities</strong><p>{report.qualified_count===null?"Qualification unavailable":report.qualified_count+" qualified"} · {report.reviewed_count} technical watches assessed · {report.review_required_count} with review findings</p><p>{words(report.status)}. No technical watch is promoted automatically.</p>{report.selection&&<p>{report.selection.unique_company_count} distinct identified companies · {report.selection.cross_venue_company_count} on both venues · {report.selection.review_company_count} companies with review findings · {report.selection.unidentified_listing_count} unidentified listings · {report.selection.conflicting_listing_count} conflicting listings withheld. Coverage: {report.selection.ready_markets.join(", ")||"None"}. {report.selection.notice}</p>}{report.leading_blockers.length>0&&<details><summary>Leading qualification requirements</summary><ul>{report.leading_blockers.map(g=><li key={g.code}>{words(g.code)} · {g.count} watches</li>)}</ul></details>}<p className="muted tiny">{report.notice}</p></section>;
 }
 function StockQualificationView({report}:{report:StockQualification}){
  return <details className="notice"><summary>Investment qualification · {words(report.status)}</summary><div className="tablewrap"><table><thead><tr><th>Evidence domain</th><th>Assessment</th><th>Remaining requirements</th></tr></thead><tbody>{report.gates.map(g=><tr key={g.domain}><td>{words(g.domain)}</td><td>{words(g.status)}</td><td>{g.requirements.map(words).join(" · ")||"None in this domain"}</td></tr>)}</tbody></table></div>{report.review_findings.length>0&&<><strong>Review findings</strong><ul>{report.review_findings.map(f=><li key={f}>{words(f)}</li>)}</ul></>}<p className="muted tiny">{report.notice}</p></details>;
+}
+
+function CompanyContextView({report}:{report:CompanyContext}){
+ return <details className="notice"><summary>Company-level selection · {words(report.status)}</summary><p>{report.listing_count} observed listings · {report.venues.join(", ")}</p><p>Combined qualification requirements: {report.blockers.map(words).join(" · ")||"None reported"}</p>{report.review_findings.length>0&&<ul>{report.review_findings.map(f=><li key={f}>{words(f)}</li>)}</ul>}<p className="muted tiny">Evidence gaps and review findings from all reviewed listings are retained. The displayed listing is a technical watch, not an execution venue recommendation.</p></details>;
 }
