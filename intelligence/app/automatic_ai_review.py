@@ -69,7 +69,7 @@ def evidence(candidate, horizon):
     if isinstance(isin,str) and re.fullmatch(r"IN[A-Z0-9]{10}",isin) and company.get("isin")==isin:
         trends=[]
         for row in (company.get("financial_trends") or {}).get("items",[])[:10]:
-            if (row.get("metric") not in ("REVENUE","NET_PROFIT","OPERATING_CASH_FLOW","TOTAL_ASSETS","TOTAL_LIABILITIES")
+            if (row.get("metric") not in ("REVENUE","NET_PROFIT","OPERATING_PROFIT","OPERATING_CASH_FLOW","TOTAL_ASSETS","TOTAL_LIABILITIES")
                 or row.get("latest_period_may_be_stale") is not False
                 or type(row.get("latest_year")) is not int or type(row.get("previous_year")) is not int
                 or not 2000<=row["previous_year"]<row["latest_year"]<=date.fromisoformat(observed).year
