@@ -308,7 +308,7 @@ def _execute_job(job):
     if job=="INSTITUTIONAL_FLOWS":
         if not automatic_institutional.permitted():
             return "DISABLED_OR_NOT_AUTHORIZED"
-        automatic_institutional.refresh(_connect)
+        automatic_institutional.refresh(_connect,calendar_loader=backend_json)
         return "PASS_COMPLETED"
     if job=="COMPANY_EVIDENCE" and not automatic_company_evidence.permitted():
         return "DISABLED_OR_NOT_AUTHORIZED"
