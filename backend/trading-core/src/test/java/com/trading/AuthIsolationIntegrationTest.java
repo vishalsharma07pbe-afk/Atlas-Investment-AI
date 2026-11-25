@@ -621,10 +621,16 @@ class AuthIsolationIntegrationTest {
       .andExpect(jsonPath("$.availableHoldings.length()").value(0));
     jdbc.update("UPDATE personal_holdings SET last_price=3000,price_as_of=now() WHERE id=?",id);
     mvc.perform(get(base).header("Authorization",a)).andExpect(status().isOk())
-      .andExpect(jsonPath("$.goals[0].funding.totalRecordedFunding").value(70000.0));
+      .andExpect(jsonPath("$.goals[0].funding.totalRecordedFunding").value(70000.0))
+      .andExpect(jsonPath("$.goalRisk['"+ids[0]+"'].equityValue").value(30000.0))
+      .andExpect(jsonPath("$.goalRisk['"+ids[0]+"'].scenarios[0].hypotheticalLoss").value(6000.0));
+    mvc.perform(get(base).header("Authorization",b)).andExpect(status().isOk())
+      .andExpect(jsonPath("$.goalRisk['"+ids[0]+"']").doesNotExist());
     jdbc.update("UPDATE personal_holdings SET price_as_of=now()-interval '8 days' WHERE id=?",id);
     mvc.perform(get(base).header("Authorization",a)).andExpect(status().isOk())
-      .andExpect(jsonPath("$.goals[0].progress.status").value("INCOMPLETE_LINKED_VALUATION"));
+      .andExpect(jsonPath("$.goals[0].progress.status").value("INCOMPLETE_LINKED_VALUATION"))
+      .andExpect(jsonPath("$.goalRisk['"+ids[0]+"'].status").value("INSUFFICIENT_FUNDING_EVIDENCE"))
+      .andExpect(jsonPath("$.goalRisk['"+ids[0]+"'].scenarios.length()").value(0));
 
     assertEqualsGoalAlerts(owner,ids[0],other,0);
     org.junit.jupiter.api.Assertions.assertEquals(1,goalNotifications.evaluateOwner(owner));

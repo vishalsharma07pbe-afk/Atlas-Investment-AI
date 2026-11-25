@@ -5,11 +5,27 @@ type Input={name:string;targetAmount:string;reservedAmount:string;balanceDate:st
 type Progress={status:string;remainingMonthEnds:number;recordedProgressPercent:number|null;recordedGap:number|null;zeroGrowthProjectedBalance:number|null;zeroGrowthShortfall:number|null;requiredMonthlyContribution:number|null;additionalMonthlyContribution:number|null};
 type LinkedHolding={holdingId:number;symbol:string;assetType:string;status:string;recordedValue:number|null};
 type Goal={id:string;name:string;targetAmount:number;reservedAmount:number;balanceDate:string;deadline:string;monthlyContribution:number;progress:Progress;funding?:{linkedValue:number|null;totalRecordedFunding:number|null;holdings:LinkedHolding[]}};
-type Report={as_of:string;goals:Goal[];availableHoldings?:{holdingId:number;symbol:string;assetType:string}[];notice:string};
+type GoalRisk={status:string;daysToDeadline:number;reservedSavings:number;equityValue:number|null;fundValue:number|null;grossWithdrawalGap:number|null;projectedWithdrawalGap:number|null;grossFundingNotCoveredByAssignedHoldings:number|null;recordedFundingSurplus:number|null;reviewPriority:string;notice:string;scenarios:{kind:string;equityDeclinePercent:number;fundDeclinePercent:number;hypotheticalLoss:number;stressedRecordedFunding:number;projectedFunding:number;projectedShortfall:number;requiredMonthlyContribution:number|null;additionalMonthlyContribution:number|null}[]};
+type Report={goalRisk?:Record<string,GoalRisk>;as_of:string;goals:Goal[];availableHoldings?:{holdingId:number;symbol:string;assetType:string}[];notice:string};
 const endpoint="/api/v1/portfolio/goals";
 const money=(n:number|null)=>n==null?"Unavailable":new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",minimumFractionDigits:0,maximumFractionDigits:2}).format(n);
 const blank=(date:string):Input=>({name:"",targetAmount:"",reservedAmount:"0",balanceDate:date,deadline:"",monthlyContribution:"0"});
 const labels:Record<string,string>={RECORDED_TARGET_FUNDED:"Recorded target funded",FUNDED_UNDER_ZERO_GROWTH:"Funded under zero-growth assumptions",FUNDING_SHORTFALL:"Funding shortfall",NO_REMAINING_MONTH_ENDS:"No remaining contribution dates",STALE_RECORDED_BALANCE:"Update recorded balance",INCOMPLETE_LINKED_VALUATION:"Linked valuation unavailable"};
+function GoalRiskDigest({risk}:{risk:GoalRisk}){
+ const labels:Record<string,string>={NEAR_DEADLINE_FUNDING_REVIEW:"Review funding before deadline",DOWNSIDE_FUNDING_REVIEW:"Review downside funding risk",BASELINE_FUNDING_REVIEW:"Review baseline funding",MONITOR:"Monitor",REVIEW_EVIDENCE:"Review missing evidence"};
+ return <details className="thesis-digest"><summary>Goal stress & withdrawal readiness · {labels[risk.reviewPriority]??risk.reviewPriority}</summary>
+  <p>{risk.daysToDeadline<0?"Deadline passed":risk.daysToDeadline===0?"Deadline today":risk.daysToDeadline+" days to deadline"}</p>
+  {risk.status==="INSUFFICIENT_FUNDING_EVIDENCE"?<p>Stress and withdrawal research withheld until assigned valuations and reserved balance are current.</p>:<>
+   <p>Recorded direct equity: {money(risk.equityValue)} · Recorded funds: {money(risk.fundValue)}</p>
+   <p>Target less recorded reserved savings: {money(risk.grossWithdrawalGap)} · After planned future contributions: {money(risk.projectedWithdrawalGap)}</p>
+   <p>Recorded gap beyond assigned holdings: {money(risk.grossFundingNotCoveredByAssignedHoldings)} · Recorded funding surplus: {money(risk.recordedFundingSurplus)}</p>
+   {risk.scenarios.length===0?<p>No positive assigned investment exposure to stress.</p>:<div className="tablewrap"><table><thead><tr><th>Independent shock</th><th>Hypothetical loss</th><th>Stressed recorded funding</th><th>Projected deadline funding</th><th>Projected gap</th><th>Monthly needed</th><th>Additional monthly</th></tr></thead><tbody>
+    {risk.scenarios.map(s=><tr key={s.kind}><td>{s.equityDeclinePercent>0?"Equity −"+s.equityDeclinePercent+"%":""}{s.equityDeclinePercent>0&&s.fundDeclinePercent>0?" / ":""}{s.fundDeclinePercent>0?"Fund NAV −"+s.fundDeclinePercent+"%":""}</td><td>{money(s.hypotheticalLoss)}</td><td>{money(s.stressedRecordedFunding)}</td><td>{money(s.projectedFunding)}</td><td>{money(s.projectedShortfall)}</td><td>{money(s.requiredMonthlyContribution)}</td><td>{money(s.additionalMonthlyContribution)}</td></tr>)}
+   </tbody></table></div>}
+  </>}
+  <p className="muted tiny">{risk.notice}</p>
+ </details>;
+}
 export default function GoalMonitor(){
  const [report,setReport]=useState<Report|null>(null);
  const [form,setForm]=useState<Input|null>(null);
@@ -76,6 +92,7 @@ export default function GoalMonitor(){
        {assignment?.goal===g.id?<div className="atlas-compact-form"><label>Unassigned investment <select value={assignment.holding} onChange={e=>setAssignment({...assignment,holding:e.target.value})}><option value="">Choose holding</option>{(report.availableHoldings??[]).map(h=><option key={h.holdingId} value={h.holdingId}>{h.symbol} · {h.assetType}</option>)}</select></label>
        <label><input type="checkbox" checked={assignment.confirmed} onChange={e=>setAssignment({...assignment,confirmed:e.target.checked})}/> Reserved savings exclude assigned holdings and other goals.</label>
        <div className="atlas-form-actions"><button type="button" className="primary" disabled={busy||!assignment.confirmed||!assignment.holding} onClick={()=>link(g.id,assignment.holding,false)}>Confirm whole-holding assignment</button><button type="button" className="secondary" disabled={busy} onClick={()=>setAssignment(null)}>Cancel assignment</button></div></div>:<button type="button" className="secondary" disabled={busy||!report.availableHoldings?.length} onClick={()=>setAssignment({goal:g.id,holding:"",confirmed:false})}>Assign holding</button>}</div>}
+       {report.goalRisk?.[g.id]&&<GoalRiskDigest risk={report.goalRisk[g.id]}/>}
        <div className="atlas-form-actions"><button className="secondary" type="button" disabled={busy} onClick={()=>edit(g)}>Update goal / balance</button>
        {removing===g.id?<><button className="secondary" type="button" disabled={busy} onClick={()=>remove(g.id)}>Confirm removal</button><button className="secondary" type="button" disabled={busy} onClick={()=>setRemoving(null)}>Cancel removal</button></>:<button className="secondary" type="button" disabled={busy} onClick={()=>setRemoving(g.id)}>Remove goal</button>}</div>
      </article>)}
