@@ -118,3 +118,24 @@ def summarize(report,latest_year,*,as_of=None):
                       "latest_period_may_be_stale":((as_of.year-period[0])*12+as_of.month-period[1]>18) if period[1] else latest_year-period[0]>1})
     return {"status":"PARTIAL" if items and missing else "AVAILABLE" if items else "UNAVAILABLE",
             "items":items,"missing_metrics":missing,"notice":NOTICE}
+
+
+def earnings_evidence(report,as_of):
+    data=(report.get("sections",{}).get("income_statement",{}).get("data") or {})
+    rows=[]
+    if data.get("statement_type")=="consolidated" and data.get("time_period")=="yearly":
+        for name in ("eps - basic","eps - diluted"):
+            matches=[r for r in data.get("eps_rows",[]) if r.get("name","").strip().casefold()==name]
+            if len(matches)!=1:
+                continue
+            points=_series(matches[0].get("history"),as_of,True)
+            if points:
+                rows.append({"metric":"BASIC_EPS" if name.endswith("basic") else "DILUTED_EPS",
+                    "observations":[{"period":_label(p),"reported_value":v} for p,v in points],
+                    "unit_status":"PER_SHARE_CURRENCY_UNVERIFIED",
+                    "latest_period_may_be_stale":(as_of.year-points[-1][0][0])*12+as_of.month-points[-1][0][1]>18
+                        if points[-1][0][1] else as_of.year-points[-1][0][0]>1})
+    return {"status":"REPORTED_ONLY" if rows else "UNAVAILABLE","items":rows,
+            "source":report.get("sections",{}).get("income_statement",{}).get("source"),
+            "valuation_eligible":False,
+            "notice":"Reported EPS observations only. Per-share currency, share basis, corporate-action comparability and filing publication dates are not verified. No price estimate or EPS growth assumption is derived."}
