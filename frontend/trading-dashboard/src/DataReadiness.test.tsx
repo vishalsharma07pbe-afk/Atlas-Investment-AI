@@ -21,3 +21,13 @@ it("renders background job failures without conflating scheduler completion with
  expect(screen.getByText("2 / 1")).toBeTruthy();
  expect(screen.getByText("Pass completion is not provider verification.")).toBeTruthy();
 });
+
+it("shows independently stored calendar states without asserting live connectivity",async()=>{
+ const calendar={status:"STORED_SESSION_CONTEXT",sessions:[{exchange:"NSE",session_date:"2026-11-25",phase:"PRE_MARKET",open_at:"2026-11-25T03:45:00Z",close_at:"2026-11-25T10:00:00Z"},{exchange:"BSE",session_date:"2026-11-25",phase:"CALENDAR_UNVERIFIED",open_at:null,close_at:null}],notice:"Stored schedule only."};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-25T02:30:00Z",provider_mode:"UPSTOX",automatic_research_enabled:true,live_market_data_connected:false,blockers:[],datasets:[],research_jobs:{status:"PERSISTED_LOCAL_JOB_LEDGER",jobs:[],calendar}})})));
+ render(<DataReadiness/>);
+ expect(await screen.findByText("Exchange session context")).toBeTruthy();
+ expect(screen.getByText("PRE MARKET")).toBeTruthy();
+ expect(screen.getByText("CALENDAR UNVERIFIED")).toBeTruthy();
+ expect(screen.getByText(/Live feed: not verified/)).toBeTruthy();
+});
