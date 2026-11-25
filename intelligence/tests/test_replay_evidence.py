@@ -78,3 +78,35 @@ class ReplayEvidenceTests(unittest.TestCase):
         action={"ex_date":manifest["first_date"],"action_type":"SPLIT"}
         self.assertEqual(corporate_action_status({"latest_action_date":action["ex_date"],"corporate_action_context":json.dumps([action])},manifest),"NO_RECORDED_CROSSING_ACTION")
         self.assertEqual(corporate_action_status({"latest_action_date":action["ex_date"],"corporate_action_context":json.dumps([action]*33)},manifest),"ACTION_CONTEXT_UNAVAILABLE")
+
+    def test_session_audit_detects_internal_and_trailing_gaps_and_unknowns(self):
+        from app.replay_evidence import full_manifest,session_audit
+        data=history(5)
+        manifest=full_manifest(data,TODAY)
+        rows=[{"trade_date":r["trade_date"],"state":"REGULAR"} for r in data]
+        calendar={"exchange":"NSE","through":data[-1]["trade_date"],"days":rows}
+        self.assertEqual(session_audit(manifest,calendar,"NSE",TODAY)["status"],"STORED_SESSIONS_MATCHED")
+        for index in (2,4):
+            gap=full_manifest(data[:index]+data[index+1:],TODAY)
+            audit=session_audit(gap,calendar,"NSE",TODAY)
+            self.assertEqual(audit["status"],"HISTORICAL_SESSION_MISMATCH")
+            self.assertEqual(audit["missing_dates"],[data[index]["trade_date"]])
+        for state,key,status in (("CLOSED","unexpected_observations","HISTORICAL_SESSION_MISMATCH"),
+            ("UNKNOWN","unknown_days","HISTORICAL_CALENDAR_INCOMPLETE"),
+            ("SPECIAL_SESSION_UNSUPPORTED","special_days","HISTORICAL_CALENDAR_INCOMPLETE")):
+            changed=[{**r,"state":state} if i==2 else r for i,r in enumerate(rows)]
+            audit=session_audit(manifest,{**calendar,"days":changed},"NSE",TODAY)
+            self.assertEqual(audit[key],1)
+            self.assertEqual(audit["status"],status)
+        self.assertEqual(session_audit(manifest,{**calendar,"days":rows[:-1]},"NSE",TODAY)["unknown_days"],1)
+        self.assertEqual(session_audit(manifest,{**calendar,"days":rows+[rows[0]]},"NSE",TODAY)["status"],"HISTORICAL_CALENDAR_UNAVAILABLE")
+        self.assertEqual(session_audit(manifest,calendar,"BSE",TODAY)["status"],"HISTORICAL_CALENDAR_UNAVAILABLE")
+
+    def test_session_audit_accepts_known_closure_without_candle(self):
+        from app.replay_evidence import full_manifest,session_audit
+        data=history(5)
+        rows=[{"trade_date":r["trade_date"],"state":"CLOSED" if i==2 else "REGULAR"} for i,r in enumerate(data)]
+        calendar={"exchange":"BSE","through":data[-1]["trade_date"],"days":rows}
+        audit=session_audit(full_manifest(data[:2]+data[3:],TODAY),calendar,"BSE",TODAY)
+        self.assertEqual(audit["status"],"STORED_SESSIONS_MATCHED")
+        self.assertEqual(audit["regular_sessions"],4)

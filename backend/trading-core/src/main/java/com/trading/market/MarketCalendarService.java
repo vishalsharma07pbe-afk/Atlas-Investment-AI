@@ -50,6 +50,31 @@ import org.springframework.stereotype.Service;
      instant.isBefore(open)?"PRE_MARKET":instant.isBefore(close)?"MARKET_HOURS":"POST_MARKET");
   return result;
  }
+ /** Bounded retrospective view of local calendar evidence, not an official calendar certificate.
+  * Weekends and stored holidays follow the existing closure policy; explicitly recorded
+  * special sessions and malformed regular sessions remain unresolved.
+  */
+ public Map<String,Object> historicalContext(String exchange,LocalDate today){
+  if(!Set.of("NSE","BSE").contains(exchange))throw new IllegalArgumentException("exchange");
+  var rows=jdbc.queryForList("""
+    WITH days AS (SELECT CAST(? AS date)-n AS day FROM generate_series(1,1100) AS g(n))
+    SELECT to_char(d.day,'YYYY-MM-DD') AS trade_date,
+      CASE
+        WHEN EXISTS(SELECT 1 FROM market_sessions s WHERE s.exchange_id=e.id AND s.session_date=d.day
+          AND s.is_trading_day AND s.session_type<>'REGULAR') THEN 'SPECIAL_SESSION_UNSUPPORTED'
+        WHEN extract(isodow FROM d.day) IN (6,7) OR h.holiday_date IS NOT NULL THEN 'CLOSED'
+        WHEN s.is_trading_day IS FALSE THEN 'CLOSED'
+        WHEN s.is_trading_day IS TRUE AND s.open_time IS NOT NULL AND s.close_time IS NOT NULL
+          AND s.open_time<s.close_time AND (s.open_time AT TIME ZONE 'Asia/Kolkata')::date=d.day
+          AND (s.close_time AT TIME ZONE 'Asia/Kolkata')::date=d.day THEN 'REGULAR'
+        ELSE 'UNKNOWN' END AS state
+    FROM days d JOIN exchanges e ON e.code=?
+    LEFT JOIN exchange_holidays h ON h.exchange_code=e.code AND h.holiday_date=d.day
+    LEFT JOIN market_sessions s ON s.exchange_id=e.id AND s.session_date=d.day AND s.session_type='REGULAR'
+    ORDER BY d.day
+    """,today,exchange);
+  return Map.of("exchange",exchange,"through",today.minusDays(1).toString(),"days",rows);
+ }
  public boolean isMarketOpen(){return isMarketOpen("NSE",Instant.now());}
  public boolean isMarketOpen(String exchange){return isMarketOpen(exchange,Instant.now());}
  public boolean isMarketOpen(String exchange,Instant instant){

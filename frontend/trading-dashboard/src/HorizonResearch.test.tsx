@@ -141,3 +141,14 @@ it("shows full history provenance without claiming point-in-time certification",
  expect(screen.getByText(/no recorded crossing action/)).toBeTruthy();
  expect(screen.getByText("Not point-in-time certified.")).toBeTruthy();
 });
+
+it("explains withheld calendar evidence without simulated returns",async()=>{
+ const strategy_validation={sample_count:1,horizons:{SWING:{counts:{HISTORICAL_SESSION_MISMATCH:1},observed_instruments:0,items:[],
+ calendar_withheld:[{exchange:"NSE",symbol:"GAP",status:"HISTORICAL_SESSION_MISMATCH",calendar_days:300,regular_sessions:200,missing_sessions:1,unexpected_observations:0,unknown_days:0,special_days:0,missing_dates:["2026-10-01"],unexpected_dates:[],unknown_dates:[],special_dates:[],notice:"Stored calendar only."}]}}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[section],strategy_validation})})));
+ render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+ fireEvent.click(await screen.findByText(/GAP · NSE · historical calendar evidence withheld/));
+ expect(screen.getByText(/1 missing sessions/)).toBeTruthy();
+ expect(screen.getByText(/Missing dates.*2026-10-01/)).toBeTruthy();
+ expect(screen.getByText(/No usable replay results yet/)).toBeTruthy();
+});

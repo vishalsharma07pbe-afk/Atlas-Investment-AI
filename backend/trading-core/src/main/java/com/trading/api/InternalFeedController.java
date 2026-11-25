@@ -176,6 +176,14 @@ public class InternalFeedController {
     return Map.of("benchmark_key","NSE_INDEX|Nifty 50","kind","PRICE_INDEX","candles",rows);
   }
 
+  /** Fixed bounded public historical calendar read. */
+  @GetMapping("/strategy-calendar")
+  public Map<String,Object> strategyCalendar(HttpServletRequest request,@RequestParam String exchange) {
+    requireServiceToken(request.getHeader("X-Atlas-Service-Token"));
+    requireExchange(exchange);
+    return new MarketCalendarService(jdbc).historicalContext(exchange,java.time.LocalDate.now(MarketCalendarService.IST));
+  }
+
   @GetMapping("/session-context")
   public Map<String,Object> sessionContext(HttpServletRequest request) {
     requireServiceToken(request.getHeader("X-Atlas-Service-Token"));

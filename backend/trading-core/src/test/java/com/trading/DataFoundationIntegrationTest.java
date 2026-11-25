@@ -63,6 +63,16 @@ class DataFoundationIntegrationTest {
     mvc.perform(get("/api/v1/market-data/instruments/1/candles")).andExpect(status().isOk()).andExpect(jsonPath("$.timeframe").value("1d")).andExpect(jsonPath("$.count").value(2)).andExpect(jsonPath("$.candles[0].adjustment_status").value("RAW_UNADJUSTED"));
   }
 
+  @Test @Order(2) void historicalCalendarDistinguishesHolidayRegularAndUnknown() {
+    var report=new com.trading.market.MarketCalendarService(jdbc).historicalContext("NSE",java.time.LocalDate.of(2026,11,13));
+    assertThat(report.get("through")).isEqualTo("2026-11-12");
+    var rows=(java.util.List<?>)report.get("days");
+    assertThat(rows).hasSize(1100);
+    assertThat(rows.contains(java.util.Map.of("trade_date","2026-11-10","state","CLOSED"))).isTrue();
+    assertThat(rows.contains(java.util.Map.of("trade_date","2026-11-11","state","REGULAR"))).isTrue();
+    assertThat(rows.contains(java.util.Map.of("trade_date","2026-11-08","state","CLOSED"))).isTrue();
+  }
+
   @Test @Order(2) void identicalArtifactIsIdempotent() throws Exception {
     String csv="""
       exchange,symbol,series,trade_date,open,high,low,close,volume,adjustment_status,source_revision
