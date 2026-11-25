@@ -35,7 +35,16 @@ final class PortfolioAllocationResearch {
       return result;
     }
     result.put("status","HYPOTHETICAL_SCENARIOS_AVAILABLE");
-    result.put("scenarios",List.of(scenario(ordered,total,5),scenario(ordered,total,10)));
+    var scenarios=List.of(scenario(ordered,total,5),scenario(ordered,total,10));
+    result.put("scenarios",scenarios);
+    List<PortfolioRebalancingCosts.Case> costs=new ArrayList<>();
+    for(Scenario s:scenarios){
+      String count=s.hypotheticalNewIdentities()+" new identities";
+      costs.add(new PortfolioRebalancingCosts.Case(count+" · no-sale contribution",s.additionalCapital(),BigDecimal.ZERO));
+      costs.add(new PortfolioRebalancingCosts.Case(count+" · fixed-capital redistribution",
+        s.hypotheticalRedistributedCapital(),s.hypotheticalRedistributedCapital()));
+    }
+    result.put("cost_sensitivity",PortfolioRebalancingCosts.assess(total,costs));
     return result;
   }
 
