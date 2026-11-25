@@ -17,3 +17,11 @@ describe("Mutual fund research dashboard",()=>{
     await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("horizon_months=36"),expect.anything()));
   });
 });
+
+it("distinguishes explicit AMFI scheme evidence from name-matched discovery without qualifying incomplete funds",async()=>{
+ const official={...response,coverage:{...response.coverage,explicit_amfi_history_candidates:2}};
+ vi.stubGlobal("fetch",vi.fn(async(url:string)=>({ok:true,json:async()=>url.includes("historical-watch")?{category:"LARGE_CAP",items:[],universe_count:120,sample_count:20,eligible_count:0,automatic_collection_enabled:true,notice:"Historical only"}:official})));
+ render(<MutualFundResearchDashboard onExplore={()=>{}}/>);
+ expect(await screen.findByText("Explicit AMFI Direct Growth evidence (sample)")).toBeTruthy();
+ expect(screen.getAllByText("No fund currently qualifies")).toHaveLength(2);
+});
