@@ -43,7 +43,7 @@ public class PortfolioReviewService {
     // Read only this owner's holdings; market history is shared public evidence.
     // Ambiguous symbol matches are rejected unless all listings share an ISIN.
     var rows=jdbc.queryForList("""
-      SELECT p.id,p.symbol,p.asset_type,p.quantity*p.average_cost AS invested,
+      SELECT p.id,p.symbol,p.asset_type,p.quantity,p.quantity*p.average_cost AS invested,
         p.quantity*p.last_price AS market_value,p.price_as_of,
         (p.last_price IS NOT NULL AND p.last_price>=0 AND p.price_as_of IS NOT NULL
           AND p.price_as_of<=now()
@@ -103,6 +103,11 @@ public class PortfolioReviewService {
       WHERE p.user_id=? ORDER BY p.id
       """,today,today,owner);
     Map<String,Object> report=assess(rows,today,now);
+    try{report.put("journal_lot_reconciliation",PortfolioJournalLots.collect(jdbc,owner,rows,today));}
+    catch(org.springframework.dao.DataAccessException ex){
+      report.put("journal_lot_reconciliation",Map.of("status","UNAVAILABLE_LOCAL_JOURNAL","holdings",List.of(),
+        "reconciled_count",0,"notice","Local transaction journal could not be read. No tax-lot estimate."));
+    }
     try{report.put("benchmark_risk_estimate",PortfolioBenchmarkEvidence.assessOwner(jdbc,owner,today));}
     catch(org.springframework.dao.DataAccessException ex){
       report.put("benchmark_risk_estimate",Map.of("status","UNAVAILABLE_LOCAL_EVIDENCE","attentionStatus","INSUFFICIENT_EVIDENCE"));
