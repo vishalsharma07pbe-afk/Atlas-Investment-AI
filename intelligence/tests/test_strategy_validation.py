@@ -138,3 +138,53 @@ class StrategyValidationTests(unittest.TestCase):
         self.assertEqual(swing["market_regime_research"]["groups"][-1]["trades"],19)
         self.assertEqual(swing["market_regime_research"]["groups"][-1]["cost_scenarios"],[])
         self.assertEqual(swing["trades"],19)
+
+    def test_repeated_fixed_rule_windows_preserve_main_replay_and_bound_exposure(self):
+        data=history()
+        with patch("app.strategy_validation.evaluate",return_value={h:("TECHNICAL_WATCH",{}) for h in ("SWING","SHORT_TERM","LONG_TERM")}):
+            result=replay(data,TODAY)
+        swing=result["horizons"]["SWING"]
+        self.assertEqual(swing["trades"],19)
+        validation=swing["chronological_validation"]
+        self.assertEqual(validation["status"],"REPEATED_WINDOWS_OBSERVED")
+        self.assertEqual(validation["eligible_folds"],3)
+        self.assertEqual(validation["observed_folds"],3)
+        rows=data["candles"]
+        dates=[r["trade_date"] for r in rows]
+        ends=[366,432,499]
+        for i,fold in enumerate(validation["folds"]):
+            self.assertEqual(fold["test_end"],dates[ends[i]])
+            self.assertEqual(fold["exposure_start"],dates[301 if i==0 else ends[i-1]+1])
+            self.assertEqual(fold["trades"],6)
+            self.assertLessEqual(fold["trades"]*10,dates.index(fold["test_end"])-dates.index(fold["test_start"]))
+            expected=(rows[ends[i]]["close"]/rows[dates.index(fold["exposure_start"])]["open"])*.997**2
+            self.assertAlmostEqual(fold["cost_scenarios"][1]["net_same_stock_buy_hold_percent"],(expected-1)*100,places=3)
+        self.assertEqual(result["horizons"]["SHORT_TERM"]["chronological_validation"]["eligible_folds"],3)
+        long=result["horizons"]["LONG_TERM"]["chronological_validation"]
+        self.assertEqual(long["status"],"INSUFFICIENT_REPEATED_WINDOWS")
+        self.assertEqual(long["folds"],[])
+        self.assertEqual(result["horizons"]["LONG_TERM"]["trades"],1)
+
+    def test_fold_no_signal_and_benchmark_gaps_are_explicit(self):
+        data=history()
+        def signal(candles,indicators,base):
+            self.assertTrue(all(len(v)==len(candles) for v in indicators.values()))
+            state="TECHNICAL_WATCH" if len(candles)<367 else "RULES_NOT_MET"
+            return {h:(state,{}) for h in ("SWING","SHORT_TERM","LONG_TERM")}
+        with patch("app.strategy_validation.evaluate",side_effect=signal):
+            result=replay(data,TODAY)
+        validation=result["horizons"]["SWING"]["chronological_validation"]
+        self.assertEqual(validation["status"],"INSUFFICIENT_OBSERVED_FOLDS")
+        self.assertEqual(validation["no_signal_folds"],2)
+        self.assertTrue(all(not f["cost_scenarios"] for f in validation["folds"][1:]))
+        self.assertEqual(sum(validation["cost_summaries"][0][k] for k in ("positive_folds","negative_folds","flat_folds")),1)
+        rows=[{"trade_date":r["trade_date"],"open":100,"close":110,"revision":1,"source_code":"UPSTOX"}
+              for r in data["candles"][-250:]]
+        benchmark={"benchmark_key":"NSE_INDEX|Nifty 50","kind":"PRICE_INDEX","candles":rows}
+        attach_market_benchmark(result,data,benchmark,TODAY)
+        fold=validation["folds"][0]
+        self.assertEqual(fold["market_benchmark_status"],"MATCHED_PRICE_INDEX")
+        self.assertEqual(fold["cost_scenarios"][0]["gross_nifty50_price_index_percent"],10)
+        attach_market_benchmark(result,data,{**benchmark,"candles":rows[:70]+rows[71:]},TODAY)
+        self.assertEqual(fold["market_benchmark_status"],"UNAVAILABLE")
+        self.assertNotIn("gross_nifty50_price_index_percent",fold["cost_scenarios"][0])
