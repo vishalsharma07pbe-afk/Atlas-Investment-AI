@@ -9,22 +9,22 @@ import java.time.Instant;
 final class PortfolioThesisChanges {
   private PortfolioThesisChanges(){}
   private static final Set<String> METRICS=Set.of("REVENUE","NET_PROFIT","OPERATING_PROFIT","OPERATING_CASH_FLOW");
-  record Signal(String metric,int year,String period,String unit,String direction){}
+  record Signal(String metric,int year,String period,String previousPeriod,String unit,String direction){}
 
   static List<Signal> signals(JsonNode holding){
     if(!"EQUITY".equals(holding.path("asset_type").asText())||
         !holding.path("isin").asText().matches("IN[A-Z0-9]{10}"))return List.of();
     Map<String,List<Signal>> byMetric=new TreeMap<>();
     for(var row:holding.path("thesis_evidence").path("company_evidence").path("financial_trends").path("items")){
-      String metric=row.path("metric").asText(),period=row.path("latest_period").asText(),unit=row.path("unit").asText();
+      String metric=row.path("metric").asText(),period=row.path("latest_period").asText(),previousPeriod=row.path("previous_period").asText(),unit=row.path("unit").asText();
       int year=row.path("latest_year").asInt(),previous=row.path("previous_year").asInt();
       var old=row.path("previous_value");var latest=row.path("latest_value");
-      if(!METRICS.contains(metric)||year<2001||year-previous!=1||period.isBlank()||unit.isBlank()||
+      if(!METRICS.contains(metric)||year<2001||year-previous!=1||period.isBlank()||previousPeriod.isBlank()||unit.isBlank()||
           row.path("latest_period_may_be_stale").asBoolean(true)||!old.isNumber()||!latest.isNumber()||
           !Double.isFinite(old.asDouble())||!Double.isFinite(latest.asDouble()))continue;
       String direction=latest.asDouble()<0?"NEGATIVE":latest.asDouble()<old.asDouble()?"DECLINING":
         latest.asDouble()>old.asDouble()?"IMPROVING":"UNCHANGED";
-      byMetric.computeIfAbsent(metric,k->new ArrayList<>()).add(new Signal(metric,year,period,unit,direction));
+      byMetric.computeIfAbsent(metric,k->new ArrayList<>()).add(new Signal(metric,year,period,previousPeriod,unit,direction));
     }
     return byMetric.values().stream().filter(v->v.size()==1).map(List::getFirst).toList();
   }
@@ -50,7 +50,7 @@ final class PortfolioThesisChanges {
       for(var s:fresh){
         Signal before=baseline.get(s.metric());
         if(before!=null&&s.year()==before.year()+1&&s.unit().equals(before.unit())&&
-            !s.period().equals(before.period())&&!s.direction().equals(before.direction())){
+            s.previousPeriod().equals(before.period())&&!s.period().equals(before.period())&&!s.direction().equals(before.direction())){
           changes.add(Map.of("metric",s.metric(),"previous_period",before.period(),"current_period",s.period(),
             "previous_direction",before.direction(),"current_direction",s.direction(),"observed_at",now.toString()));
         }
