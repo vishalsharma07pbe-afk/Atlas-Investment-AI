@@ -87,3 +87,15 @@ it("shows historical price geometry with explicit costs and no trade verdict",as
  expect(screen.getByText("Assumed cost: 30 bps each side.")).toBeTruthy();
  expect(screen.getByText("Historical geometry only.")).toBeTruthy();
 });
+
+it("keeps split normalization diagnostics separate from technical candidates",async()=>{
+ const corporate_action_review={normalized_preview_count:1,withheld_count:1,notice:"Excluded from rankings and backtesting.",previews:[{symbol:"SPLITTEST",exchange:"NSE",first_date:"2026-10-20",as_of:"2026-11-13",observations:25,actions:[{ex_date:"2026-11-13",action_type:"SPLIT",post_shares_per_pre_share:"2"}],change_1d_percent:2,change_20_observation_percent:2,window_price_change_percent:2,notice:"Price only, not total return."}]};
+ const market={...section,result:{...section.result,corporate_action_review}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[market]})})));
+ render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+ fireEvent.click(await screen.findByText("NSE · corporate action diagnostics (1 previews, 1 withheld)"));
+ expect(screen.getByText(/SPLITTEST · known-action price-only preview/)).toBeTruthy();
+ expect(screen.getByText(/Normalized daily price change: 2%/)).toBeTruthy();
+ expect(screen.getByText("Excluded from rankings and backtesting.")).toBeTruthy();
+ expect(screen.getByText("TEST")).toBeTruthy();
+});
