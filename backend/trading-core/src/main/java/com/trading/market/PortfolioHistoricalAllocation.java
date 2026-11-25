@@ -86,6 +86,7 @@ final class PortfolioHistoricalAllocation {
     out.put("first_date",dates.getFirst().start().toString());out.put("last_date",dates.getLast().end().toString());
     out.put(mixed?"recorded_value":"direct_equity_value",values.values().stream().reduce(BigDecimal.ZERO,BigDecimal::add));
     out.put("lowest_observed_variability",lowest.kind());
+    out.put("chronological_validation",PortfolioAllocationValidation.assess(current,observations,dates));
     if(mixed){
       out.put("alternatives",alternatives.stream().map(a->Map.of(
         "kind",a.kind(),"sampleMeanPercent",a.sampleMeanPercent(),"sampleVolatilityPercent",a.sampleVolatilityPercent(),

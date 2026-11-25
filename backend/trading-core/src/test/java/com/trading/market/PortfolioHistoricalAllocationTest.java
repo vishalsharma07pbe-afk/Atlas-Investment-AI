@@ -26,6 +26,7 @@ class PortfolioHistoricalAllocationTest {
     assertEquals("HISTORICAL_COMPARISON_AVAILABLE",result.get("status"));
     assertEquals(40,result.get("observations"));
     assertEquals("EQUAL_WEIGHTS",result.get("lowest_observed_variability"));
+    assertEquals("INSUFFICIENT_HOLDOUT_HISTORY",((Map<?,?>)result.get("chronological_validation")).get("status"));
     var plans=((List<?>)result.get("alternatives")).stream().map(PortfolioHistoricalAllocation.Alternative.class::cast).toList();
     assertEquals(3,plans.size());
     assertEquals(1.2*Math.sqrt(40.0/39),plans.get(0).sampleVolatilityPercent(),1e-8);
@@ -47,4 +48,28 @@ class PortfolioHistoricalAllocationTest {
     var result=assess(Map.of(A,returns(0.1),B,returns(1)),true);
     assertEquals("CURRENT_WEIGHTS",result.get("lowest_observed_variability"));
   }
+  @Test void bothAllocationModesExposeConditionalValidationOnCommonHistory(){
+    var first=new HashMap<PortfolioEquityCorrelation.Interval,Double>();
+    var second=new HashMap<PortfolioEquityCorrelation.Interval,Double>();
+    for(int k=0;k<60;k++){
+      var start=TODAY.minusDays(61-k);
+      var interval=new PortfolioEquityCorrelation.Interval(start,start.plusDays(1));
+      double sign=k%2==0?1:-1;
+      first.put(interval,sign*0.02);
+      second.put(interval,k<40?-sign*0.02:sign*0.08);
+    }
+    var direct=assess(Map.of(A,first,B,second),true);
+    var mixed=PortfolioHistoricalAllocation.assessMixed(
+      Map.of(A,new BigDecimal("800"),"AMFI:123456",new BigDecimal("200")),Map.of(),
+      Map.of(A,first,"AMFI:123456",second),TODAY,true);
+    for(var result:List.of(direct,mixed)){
+      var validation=(Map<?,?>)result.get("chronological_validation");
+      assertEquals("CONDITIONAL_HOLDOUT_AVAILABLE",validation.get("status"));
+      assertEquals("EQUAL_WEIGHTS",validation.get("selected_kind"));
+      assertEquals("HIGHER_OBSERVED_HOLDOUT_VARIABILITY",validation.get("comparison"));
+      assertEquals(40,validation.get("selection_count"));
+      assertEquals(20,validation.get("holdout_count"));
+    }
+  }
+
 }
