@@ -81,6 +81,7 @@ public class InternalFeedController {
       )
       SELECT i.id,e.code AS exchange,i.symbol,i.series,i.isin,i.instrument_type,i.listing_status,i.active,
              count(*) OVER () AS recent_registry_count,calendar.expected_session,
+             count(*) FILTER (WHERE (latest.candle_time AT TIME ZONE e.timezone)::date=calendar.expected_session) OVER () AS expected_session_count,
              (SELECT max(a.ex_date) FROM corporate_actions a
                WHERE a.instrument_id=i.id AND a.action_type IN ('SPLIT','BONUS','DIVIDEND')
                AND a.ex_date <= (latest.candle_time AT TIME ZONE e.timezone)::date) AS latest_action_date
@@ -96,7 +97,9 @@ public class InternalFeedController {
       CROSS JOIN calendar
       WHERE e.code=? AND i.active AND i.listing_status='ACTIVE' AND i.series='EQ'
         AND i.instrument_type IN ('EQ','EQUITY','STOCK')
-      ORDER BY latest.close*latest.volume DESC NULLS LAST,i.id LIMIT 200
+      ORDER BY CASE WHEN calendar.expected_session IS NOT NULL AND
+        (latest.candle_time AT TIME ZONE e.timezone)::date=calendar.expected_session THEN 0 ELSE 1 END,
+        latest.close*latest.volume DESC NULLS LAST,i.id LIMIT 200
       """,exchange,exchange);
   }
 
