@@ -271,6 +271,11 @@ def attach_conclusions(snapshot):
                     warnings.extend(f for f in pressure.get("findings",[]) if f in DOWNSIDE)
                     if any(f in DOWNSIDE for f in pressure.get("findings",[])):
                         priorities.append("PRICE_VOLUME_PRESSURE_CAUSE_UNVERIFIED")
+                    follow=pressure.get("breakout_followthrough") or {}
+                    if follow.get("status")=="OBSERVED_FOLLOWTHROUGH" and follow.get("as_of")==item.get("as_of"):
+                        if any(e.get("direction")=="UPSIDE" and e.get("status")=="REENTRY_OBSERVED" for e in follow.get("events",[])):
+                            warnings.append("RECENT_UPSIDE_BREAKOUT_REENTRY_REVIEW")
+                            priorities.append("BREAKOUT_FOLLOWTHROUGH_STRATEGY_VALIDATION_REQUIRED")
                 thesis="Technical watch meets the current horizon rules; a full investment verdict is withheld."
                 if warnings:
                     thesis="Technical watch meets the current horizon rules, but risk or conflicting evidence requires review."

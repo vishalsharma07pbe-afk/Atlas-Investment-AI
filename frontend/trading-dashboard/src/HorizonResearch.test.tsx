@@ -263,3 +263,14 @@ it("displays historical cost and gap stress without calling it a trade target",a
  expect(screen.getByText("1.00×")).toBeTruthy();
  expect(screen.getByText("Mathematical geometry, not executable prices.")).toBeTruthy();
 });
+
+it("shows failed breakout follow-through without inventing a trading signal",async()=>{
+ const follow={status:"OBSERVED_FOLLOWTHROUGH",as_of:"2026-11-23",events:[{direction:"UPSIDE",status:"REENTRY_OBSERVED",signal_date:"2026-11-20",boundary:102,signal_close:105,break_percent:2.9412,relative_volume:1.2,volume_context:"BELOW_HIGH_VOLUME_THRESHOLD",followup_count:1,reentry_date:"2026-11-23"}],notice:"Observed re-entry, not a confirmed trap or trading signal."};
+ const market={...section,result:{...section.result,breakout_review:{evaluated_count:5,event_listing_count:1,items:[{id:2,symbol:"BREAKOUT",exchange:"NSE",as_of:"2026-11-23",followthrough:follow}],notice:"Bounded sample."}}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[market]})})));
+ render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+ fireEvent.click(await screen.findByText("NSE · breakout follow-through (1 of 5 assessed)"));
+ expect(screen.getByText(/upside · reentry observed/)).toBeTruthy();
+ expect(screen.getByText(/re-entry 2026-11-23/)).toBeTruthy();
+ expect(screen.getByText("Observed re-entry, not a confirmed trap or trading signal.")).toBeTruthy();
+});

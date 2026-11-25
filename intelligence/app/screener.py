@@ -21,6 +21,8 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
     breadth_pairs={}
     pressure_rows=[]
     pressure_eligible=0
+    trap_eligible=0
+    trap_rows=[]
     action_previews=[]
     action_preview_count=0
     action_preview_withheld=0
@@ -96,6 +98,12 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
             if include_horizons and batch_loaded:
                 pressure=price_volume_pressure.analyze(candles, calendar_verified=expected_session is not None)
                 row["price_volume_pressure"]=pressure
+                follow=pressure.get("breakout_followthrough") or {}
+                if follow.get("status")=="OBSERVED_FOLLOWTHROUGH":
+                    trap_eligible+=1
+                    if follow.get("events"):
+                        trap_rows.append({"id":row["id"],"symbol":row["symbol"],"exchange":row["exchange"],
+                            "as_of":row["as_of"],"followthrough":follow})
                 if pressure["status"]=="OBSERVED_PRICE_VOLUME_ONLY":
                     pressure_eligible+=1
                     if pressure["findings"]:
@@ -148,6 +156,10 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
     if include_horizons:
         result["horizons"] = summarize(horizon_evaluations)
         if batch_loaded:
+            result["breakout_review"]={"evaluated_count":trap_eligible,"event_listing_count":len(trap_rows),
+                "items":sorted(trap_rows,key=lambda r:(not any(e["status"]=="REENTRY_OBSERVED" for e in r["followthrough"]["events"]),
+                    -max(abs(e["break_percent"]) for e in r["followthrough"]["events"]),r["symbol"],r["id"]))[:5],
+                "notice":price_volume_pressure.breakout_followthrough.NOTICE}
             result["price_volume_review"]={"evaluated_count":pressure_eligible,
                 "flagged_count":len(pressure_rows),
                 "downside_items":sorted([r for r in pressure_rows if any(f in price_volume_pressure.DOWNSIDE for f in r["price_volume_pressure"]["findings"])],

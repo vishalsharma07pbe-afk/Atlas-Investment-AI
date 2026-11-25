@@ -2,6 +2,7 @@
 from datetime import date
 from math import isfinite
 from statistics import median
+from . import breakout_followthrough
 
 DOWNSIDE=frozenset(("HIGH_VOLUME_DECLINE_REVIEW","HIGH_VOLUME_UPSIDE_REJECTION_REVIEW"))
 UPSIDE=frozenset(("HIGH_VOLUME_ADVANCE_OBSERVATION","HIGH_VOLUME_DOWNSIDE_REJECTION_OBSERVATION"))
@@ -48,6 +49,7 @@ def analyze(candles,*,calendar_verified=False):
             "calendar_status":"LATEST_SESSION_MATCHED_ONLY","relative_volume":round(relative,4),"change_percent":round(change,4),
             "close_range_position":round(position,4) if position is not None else None,
             "prior_median_traded_value":round(traded,2),"prior_range_high":upper,"prior_range_low":lower,
-            "findings":findings}
+            "findings":findings,
+            "breakout_followthrough":breakout_followthrough.analyze(candles,calendar_verified=calendar_verified)}
     except (ValueError,TypeError,AttributeError,OverflowError,ZeroDivisionError):
         return result
