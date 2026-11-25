@@ -27,7 +27,7 @@ class AutomaticAiReviewTests(unittest.TestCase):
         def runner(prompt, ids, providers):
             calls.append((prompt,providers))
             return {"status":"MODEL_GROUNDED","provider":providers[0],"response":
-                    {"findings":[{"statement":"ATR is 2 percent.", "evidence_ids":["OBS"]}]}}
+                    {"findings":[{"statement":'{"path":"/OBS/observations/atr_percent","value":2}', "evidence_ids":["OBS"]}]}}
         with patch.object(review.ai_failover,"_enabled",return_value=True):
             self.assertEqual(review.providers(),["OLLAMA"])
             review.refresh(snapshot(),research._connect,runner)
@@ -82,7 +82,7 @@ class AutomaticAiReviewTests(unittest.TestCase):
             self.assertNotIn("never forward",prompt)
             self.assertNotIn("secret notes",prompt)
             return {"status":"MODEL_GROUNDED","provider":providers[0],"response":{
-                "findings":[{"statement":"Reported revenue increased.","evidence_ids":["FUND"]}]}}
+                "findings":[{"statement":'{"path":"/FUND/0/direction","value":"INCREASED"}',"evidence_ids":["FUND"]}]}}
         self.assertIsNotNone(review._review(pack,"OLLAMA",runner))
         item["company_evidence"]["isin"]="INE009A01021"
         self.assertNotIn("financial_trends",review.evidence(item,"SWING"))
@@ -93,7 +93,7 @@ class AutomaticAiReviewTests(unittest.TestCase):
         def runner(prompt,ids,providers):
             calls.append((providers[0],prompt))
             return {"status":"MODEL_GROUNDED","provider":providers[0],"response":{
-                "findings":[{"statement":"Dated ATR observation.","evidence_ids":["OBS"]}]}}
+                "findings":[{"statement":'{"path":"/OBS/observations/atr_percent","value":2}',"evidence_ids":["OBS"]}]}}
         with patch.dict(os.environ,{"ATLAS_AUTOMATIC_EXTERNAL_AI_ALLOWED":"true",
             "ATLAS_AI_PROVIDER_ORDER":"GEMINI,GROQ,OPENAI,XAI,OLLAMA"}),patch.object(review.ai_failover,"_enabled",return_value=True):
             for expected in (2,4,5,5):
@@ -104,7 +104,7 @@ class AutomaticAiReviewTests(unittest.TestCase):
             committee=item["ai_review"]["committee"]
             self.assertEqual(committee["reviewed_count"],5)
             self.assertEqual(committee["status"],"ALL_CONFIGURED_REVIEWS_RETURNED")
-            self.assertEqual(committee["agreement_status"],"NOT_ASSESSED")
+            self.assertEqual(committee["agreement_status"],"SHARED_MATCHED_OBSERVATIONS_ONLY")
             self.assertEqual(committee["uncited_domains"],["LIMITS"])
             self.assertEqual([p for p,_ in calls],["OLLAMA","GEMINI","GROQ","OPENAI","XAI"])
             self.assertEqual(len({m["role"] for m in committee["members"]}),5)
@@ -121,7 +121,7 @@ class AutomaticAiReviewTests(unittest.TestCase):
             if provider=="GEMINI":
                 return {"status":"MODEL_UNAVAILABLE"}
             return {"status":"MODEL_GROUNDED","provider":provider,"response":{
-                "findings":[{"statement":"Evidence remains limited.","evidence_ids":["LIMITS"]}]}}
+                "findings":[{"statement":'{"path":"/LIMITS/0","value":"Live liquidity"}',"evidence_ids":["LIMITS"]}]}}
         with patch.dict(os.environ,{"ATLAS_AUTOMATIC_EXTERNAL_AI_ALLOWED":"true",
             "ATLAS_AI_PROVIDER_ORDER":"OLLAMA,GEMINI,GROQ"}),patch.object(review.ai_failover,"_enabled",return_value=True):
             for _ in range(3):

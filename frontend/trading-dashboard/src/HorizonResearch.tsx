@@ -7,7 +7,8 @@ import CompanyEvidenceCard,{type CompanyEvidence} from "./CompanyEvidenceCard";
 import AutomaticCompanyNews,{type NewsEvidence} from "./AutomaticCompanyNews";
 
 export type Horizon="INTRADAY"|"SWING"|"SHORT_TERM"|"LONG_TERM";
-type CommitteeCoverage={status:string;configured_count:number;reviewed_count:number;members:{provider:string;role:string;status:string;cited_domains:string[]}[];available_domains:string[];cited_domains:string[];uncited_domains:string[];agreement_status:string;notice:string};
+type ClaimComparison={status:string;matched_count:number;contradicted_count:number;rejected_count:number;duplicate_count:number;shared_matches:{path:string;providers:string[]}[];conflicts:{path:string;matching_providers:string[];contradicting_providers:string[]}[];notice:string};
+type CommitteeCoverage={claim_comparison?:ClaimComparison;status:string;configured_count:number;reviewed_count:number;members:{provider:string;role:string;status:string;cited_domains:string[]}[];available_domains:string[];cited_domains:string[];uncited_domains:string[];agreement_status:string;notice:string};
 type AiReview={committee?:CommitteeCoverage;reviews:{provider:string;role?:string;findings:{statement:string;evidence_ids:string[]}[]}[];reviewed_at:string;notice:string};
 type CandidateReliability={status:string;blockers:string[];warnings:string[];prospective_status:string;notice:string};
 type ResearchConclusion={report_version?:string;qualification_status?:string;supporting_evidence?:string[];next_evidence_checks?:string[];status:string;summary:string;blockers:string[];warnings:string[];evidence:Record<string,string>;reassessment_conditions:string[];notice:string};
@@ -248,5 +249,12 @@ function CurrentRegimeView({report}:{report:CurrentRegimeReplay}){
 }
 
 function CommitteeCoverageView({report}:{report:CommitteeCoverage}){
- return <section className="notice" aria-label="AI committee coverage"><strong>Independent AI research committee</strong><p>{report.reviewed_count}/{report.configured_count} configured reviews returned · {words(report.status)}</p><div className="tablewrap"><table><thead><tr><th>Provider</th><th>Assigned review role</th><th>Status</th><th>Cited domains</th></tr></thead><tbody>{report.members.map(m=><tr key={m.provider}><td>{m.provider}</td><td>{words(m.role)}</td><td>{words(m.status)}</td><td>{m.cited_domains.join(", ")||"None"}</td></tr>)}</tbody></table></div><p>Uncited available domains: {report.uncited_domains.join(", ")||"None"} · Agreement: {words(report.agreement_status)}</p><p className="muted tiny">{report.notice}</p></section>;
+ return <section className="notice" aria-label="AI committee coverage"><strong>Independent AI research committee</strong><p>{report.reviewed_count}/{report.configured_count} configured reviews returned · {words(report.status)}</p><div className="tablewrap"><table><thead><tr><th>Provider</th><th>Assigned review role</th><th>Status</th><th>Cited domains</th></tr></thead><tbody>{report.members.map(m=><tr key={m.provider}><td>{m.provider}</td><td>{words(m.role)}</td><td>{words(m.status)}</td><td>{m.cited_domains.join(", ")||"None"}</td></tr>)}</tbody></table></div><p>Uncited available domains: {report.uncited_domains.join(", ")||"None"} · Claim comparison: {words(report.agreement_status)}</p>{report.claim_comparison&&<ClaimAuditView report={report.claim_comparison}/>}<p className="muted tiny">{report.notice}</p></section>;
+}
+
+function ClaimAuditView({report}:{report:ClaimComparison}){
+ return <div><strong>Exact evidence claim checks</strong><p>{report.matched_count} matching · {report.contradicted_count} contradicted · {report.rejected_count} unsupported or malformed · {report.duplicate_count} duplicate assertions withheld</p>
+ {report.conflicts.length>0&&<div><strong>Conflicting assertions</strong><ul>{report.conflicts.map(c=><li key={c.path}>{c.path} · Matching: {c.matching_providers.join(", ")} · Contradicted: {c.contradicting_providers.join(", ")}</li>)}</ul></div>}
+ {report.shared_matches.length>0&&<details><summary>Shared matching observations ({report.shared_matches.length})</summary><ul>{report.shared_matches.map(m=><li key={m.path}>{m.path} · {m.providers.join(", ")}</li>)}</ul></details>}
+ <p className="muted tiny">{report.notice}</p></div>;
 }

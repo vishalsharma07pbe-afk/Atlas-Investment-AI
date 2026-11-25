@@ -14,9 +14,9 @@ import os
 import re
 import sqlite3
 
-from . import ai_failover, ai_public_evidence
+from . import ai_failover, ai_public_evidence, ai_claims
 
-VERSION = "AUTO-GROUNDED-4"
+VERSION = "AUTO-GROUNDED-5"
 BATCH_SIZE = 2
 ROLES = ("TECHNICAL_EVIDENCE", "ADVERSARIAL_RISK", "FINANCIAL_EVIDENCE", "HISTORICAL_VALIDATION", "EVIDENCE_COMPLETENESS")
 ROLE_TASKS = {
@@ -161,17 +161,17 @@ def _review(pack, provider, runner, role="TECHNICAL_EVIDENCE"):
     supplied=_supplied(pack)
     prompt = ("Review this dated research watch for research purposes only. "
               "Assigned independent review role: "+ROLE_TASKS[role]+" "
-              "Do not claim other reviewers agree with you. If your assigned domain is missing, cite LIMITS. "
-              "Use only the supplied evidence. Give cautious descriptive findings, "
-              "not trade actions, targets, predictions or confidence percentages. "
-              "Cite OBS for technical observations, FUND for reported annual trends if supplied, "
-              "REPLAY for historical simulations if supplied, LIMITS for missing evidence, and the exact named IDs for any additional supplied domains. "
-              "Ownership percentages are not trades; institutional flows are market-level, not stock-specific. "
-              "News categories are unverified headline topics; global changes are not synchronized sessions or company sensitivity. "
-              "Peer valuation observation periods are unverified, not fair value. "
-              "Annual trends are not independently verified; replay is not forward performance. "
-              "Do not invent facts. Return the required JSON.\n"
-              + json.dumps(supplied, ensure_ascii=True))
+              "Return 1 to 8 independent factual observations using the existing JSON findings schema. "
+              "Each finding statement MUST itself be a JSON object encoded as a string, with exactly keys path and value. "
+              'Example statement content: {"path":"/OBS/observations/atr_percent","value":2}. '
+              "Use slash-separated paths through the supplied evidence JSON, zero-based array indexes, and the exact scalar value. "
+              "Cite exactly the top-level evidence ID in evidence_ids. For missing evidence cite a specific LIMITS array entry. "
+              "Choose important observations for your role. Do not add prose, invent paths or values, infer recommendations, "
+              "predict outcomes, calculate new values or assert that another reviewer agrees. "
+              "Ownership percentages are not transactions; flows are market-level. News topics are unverified. "
+              "Peer multiples are undated, global changes are not synchronized, and replay is not forward performance. "
+              "The system will validate each assertion against the supplied observations.\n"
+              + json.dumps(supplied, ensure_ascii=True,separators=(",",":")))
     result = runner(prompt, list(supplied), providers=[provider])
     response = result.get("response")
     if result.get("status") != "MODEL_GROUNDED" or result.get("provider") != provider or not isinstance(response, dict):
@@ -179,19 +179,13 @@ def _review(pack, provider, runner, role="TECHNICAL_EVIDENCE"):
     findings = response.get("findings")
     if not isinstance(findings, list) or not 1<=len(findings)<=8:
         return None
-    clean = []
-    for finding in findings:
-        if not isinstance(finding, dict):
-            return None
-        statement, citations = finding.get("statement"), finding.get("evidence_ids")
-        if (not isinstance(statement, str) or not 1<=len(statement)<=500
-                or ai_failover.BLOCKED.search(statement) or UNSAFE.search(statement)
-                or not isinstance(citations, list) or not 1<=len(citations)<=5
-                or any(not isinstance(c,str) or c not in supplied for c in citations)):
-            return None
-        clean.append({"statement": statement, "evidence_ids": citations})
-    # Never persist raw prompts, raw answers, actions, confidence, or provider errors.
-    return {"provider": provider, "role":role,"findings": clean}
+    # Free prose, unsupported paths and mismatched citations are never accepted.
+    # Keep safe audit outcomes, not raw model statements or incorrect values.
+    audit=ai_claims.audit(supplied,findings)
+    if not audit["claims"]:
+        return None
+    return {"provider":provider,"role":role,"findings":audit["findings"],
+            "claim_audit":{k:v for k,v in audit.items() if k!="findings"}}
 
 
 def candidates(snapshot, selected=None):
@@ -215,12 +209,14 @@ def _committee(pack, selected, reviews, attempted):
               "NO_USABLE_REVIEW" if p in attempted else "PENDING",
               "cited_domains":sorted({c for f in indexed[p]["findings"] for c in f["evidence_ids"]}) if p in indexed else []}
              for i,p in enumerate(selected)]
+    comparison=ai_claims.compare(supplied=_supplied(pack),reviews=list(indexed.values()))
     return {"status":"ALL_CONFIGURED_REVIEWS_RETURNED" if len(indexed)==len(selected) and selected else
             "PARTIAL_REVIEWS" if indexed else "AWAITING_REVIEWS",
             "configured_count":len(selected),"reviewed_count":len(indexed),"members":members,
             "available_domains":expected,"cited_domains":[k for k in expected if k in cited],
             "uncited_domains":[k for k in expected if k not in cited],
-            "agreement_status":"NOT_ASSESSED","notice":"Independent assigned reviews; citation coverage is not factual validation, agreement, confidence or investment qualification."}
+            "agreement_status":comparison["status"],"claim_comparison":comparison,
+            "notice":"Exact scalar checks against the supplied evidence only, not independent source verification, interpretive agreement, confidence or investment qualification."}
 
 
 def refresh(snapshot, connect, runner=ai_failover.grounded_research):
@@ -254,7 +250,7 @@ def refresh(snapshot, connect, runner=ai_failover.grounded_research):
         completed={r["provider"] for r in reviews}
         result={"reviews":reviews,"evidence":pack,"reviewed_at":now.isoformat(),
                 "attempted_providers":[p for p in selected if p in attempted],
-                "notice":"Unverified independent model commentary on the same dated evidence; no consensus trade verdict.",
+                "notice":"Accepted findings are deterministic restatements of matching supplied observations. Incorrect or unsupported assertions are withheld; source truth and investment suitability are not established.",
                 "committee":_committee(pack,selected,reviews,attempted)}
         status=("COMPLETE" if len(completed)==len(selected) else
                 "PENDING_MEMBERS" if any(p not in attempted for p in selected) else
