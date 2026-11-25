@@ -271,6 +271,48 @@ def _official_history_candidates(historical,category,today):
     return output
 
 
+def _research_reports(candidates, ranked, source_rows, disclosed, portfolios):
+    """Build bounded, deterministic reports from the same exact-scheme evidence
+    and qualification decisions used by the existing recommendation endpoint.
+    Secondary evidence is descriptive and never substitutes for missing gates.
+    """
+    exclusions={row["identifier"]:row for row in ranked["excluded"]}
+    top_ranks={row["fund"]["identifier"]:row["rank"] for row in ranked["top_performers"]}
+    growth_ranks={row["fund"]["identifier"]:row["rank"] for row in ranked["growth_outlook"]}
+    sources={str(row["scheme_code"]):row["sources"] for row in source_rows
+             if isinstance(row,dict) and type(row.get("scheme_code")) is int and isinstance(row.get("sources"),list)}
+    disclosure_ids={row["scheme_code"] for row in disclosed}
+    portfolio_ids={row["scheme_code"] for row in portfolios}
+    reports=[]
+    for fund in sorted(candidates,key=lambda f:f.identifier):
+        missing=exclusions.get(fund.identifier,{})
+        top_missing=missing.get("top_performer_missing",[])
+        growth_missing=missing.get("growth_outlook_missing",[])
+        def decision(blockers,ranks):
+            return {"status":"WITHHELD" if blockers else "QUALIFIED",
+                    "missing":blockers,"published_rank":ranks.get(fund.identifier)}
+        top=decision(top_missing,top_ranks)
+        growth=decision(growth_missing,growth_ranks)
+        reports.append({
+            "identifier":fund.identifier,"name":fund.name,"category":fund.category,
+            "plan":fund.plan,"option":fund.option,"nav":str(fund.nav) if fund.nav is not None else None,
+            "nav_date":fund.nav_date,"nav_age_days":fund.nav_age_days,
+            "historical":{"sources":sources.get(fund.identifier,[]),
+                "returns_1y":fund.returns_1y,"returns_3y":fund.returns_3y,
+                "sample_peer_percentile":fund.peer_percentile,"worst_rolling_return":fund.worst_rolling_return,
+                "max_drawdown":fund.max_drawdown,"volatility":fund.volatility},
+            "secondary_disclosure_available":fund.identifier in disclosure_ids,
+            "secondary_portfolio_available":fund.identifier in portfolio_ids,
+            "top_performer":top,"growth_outlook":growth,
+            "suitability":ranked["suitability"],
+            "conclusion":"Evidence gates met for both research lists." if not top_missing and not growth_missing
+                else "Historical research only; neither research list qualifies." if top_missing and growth_missing
+                else "Only one research list meets its evidence gates; review the separate decisions.",
+            "reassessment":"Re-evaluate when missing dated evidence is acquired or suitability changes. Historical returns are not a forecast."
+        })
+    return reports
+
+
 def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str="MODERATE"):
     if category not in CATEGORIES:raise ValueError("UNSUPPORTED_CATEGORY")
     if horizon_months<12 or horizon_months>360:raise ValueError("INVALID_HORIZON")
@@ -321,6 +363,7 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
       "filters":{"horizon_months":horizon_months,"risk_tolerance":risk_tolerance},"coverage":coverage,
       "top_performers":ranked["top_performers"],"growth_outlook":ranked["growth_outlook"],
       "portfolio_overlap":fund_portfolios.overlap(disclosed),
+      "research_reports":_research_reports(official,ranked,source_rows,disclosed,portfolios),
       "portfolio_evidence":{"status":"SECONDARY_COMPOSITION_ONLY" if portfolios else "NOT_AVAILABLE_OR_NOT_AUTHORIZED",
           "items":portfolios,"notice":"Selected fund coverage only. Reported weights and existing cached company evidence are not verified forward earnings or valuation coverage."},
       "disclosure_evidence":{"status":"SECONDARY_REPORTED" if disclosed else "NOT_AVAILABLE_OR_NOT_AUTHORIZED",
