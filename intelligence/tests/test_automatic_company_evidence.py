@@ -69,7 +69,8 @@ class CompanyEvidenceTests(unittest.TestCase):
             def row(category,a,b):
                 return {"category":category,"history":[{"period":"Mar 2026","value":b},{"period":"Mar 2025","value":a}]}
             return {"isin":isin,"sections":{
-                "income_statement":block({"income_statement":[row("revenue",100,120),row("operating_profit",20,30),row("net_profit",10,12)]}),
+                "income_statement":block({"income_statement":[row("revenue",100,120),row("operating_profit",20,30),row("net_profit",10,12)],
+                    "full_statement":[{"particular":"EPS - Diluted","history":[{"period":"Mar 2026","value":12},{"period":"Mar 2025","value":10}]}]}),
                 "cash_flow":block({"cash_flow":[row("operating",15,18)]}),
                 "balance_sheet":block({"history":[{"period":"Mar 2026","total_asset":200,"total_liability":100},{"period":"Mar 2025","total_asset":150,"total_liability":60}]})}}
         company.refresh(self.snapshot,research._connect,report,self.now)
@@ -80,3 +81,5 @@ class CompanyEvidenceTests(unittest.TestCase):
         self.assertEqual(rows["OPERATING_MARGIN"]["latest_value"],25)
         self.assertEqual(rows["OPERATING_CASH_TO_PROFIT"]["latest_value"],1.5)
         self.assertEqual(rows["REPORTED_LIABILITIES_TO_ASSETS"]["latest_period"],"2026-03")
+        self.assertEqual(evidence["reported_earnings"]["items"][0]["observations"][-1]["reported_value"],12)
+        self.assertFalse(evidence["reported_earnings"]["valuation_eligible"])
