@@ -67,3 +67,12 @@ it("distinguishes dated oil prices and treasury yield changes",async()=>{
  expect(screen.getByText("+5.00 bp / — / —")).toBeTruthy();
  expect(screen.getByText("US EIA")).toBeTruthy();
 });
+
+it("shows independent international observations and unavailable instruments",async()=>{
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[],global_markets:{status:"PARTIAL",items:[{series:"SP500",label:"S&P 500",source:"S&P DJI via FRED",unit:"INDEX_POINTS",status:"AVAILABLE",as_of:"2026-11-23",value:6000,changes:[{observations:1,start_date:"2026-11-20",end_date:"2026-11-23",percent:1.5}]},{series:"GOLD",label:"Gold spot / USD",source:"Twelve Data",unit:"USD_PROVIDER_QUOTE",status:"DISABLED_OR_NOT_AUTHORIZED",changes:[]}],notice:"Prior-date observations only."}})})));
+ render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}}>{null}</AutonomousOverview>);
+ expect(await screen.findByRole("region",{name:"International indices and metals"})).toBeTruthy();
+ expect(screen.getByText("6,000 points")).toBeTruthy();
+ expect(screen.getByText("+1.50% / — / —")).toBeTruthy();
+ expect(screen.getByText("disabled or not authorized")).toBeTruthy();
+});
