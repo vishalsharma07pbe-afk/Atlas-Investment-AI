@@ -95,19 +95,42 @@ import org.springframework.transaction.annotation.Transactional;
  }
  private String token(UUID user){String t=vault.decrypt(user,"UPSTOX");if(t==null||t.isBlank())throw new IllegalStateException("Upstox credential unavailable");return t;}
  public JsonNode quote(UUID user,String key)throws Exception{
-  if(jdbc.queryForObject("SELECT count(*) FROM upstox_instrument_map WHERE instrument_key=?",Integer.class,key)==0)throw new IllegalArgumentException("Unknown instrument");
-  String url="https://api.upstox.com/v2/market-quote/quotes?instrument_key="+URLEncoder.encode(key,StandardCharsets.UTF_8);
+  if(!Integer.valueOf(1).equals(jdbc.queryForObject("""
+      SELECT count(*) FROM upstox_instrument_map m JOIN exchanges e ON e.code=m.exchange_code
+      JOIN instruments i ON i.exchange_id=e.id AND i.symbol=m.trading_symbol AND i.isin=m.isin
+      WHERE m.instrument_key=? AND m.isin ~ '^IN[A-Z0-9]{10}$' AND m.instrument_type IN ('EQ','EQUITY')
+        AND i.active AND i.series='EQ' AND i.listing_status='ACTIVE'
+        AND i.instrument_type IN ('EQ','EQUITY','STOCK')
+      """,Integer.class,key)))throw new IllegalArgumentException("Exact equity registry mapping required");
+  String url="https://api.upstox.com/v3/market-quote/quotes?instrument_key="+URLEncoder.encode(key,StandardCharsets.UTF_8);
   JsonNode body=json.readTree(http.text(url,token(user),2_000_000));
   if(!"success".equals(body.path("status").asText()))throw new IllegalStateException("Provider rejected quote");
-  JsonNode data=body.path("data");if(!data.isObject()||data.isEmpty())throw new IllegalStateException("Empty quote");
-  JsonNode quote=data.elements().next();BigDecimal ltp=quote.path("last_price").decimalValue();
-  if(ltp.signum()<0)throw new IllegalStateException("Invalid price");
-  BigDecimal previousClose=quote.path("ohlc").path("close").isNumber()
-    ?quote.path("ohlc").path("close").decimalValue():null;
-  if(previousClose!=null&&previousClose.signum()<0)previousClose=null;
-  Instant timestamp=Instant.now();
-  jdbc.update("INSERT INTO upstox_market_quotes(instrument_key,ltp,source_code,quoted_at) VALUES (?,?,'UPSTOX',?) ON CONFLICT(instrument_key) DO UPDATE SET ltp=EXCLUDED.ltp,quoted_at=EXCLUDED.quoted_at,received_at=now()",key,ltp,java.sql.Timestamp.from(timestamp));
-  var result=json.createObjectNode().put("instrument_key",key).put("ltp",ltp).put("as_of",timestamp.toString()).put("source","UPSTOX");
+  JsonNode data=body.path("data");
+  if(!data.isObject()||data.size()!=1)throw new IllegalStateException("Invalid quote response");
+  JsonNode quote=data.elements().next();
+  if(!key.equals(quote.path("instrument_token").asText(""))||!quote.path("last_price").isNumber())
+    throw new IllegalStateException("Quote identity or price invalid");
+  BigDecimal ltp=quote.path("last_price").decimalValue();
+  if(ltp.signum()<=0)throw new IllegalStateException("Invalid price");
+  // The V3 timestamp is response generation time, not last trade time.
+  Instant received=Instant.now(),timestamp,responseTime;
+  try{
+    String tradeTime=quote.path("last_trade_time").asText("");
+    if(!tradeTime.matches("[0-9]{13}"))throw new IllegalArgumentException();
+    timestamp=Instant.ofEpochMilli(Long.parseLong(tradeTime));
+    responseTime=OffsetDateTime.parse(quote.path("timestamp").asText()).toInstant();
+    if(timestamp.isAfter(received)||timestamp.isAfter(responseTime)||responseTime.isAfter(received.plusSeconds(5)))
+      throw new IllegalArgumentException();
+  }catch(RuntimeException ex){throw new IllegalStateException("Provider quote timestamp invalid");}
+  BigDecimal previousClose=quote.path("prev_close_price").isNumber()?quote.path("prev_close_price").decimalValue():null;
+  if(previousClose!=null&&previousClose.signum()<=0)previousClose=null;
+  jdbc.update("""
+    INSERT INTO upstox_market_quotes(instrument_key,ltp,source_code,quoted_at) VALUES (?,?,'UPSTOX',?)
+    ON CONFLICT(instrument_key) DO UPDATE SET ltp=EXCLUDED.ltp,quoted_at=EXCLUDED.quoted_at,received_at=now()
+    WHERE upstox_market_quotes.quoted_at<EXCLUDED.quoted_at
+    """,key,ltp,java.sql.Timestamp.from(timestamp));
+  var result=json.createObjectNode().put("instrument_key",key).put("ltp",ltp).put("as_of",timestamp.toString())
+    .put("received_at",received.toString()).put("source","UPSTOX").put("timestamp_basis","LAST_TRADE_TIME");
   if(previousClose!=null)result.put("previous_close",previousClose);
   return result;
  }
