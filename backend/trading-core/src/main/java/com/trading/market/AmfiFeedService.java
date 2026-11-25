@@ -78,6 +78,8 @@ import org.springframework.transaction.annotation.Transactional;
  public int history(long code)throws Exception{
   if(code<=0||code>999999999)throw new IllegalArgumentException("Invalid scheme code");
   JsonNode root=json.readTree(http.text("https://api.mfapi.in/mf/"+code,null,12_000_000));
+  if(!root.isObject()||(root.has("status")&&!"SUCCESS".equalsIgnoreCase(root.path("status").asText())))
+    throw new IllegalStateException("History provider rejected request");
   JsonNode meta=root.path("meta");
   if(!Long.toString(code).equals(meta.path("scheme_code").asText()))throw new IllegalStateException("History scheme mismatch");
   JsonNode rows=root.path("data");if(!rows.isArray()||rows.isEmpty()||rows.size()>30000)throw new IllegalStateException("Invalid historical NAV");
