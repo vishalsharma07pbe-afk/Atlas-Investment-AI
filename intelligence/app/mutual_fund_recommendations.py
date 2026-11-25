@@ -294,6 +294,7 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
     payload={"generated_at":generated,"methodology_version":METHODOLOGY_VERSION,"category":category,
       "filters":{"horizon_months":horizon_months,"risk_tolerance":risk_tolerance},"coverage":coverage,
       "top_performers":ranked["top_performers"],"growth_outlook":ranked["growth_outlook"],
+      "portfolio_overlap":fund_portfolios.overlap(disclosed),
       "portfolio_evidence":{"status":"SECONDARY_COMPOSITION_ONLY" if portfolios else "NOT_AVAILABLE_OR_NOT_AUTHORIZED",
           "items":portfolios,"notice":"Selected fund coverage only. Reported weights and existing cached company evidence are not verified forward earnings or valuation coverage."},
       "disclosure_evidence":{"status":"SECONDARY_REPORTED" if disclosed else "NOT_AVAILABLE_OR_NOT_AUTHORIZED",
