@@ -94,7 +94,9 @@ final class PortfolioOwnershipChanges {
       for(var row:previous.path("ownership_recent_changes"))try{
         Change c=json.treeToValue(row,Change.class);
         Instant at=Instant.parse(c.observedAt());
-        if(CATEGORIES.contains(c.category())&&!at.isAfter(now)&&!at.isBefore(now.minus(Duration.ofDays(7))))recent.add(c);
+        if(CATEGORIES.contains(c.category())&&date(c.currentDate())!=null&&date(c.previousDate())!=null&&
+            c.currentPercent()!=null&&c.previousPercent()!=null&&c.changePp()!=null&&
+            Set.of("REVIEW","OBSERVE").contains(c.attention())&&!at.isAfter(now)&&!at.isBefore(now.minus(Duration.ofDays(7))))recent.add(c);
       }catch(Exception ignored){}
       Quarter[] evidence=fresh(current,now);
       Quarter latest=evidence==null?null:evidence[0],previousQuarter=evidence==null?null:evidence[1];
