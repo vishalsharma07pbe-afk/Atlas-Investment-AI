@@ -1,8 +1,10 @@
+import PortfolioBenchmarkRisk,{type BenchmarkRisk} from "./PortfolioBenchmarkRisk";
 import {FormEvent,useCallback,useEffect,useState} from "react";
 
 type RollingWindow={days:number;status:string;from:string|null;through:string|null;returnPercent:number|null;drawdownPercent:number|null;benchmarkStatus:string;benchmarkReturnPercent:number|null;relativePercentagePoints:number|null};
 type WeeklyRisk={status:string;weeklyObservations:number;annualizedVolatilityPercent:number|null;annualizedDownsideDeviationPercent:number|null;negativeWeekFrequencyPercent:number|null;from:string|null;through:string|null};
 type Performance={
+  benchmark_risk_estimate?:BenchmarkRisk;
   transaction_count:number;
   snapshot_count:number;
   xirr_percent:number|null;
@@ -117,6 +119,7 @@ export default function PortfolioPerformanceHistory({revision=0}:{revision?:numb
       </div><p className="muted tiny">{performance.weekly_risk_estimate.weeklyObservations}/13 exact weekly intervals. {performance.weekly_risk_estimate.status==="AVAILABLE_ESTIMATE"?"Historical estimate, not a forecast.":"Insufficient contiguous weekly evidence."}</p></>}
       <p className="muted tiny">{performance.rolling_methodology}</p>
     </section>}
+    {performance.benchmark_risk_estimate&&<PortfolioBenchmarkRisk report={performance.benchmark_risk_estimate}/>}
     {performance.valuation_through&&<p className="muted tiny">Performance through {performance.valuation_through} · {performance.external_flows_after_valuation??0} later external flows excluded · {performance.incomplete_snapshot_count??0} incomplete historical valuations · {performance.future_snapshot_count??0} future valuations excluded.</p>}
     {performance.automatic_snapshot_count!==undefined&&<div className="muted tiny"><p>Automatic evening valuation records: {performance.automatic_snapshot_count}. Automatic capture runs while the local backend is enabled and has sufficient recorded prices; missing days are not reconstructed.</p>{performance.latest_capture_source&&<p>Latest capture: {performance.latest_capture_source==="AUTO_RECORDED"?"Automatic":performance.latest_capture_source==="MANUAL_RECORDED"?"Manual":"Legacy recorded"}{performance.latest_oldest_price_at&&performance.latest_newest_price_at?` · Price observations: ${performance.latest_oldest_price_at} to ${performance.latest_newest_price_at}`:" · Price observation timestamps unavailable"}. Recorded values are not certified market closes.</p>}</div>}
     <form className="portfolio-cashflow-form" onSubmit={event=>void saveFlow(event)}>
