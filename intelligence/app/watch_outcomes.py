@@ -11,6 +11,9 @@ from math import isfinite
 import re
 
 from .market_client import backend_json
+from .replay_evidence import exact_isin, full_manifest
+
+OUTCOME_EVIDENCE_VERSION = "WATCH-SESSION-EVIDENCE-1"
 
 HORIZONS = {"SWING": 14, "SHORT_TERM": 60, "LONG_TERM": 180}
 IST = ZoneInfo("Asia/Kolkata")
@@ -22,6 +25,12 @@ def _table(db):
         published_at TEXT NOT NULL, maturity_date TEXT NOT NULL, evidence TEXT NOT NULL,
         attempted_at TEXT, status TEXT NOT NULL DEFAULT 'PENDING', outcome TEXT,
         PRIMARY KEY(instrument_id,horizon,observed_date))""")
+    db.execute("""CREATE TRIGGER IF NOT EXISTS watch_publication_immutable
+        BEFORE UPDATE OF instrument_id,horizon,observed_date,published_at,maturity_date,evidence ON watch_outcomes
+        BEGIN SELECT RAISE(ABORT,'immutable watch publication'); END""")
+    db.execute("""CREATE TRIGGER IF NOT EXISTS watch_observed_immutable
+        BEFORE UPDATE ON watch_outcomes WHEN OLD.status='OBSERVED'
+        BEGIN SELECT RAISE(ABORT,'immutable observed outcome'); END""")
 
 
 def publish(snapshot, connect, instant):
@@ -58,44 +67,88 @@ def publish(snapshot, connect, instant):
                         continue
 
 
-def evaluate(row, payload, today):
+def _expected_dates(calendar,exchange,start,maturity,today):
+    """First stored regular session after publication and at/after maturity.
+
+    Every intervening calendar date must be known. No substitution of the next
+    available candle when the actual expected session observation is missing.
+    """
+    if (not isinstance(calendar,dict) or calendar.get("exchange")!=exchange
+            or calendar.get("through")!=(today-timedelta(days=1)).isoformat()):
+        return None
+    raw=calendar.get("days")
+    if not isinstance(raw,list) or len(raw)>1100:
+        return None
+    states={}
+    for row in raw:
+        day=date.fromisoformat(row["trade_date"])
+        state=row["state"]
+        if day in states or not today-timedelta(days=1100)<=day<today or state not in (
+                "REGULAR","CLOSED","UNKNOWN","SPECIAL_SESSION_UNSUPPORTED"):
+            return None
+        states[day]=state
+    expected=[]
+    day=start+timedelta(days=1)
+    while day<today and day<=maturity+timedelta(days=7):
+        state=states.get(day)
+        if state not in ("REGULAR","CLOSED"):
+            return None
+        if state=="REGULAR":
+            if not expected and day>start+timedelta(days=7):
+                return None
+            expected.append(day)
+            if day>=maturity:
+                return expected
+        day+=timedelta(days=1)
+    return None
+
+
+def evaluate(row, payload, today, calendar=None):
     evidence=json.loads(row["evidence"])
     instrument=payload["instrument"]
-    if (int(instrument["id"])!=row["instrument_id"] or instrument["symbol"]!=evidence["symbol"]
-            or instrument["exchange"]!=evidence["exchange"]):
+    if (type(instrument["id"]) is not int or instrument["id"]!=row["instrument_id"]
+            or instrument["symbol"]!=evidence["symbol"] or instrument["exchange"]!=evidence["exchange"]
+            or not exact_isin(evidence.get("isin")) or instrument.get("isin")!=evidence["isin"]):
         return "IDENTITY_MISMATCH", None
-    if evidence.get("isin") and instrument.get("isin")!=evidence["isin"]:
-        return "IDENTITY_MISMATCH", None
-    start=datetime.fromisoformat(row["published_at"]).astimezone(IST).date()
+    publication=datetime.fromisoformat(row["published_at"])
+    if publication.tzinfo is None:
+        return "EVIDENCE_GAP",None
+    start=publication.astimezone(IST).date()
     maturity=date.fromisoformat(row["maturity_date"])
+    if maturity!=start+timedelta(days=HORIZONS[row["horizon"]]):
+        return "EVIDENCE_GAP",None
     if today<=maturity:
         return "PENDING", None
+    try:
+        expected=_expected_dates(calendar,evidence["exchange"],start,maturity,today)
+    except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
+        expected=None
+    if not expected:
+        return "CALENDAR_EVIDENCE_GAP",None
     rows=[]
     for item in payload["candles"]:
         d=date.fromisoformat(item["trade_date"])
-        if start<d<today and d<=maturity+timedelta(days=7):
+        if start<d<=expected[-1]:
             rows.append((d,item))
     rows.sort(key=lambda x:x[0])
-    if len({d for d,_ in rows})!=len(rows):
+    if [d for d,_ in rows]!=expected:
         return "EVIDENCE_GAP",None
-    entry=next(((d,x) for d,x in rows if d<=start+timedelta(days=7)),None)
-    exit_point=next(((d,x) for d,x in rows if d>=maturity),None)
-    if not entry or not exit_point:
-        return "EVIDENCE_GAP",None
-    interval=[x for d,x in rows if entry[0]<=d<=exit_point[0]]
-    dates=[d for d,_ in rows if entry[0]<=d<=exit_point[0]]
-    sources={x.get("source_code") for x in interval}
-    if (any(x.get("adjustment_status")!="ADJUSTED" or x.get("quality_status")!="PROVIDER_VALIDATED" for x in interval)
-            or len(sources)!=1 or None in sources or "" in sources
-            or any((b-a).days>7 for a,b in zip(dates,dates[1:]))):
+    interval=[x for _,x in rows]
+    manifest=full_manifest(interval,today)
+    if manifest is None:
         return "EVIDENCE_GAP",None
     values=[float(x["close"]) for x in interval]
     if any(not isfinite(v) or v<=0 for v in values):
         return "EVIDENCE_GAP",None
-    return "OBSERVED", {"entry_date":entry[0].isoformat(),"exit_date":exit_point[0].isoformat(),
-        "entry_close":values[0],"exit_close":values[-1],"observed_price_return_pct":round(100*(values[-1]/values[0]-1),4),
-        "source_code":next(iter(sources)),
-        "notice":"Observed adjusted close-to-close change only; not executed, benchmarked, or net of fees."}
+    change=100*(values[-1]/values[0]-1)
+    if not isfinite(change):
+        return "EVIDENCE_GAP",None
+    return "OBSERVED", {"entry_date":expected[0].isoformat(),"exit_date":expected[-1].isoformat(),
+        "entry_close":values[0],"exit_close":values[-1],"observed_price_return_pct":round(change,4),
+        "source_code":interval[0]["source_code"],"evidence_version":OUTCOME_EVIDENCE_VERSION,
+        "observations":len(interval),"history_fingerprint":manifest["digest"],
+        "calendar_status":"STORED_SESSIONS_MATCHED",
+        "notice":"Observed adjusted close-to-close change on matching stored sessions; not executed, benchmarked or net of fees. Corporate-action completeness and point-in-time history are not certified."}
 
 
 def refresh(snapshot, connect, loader=backend_json, instant=None):
@@ -107,14 +160,23 @@ def refresh(snapshot, connect, loader=backend_json, instant=None):
     with closing(connect()) as db, db:
         _table(db)
         due=db.execute("""SELECT * FROM watch_outcomes WHERE maturity_date<?
-            AND status IN ('PENDING','EVIDENCE_GAP','UNAVAILABLE')
+            AND status IN ('PENDING','EVIDENCE_GAP','CALENDAR_EVIDENCE_GAP','UNAVAILABLE')
             AND (attempted_at IS NULL OR attempted_at<?)
             ORDER BY attempted_at ASC NULLS FIRST,maturity_date LIMIT 5""",
             (today.isoformat(),(instant-timedelta(days=1)).isoformat())).fetchall()
+    calendars={}
     for row in due:
         key=(row["instrument_id"],row["horizon"],row["observed_date"])
         try:
-            status,outcome=evaluate(row,loader(f"/api/v1/market-data/instruments/{key[0]}/candles?limit=500"),today)
+            exchange=json.loads(row["evidence"])["exchange"]
+            if exchange not in ("NSE","BSE"):
+                raise ValueError("INVALID_VENUE")
+            if exchange not in calendars:
+                try:
+                    calendars[exchange]=loader(f"/api/v1/market-data/strategy-calendar?exchange={exchange}")
+                except Exception:
+                    calendars[exchange]=None
+            status,outcome=evaluate(row,loader(f"/api/v1/market-data/instruments/{key[0]}/candles?limit=500"),today,calendars[exchange])
         except Exception:
             status,outcome="UNAVAILABLE",None
         with closing(connect()) as db, db:
@@ -134,4 +196,4 @@ def summary(connect, horizon):
         "exchange":json.loads(r["evidence"])["exchange"],"observed_date":r["observed_date"],
         "published_at":r["published_at"],"maturity_date":r["maturity_date"],"status":r["status"],
         "outcome":json.loads(r["outcome"]) if r["outcome"] else None} for r in rows],
-        "notice":"Public technical watch history, not trades or validated strategy performance. Raw or insufficient history is excluded from outcome calculations."}
+        "notice":"Public technical watch history, not trades or validated strategy performance. New observations require exact identity, adjusted source evidence and matching stored sessions; legacy outcomes remain visible but are excluded from current reliability metrics."}
