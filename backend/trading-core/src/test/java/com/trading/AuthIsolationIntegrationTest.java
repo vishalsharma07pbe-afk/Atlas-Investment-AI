@@ -407,4 +407,51 @@ class AuthIsolationIntegrationTest {
       .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
   }
 
+  @Test void thesisAlertsAreSelectiveDeduplicatedAndOwnerScoped()throws Exception{
+    String email="thesis-alert-"+UUID.randomUUID()+"@example.test";
+    String a=create(email),b=create("thesis-alert-other-"+UUID.randomUUID()+"@example.test");
+    UUID owner=jdbc.queryForObject("SELECT id FROM atlas_users WHERE email=?",UUID.class,email);
+    mvc.perform(post("/api/v1/portfolio/holdings").header("Authorization",a)
+      .contentType(MediaType.APPLICATION_JSON).content("{\"symbol\":\"THESISTEST\",\"assetType\":\"EQUITY\",\"quantity\":2,\"averageCost\":100}"))
+      .andExpect(status().isOk());
+    mvc.perform(post("/api/v1/portfolio/holdings").header("Authorization",a)
+      .contentType(MediaType.APPLICATION_JSON).content("{\"symbol\":\"118955\",\"assetType\":\"MUTUAL_FUND\",\"quantity\":2,\"averageCost\":100}"))
+      .andExpect(status().isOk());
+    mvc.perform(get("/api/v1/portfolio/review").header("Authorization",a)).andExpect(status().isOk());
+    long equity=jdbc.queryForObject("SELECT id FROM personal_holdings WHERE user_id=? AND symbol='THESISTEST'",Long.class,owner);
+    long fund=jdbc.queryForObject("SELECT id FROM personal_holdings WHERE user_id=? AND symbol='118955'",Long.class,owner);
+    var decline=Map.of("metric","NET_PROFIT","previous_period","March 2025","current_period","March 2026",
+      "previous_direction","IMPROVING","current_direction","DECLINING");
+    var improve=Map.of("metric","REVENUE","previous_period","March 2025","current_period","March 2026",
+      "previous_direction","DECLINING","current_direction","IMPROVING");
+    var expense=Map.of("metric","TER","previousDate","2026-11-24","currentDate","2026-11-25","attention","REVIEW");
+    var lowerRisk=Map.of("metric","RISKOMETER","previousDate","2026-11-24","currentDate","2026-11-25","attention","OBSERVE");
+    var equityRow=new java.util.LinkedHashMap<String,Object>(Map.of("id",equity,"symbol","THESISTEST","asset_type","EQUITY",
+      "exchange","NSE","isin","INE002A01018","thesis_changes",java.util.List.of(decline,improve)));
+    var fundRow=Map.of("id",fund,"symbol","118955","asset_type","MUTUAL_FUND","exact_scheme_code",118955,
+      "fund_monitor_identity","118955:INF179K01BB2:DIRECT:TIGZIG_AMFI_DERIVED","fund_thesis_changes",java.util.List.of(expense,lowerRisk));
+    String payload=mapper.writeValueAsString(java.util.List.of(equityRow,fundRow));
+    jdbc.update("UPDATE portfolio_review_snapshots SET generated_at=now()-interval '6 minutes',result=jsonb_set(result,'{holdings}',?::jsonb) WHERE user_id=?",payload,owner);
+    riskNotifications.evaluate();
+    mvc.perform(get("/api/v1/research-workspace/notifications").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+    jdbc.update("UPDATE portfolio_review_snapshots SET generated_at=now() WHERE user_id=?",owner);
+    riskNotifications.evaluate();riskNotifications.evaluate();
+    mvc.perform(get("/api/v1/research-workspace/notifications").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2));
+    org.junit.jupiter.api.Assertions.assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM user_notification_history WHERE user_id=? AND title='Financial thesis review'",Integer.class,owner));
+    org.junit.jupiter.api.Assertions.assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM user_notification_history WHERE user_id=? AND title='Fund disclosure review'",Integer.class,owner));
+    mvc.perform(get("/api/v1/research-workspace/notifications").header("Authorization",b))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+    // A new metric on an obsolete holding revision must never be delivered.
+    equityRow.put("thesis_changes",java.util.List.of(Map.of("metric","OPERATING_CASH_FLOW","previous_period","March 2025",
+      "current_period","March 2026","previous_direction","IMPROVING","current_direction","NEGATIVE")));
+    mvc.perform(delete("/api/v1/portfolio/holdings/"+equity).header("Authorization",a)).andExpect(status().isOk());
+    jdbc.update("UPDATE portfolio_review_snapshots SET generated_at=now(),result=jsonb_set(result,'{holdings}',?::jsonb) WHERE user_id=?",
+      mapper.writeValueAsString(java.util.List.of(equityRow,fundRow)),owner);
+    riskNotifications.evaluate();
+    mvc.perform(get("/api/v1/research-workspace/notifications").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2));
+  }
+
 }
