@@ -209,7 +209,7 @@ def fund_evidence(rows,instant=None):
     result={}
     for row in rows[:20]:
         code=row.get("scheme_code")
-        if type(code) is not int or code in result or row.get("amfi_option")!="GROWTH":
+        if type(code) is not int or str(code) in result or row.get("amfi_option")!="GROWTH":
             continue
         if not fund_disclosures._day(row.get("amfi_metadata_date"),today,7):
             continue
