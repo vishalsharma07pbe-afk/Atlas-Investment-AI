@@ -85,6 +85,8 @@ def attach_market_benchmark(result,payload,benchmark,today):
             raise ValueError("INDEX_HISTORY")
         index={}
         for row in rows:
+            if not isinstance(row,dict):
+                raise ValueError("INDEX_ROW")
             day=date.fromisoformat(row["trade_date"])
             if day>=today or day.isoformat() in index or row.get("source_code")!="UPSTOX":
                 raise ValueError("INDEX_DATE_OR_SOURCE")
@@ -101,6 +103,8 @@ def attach_market_benchmark(result,payload,benchmark,today):
         if horizon.get("status")!="REPLAY_OBSERVED":
             continue
         horizon["market_benchmark_status"]="UNAVAILABLE"
+        for field in ("market_benchmark_start","market_benchmark_end","market_benchmark_observations"):
+            horizon.pop(field,None)
         for cost in horizon["cost_scenarios"]:
             cost.pop("gross_nifty50_price_index_percent",None)
             cost.pop("net_difference_vs_nifty50_pp",None)
