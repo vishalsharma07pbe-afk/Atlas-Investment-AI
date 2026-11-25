@@ -81,3 +81,29 @@ class FundamentalQualityTests(unittest.TestCase):
         self.assertEqual(by["ROA"]["difference"],-5)
         self.assertEqual(by["EV_EBITDA"]["premium_discount_percent"],50)
         self.assertIsNone(result["valuation"]["fair_value"])
+
+    def test_multiyear_quality_exposes_uneven_growth_and_cash_conversion(self):
+        def four(metric,values,unit="INR crore"):
+            row=trend(metric,values[-2],values[-1],unit,start=2025,end=2026)
+            row.update(statement_type="consolidated",period_basis="DECLARED_ANNUAL_MONTH_END",
+                previous_period="2025-03",latest_period="2026-03",
+                annual_observations=[{"period":f"{y}-03","value":v} for y,v in zip(range(2023,2027),values)])
+            return row
+        rows=[four("REVENUE",[100,200,190,180]),four("NET_PROFIT",[10,20,30,40]),
+              four("OPERATING_CASH_FLOW",[10,-5,15,20])]
+        result=summarize(report(rows),2026)
+        quality=result["multi_year_quality"]
+        self.assertEqual(quality["status"],"REPORTED_MULTI_YEAR_EVIDENCE")
+        self.assertIn("REVENUE_MULTI_YEAR_DECLINES_REVIEW",result["warnings"])
+        self.assertIn("NET_PROFIT_THREE_CONSECUTIVE_ANNUAL_INCREASES",result["strengths"])
+        self.assertIn("OPERATING_CASH_FLOW_NONPOSITIVE_ANNUAL_OBSERVATION_REVIEW",result["warnings"])
+        self.assertIn("CUMULATIVE_OPERATING_CASH_BELOW_NET_PROFIT_REVIEW",result["warnings"])
+        self.assertEqual(quality["cash_conversion"]["cash_to_profit_ratio"],0.4)
+        self.assertEqual(quality["cash_conversion"]["negative_cash_years"],1)
+        self.assertIsNone(result["valuation"]["fair_value"])
+        rows[2]["unit"]="INR lakh"
+        self.assertIsNone(summarize(report(rows),2026)["multi_year_quality"]["cash_conversion"])
+        rows[0]["annual_observations"][0]["period"]="2022-03"
+        rows[1]["statement_type"]=None
+        rows[2]["latest_period_may_be_stale"]=True
+        self.assertEqual(summarize(report(rows),2026)["multi_year_quality"]["metrics"],[])
