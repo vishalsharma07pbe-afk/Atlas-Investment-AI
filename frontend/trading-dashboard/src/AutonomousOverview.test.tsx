@@ -58,3 +58,12 @@ it("shows sourced reference currency rates and derived changes without calling t
  expect(screen.getByText("+1.20% / — / —")).toBeTruthy();
  expect(screen.getByText(/ATLAS cross-rate/)).toBeTruthy();
 });
+
+it("distinguishes dated oil prices and treasury yield changes",async()=>{
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[],global_macro:{status:"PARTIAL",sources:[{source:"US Treasury",status:"AVAILABLE",items:[{series:"US10Y",label:"US 10-year par yield",unit:"PERCENT",status:"AVAILABLE",as_of:"2026-11-24",value:4.2,changes:[{observations:1,start_date:"2026-11-23",end_date:"2026-11-24",value:5,unit:"BASIS_POINTS"}]}]},{source:"US EIA",status:"DISABLED_OR_NOT_AUTHORIZED",items:[]}],notice:"Dated observations, not live."}})})));
+ render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}}>{null}</AutonomousOverview>);
+ expect(await screen.findByRole("region",{name:"Global oil and interest-rate context"})).toBeTruthy();
+ expect(screen.getByText("4.20%")).toBeTruthy();
+ expect(screen.getByText("+5.00 bp / — / —")).toBeTruthy();
+ expect(screen.getByText("US EIA")).toBeTruthy();
+});
