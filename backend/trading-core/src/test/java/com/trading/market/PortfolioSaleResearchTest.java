@@ -12,7 +12,7 @@ class PortfolioSaleResearchTest {
   private final ObjectMapper json=new ObjectMapper();
   private BigDecimal n(String value){return new BigDecimal(value);}
   private Map<String,Object> holding(String symbol,String isin,String units,String price,String cost){
-    return Map.of("symbol",symbol,"isin",isin,"asset_type","EQUITY","quantity",n(units),
+    return Map.of("symbol",symbol,"isin",isin,"asset_type","EQUITY","exchange","NSE","quantity",n(units),
       "last_price",n(price),"market_value",n(units).multiply(n(price)),"invested",n(cost),"recorded_valuation_recent",true);
   }
   private Map<String,Object> buy(String symbol,int age,String units,String price){
@@ -50,6 +50,11 @@ class PortfolioSaleResearchTest {
     equal("300",equalWeight.grossProceeds());equal("180",equalWeight.provisionalOpenCost());equal("120",equalWeight.grossGainOrLoss());
     assertEquals(100,equalWeight.sales().getFirst().youngestCalendarDays());
     assertEquals(400,equalWeight.sales().getFirst().oldestCalendarDays());
+    assertEquals("CONDITIONAL_REFERENCE_ONLY",equalWeight.taxReference().status());
+    equal("20",equalWeight.taxReference().shortPositiveGains());
+    equal("100",equalWeight.taxReference().longPositiveGains());
+    equal("4",equalWeight.taxReference().baseTaxIfFullThresholdUnused());
+    equal("16.5",equalWeight.taxReference().baseTaxIfThresholdAlreadyUsed());
   }
   @Test void missingSoldLotsWithholdTotalsButNonSoldLotsAreNotRequired(){
     var scenarios=scenarios(holdings(),trades().subList(0,2));
