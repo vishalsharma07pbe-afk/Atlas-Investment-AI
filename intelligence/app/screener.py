@@ -18,6 +18,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
     today = as_of or date.today()
     rows = []
     horizon_evaluations = []
+    breadth_pairs={}
     pressure_rows=[]
     pressure_eligible=0
     action_previews=[]
@@ -115,6 +116,10 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                 for horizon,minimum in HORIZON_MIN_HISTORY.items():
                     if len(candles)>=minimum:
                         history_coverage[horizon]+=1
+            if batch_loaded and expected_session is not None and candles[-1].adjustment_status=="ADJUSTED":
+                key=candles[-2].date
+                counts=breadth_pairs.setdefault(key,{"advancing":0,"declining":0,"unchanged":0})
+                counts["advancing" if close>previous else "declining" if close<previous else "unchanged"]+=1
             rows.append(row)
         except (KeyError, TypeError, ValueError, OverflowError, ZeroDivisionError):
             skipped["INVALID"] += 1
@@ -134,6 +139,9 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
         "notice": f"Bounded daily sample of up to {limit} registry instruments; not a full-market top-five ranking, live feed, intraday signal or recommendation.",
     }
     if batch_loaded:
+        result["sample_breadth"]={"as_of":expected_session.isoformat() if expected_session is not None else None,
+            "adjustment_status":"ADJUSTED","pairs":[{"previous_session":k,**v} for k,v in sorted(breadth_pairs.items())],
+            "notice":"Counts of adjusted histories in the selected registry sample, grouped by preceding observed date; not full-exchange breadth."}
         result["corporate_action_review"]={"normalized_preview_count":action_preview_count,
             "withheld_count":action_preview_withheld,"previews":action_previews,
             "notice":"Recorded split/bonus normalization diagnostics only. These histories remain excluded from rankings and backtesting."}

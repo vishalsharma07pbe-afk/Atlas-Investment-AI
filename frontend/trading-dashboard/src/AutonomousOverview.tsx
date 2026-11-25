@@ -18,7 +18,8 @@ type GlobalContext={status:string;available_count:number;total_count:number;grou
 type GlobalReleaseContext={status:string;sources:{source:string;label:string;status:string;retrieved_at?:string;event_count?:number}[];events:{id:string;headline:string;source_name:string;source_url:string;published_at:string;topics:string[];geography:string}[];notice:string};
 type ReleaseMatch={status:string;headline?:string;source_url?:string;published_at?:string;notice:string};
 type EconomicCalendar={status:string;source_url:string;retrieved_at?:string;events:{id:string;headline:string;topic:string;scheduled_at:string;status:string;review_window:boolean;release_match?:ReleaseMatch}[];notice:string};
-type Snapshot={economic_calendar?:EconomicCalendar;global_releases?:GlobalReleaseContext;global_context?:GlobalContext;global_markets?:GlobalMarketContext;global_macro?:MacroContext;global_fx?:FxContext;daily_briefing?:Briefing;recent_company_news?:Article[];institutional_activity?:InstitutionalActivity;enabled:boolean;interval_seconds:number;sections:{section:string;status:string;generated_at:string|null;attempted_at:string|null;result:Result|null}[]};
+type RegimeReport={status:string;trend?:string;volatility_regime?:string;as_of?:string;benchmark_change_60_percent?:number;volatility_20_annualized_percent?:number;breadth?:{status:string;advancing?:number;declining?:number;unchanged?:number;matched_count?:number;selected_count?:number;direction?:string};agreement?:string;institutional?:{status:string;fii?:string;dii?:string};global_coverage?:{available_count:number;total_count:number};notice:string};
+type Snapshot={market_regime?:RegimeReport;economic_calendar?:EconomicCalendar;global_releases?:GlobalReleaseContext;global_context?:GlobalContext;global_markets?:GlobalMarketContext;global_macro?:MacroContext;global_fx?:FxContext;daily_briefing?:Briefing;recent_company_news?:Article[];institutional_activity?:InstitutionalActivity;enabled:boolean;interval_seconds:number;sections:{section:string;status:string;generated_at:string|null;attempted_at:string|null;result:Result|null}[]};
 const labels:Record<string,string>={NSE:"NSE",BSE:"BSE",LARGE_CAP:"Large cap",MID_CAP:"Mid cap",SMALL_CAP:"Small cap",FLEXI_CAP:"Flexi cap",INDEX:"Index funds",LARGE_MID_CAP:"Large & mid cap",MULTI_CAP:"Multi cap",AGGRESSIVE_HYBRID:"Aggressive hybrid",CORPORATE_BOND:"Corporate bond",SHORT_DURATION:"Short duration"};
 const percent=(value:number|null)=>value==null?"—":(value>0?"+":"")+value.toFixed(2)+"%";
 const stamp=(value:string|null)=>value?new Date(value).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",dateStyle:"medium",timeStyle:"short"})+" IST":"Not yet refreshed";
@@ -48,6 +49,7 @@ export default function AutonomousOverview({children,onPortfolio,onFunds,onSetti
    {onHorizon&&<div className="research-shortcuts" aria-label="Automatic equity research shortcuts">{horizonLinks.map(({id,title})=>{const groups=readyMarkets.flatMap(row=>row.result?.horizons?.[id]?[row.result.horizons[id]!]:[]);const count=groups.reduce((n,group)=>n+(group.status==="TECHNICAL_WATCH_ONLY"?group.candidates.length:0),0);return <button key={id} type="button" className="research-shortcut" onClick={()=>onHorizon(id)}><strong>{title}</strong><span>{groups.length?`${count} technical watches`:"Current research pending"}</span><small>Open research →</small></button>;})}</div>}
    {current&&data?.economic_calendar&&<EconomicCalendarPanel report={data.economic_calendar}/>}
    {current&&data?.global_releases&&<GlobalReleasePanel report={data.global_releases}/>}
+   {current&&data?.market_regime&&<MarketRegimePanel report={data.market_regime}/>}
    {current&&data?.global_context&&<GlobalResearchSummary report={data.global_context}/>}
    {current&&data?.global_fx&&<GlobalFxContext report={data.global_fx}/>}
    {current&&data?.global_macro&&<GlobalMacroContext report={data.global_macro}/>}
@@ -119,5 +121,18 @@ function EconomicCalendarPanel({report}:{report:EconomicCalendar}){
  return <section className="autonomous-result" aria-label="Upcoming economic release calendar"><header><strong>Upcoming economic release calendar</strong><span>{report.status.toLowerCase().replace(/_/g," ")}</span></header>
  <p className="muted tiny">US Bureau of Labor Statistics · scheduled time in IST · <a href={report.source_url} target="_blank" rel="noopener noreferrer">Official calendar</a>{report.retrieved_at&&" · retrieved "+stamp(report.retrieved_at)}</p>
  {report.events.length?<ul>{report.events.map(e=><li key={e.id}><div><strong>{e.headline}</strong><small>{stamp(e.scheduled_at)} · {e.status.toLowerCase().replace(/_/g," ")}</small>{e.review_window&&<small>Upcoming within 24 hours · review event exposure</small>}{e.release_match&&<div><small>{e.release_match.status.toLowerCase().replace(/_/g," ")}</small>{e.release_match.source_url&&<p><a href={e.release_match.source_url} target="_blank" rel="noopener noreferrer">{e.release_match.headline}</a> · {stamp(e.release_match.published_at??null)}</p>}<small>{e.release_match.notice}</small></div>}</div></li>)}</ul>:<p>No usable scheduled events in the current coverage window.</p>}
+ <p className="muted tiny">{report.notice}</p></section>;
+}
+
+function MarketRegimePanel({report}:{report:RegimeReport}){
+ const words=(v:string)=>v.toLowerCase().replace(/_/g," ");
+ return <section className="autonomous-result" aria-label="Observed market regime"><header><strong>Observed market regime</strong><span>{words(report.status)}</span></header>
+ {report.status==="OBSERVED_BENCHMARK_REGIME"?<><p><strong>Nifty 50 · {words(report.trend??"UNAVAILABLE")}</strong> · {report.as_of} · 60-session price change {percent(report.benchmark_change_60_percent??null)}</p>
+ <p>20-session annualized historical volatility: {percent(report.volatility_20_annualized_percent??null)} · {words(report.volatility_regime??"UNAVAILABLE")}</p>
+ {report.breadth?.matched_count!=null?<p>Matched adjusted NSE sample: {report.breadth.advancing} advancing · {report.breadth.declining} declining · {report.breadth.unchanged} unchanged · {report.breadth.matched_count}/{report.breadth.selected_count} selected · {words(report.breadth.status)}</p>:<p>Comparable adjusted sample breadth unavailable.</p>}
+ <p>Trend / daily breadth context: {words(report.agreement??"UNAVAILABLE")}</p>
+ {report.institutional?.fii&&<p>Same latest session, five-session reported flows: FII {words(report.institutional.fii)} · DII {words(report.institutional.dii??"UNAVAILABLE")}</p>}
+ </>:<p>Insufficient current calendar-matched benchmark history.</p>}
+ {report.global_coverage&&<p>Separate global context: {report.global_coverage.available_count}/{report.global_coverage.total_count} dated indicators. Not synchronized with the Indian close.</p>}
  <p className="muted tiny">{report.notice}</p></section>;
 }

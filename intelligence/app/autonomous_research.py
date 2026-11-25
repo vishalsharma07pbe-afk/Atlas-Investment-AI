@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from .market_client import backend_json
 from .screener import screen
 from .mutual_fund_recommendations import CATEGORIES, dashboard
-from . import release_reconciliation, economic_calendar, global_releases, global_context, global_markets, global_macro, global_fx, automatic_deals, fund_portfolios, fund_disclosures, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
+from . import market_regime, release_reconciliation, economic_calendar, global_releases, global_context, global_markets, global_macro, global_fx, automatic_deals, fund_portfolios, fund_disclosures, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
 
 SECTIONS = ("NSE", "BSE", *CATEGORIES)
 DEFAULT_INTERVAL = 900
@@ -276,6 +276,10 @@ def read_snapshot(include_ai=True):
             snapshot["economic_calendar"]=economic_calendar.empty("UNAVAILABLE")
         release_reconciliation.attach(snapshot,current)
         global_context.attach(snapshot,current)
+        try:
+            market_regime.attach(snapshot,_connect,current)
+        except (ValueError,OSError,sqlite3.Error):
+            snapshot["market_regime"]=market_regime.empty("UNAVAILABLE")
         research_reliability.attach_conclusions(snapshot)
         snapshot["daily_briefing"] = daily_briefing.summarize(snapshot)
     return snapshot
@@ -294,6 +298,8 @@ def job_status():
 
 def _execute_job(job):
     """Dispatch existing bounded engines, with explicit evidence/config gates."""
+    if job=="MARKET_REGIME":
+        return "PASS_COMPLETED" if market_regime.refresh(_connect) else "WAITING_EVIDENCE"
     if job=="ECONOMIC_CALENDAR":
         if not economic_calendar.permitted():
             return "DISABLED_OR_NOT_AUTHORIZED"
