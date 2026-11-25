@@ -85,3 +85,12 @@ it("shows integrated global evidence coverage without a composite market predict
  expect(screen.getByText("+1.20% over 5 observed dates")).toBeTruthy();
  expect(screen.getByText("Not synchronized or a forecast.")).toBeTruthy();
 });
+
+it("shows official economic announcements with source and publication date",async()=>{
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[],global_releases:{status:"PARTIAL",sources:[{source:"FED",label:"Federal Reserve monetary policy",status:"CURRENT_FEED"}],events:[{id:"one",headline:"Example monetary policy statement",source_name:"Federal Reserve",source_url:"https://www.federalreserve.gov/newsevents/pressreleases/example.htm",published_at:"2026-11-24T12:00:00Z",topics:["MONETARY_POLICY"],geography:"US"}],notice:"Published feed headline, not a forecast."}})})));
+ render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}}>{null}</AutonomousOverview>);
+ expect(await screen.findByRole("region",{name:"Official global economic announcements"})).toBeTruthy();
+ expect(screen.getByRole("link",{name:"Example monetary policy statement"}).getAttribute("href")).toContain("federalreserve.gov");
+ expect(screen.getByText("monetary policy")).toBeTruthy();
+ expect(screen.getByText("Published feed headline, not a forecast.")).toBeTruthy();
+});

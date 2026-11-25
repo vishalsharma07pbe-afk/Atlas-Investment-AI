@@ -47,19 +47,25 @@ def _load():
 
 def _combined():
     local = _load()
-    from . import automatic_news
+    from . import automatic_news, global_releases
     from .autonomous_research import config, _connect
-    if not config()[0] or not automatic_news.permitted():
+    if not config()[0]:
         return local, False
-    try:
-        news = [Alert.model_validate(item) for item in automatic_news.alerts(_connect)]
-    except (OSError, ValueError, RuntimeError, TypeError):
-        # Manual and IPO alerts remain available if optional news is unavailable.
-        return local, False
-    except sqlite3.Error:
-        return local, False
+    news=[]
+    for adapter in (automatic_news,global_releases):
+        try:
+            # Each adapter enforces its own authorization on read.
+            news.extend([Alert.model_validate(item) for item in adapter.alerts(_connect)])
+        except (OSError, ValueError, RuntimeError, TypeError, sqlite3.Error):
+            # Failure of one source does not suppress the others.
+            continue
     known={a.id for a in local}
-    return sorted(local+[a for a in news if a.id not in known],key=lambda a:a.published_at,reverse=True), bool(news)
+    combined=list(local)
+    for a in news:
+        if a.id not in known:
+            combined.append(a)
+            known.add(a.id)
+    return sorted(combined,key=lambda a:a.published_at,reverse=True), bool(news)
 
 def summary():
     alerts,has_news=_combined()
