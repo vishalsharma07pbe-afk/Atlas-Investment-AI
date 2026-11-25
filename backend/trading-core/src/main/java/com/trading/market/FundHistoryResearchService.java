@@ -123,10 +123,16 @@ public class FundHistoryResearchService {
     // them a cross-index risk-adjusted rank or category peer percentile.
     boolean comparable=!"INDEX".equals(category);
     if(comparable&&observations.size()>=5){
+      // The cohort median is descriptive, not an investable benchmark.
+      double[] cohort=observations.stream().mapToDouble(r->((Number)r.get("cagr_3y_percent")).doubleValue()).sorted().toArray();
+      double median=cohort.length%2==0?(cohort[cohort.length/2-1]+cohort[cohort.length/2])/2:cohort[cohort.length/2];
       for(var row:observations){
         double value=((Number)row.get("cagr_3y_percent")).doubleValue();
         long below=observations.stream().filter(r->((Number)r.get("cagr_3y_percent")).doubleValue()<value).count();
         long equal=observations.stream().filter(r->((Number)r.get("cagr_3y_percent")).doubleValue()==value).count();
+        row.put("sample_median_cagr_3y_percent",round(median));
+        row.put("sample_cagr_3y_difference_pp",round(value-median));
+        row.put("sample_peer_count",cohort.length);
         row.put("sample_peer_percentile",round(100.0*(below+(equal-1)/2.0)/(observations.size()-1)));
       }
     }
