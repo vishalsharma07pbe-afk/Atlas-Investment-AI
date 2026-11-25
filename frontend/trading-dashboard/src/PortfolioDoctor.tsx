@@ -30,7 +30,8 @@ type JournalLots={status:string;reconciled_count:number;holdings:{symbol:string;
 type EquityTaxReference={status:string;taxYear:string;shortPositiveGains:number|null;shortGrossLosses:number|null;longPositiveGains:number|null;longGrossLosses:number|null;baseTaxIfFullThresholdUnused:number|null;baseTaxIfThresholdAlreadyUsed:number|null;withheld:string[]};
 type SaleResearch={status:string;scenarios:{scope:string;kind:string;status:string;grossProceeds:number|null;provisionalOpenCost:number|null;grossGainOrLoss:number|null;taxReference?:EquityTaxReference;sales:{identity:string;symbol:string;assetType:string;hypotheticalQuantity:number;grossProceeds:number;provisionalOpenCost:number;grossGainOrLoss:number;youngestCalendarDays:number;oldestCalendarDays:number}[];withheld:string[]}[];notice:string};
 type FundExitLoad={status:string;scenarios:{scope:string;kind:string;status:string;hypotheticalFundExitLoad:number|null;funds:{schemeCode:string;status:string;disclosureDate:string|null;disclosureText:string|null;hypotheticalLoad:number|null;proceedsAfterLoad:number|null;reason:string|null}[]}[];notice:string};
-type Review={fund_exit_load_research?:FundExitLoad;sale_research?:SaleResearch;journal_lot_reconciliation?:JournalLots;portfolio_level_risk?:LevelRisk;ownership_changed_count?:number;ownership_attention_count?:number;ownership_monitor_notice?:string;fund_thesis_changed_count?:number;fund_thesis_attention_count?:number;fund_monitor_notice?:string;thesis_changed_count?:number;thesis_monitor_notice?:string;benchmark_risk_estimate?:BenchmarkRisk;opportunity_context?:OpportunityContext;diversification?:Diversification;equity_correlation?:Correlation;thesis_review_count?:number;generated_at:string;holding_count:number;attention_count:number;data_gap_count:number;holdings:HoldingReview[];notice:string};
+type RebalancingFunding={status:string;comparisons:{scope:string;kind:string;status:string;purchaseNotional:number;saleNotional:number;additionalCashBeforeCost:number;conditionalExitLoad:number|null;conditionalTaxIfThresholdUnused:number|null;conditionalTaxIfThresholdUsed:number|null;estimates:{basisPointsPerSide:number;transactionCost:number;additionalCashIncludingTransactionCost:number;additionalCashWithKnownExitLoad:number|null;conditionalCashIfThresholdUnused:number|null;conditionalCashIfThresholdUsed:number|null}[];evidenceGaps:string[]}[];notice:string};
+type Review={rebalancing_funding?:RebalancingFunding;fund_exit_load_research?:FundExitLoad;sale_research?:SaleResearch;journal_lot_reconciliation?:JournalLots;portfolio_level_risk?:LevelRisk;ownership_changed_count?:number;ownership_attention_count?:number;ownership_monitor_notice?:string;fund_thesis_changed_count?:number;fund_thesis_attention_count?:number;fund_monitor_notice?:string;thesis_changed_count?:number;thesis_monitor_notice?:string;benchmark_risk_estimate?:BenchmarkRisk;opportunity_context?:OpportunityContext;diversification?:Diversification;equity_correlation?:Correlation;thesis_review_count?:number;generated_at:string;holding_count:number;attention_count:number;data_gap_count:number;holdings:HoldingReview[];notice:string};
 const pct=(value:number|null)=>value==null?"—":(value>0?"+":"")+value.toFixed(2)+"%";
 const statuses={REVIEW_REQUIRED:"Needs review",MONITOR:"Monitor",EVIDENCE_GAP:"Data needed"};
 
@@ -168,6 +169,25 @@ function SaleResearchDigest({report}:{report:SaleResearch}){
    {report.scenarios.filter(s=>s.taxReference&&s.taxReference.status!=="CONDITIONAL_REFERENCE_ONLY").map(s=><p key={s.scope+":"+s.kind}>{label(s.scope)} · {label(s.kind)}: {s.taxReference!.status==="NO_HYPOTHETICAL_SALE"?"No hypothetical sale.":s.taxReference!.withheld.join("; ")||"Tax reference withheld."}</p>)}
    <p className="muted tiny">Reference: Income-tax Act, 2025 sections 2(101), 196 and 198, as amended by Finance Act 2026. <a href="https://wm.incometaxindia.gov.in/w/determination-of-tax-in-certain-special-cases" target="_blank" rel="noreferrer">Income Tax Department rate reference</a>. Actual STT, tax residency, capital-asset treatment, full-year gains/losses and verified cost basis are not established.</p>
   </details>}
+  <p className="muted tiny">{report.notice}</p>
+ </section>;
+}
+function RebalancingFundingDigest({report}:{report:RebalancingFunding}){
+ const [rate,setRate]=useState(50);
+ const money=(v:number|null|undefined)=>v==null?"Unavailable":new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",minimumFractionDigits:0,maximumFractionDigits:2}).format(v);
+ if(!report.comparisons.length)return null;
+ return <section className="doctor-item" aria-label="Combined rebalancing funding research">
+  <h3>Combined rebalancing funding research</h3>
+  <p>Additional hypothetical cash to preserve the proposed weights before costs. Tax and exit-load amounts are conditional references, not verified charges.</p>
+  <label>Assumed transaction charge excluding tax and exit load <select aria-label="Combined funding transaction rate" value={rate} onChange={e=>setRate(Number(e.target.value))}>
+    {[10,50,100].map(bps=><option key={bps} value={bps}>{bps} bps per side</option>)}
+  </select></label>
+  <div className="tablewrap"><table><thead><tr><th>Scenario</th><th>Cash before costs</th><th>Transaction cost</th><th>Conditional exit load</th><th>Cash with transaction cost and exit load</th><th>Cash with conditional base tax (threshold unused / used)</th></tr></thead><tbody>
+   {report.comparisons.map(s=>{const e=s.estimates.find(x=>x.basisPointsPerSide===rate);return <tr key={s.scope+":"+s.kind}>
+    <td>{s.scope.replace(/_/g," ").toLowerCase()} · {s.kind.replace(/_/g," ").toLowerCase()}{s.evidenceGaps.length>0&&<ul>{s.evidenceGaps.map(g=><li key={g}>{g}</li>)}</ul>}</td>
+    <td>{money(s.additionalCashBeforeCost)}</td><td>{money(e?.transactionCost)}</td><td>{money(s.conditionalExitLoad)}</td><td>{money(e?.additionalCashWithKnownExitLoad)}</td><td>{money(e?.conditionalCashIfThresholdUnused)} / {money(e?.conditionalCashIfThresholdUsed)}</td>
+   </tr>})}
+  </tbody></table></div>
   <p className="muted tiny">{report.notice}</p>
  </section>;
 }
@@ -338,6 +358,7 @@ export default function PortfolioDoctor({revision,onSettings,compact=false,onOpe
     {review.journal_lot_reconciliation&&<JournalLotsDigest report={review.journal_lot_reconciliation}/>}
     {review.sale_research&&<SaleResearchDigest report={review.sale_research}/>}
     {review.fund_exit_load_research&&<FundExitLoadDigest report={review.fund_exit_load_research}/>}
+    {review.rebalancing_funding&&<RebalancingFundingDigest report={review.rebalancing_funding}/>}
     {review.opportunity_context&&<OpportunityDigest report={review.opportunity_context}/>}
     <p className="muted tiny">Reviewed {new Date(review.generated_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})} IST. {review.notice}</p>
   </>}
