@@ -41,6 +41,7 @@ class AuthIsolationIntegrationTest {
   @Autowired ObjectMapper mapper;
   @Autowired UserAlertEvaluator alertEvaluator;
   @Autowired com.trading.market.PortfolioRiskNotifications riskNotifications;
+  @Autowired com.trading.api.PortfolioGoalNotifications goalNotifications;
   String create(String email)throws Exception{
     String input=mapper.writeValueAsString(Map.of("email",email,"password","strong-password-12345"));
     mvc.perform(post("/api/v1/auth/register").contentType(MediaType.APPLICATION_JSON).content(input))
@@ -606,6 +607,8 @@ class AuthIsolationIntegrationTest {
       .andExpect(jsonPath("$.availableHoldings.length()").value(1)).andReturn().getResponse();
     long id=mapper.readTree(list.getContentAsString()).path("availableHoldings").get(0).path("holdingId").asLong();
     String route=base+"/"+ids[0]+"/holdings/"+id,confirm="{\"confirmSeparateBalance\":true}";
+    UUID owner=jdbc.queryForObject("SELECT user_id FROM portfolio_saved_goals WHERE id=?::uuid",UUID.class,ids[0]);
+    UUID other=jdbc.queryForObject("SELECT user_id FROM portfolio_saved_goals WHERE id=?::uuid",UUID.class,ids[2]);
     mvc.perform(post(route).header("Authorization",a).contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isBadRequest());
     mvc.perform(post(route).header("Authorization",b).contentType(MediaType.APPLICATION_JSON).content(confirm)).andExpect(status().isNotFound());
     mvc.perform(post(base+"/"+ids[2]+"/holdings/"+id).header("Authorization",b).contentType(MediaType.APPLICATION_JSON).content(confirm)).andExpect(status().isNotFound());
@@ -622,12 +625,28 @@ class AuthIsolationIntegrationTest {
     jdbc.update("UPDATE personal_holdings SET price_as_of=now()-interval '8 days' WHERE id=?",id);
     mvc.perform(get(base).header("Authorization",a)).andExpect(status().isOk())
       .andExpect(jsonPath("$.goals[0].progress.status").value("INCOMPLETE_LINKED_VALUATION"));
+
+    assertEqualsGoalAlerts(owner,ids[0],other,0);
+    org.junit.jupiter.api.Assertions.assertEquals(1,goalNotifications.evaluateOwner(owner));
+    org.junit.jupiter.api.Assertions.assertEquals(0,goalNotifications.evaluateOwner(owner));
+    assertEqualsGoalAlerts(owner,ids[0],other,1);
     mvc.perform(delete("/api/v1/portfolio/holdings/"+id).header("Authorization",a)).andExpect(status().isOk());
     mvc.perform(get(base).header("Authorization",a)).andExpect(status().isOk())
       .andExpect(jsonPath("$.goals[0].funding.holdings[0].status").value("MISSING_HOLDING"));
     mvc.perform(delete(route).header("Authorization",a)).andExpect(status().isOk());
     mvc.perform(get(base).header("Authorization",a)).andExpect(status().isOk())
       .andExpect(jsonPath("$.goals[0].funding.totalRecordedFunding").value(40000.0));
+  }
+
+  private void assertEqualsGoalAlerts(UUID owner,String goal,UUID other,int expected){
+    org.junit.jupiter.api.Assertions.assertEquals(expected,jdbc.queryForObject("""
+      SELECT count(*) FROM user_notification_history WHERE user_id=? AND source_code='ATLAS_GOAL_REVIEW'
+        AND source_reference=? AND details->>'kind'='LINKED_VALUE'
+      """,Integer.class,owner,goal));
+    org.junit.jupiter.api.Assertions.assertEquals(0,jdbc.queryForObject("""
+      SELECT count(*) FROM user_notification_history WHERE user_id=? AND source_code='ATLAS_GOAL_REVIEW'
+        AND source_reference=?
+      """,Integer.class,other,goal));
   }
 
 }
