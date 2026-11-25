@@ -55,7 +55,7 @@ class LiveFeedsDatabaseIntegrationTest {
  @Test void benchmarkHistoryUsesStoredSessionClosesAndNeverReplacesManualSource()throws Exception{
   var service=new BenchmarkHistoryService(db,http,new org.springframework.transaction.support.TransactionTemplate(
     new org.springframework.jdbc.datasource.DataSourceTransactionManager(Objects.requireNonNull(db.getDataSource()))));
-  LocalDate date=LocalDate.of(2025,1,6),unknown=date.plusDays(1);
+  LocalDate date=LocalDate.of(2025,1,6);
   long index=0;
   boolean previouslyEnabled=Boolean.TRUE.equals(db.queryForObject("SELECT enabled FROM data_sources WHERE source_code='UPSTOX'",Boolean.class));
   try{
@@ -77,17 +77,13 @@ class LiveFeedsDatabaseIntegrationTest {
    when(http.text(contains("NSE_INDEX%7CNifty%2050/days/1"),eq("test-operator"),anyInt())).thenReturn("""
      {"status":"success","data":{"candles":[["2025-01-06T00:00:00+05:30",100,110,90,105,0,0]]}}
      """);
-   // The scheduled path uses the same public service. Invoke it via reflection only
-   // from this cross-package integration fixture.
-   var refresh=BenchmarkHistoryService.class.getDeclaredMethod("refresh",long.class,String.class,LocalDate.class,LocalDate.class);
-   refresh.setAccessible(true);
-   assertThat((Integer)refresh.invoke(service,index,"test-operator",date,date)).isEqualTo(1);
+   assertThat(service.refresh(index,"test-operator",date,date)).isEqualTo(1);
    assertThat(db.queryForObject("SELECT close FROM market_candles WHERE instrument_id=? AND candle_time=?",BigDecimal.class,index,close)).isEqualByComparingTo("105");
    db.update("UPDATE market_candles SET source_id=(SELECT id FROM data_sources WHERE source_code='MANUAL_CSV'),close=99 WHERE instrument_id=? AND candle_time=?",index,close);
-   assertThat((Integer)refresh.invoke(service,index,"test-operator",date,date)).isZero();
+   assertThat(service.refresh(index,"test-operator",date,date)).isZero();
    assertThat(db.queryForObject("SELECT close FROM market_candles WHERE instrument_id=? AND candle_time=?",BigDecimal.class,index,close)).isEqualByComparingTo("99");
   }finally{
-   if(index!=0)db.update("DELETE FROM market_candles WHERE instrument_id=?",index);
+   if(index!=0)db.update("DELETE FROM market_candles WHERE instrument_id=? AND (candle_time AT TIME ZONE 'Asia/Kolkata')::date=?",index,date);
    db.update("UPDATE data_sources SET enabled=? WHERE source_code='UPSTOX'",previouslyEnabled);
   }
  }
