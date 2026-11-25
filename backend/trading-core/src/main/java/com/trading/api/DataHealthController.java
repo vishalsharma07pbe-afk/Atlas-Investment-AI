@@ -36,6 +36,11 @@ public class DataHealthController {
       SELECT scope,failure_code,failure_count,last_failure_at,blocked_until,
         blocked_until>now() AS blocked FROM operator_feed_cooldown
       """));
+    out.put("publicFeedSchedule",jdbc.queryForList("""
+      SELECT provider,CASE WHEN status='RUNNING' AND lease_until<=now() THEN 'RECOVERY_PENDING' ELSE status END AS status,
+        attempts,interruptions,error_code,last_attempt_at,last_success_at,next_attempt_at
+      FROM public_feed_schedule ORDER BY provider
+      """));
     out.put("upstoxRegistry",registry);out.put("officialAmfiNav",nav);out.put("upstoxDailyHistory",daily);
     out.put("instrumentCount",jdbc.queryForObject("SELECT count(*) FROM instruments",Long.class));
     out.put("candleCount",jdbc.queryForObject("SELECT count(*) FROM market_candles WHERE timeframe='1d'",Long.class));
