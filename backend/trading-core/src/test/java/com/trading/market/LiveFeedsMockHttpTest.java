@@ -26,7 +26,7 @@ class LiveFeedsMockHttpTest {
   JdbcTemplate db=mock(JdbcTemplate.class);FeedHttp http=mock(FeedHttp.class);VersionedVaultReader vault=mock(VersionedVaultReader.class);
   UUID user=UUID.randomUUID();when(vault.decrypt(user,"UPSTOX")).thenReturn("test-only-token");
   when(db.queryForObject(contains("upstox_instrument_map"),eq(Integer.class),any())).thenReturn(1);
-  when(http.text(contains("market-quote/quotes"),eq("test-only-token"),anyInt())).thenReturn("{\"status\":\"success\",\"data\":{\"NSE_EQ:RELIANCE\":{\"last_price\":2500.50,\"ohlc\":{\"close\":2475.00}}}}");
+  when(http.text(contains("market-quote/quotes"),eq("test-only-token"),anyInt())).thenReturn("{\"status\":\"success\",\"data\":{\"NSE_EQ:RELIANCE\":{\"last_price\":2500.50,\"instrument_token\":\"NSE_EQ|INE002A01018\",\"last_trade_time\":\"1760000000000\",\"timestamp\":\"2025-10-09T12:00:00Z\",\"prev_close_price\":2475.00}}}");
   JsonNode result=new UpstoxFeedService(db,http,vault).quote(user,"NSE_EQ|INE002A01018");
   assertThat(result.path("ltp").decimalValue()).isEqualByComparingTo(new BigDecimal("2500.50"));
   assertThat(result.path("previous_close").decimalValue()).isEqualByComparingTo(new BigDecimal("2475.00"));
