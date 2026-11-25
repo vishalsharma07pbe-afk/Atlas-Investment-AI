@@ -4,6 +4,9 @@ from decimal import Decimal, InvalidOperation
 import json
 import os
 import re
+import sqlite3
+from urllib.parse import urlsplit
+from . import quote_recovery
 import httpx
 from urllib.parse import quote, urlencode
 from .provider_router import Quote, ProviderFailure, ReadOnlyRouter, CircuitBreaker
@@ -15,6 +18,17 @@ DEFAULT_TIMEOUT = 5
 quote_breaker = CircuitBreaker()
 
 def _request(url, headers):
+    provider={"api.upstox.com":"UPSTOX","api.polygon.io":"POLYGON"}.get(urlsplit(url).hostname)
+    if provider is None:
+        raise ProviderFailure("PROVIDER_REQUEST_FAILED")
+    try:
+        claim=quote_recovery.claim(provider)
+    except (OSError,sqlite3.Error):
+        raise ProviderFailure("RECOVERY_STORAGE_UNAVAILABLE") from None
+    if claim is None:
+        raise ProviderFailure("PROVIDER_RECOVERY_COOLDOWN")
+    reason="PROVIDER_REQUEST_FAILED"
+    retry_after=None
     try:
         safe_headers = {**headers, "User-Agent": "ATLAS-Research/1.0"}
         response = httpx.get(url, headers=safe_headers, timeout=DEFAULT_TIMEOUT,
@@ -22,19 +36,35 @@ def _request(url, headers):
         if response.status_code in (401, 403):
             raise ProviderFailure("PROVIDER_ACCESS_REJECTED")
         if response.status_code == 429:
+            raw=response.headers.get("Retry-After","")
+            if isinstance(raw,str) and raw.isascii() and raw.isdigit() and len(raw)<=6:
+                retry_after=int(raw)
             raise ProviderFailure("PROVIDER_RATE_LIMITED")
         if response.status_code != 200:
-            raise ProviderFailure("PROVIDER_HTTP_FAILURE")
+            raise ProviderFailure("PROVIDER_HTTP_FAILURE" if response.status_code>=500 else "PROVIDER_REQUEST_REJECTED")
         raw = response.content
         if len(raw) > 262144:
             raise ProviderFailure("PROVIDER_RESPONSE_TOO_LARGE")
-        return json.loads(raw)
-    except httpx.HTTPError as exc:
-        raise ProviderFailure("PROVIDER_REQUEST_FAILED") from exc
-    except ProviderFailure:
+        result=json.loads(raw)
+        if not isinstance(result,dict):
+            raise ProviderFailure("PROVIDER_SCHEMA_INVALID")
+        reason=None
+        return result
+    except httpx.HTTPError:
+        raise ProviderFailure("PROVIDER_REQUEST_FAILED") from None
+    except ProviderFailure as exc:
+        reason=str(exc)
         raise
-    except (ValueError, KeyError, TypeError) as exc:
-        raise ProviderFailure("PROVIDER_SCHEMA_INVALID") from exc
+    except (ValueError, KeyError, TypeError):
+        reason="PROVIDER_SCHEMA_INVALID"
+        raise ProviderFailure(reason) from None
+    finally:
+        try:
+            quote_recovery.finish(provider,claim,reason,retry_after)
+        except (OSError,sqlite3.Error):
+            # An unfinished claim remains bounded by its lease; do not expose
+            # storage errors, filesystem paths or provider credentials.
+            pass
 
 def _timestamp(value):
     if isinstance(value, bool):
@@ -159,5 +189,6 @@ def provider_status():
         {"code":"POLYGON","configured":bool(os.getenv("ATLAS_POLYGON_API_KEY")),
          "authorization_gate":os.getenv("ATLAS_POLYGON_QUOTES_AUTHORIZED", "false").lower()=="true"}],
         "automatic_fallback_available": False, "streaming_verified": False,
+        "http_recovery":quote_recovery.status(),
         "circuits":[quote_breaker.status(name) for name in ("UPSTOX","POLYGON")],
         "notice":"Quote requests require independently authorized credentials. Indian and US instruments cannot substitute for one another; a same-market backup is not configured."}

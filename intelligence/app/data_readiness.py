@@ -6,7 +6,7 @@ independent dimensions; local imports never imply licensed automated access.
 from datetime import date, datetime, timezone
 from pathlib import Path
 import sqlite3
-from . import nav_catalog, flow_ledger, news_ledger
+from . import nav_catalog, flow_ledger, news_ledger, quote_recovery
 from .config import settings
 from .market_client import backend_json
 from zoneinfo import ZoneInfo
@@ -159,6 +159,7 @@ def readiness(now: datetime | None = None, health_loader=None):
         "research_interval_seconds": interval,
         "research_sections": research_sections,
         "research_jobs": research_jobs,
+        "provider_http_recovery": quote_recovery.status(now.timestamp()),
         "blockers": blockers,
         "datasets": datasets,
         "backend_evidence": provider_rows,
