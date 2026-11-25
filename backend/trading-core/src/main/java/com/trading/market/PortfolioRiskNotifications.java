@@ -43,7 +43,7 @@ public class PortfolioRiskNotifications {
       FROM attention
       ON CONFLICT DO NOTHING
       """);
-    return digest+ownershipChanges()+thesisChanges();
+    return digest+ownershipChanges()+thesisChanges()+portfolioLevelRisk();
   }
 
   private int ownershipChanges(){
@@ -157,6 +157,60 @@ public class PortfolioRiskNotifications {
         'portfolio-thesis:'||md5(jsonb_build_array(holding_id,identity,kind,metric,period)::text),
         'IN_APP','DELIVERED'
       FROM events
+      ON CONFLICT DO NOTHING
+      """);
+  }
+
+  /** Separate weekly cooldown per risk family; no alerts from incomplete evidence. */
+  private int portfolioLevelRisk(){
+    return jdbc.update("""
+      WITH fresh AS (
+        SELECT s.user_id,s.generated_at,s.result,
+          date_trunc('week',now() AT TIME ZONE 'Asia/Kolkata')::date AS week_start
+        FROM portfolio_review_snapshots s
+        WHERE s.generated_at BETWEEN now()-interval '5 minutes' AND now()
+          AND s.holdings_revision=(
+            SELECT md5(coalesce(string_agg(h.id::text||':'||h.updated_at::text,',' ORDER BY h.id),''))
+            FROM personal_holdings h WHERE h.user_id=s.user_id
+          )
+          AND s.result->>'methodology'='PORTFOLIO_REVIEW_V1'
+      ), flags AS (
+        SELECT f.user_id,f.generated_at,f.week_start,flag,
+          CASE WHEN flag->>'kind'='BENCHMARK_RELATIVE_LAG' THEN 'BENCHMARK' ELSE 'CONCENTRATION' END AS family
+        FROM fresh f CROSS JOIN LATERAL jsonb_array_elements(
+          CASE WHEN jsonb_typeof(f.result->'portfolio_level_risk'->'attention')='array'
+            THEN f.result->'portfolio_level_risk'->'attention' ELSE '[]'::jsonb END
+        ) flag
+        WHERE flag->>'kind' IN ('BENCHMARK_RELATIVE_LAG','SINGLE_IDENTITY','TOP_THREE','DIRECT_EQUITY_SECTOR')
+          AND length(flag->>'label') BETWEEN 1 AND 200 AND jsonb_typeof(flag->'value')='number'
+          AND flag->>'evidenceThrough' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+          AND (
+            (flag->>'kind'='BENCHMARK_RELATIVE_LAG'
+              AND f.result->'portfolio_level_risk'->>'benchmark_status'='COMPARABLE_PRICE_REFERENCE'
+              AND flag->>'unit'='PP')
+            OR
+            (flag->>'kind'<>'BENCHMARK_RELATIVE_LAG'
+              AND f.result->'portfolio_level_risk'->>'concentration_status'='RECENT_RECORDED_EXPOSURES'
+              AND flag->>'unit'='PERCENT'
+              AND flag->>'evidenceThrough'=(now() AT TIME ZONE 'Asia/Kolkata')::date::text)
+          )
+      ), grouped AS (
+        SELECT user_id,generated_at,week_start,family,
+          jsonb_agg(flag ORDER BY flag->>'kind',flag->>'label') AS evidence,count(*) AS finding_count
+        FROM flags GROUP BY user_id,generated_at,week_start,family
+      )
+      INSERT INTO user_notification_history(user_id,event_type,title,message,source_code,
+        source_reference,occurred_at,details,dedupe_key,delivery_channel,delivery_status)
+      SELECT user_id,'PORTFOLIO_RISK',
+        CASE family WHEN 'BENCHMARK' THEN 'Benchmark underperformance review' ELSE 'Portfolio concentration review' END,
+        CASE family WHEN 'BENCHMARK' THEN
+          'Recorded 13-week portfolio return estimate lags the NIFTY 50 price reference by at least five percentage points. Not a personalized benchmark.'
+        ELSE finding_count||' aggregate exposure observation(s) exceed review thresholds using recent recorded values. Fund look-through is excluded.' END
+          ||' Open My Portfolio for the dated evidence; no trade recommendation.',
+        'ATLAS_PORTFOLIO_REVIEW',family||':'||week_start::text,generated_at,
+        jsonb_build_object('family',family,'week_start',week_start,'attention',evidence),
+        'portfolio-level:'||family||':'||week_start::text,'IN_APP','DELIVERED'
+      FROM grouped
       ON CONFLICT DO NOTHING
       """);
   }
