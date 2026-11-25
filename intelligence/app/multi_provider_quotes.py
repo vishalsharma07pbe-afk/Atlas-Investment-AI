@@ -41,7 +41,7 @@ def _request(url, headers):
                 retry_after=int(raw)
             raise ProviderFailure("PROVIDER_RATE_LIMITED")
         if response.status_code != 200:
-            raise ProviderFailure("PROVIDER_HTTP_FAILURE")
+            raise ProviderFailure("PROVIDER_HTTP_FAILURE" if response.status_code>=500 else "PROVIDER_REQUEST_REJECTED")
         raw = response.content
         if len(raw) > 262144:
             raise ProviderFailure("PROVIDER_RESPONSE_TOO_LARGE")
