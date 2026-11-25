@@ -50,7 +50,7 @@ def _metric(report,key):
         items=(report.get("fundamental_quality") or {}).get("derived_metrics",[])
     else:
         items=(report.get("financial_trends") or {}).get("items",[])
-    matches=[r for r in items if r.get("metric")==key]
+    matches=[r for r in items if r.get("metric")==("REVENUE" if key=="REVENUE_GROWTH" else key)]
     if len(matches)!=1:
         return None
     row=matches[0]
@@ -73,6 +73,11 @@ def _metric(report,key):
         return None
     if key=="REVENUE" and value<=0:
         return None
+    if key=="REVENUE_GROWTH":
+        prior=row.get("previous_period")
+        if not isinstance(prior,str) or not re.fullmatch(r"20\\d{2}-(0[1-9]|1[0-2])",prior):
+            return None
+        period=prior+" / "+period
     return period,unit,value
 
 
@@ -84,7 +89,7 @@ def summarize(report,reports):
         if peer and peer.get("isin")==isin and sector(peer)==sector(report):
             compatible.append((isin,key,peer))
     metrics=[]
-    for key in ("REVENUE","NET_MARGIN","OPERATING_MARGIN"):
+    for key in ("REVENUE","REVENUE_GROWTH","NET_MARGIN","OPERATING_MARGIN"):
         target=_metric(report,key)
         if not target:
             continue
