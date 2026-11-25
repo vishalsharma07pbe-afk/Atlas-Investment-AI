@@ -41,13 +41,29 @@ public class DiscoveryHistoryScheduler {
     }
   }
 
+  private static LocalDate localDate(Object raw){
+    return raw instanceof java.sql.Date d?d.toLocalDate():raw instanceof LocalDate d?d:null;
+  }
+
   void refreshExchange(String exchange,LocalDate end){
     if(!Set.of("NSE","BSE").contains(exchange))throw new IllegalArgumentException("exchange");
     // Keep only active cash equities with explicit mappings. Skip adjusted
     // series rather than create a mixed adjustment history.
     var rows=jdbc.queryForList("""
-      WITH candidates AS (
-      SELECT i.id,m.instrument_key,h.candle_count,h.latest_date,a.attempted_at,
+      WITH expected AS (
+        SELECT s.exchange_id,s.session_date
+        FROM market_sessions s JOIN exchanges ex ON ex.id=s.exchange_id
+        WHERE ex.code=? AND s.session_date BETWEEN ? AND ?
+          AND s.session_type='REGULAR' AND s.is_trading_day
+          AND extract(isodow FROM s.session_date) BETWEEN 1 AND 5
+          AND s.open_time IS NOT NULL AND s.close_time IS NOT NULL AND s.open_time<s.close_time
+          AND (s.open_time AT TIME ZONE 'Asia/Kolkata')::date=s.session_date
+          AND (s.close_time AT TIME ZONE 'Asia/Kolkata')::date=s.session_date
+          AND NOT EXISTS(SELECT 1 FROM exchange_holidays h WHERE h.exchange_code=ex.code AND h.holiday_date=s.session_date)
+          AND NOT EXISTS(SELECT 1 FROM market_sessions x WHERE x.exchange_id=s.exchange_id
+            AND x.session_date=s.session_date AND x.is_trading_day AND x.session_type<>'REGULAR')
+      ), candidates AS (
+      SELECT i.id,m.instrument_key,h.candle_count,h.latest_date,g.first_missing_date,a.attempted_at,
         CASE WHEN h.candle_count>=200 THEN 0 ELSE 1 END AS workload
       FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
       JOIN LATERAL (
@@ -65,28 +81,40 @@ public class DiscoveryHistoryScheduler {
                    AND c.candle_time < (?::date+1)::timestamp AT TIME ZONE 'Asia/Kolkata') candle_count,
                max((c.candle_time AT TIME ZONE 'Asia/Kolkata')::date)
                  FILTER (WHERE c.candle_time < (?::date+1)::timestamp AT TIME ZONE 'Asia/Kolkata') latest_date,
+               min((c.candle_time AT TIME ZONE 'Asia/Kolkata')::date) first_date,
                bool_or(c.adjustment_status='ADJUSTED') has_adjusted
         FROM market_candles c WHERE c.instrument_id=i.id AND c.timeframe='1d'
           AND c.is_complete AND c.quality_status IN ('VALIDATED_MANUAL','PROVIDER_VALIDATED')
       ) h
+      LEFT JOIN LATERAL (
+        SELECT min(s.session_date) first_missing_date
+        FROM expected s WHERE s.exchange_id=i.exchange_id AND s.session_date>=h.first_date
+          AND (i.listed_on IS NULL OR s.session_date>=i.listed_on)
+          AND (i.delisted_on IS NULL OR s.session_date<i.delisted_on)
+          AND NOT EXISTS(
+            SELECT 1 FROM market_candles c WHERE c.instrument_id=i.id AND c.timeframe='1d'
+              AND c.is_complete AND c.quality_status IN ('VALIDATED_MANUAL','PROVIDER_VALIDATED')
+              AND c.candle_time>=s.session_date::timestamp AT TIME ZONE 'Asia/Kolkata'
+              AND c.candle_time<(s.session_date+1)::timestamp AT TIME ZONE 'Asia/Kolkata')
+      ) g ON true
       WHERE e.code=? AND i.active AND i.listing_status='ACTIVE' AND i.series='EQ'
         AND i.instrument_type IN ('EQ','EQUITY','STOCK')
         AND NOT coalesce(h.has_adjusted,false)
-        AND (h.candle_count<? OR h.latest_date IS NULL OR h.latest_date<?)
+        AND (h.candle_count<? OR h.latest_date IS NULL OR h.latest_date<? OR g.first_missing_date IS NOT NULL)
         AND (a.next_attempt_at IS NULL OR a.next_attempt_at<=now())
       ), ranked AS (
         SELECT *,row_number() OVER (PARTITION BY workload ORDER BY attempted_at ASC NULLS FIRST,
           candle_count DESC,id) AS position
         FROM candidates
       )
-      SELECT id,instrument_key,candle_count,latest_date FROM ranked
+      SELECT id,instrument_key,candle_count,latest_date,first_missing_date FROM ranked
       ORDER BY position,workload LIMIT 2
-      """,end.minusMonths(BACKFILL_MONTHS),end,end,exchange,REQUIRED_DAILY_CANDLES,end);
+      """,exchange,end.minusMonths(BACKFILL_MONTHS),end,end.minusMonths(BACKFILL_MONTHS),end,end,exchange,REQUIRED_DAILY_CANDLES,end);
     for(var row:rows){
       long id=((Number)row.get("id")).longValue();
       long count=((Number)row.get("candle_count")).longValue();
-      Object raw=row.get("latest_date");
-      LocalDate latest=raw instanceof java.sql.Date d?d.toLocalDate():raw instanceof LocalDate d?d:null;
+      LocalDate latest=localDate(row.get("latest_date"));
+      LocalDate missing=localDate(row.get("first_missing_date"));
       // Claim before network I/O; a restart or duplicate invocation cannot
       // repeatedly fetch the same instrument in a tight loop.
       int claimed=jdbc.update("""
@@ -100,6 +128,8 @@ public class DiscoveryHistoryScheduler {
       try{
         LocalDate floor=end.minusMonths(BACKFILL_MONTHS);
         LocalDate from=count<REQUIRED_DAILY_CANDLES||latest==null||latest.isBefore(floor)?floor:latest.plusDays(1);
+        // Repair an interior known-session hole even if the latest candle is current.
+        if(missing!=null&&!missing.isBefore(floor)&&!missing.isAfter(end)&&missing.isBefore(from))from=missing;
         if(from.isAfter(end))from=floor;
         int written=stocks.discoveryDailyCandles(accessToken,(String)row.get("instrument_key"),from,end);
         if(written>0)
