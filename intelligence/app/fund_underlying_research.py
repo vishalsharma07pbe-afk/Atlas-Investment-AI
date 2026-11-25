@@ -5,7 +5,7 @@ coverage, and undated relative valuations do not establish attractiveness.
 """
 from collections import defaultdict
 from contextlib import closing
-from datetime import timedelta
+from datetime import datetime,timedelta
 from math import isfinite
 import json
 import os
@@ -45,7 +45,7 @@ def load(equities,instant):
                 for isin,payload in rows:
                     try:
                         report=json.loads(payload)
-                        stamp=__import__("datetime").datetime.fromisoformat(report["retrieved_at"])
+                        stamp=datetime.fromisoformat(report["retrieved_at"])
                         if (report.get("isin")==isin and stamp.tzinfo is not None
                             and instant-timedelta(hours=24)<=stamp<=instant):
                             result[isin]=report
