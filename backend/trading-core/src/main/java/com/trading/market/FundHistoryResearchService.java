@@ -19,7 +19,11 @@ public class FundHistoryResearchService {
   public FundHistoryResearchService(JdbcTemplate jdbc,AmfiFeedService funds){this.jdbc=jdbc;this.funds=funds;}
 
   static final Map<String,String> CATEGORIES=Map.of("LARGE_CAP","large cap fund",
-    "MID_CAP","mid cap fund","SMALL_CAP","small cap fund","FLEXI_CAP","flexi cap fund","INDEX","index funds");
+    "MID_CAP","mid cap fund","SMALL_CAP","small cap fund","FLEXI_CAP","flexi cap fund","INDEX","index funds",
+    "LARGE_MID_CAP","large & mid cap fund","MULTI_CAP","multi cap fund","AGGRESSIVE_HYBRID","aggressive hybrid fund",
+    "CORPORATE_BOND","corporate bond fund","SHORT_DURATION","short duration fund");
+  static final List<String> ADDITIONAL=List.of("LARGE_MID_CAP","MULTI_CAP","AGGRESSIVE_HYBRID","CORPORATE_BOND","SHORT_DURATION");
+  static final Set<String> DESCRIPTIVE_ONLY=Set.of("INDEX","AGGRESSIVE_HYBRID","CORPORATE_BOND","SHORT_DURATION");
   static final String UNIVERSE="""
     FROM mutual_fund_schemes s
     WHERE lower(trim(s.category)) LIKE ?
@@ -33,7 +37,7 @@ public class FundHistoryResearchService {
   private static String categoryPattern(String category){
     String label=CATEGORIES.get(category);
     if(label==null)throw new IllegalArgumentException("UNSUPPORTED_CATEGORY");
-    return "% - "+label+")%";
+    return "% - "+label+")";
   }
 
   @Scheduled(initialDelayString="${atlas.funds.history.initial-ms:90000}",
@@ -44,7 +48,10 @@ public class FundHistoryResearchService {
     // Prioritize the exact saved scheme, including regular, debt and other plans
     // outside the discovery universe. Only public scheme codes are selected.
     collectHeld(today);
-    for(String category:List.of("LARGE_CAP","MID_CAP","SMALL_CAP","FLEXI_CAP","INDEX")){
+    var categories=new ArrayList<>(List.of("LARGE_CAP","MID_CAP","SMALL_CAP","FLEXI_CAP","INDEX"));
+    // Preserve existing collection capacity and rotate one additional category per 15-minute slot.
+    categories.add(ADDITIONAL.get(Math.floorMod(Instant.now().getEpochSecond()/900,ADDITIONAL.size())));
+    for(String category:categories){
       var rows=jdbc.queryForList("SELECT s.scheme_code "+UNIVERSE+"""
         AND EXISTS(SELECT 1 FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code
           AND n.source_code='AMFI' AND n.nav_date BETWEEN ?::date-7 AND ?::date)
@@ -121,7 +128,7 @@ public class FundHistoryResearchService {
       .thenComparingLong(row->((Number)row.get("scheme_code")).longValue()));
     // Index funds can track entirely different assets/benchmarks, so do not give
     // them a cross-index risk-adjusted rank or category peer percentile.
-    boolean comparable=!"INDEX".equals(category);
+    boolean comparable=!DESCRIPTIVE_ONLY.contains(category);
     if(comparable&&observations.size()>=5){
       // The cohort median is descriptive, not an investable benchmark.
       double[] cohort=observations.stream().mapToDouble(r->((Number)r.get("cagr_3y_percent")).doubleValue()).sorted().toArray();
@@ -136,6 +143,7 @@ public class FundHistoryResearchService {
         row.put("sample_peer_percentile",round(100.0*(below+(equal-1)/2.0)/(observations.size()-1)));
       }
     }
+    if(!comparable)observations.sort(Comparator.comparingLong(row->((Number)row.get("scheme_code")).longValue()));
     var riskRank=observations.stream().filter(row->comparable&&row.get("return_to_drawdown") instanceof Number)
       .sorted(Comparator.comparingDouble((Map<String,Object> row)->((Number)row.get("return_to_drawdown")).doubleValue()).reversed()
         .thenComparingLong(row->((Number)row.get("scheme_code")).longValue())).limit(5).toList();
@@ -144,9 +152,11 @@ public class FundHistoryResearchService {
     result.put("universe_count",universe);result.put("sample_count",sample.size());result.put("eligible_count",observations.size());
     result.put("comparison_date",commonEnd==null?null:commonEnd.toString());
     result.put("items",observations.stream().limit(5).toList());result.put("risk_adjusted_items",riskRank);
+    result.put("research_candidates",observations);
+    result.put("category_comparison_enabled",comparable);
     result.put("weekly_risk_eligible_count",observations.stream().filter(r->r.get("weekly_volatility_percent")!=null).count());
     result.put("automatic_collection_enabled",enabled&&permitted);
-    result.put("notice","Historical observations only, from a bounded same-date AMFI category sample. Return-to-drawdown is CAGR divided by absolute observed maximum drawdown, not Sharpe or a forward forecast. Index funds may track different assets. Official benchmark TRI, TER, Riskometer and holdings evidence are still required.");
+    result.put("notice","Historical observations only, from a bounded same-date AMFI category sample. Return-to-drawdown is CAGR divided by absolute observed maximum drawdown, not Sharpe or a forward forecast. Index, hybrid and debt observations are descriptive only; comparable benchmark, allocation or credit/duration evidence is required. Official benchmark TRI, TER, Riskometer and holdings evidence are still required.");
     return result;
   }
 

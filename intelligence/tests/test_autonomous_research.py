@@ -21,7 +21,8 @@ class AutonomousResearchTests(unittest.TestCase):
         research.refresh_once(lambda exchange: {"eligible_count": 1, "exchange": exchange},
                               lambda category: {"category": category, "growth_outlook": []})
         snapshot = research.read_snapshot()
-        self.assertEqual(len(snapshot["sections"]), 7)
+        self.assertEqual(len(snapshot["sections"]), 12)
+        self.assertIn("CORPORATE_BOND",{row["section"] for row in snapshot["sections"]})
         self.assertTrue(all(row["status"] == "READY" for row in snapshot["sections"]))
         self.assertEqual(snapshot["sections"][0]["result"]["exchange"], "NSE")
 

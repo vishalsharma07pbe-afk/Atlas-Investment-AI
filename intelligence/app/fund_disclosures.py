@@ -172,7 +172,8 @@ def matched(rows,today):
     output=[]
     try:
         with nav_catalog._LOCK,closing(nav_catalog._connect()) as db:
-            for row in rows[:5]:
+            for row in rows[:40]:
+                if len(output)>=5:break
                 code=row.get("scheme_code")
                 if type(code) is not int:
                     continue

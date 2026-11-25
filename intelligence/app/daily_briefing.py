@@ -5,9 +5,10 @@ watch is not a qualified investment opportunity; unknown is not zero.
 """
 from collections import Counter
 from decimal import Decimal, InvalidOperation
+from .fund_categories import CATEGORIES
 
 MARKETS=("NSE","BSE")
-FUNDS=("LARGE_CAP","MID_CAP","SMALL_CAP","FLEXI_CAP","INDEX")
+FUNDS=CATEGORIES
 HORIZONS=("SWING","SHORT_TERM","LONG_TERM")
 
 

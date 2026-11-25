@@ -15,9 +15,9 @@ import json
 
 from . import nav_catalog, fund_disclosures, fund_portfolios
 from .market_client import backend_json
+from .fund_categories import CATEGORIES, LABELS as OFFICIAL_CATEGORY_LABELS, DEBT, SPECIALIZED, COMPARABLE
 
-METHODOLOGY_VERSION = "MF-RESEARCH-1.0.0"
-CATEGORIES = ("LARGE_CAP","MID_CAP","SMALL_CAP","FLEXI_CAP","INDEX")
+METHODOLOGY_VERSION = "MF-RESEARCH-1.1.0"
 RISK_LEVELS = ("LOW","MODERATE","HIGH")
 
 @dataclass(frozen=True)
@@ -63,7 +63,9 @@ def infer_category(name:str)->str|None:
     if " INDEX FUND " in value or " INDEX " in value:
         return "INDEX"
     if " LARGE AND MID CAP " in value or " LARGE & MID CAP " in value:
-        return None
+        return "LARGE_MID_CAP"
+    for phrase,category in ((" MULTI CAP ","MULTI_CAP"),(" AGGRESSIVE HYBRID ","AGGRESSIVE_HYBRID"),(" CORPORATE BOND ","CORPORATE_BOND"),(" SHORT DURATION ","SHORT_DURATION")):
+        if phrase in value:return category
     for phrase,category in ((" LARGE CAP ","LARGE_CAP"),(" MID CAP ","MID_CAP"),
                             (" SMALL CAP ","SMALL_CAP"),(" FLEXI CAP ","FLEXI_CAP")):
         if phrase in value:return category
@@ -78,55 +80,72 @@ def infer_benchmark(name:str)->str|None:
 
 def suitability(category:str,horizon_months:int,risk_tolerance:str):
     flags=[]
-    if horizon_months<=36:
+    if category in DEBT:
+        flags.append("CREDIT_DURATION_AND_LIQUIDITY_REVIEW_REQUIRED")
+    elif horizon_months<=36:
         flags.append("POOR_FIT_FOR_36_MONTH_GOAL")
     elif horizon_months<60:
         flags.append("SHORT_HORIZON_FOR_EQUITY")
-    if risk_tolerance=="LOW" and category in {"MID_CAP","SMALL_CAP"}:
+    if category=="AGGRESSIVE_HYBRID":
+        flags.append("EQUITY_DEBT_ALLOCATION_REVIEW_REQUIRED")
+    if category=="INDEX":
+        flags.append("UNDERLYING_INDEX_SUITABILITY_UNVERIFIED")
+    if risk_tolerance=="LOW" and category in {"MID_CAP","SMALL_CAP","LARGE_MID_CAP","MULTI_CAP"}:
         flags.append("ABOVE_SELECTED_RISK_TOLERANCE")
     elif risk_tolerance=="MODERATE" and category=="SMALL_CAP":
         flags.append("ABOVE_SELECTED_RISK_TOLERANCE")
     return {"status":"POOR_FIT" if flags else "POTENTIALLY_SUITABLE",
             "flags":flags,"horizon_months":horizon_months,"risk_tolerance":risk_tolerance}
 
-def _missing_top(f:FundEvidence):
+def _bounded(value,low=None,high=None):
+    return (not isinstance(value,bool) and isinstance(value,(int,float,Decimal)) and isfinite(value)
+            and (low is None or value>=low) and (high is None or value<=high))
+
+
+def _common(f:FundEvidence):
     missing=[]
-    if not f.category_verified:missing.append("OFFICIAL_CATEGORY")
+    if f.category_verified is not True:missing.append("OFFICIAL_CATEGORY")
     if f.plan!="DIRECT" or f.option!="GROWTH":missing.append("EXACT_DIRECT_GROWTH_PLAN")
-    if f.nav is None or f.nav_date is None or f.nav_age_days is None or f.nav_age_days>7:missing.append("FRESH_DATED_NAV")
-    if f.riskometer is None or f.riskometer_date is None:missing.append("OFFICIAL_RISKOMETER")
-    if f.history_years<3:missing.append("THREE_YEAR_NAV_HISTORY")
-    if f.expense_ratio is None:missing.append("EXPENSE_RATIO")
+    if f.category in SPECIALIZED:missing.append("CATEGORY_SPECIFIC_RISK_MODEL_REQUIRED")
+    if f.passive!=(f.category=="INDEX"):missing.append("CATEGORY_STRATEGY_MISMATCH")
+    if not _bounded(f.nav,Decimal("0.000001")) or not f.nav_date or not _bounded(f.nav_age_days,0,7):missing.append("FRESH_DATED_NAV")
+    if f.riskometer not in {"LOW","LOW_TO_MODERATE","MODERATE","MODERATELY_HIGH","HIGH","VERY_HIGH"} or not f.riskometer_date:missing.append("OFFICIAL_RISKOMETER")
+    if not _bounded(f.history_years,3):missing.append("THREE_YEAR_NAV_HISTORY")
+    if not _bounded(f.expense_ratio,0,100):missing.append("EXPENSE_RATIO")
+    return missing
+
+
+def _missing_top(f:FundEvidence):
+    missing=_common(f)
     if f.passive:
         if not f.benchmark:missing.append("UNDERLYING_INDEX")
-        if f.tracking_difference is None:missing.append("TRACKING_DIFFERENCE")
-        if f.tracking_error is None:missing.append("TRACKING_ERROR")
+        if not _bounded(f.tracking_difference):missing.append("TRACKING_DIFFERENCE")
+        if not _bounded(f.tracking_error,0):missing.append("TRACKING_ERROR")
     else:
         for value,label in ((f.returns_1y,"ONE_YEAR_RETURN"),(f.returns_3y,"THREE_YEAR_RETURN"),
                             (f.peer_percentile,"PEER_PERCENTILE"),(f.benchmark_hit_rate,"BENCHMARK_HIT_RATE"),
                             (f.worst_rolling_return,"WORST_ROLLING_RETURN"),(f.max_drawdown,"MAX_DRAWDOWN"),
                             (f.volatility,"VOLATILITY")):
-            if value is None:missing.append(label)
+            bounds={"PEER_PERCENTILE":(0,100),"BENCHMARK_HIT_RATE":(0,1),"MAX_DRAWDOWN":(-100,0),"VOLATILITY":(0,None)}
+            if not _bounded(value,*bounds.get(label,(-100,None))):missing.append(label)
     return missing
 
 def _missing_growth(f:FundEvidence):
-    missing=[]
-    if not f.category_verified:missing.append("OFFICIAL_CATEGORY")
-    if f.plan!="DIRECT" or f.option!="GROWTH":missing.append("EXACT_DIRECT_GROWTH_PLAN")
-    if f.portfolio_age_days is None or f.portfolio_age_days>60:missing.append("RECENT_PORTFOLIO_DISCLOSURE")
-    if (f.portfolio_coverage or 0)<.8:missing.append("PORTFOLIO_COVERAGE_80_PERCENT")
+    missing=_common(f)
+    if not _bounded(f.portfolio_age_days,0,60):missing.append("RECENT_PORTFOLIO_DISCLOSURE")
+    if not _bounded(f.portfolio_coverage,.8,1):missing.append("PORTFOLIO_COVERAGE_80_PERCENT")
     if f.passive:
         if not f.benchmark:missing.append("UNDERLYING_INDEX")
-        if (f.index_outlook_coverage or 0)<.7:missing.append("INDEX_OUTLOOK_COVERAGE_70_PERCENT")
-        if f.tracking_difference is None:missing.append("TRACKING_DIFFERENCE")
+        if not _bounded(f.index_outlook_coverage,.7,1):missing.append("INDEX_OUTLOOK_COVERAGE_70_PERCENT")
+        if not _bounded(f.tracking_difference):missing.append("TRACKING_DIFFERENCE")
     else:
-        if (f.earnings_coverage or 0)<.7:missing.append("EARNINGS_COVERAGE_70_PERCENT")
-        if (f.valuation_coverage or 0)<.6:missing.append("VALUATION_COVERAGE_60_PERCENT")
+        if not _bounded(f.earnings_coverage,.7,1):missing.append("EARNINGS_COVERAGE_70_PERCENT")
+        if not _bounded(f.valuation_coverage,.6,1):missing.append("VALUATION_COVERAGE_60_PERCENT")
         for value,label in ((f.earnings_growth,"FORWARD_EARNINGS_GROWTH"),
                             (f.valuation_attractiveness,"VALUATION_EVIDENCE"),
                             (f.sector_driver_score,"SECTOR_DRIVERS"),(f.concentration_risk,"CONCENTRATION"),
                             (f.liquidity_score,"LIQUIDITY")):
-            if value is None:missing.append(label)
+            if not _bounded(value, -100 if label=="FORWARD_EARNINGS_GROWTH" else 0, None if label=="FORWARD_EARNINGS_GROWTH" else 100):missing.append(label)
     return missing
 
 def _top_score(f:FundEvidence):
@@ -159,9 +178,16 @@ def _confidence(f:FundEvidence,kind:str):
 def rank_candidates(candidates:list[FundEvidence],category:str,horizon_months:int,risk_tolerance:str):
     fit=suitability(category,horizon_months,risk_tolerance)
     top=[];growth=[];excluded=[]
+    from collections import Counter
+    counts=Counter(f.identifier for f in candidates if f.category==category)
     for fund in candidates:
         if fund.category!=category:continue
         top_missing=_missing_top(fund);growth_missing=_missing_growth(fund)
+        if counts[fund.identifier]>1:
+            if any(row["identifier"]==fund.identifier for row in excluded):continue
+            top_missing.append("DUPLICATE_SCHEME_IDENTITY");growth_missing.append("DUPLICATE_SCHEME_IDENTITY")
+        if fit["status"]=="POOR_FIT":
+            top_missing.append("SELECTED_HORIZON_OR_RISK_REVIEW_REQUIRED");growth_missing.append("SELECTED_HORIZON_OR_RISK_REVIEW_REQUIRED")
         if not top_missing:
             score=round(_top_score(fund),4)
             top.append({"fund":asdict(fund),"score":score,"atlas_research_rating":"A" if score>=80 else "B" if score>=65 else "C",
@@ -180,7 +206,7 @@ def rank_candidates(candidates:list[FundEvidence],category:str,horizon_months:in
     top.sort(key=lambda x:(-x["score"],x["fund"]["identifier"]));growth.sort(key=lambda x:(-x["score"],x["fund"]["identifier"]))
     for rows in (top,growth):
         for i,row in enumerate(rows[:5],1):row["rank"]=i
-    return {"top_performers":top[:5],"growth_outlook":growth[:5],"excluded":excluded,"suitability":fit}
+    return {"top_performers":top[:5],"growth_outlook":growth[:5],"top_eligible_count":len(top),"growth_eligible_count":len(growth),"excluded":excluded,"suitability":fit}
 
 def _catalog_candidates(category:str):
     with nav_catalog._LOCK,nav_catalog._connect() as db:
@@ -199,16 +225,12 @@ def _catalog_candidates(category:str):
     return candidates,{"name_matched_schemes":matched,"exact_direct_growth_schemes":direct_growth,
                        "official_category_verified":0,"dated_nav_history_eligible":0,"portfolio_disclosures_eligible":0}
 
-OFFICIAL_CATEGORY_LABELS={"LARGE_CAP":"large cap fund","MID_CAP":"mid cap fund","SMALL_CAP":"small cap fund",
-                          "FLEXI_CAP":"flexi cap fund","INDEX":"index funds"}
-
-
 def _official_history_candidates(historical,category,today):
     """Join only dated, explicitly identified Direct Growth evidence by AMFI code.
     Do not merge an inferred Upstox ticker/name match or invent missing factors."""
     label=OFFICIAL_CATEGORY_LABELS[category]
-    items=historical.get("items",[])
-    if not isinstance(items,list) or len(items)>5:
+    items=historical.get("research_candidates",historical.get("items",[]))
+    if not isinstance(items,list) or len(items)>40:
         return []
     ids=[r.get("scheme_code") for r in items if isinstance(r,dict)]
     if len(ids)!=len(items) or any(type(i) is not int or not 1<=i<=999999999 for i in ids) or len(set(ids))!=len(ids):
@@ -241,7 +263,7 @@ def _official_history_candidates(historical,category,today):
                 category_verified=True,plan="DIRECT",option="GROWTH",passive=category=="INDEX",
                 nav=nav,nav_date=row["nav_date"],nav_age_days=nav_age,history_years=3,
                 returns_1y=metric("cagr_1y_percent",-100),returns_3y=metric("cagr_3y_percent",-100),
-                peer_percentile=metric("sample_peer_percentile",0,100) if category!="INDEX" else None,
+                peer_percentile=metric("sample_peer_percentile",0,100) if category in COMPARABLE else None,
                 worst_rolling_return=metric("worst_rolling_52w_annualized_percent",-100),
                 max_drawdown=metric("drawdown_3y_percent",-100,0),volatility=metric("weekly_volatility_percent",0)))
         except (TypeError,ValueError,KeyError,InvalidOperation,OverflowError):
@@ -272,7 +294,9 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
     official=_official_history_candidates(historical,category,datetime.now(ZoneInfo("Asia/Kolkata")).date()) if historical else []
     coverage["explicit_amfi_history_candidates"]=len(official)
     official_ids={f.identifier for f in official}
-    disclosed=fund_disclosures.matched([row for row in historical["items"] if isinstance(row,dict) and str(row.get("scheme_code")) in official_ids],datetime.now(ZoneInfo("Asia/Kolkata")).date()) if historical else []
+    # All sampled candidates enter the gates. Secondary diagnostics remain bounded to five.
+    source_rows=historical.get("research_candidates",historical["items"]) if historical else []
+    disclosed=fund_disclosures.matched([row for row in source_rows if isinstance(row,dict) and str(row.get("scheme_code")) in official_ids],datetime.now(ZoneInfo("Asia/Kolkata")).date()) if official else []
     coverage["secondary_disclosure_matches"]=len(disclosed)
     portfolios=fund_portfolios.matched(disclosed)
     coverage["secondary_portfolio_matches"]=len(portfolios)
@@ -290,6 +314,8 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
             blockers.remove("DATED_NAV_HISTORY_INSUFFICIENT")
     else:
         blockers.append("AMFI_HISTORY_READ_MODEL_UNAVAILABLE")
+    if category in SPECIALIZED:
+        blockers.append("CATEGORY_SPECIFIC_RISK_MODEL_REQUIRED")
     generated=datetime.now(timezone.utc).isoformat()
     payload={"generated_at":generated,"methodology_version":METHODOLOGY_VERSION,"category":category,
       "filters":{"horizon_months":horizon_months,"risk_tolerance":risk_tolerance},"coverage":coverage,
@@ -304,11 +330,13 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
           "sample_count":historical.get("sample_count"),"weekly_risk_eligible_count":historical.get("weekly_risk_eligible_count"),
           "items":historical["items"][:5]},
       "suitability":ranked["suitability"],"blockers":blockers,
+      "qualification_summary":{"evaluated_count":len(official),"top_eligible_count":ranked["top_eligible_count"],
+          "growth_eligible_count":ranked["growth_eligible_count"],"excluded":ranked["excluded"]},
       "market_overview":[{"segment":x,"status":"UNAVAILABLE","benchmark":None,"period":None,
                           "last_available_date":None,"evidence":[],"blocker":"BENCHMARK_TRI_NOT_CONNECTED"}
                          for x in ("LARGE_CAP","MID_CAP","SMALL_CAP")],
-      "recommendation_status":"NO_QUALIFYING_FUNDS_INCOMPLETE_EVIDENCE",
-      "notice":"Zero picks is intentional: discovery records are not recommendations. Top Performer and Growth Outlook use independent evidence gates."}
+      "recommendation_status":"QUALIFIED_RESEARCH_AVAILABLE" if ranked["top_performers"] or ranked["growth_outlook"] else "NO_QUALIFYING_FUNDS_INCOMPLETE_EVIDENCE",
+      "notice":"Discovery records are not recommendations. Top Performer and Growth Outlook use independent evidence gates; zero picks is allowed."}
     # The observation timestamp is metadata, not research evidence. Excluding it
     # keeps identical results idempotent and gives alerts a stable dedupe key.
     stable_payload={key:value for key,value in payload.items() if key!="generated_at"}

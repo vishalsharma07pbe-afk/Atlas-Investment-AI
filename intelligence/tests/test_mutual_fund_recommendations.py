@@ -58,6 +58,33 @@ class RecommendationEngineTests(unittest.TestCase):
         self.assertEqual(fit["status"],"POOR_FIT")
         self.assertIn("POOR_FIT_FOR_36_MONTH_GOAL",fit["flags"])
 
+    def test_specialized_categories_are_not_ranked_as_equity(self):
+        for category in ("AGGRESSIVE_HYBRID","CORPORATE_BOND","SHORT_DURATION"):
+            result=rank_candidates([strong(category=category)],category,84,"HIGH")
+            self.assertEqual(result["top_performers"],[])
+            self.assertIn("CATEGORY_SPECIFIC_RISK_MODEL_REQUIRED",result["excluded"][0]["top_performer_missing"])
+        self.assertNotIn("POOR_FIT_FOR_36_MONTH_GOAL",suitability("CORPORATE_BOND",36,"LOW")["flags"])
+
+    def test_invalid_evidence_duplicates_and_unsuitable_funds_are_not_picks(self):
+        for fund in (strong(nav_age_days=-1),strong(peer_percentile=float("nan")),
+                     strong(benchmark_hit_rate=1.1),strong(expense_ratio=-1),strong(passive=True)):
+            self.assertEqual(rank_candidates([fund],"LARGE_CAP",84,"HIGH")["top_performers"],[])
+        self.assertEqual(rank_candidates([strong(),strong()],"LARGE_CAP",84,"HIGH")["top_performers"],[])
+        self.assertEqual(rank_candidates([strong()],"LARGE_CAP",36,"HIGH")["top_performers"],[])
+        qualified=rank_candidates([strong(identifier=str(i)) for i in range(8)],"LARGE_CAP",84,"HIGH")
+        self.assertEqual(qualified["top_eligible_count"],8)
+        self.assertEqual(len(qualified["top_performers"]),5)
+
+    def test_full_cohort_not_just_trailing_return_leaders(self):
+        row={"scheme_code":123456,"scheme_name":"Example Direct Growth",
+             "category":"Open Ended Schemes(Equity Scheme - Multi Cap Fund)",
+             "amfi_plan":"DIRECT","amfi_option":"GROWTH","isin_growth":"INF179K01BB2",
+             "amfi_metadata_date":"2026-11-23","nav_date":"2026-11-23","nav":100.5,
+             "observations":700,"sources":["AMFI","MFAPI"],"cagr_3y_percent":14}
+        history={"comparison_date":"2026-11-23","items":[row],
+                 "research_candidates":[{**row,"scheme_code":123456+i,"isin_growth":f"INF000A{i:05d}"} for i in range(12)]}
+        self.assertEqual(len(_official_history_candidates(history,"MULTI_CAP",date(2026,11,24))),12)
+
     def test_ties_are_reproducible_by_stable_identifier(self):
         result=rank_candidates([strong(identifier="B"),strong(identifier="A")],"LARGE_CAP",84,"HIGH")
         self.assertEqual([x["fund"]["identifier"] for x in result["top_performers"]],["A","B"])
