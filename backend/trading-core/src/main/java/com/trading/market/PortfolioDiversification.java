@@ -88,6 +88,9 @@ final class PortfolioDiversification {
   out.put("sector_coverage_percent",pct(knownEquity,directEquity));out.put("fund_category_coverage_percent",pct(knownFund,fundValue));
   out.put("review_prompts",prompts);
   out.put("concentration_observations",concentration);
+  boolean recent=holdings.stream().allMatch(h->Boolean.TRUE.equals(h.get("recorded_valuation_recent")));
+  out.put("allocation_research",PortfolioAllocationResearch.assess(ranked.stream().map(Position::value).toList(),
+    total,recent&&unpriced==0&&unresolved==0));
   out.put("notice","Recorded priced holdings only, not independently verified live valuations. Sector weights use direct equity value; fund category weights use fund value. Exact identities aggregate duplicate holdings. Fund underlying exposures, overlap, correlations and optimal allocations are not established. Thresholds are illustrative review triggers, not personalized targets.");
   return out;
  }
