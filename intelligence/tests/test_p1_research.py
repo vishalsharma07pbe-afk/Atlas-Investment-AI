@@ -19,6 +19,12 @@ class P1ResearchTests(unittest.TestCase):
         self.assertEqual(result["sections"]["competitors"]["status"], "UNAVAILABLE")
         self.assertIsNone(result["recommendation"])
 
+    def test_ratio_unit_mismatch_cannot_produce_relative_difference(self):
+        ratio=p1._normalize_ratios([{"name":"ROE","company_value":"12%","sector_value":"0.1"}])[0]
+        self.assertEqual(ratio["unit"],"PERCENT")
+        self.assertEqual(ratio["sector_unit"],"RATIO")
+        self.assertIsNone(ratio["relative_difference_percent"])
+
     def test_company_research_rejects_bad_identifiers(self):
         with self.assertRaisesRegex(ValueError, "INVALID_ISIN"):
             p1.company_research("bad")
