@@ -170,9 +170,10 @@ def matched(disclosures,instant=None,*,include_exact_weights=False):
                 if report.get("fund_id")!=fund or not fund_disclosures._day(report["portfolio_date"],today,60):
                     continue
                 equities=report.pop("equities")
-                from .fund_underlying_research import summarize
+                from .fund_underlying_research import summarize, load, exact_sector_evidence
+                reports=load(equities,instant) if include_exact_weights else None
                 item_report={**report,**company_coverage(equities,instant),
-                    "underlying_research":summarize(equities,instant),
+                    "underlying_research":summarize(equities,instant,reports),
                     "scheme_code":item["scheme_code"],"scheme_name":item["scheme_name"],
                     "collected_at":found["collected_at"],"top_holdings":equities[:10],
                     "status":"SECONDARY_COMPOSITION_ONLY"}
@@ -180,6 +181,7 @@ def matched(disclosures,instant=None,*,include_exact_weights=False):
                 # Do not silently truncate large portfolios or normalize reported weights.
                 if include_exact_weights and len(equities)<=500:
                     item_report["exact_equity_weights"]={h["isin"]:h["weight_percent"] for h in equities}
+                    item_report["exact_sector_evidence"]=exact_sector_evidence(equities,instant,reports)
                 result.append(item_report)
     except (OSError,sqlite3.Error,ValueError,TypeError,KeyError,AttributeError):
         return []
