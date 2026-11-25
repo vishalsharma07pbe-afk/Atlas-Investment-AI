@@ -12,5 +12,8 @@ public class PortfolioReviewController {
   private final PortfolioThesisService thesis;
   public PortfolioReviewController(PortfolioReviewService review,PortfolioThesisService thesis){this.review=review;this.thesis=thesis;}
   @GetMapping("/review")
-  public Map<String,Object> review(){return thesis.enrich(review.current(AuthSecurity.currentUser()));}
+  public Map<String,Object> review(){
+    var current=review.current(AuthSecurity.currentUser());
+    return "ANNUAL_DIRECTION_V1".equals(current.get("thesis_monitor_version"))?current:thesis.enrich(current);
+  }
 }
