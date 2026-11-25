@@ -16,3 +16,12 @@ it("distinguishes unavailable evidence from observed price changes",async()=>{
  expect(screen.getByText("—")).toBeTruthy();
  expect(screen.getByText(/not trades or validated strategy performance/)).toBeTruthy();
 });
+
+it("shows corporate action withholding separately from legacy observations",async()=>{
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({horizon:"SWING",counts:{RECORDED_ACTION_RECONCILIATION_REQUIRED:1},items:[
+ {symbol:"SPLITTEST",exchange:"NSE",observed_date:"2026-10-01",published_at:"2026-10-02T10:00:00Z",maturity_date:"2026-10-16",status:"RECORDED_ACTION_RECONCILIATION_REQUIRED",outcome:null}
+ ],notice:"Recorded actions require reconciliation."})})));
+ render(<WatchOutcomeHistory horizon="SWING"/>);
+ expect(await screen.findByText("RECORDED ACTION RECONCILIATION REQUIRED")).toBeTruthy();
+ expect(screen.getByText("—")).toBeTruthy();
+});

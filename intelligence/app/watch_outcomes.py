@@ -11,9 +11,9 @@ from math import isfinite
 import re
 
 from .market_client import backend_json
-from .replay_evidence import exact_isin, full_manifest
+from .replay_evidence import exact_isin, full_manifest, corporate_action_status
 
-OUTCOME_EVIDENCE_VERSION = "WATCH-SESSION-EVIDENCE-1"
+OUTCOME_EVIDENCE_VERSION = "WATCH-SESSION-EVIDENCE-2"
 
 HORIZONS = {"SWING": 14, "SHORT_TERM": 60, "LONG_TERM": 180}
 IST = ZoneInfo("Asia/Kolkata")
@@ -137,6 +137,9 @@ def evaluate(row, payload, today, calendar=None):
     manifest=full_manifest(interval,today)
     if manifest is None:
         return "EVIDENCE_GAP",None
+    action=corporate_action_status(instrument,manifest,require_scope=True,today=today)
+    if action!="NO_RECORDED_CROSSING_ACTION":
+        return action,None
     values=[float(x["close"]) for x in interval]
     if any(not isfinite(v) or v<=0 for v in values):
         return "EVIDENCE_GAP",None
@@ -147,7 +150,8 @@ def evaluate(row, payload, today, calendar=None):
         "entry_close":values[0],"exit_close":values[-1],"observed_price_return_pct":round(change,4),
         "source_code":interval[0]["source_code"],"evidence_version":OUTCOME_EVIDENCE_VERSION,
         "observations":len(interval),"history_fingerprint":manifest["digest"],
-        "calendar_status":"STORED_SESSIONS_MATCHED",
+        "calendar_status":"STORED_SESSIONS_MATCHED","corporate_action_status":action,
+        "action_context_through":instrument["action_context_through"],
         "notice":"Observed adjusted close-to-close change on matching stored sessions; not executed, benchmarked or net of fees. Corporate-action completeness and point-in-time history are not certified."}
 
 
@@ -160,7 +164,7 @@ def refresh(snapshot, connect, loader=backend_json, instant=None):
     with closing(connect()) as db, db:
         _table(db)
         due=db.execute("""SELECT * FROM watch_outcomes WHERE maturity_date<?
-            AND status IN ('PENDING','EVIDENCE_GAP','CALENDAR_EVIDENCE_GAP','UNAVAILABLE')
+            AND status IN ('PENDING','EVIDENCE_GAP','CALENDAR_EVIDENCE_GAP','ACTION_CONTEXT_UNAVAILABLE','RECORDED_ACTION_RECONCILIATION_REQUIRED','UNAVAILABLE')
             AND (attempted_at IS NULL OR attempted_at<?)
             ORDER BY attempted_at ASC NULLS FIRST,maturity_date LIMIT 5""",
             (today.isoformat(),(instant-timedelta(days=1)).isoformat())).fetchall()
@@ -196,4 +200,4 @@ def summary(connect, horizon):
         "exchange":json.loads(r["evidence"])["exchange"],"observed_date":r["observed_date"],
         "published_at":r["published_at"],"maturity_date":r["maturity_date"],"status":r["status"],
         "outcome":json.loads(r["outcome"]) if r["outcome"] else None} for r in rows],
-        "notice":"Public technical watch history, not trades or validated strategy performance. New observations require exact identity, adjusted source evidence and matching stored sessions; legacy outcomes remain visible but are excluded from current reliability metrics."}
+        "notice":"Public technical watch history, not trades or validated strategy performance. New observations require exact identity, adjusted source evidence matching stored sessions and usable recorded corporate-action context; legacy outcomes remain visible but are excluded from current reliability metrics."}

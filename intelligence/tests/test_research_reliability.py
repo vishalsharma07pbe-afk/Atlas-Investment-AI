@@ -14,7 +14,8 @@ def row(isin="INE002A01018", day=date(2026,8,1), status="OBSERVED", end=110, met
         "status":status,"evidence":json.dumps({"isin":isin,"methodology":method,"adjustment_status":"ADJUSTED"}),
         "outcome":json.dumps({"entry_date":(day+timedelta(days=1)).isoformat(),"exit_date":maturity.isoformat(),
             "entry_close":100,"exit_close":end,"source_code":"TEST","evidence_version":OUTCOME_EVIDENCE_VERSION,
-            "calendar_status":"STORED_SESSIONS_MATCHED","observations":10,"history_fingerprint":"a"*64})}
+            "calendar_status":"STORED_SESSIONS_MATCHED","corporate_action_status":"NO_RECORDED_CROSSING_ACTION",
+            "action_context_through":maturity.isoformat(),"observations":10,"history_fingerprint":"a"*64})}
 
 class ResearchReliabilityTests(unittest.TestCase):
     def test_missing_early_outcome_does_not_select_later_overlapping_winner(self):
