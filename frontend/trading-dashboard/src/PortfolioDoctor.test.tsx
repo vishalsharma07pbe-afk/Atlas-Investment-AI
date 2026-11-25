@@ -198,7 +198,7 @@ it("shows mapped combined equity exposure and same-date overlap without extra AP
 
 it("shows historical fixed-weight alternatives and observed variability automatically",async()=>{
  const holding={id:1,symbol:"TEST",asset_type:"EQUITY",exchange:"NSE",status:"MONITOR",weight_percent:100,recorded_return_percent:1,evidence_date:null,history_count:0,change_20_observations_percent:null,recent_peak_change_percent:null,findings:[],missing_evidence:[]};
- const historical_allocation={status:"HISTORICAL_COMPARISON_AVAILABLE",observations:40,first_date:"2026-10-15",last_date:"2026-11-24",lowest_observed_variability:"EQUAL_WEIGHTS",alternatives:[{kind:"EQUAL_WEIGHTS",sampleMeanPercent:0.12,sampleVolatilityPercent:0.82,largestWeightPercent:50,oneWayTurnoverPercent:30,weights:[{isin:"INE002A01018",symbol:"TEST",weightPercent:50}]}],notice:"In-sample only."};
+ const historical_allocation={status:"HISTORICAL_COMPARISON_AVAILABLE",observations:60,chronological_validation:{status:"CONDITIONAL_HOLDOUT_AVAILABLE",selection_count:40,holdout_count:20,selection_from:"2026-09-01",selection_through:"2026-10-11",holdout_from:"2026-10-11",holdout_through:"2026-10-31",selected_kind:"EQUAL_WEIGHTS",comparison:"HIGHER_OBSERVED_HOLDOUT_VARIABILITY",holdout_volatility_difference_pp:0.48,metrics:[{kind:"EQUAL_WEIGHTS",selectionVolatilityPercent:0.4,holdoutVolatilityPercent:1.3,holdoutMeanPercent:0.02}],notice:"Conditional on current holdings, not a point-in-time backtest."},first_date:"2026-10-15",last_date:"2026-11-24",lowest_observed_variability:"EQUAL_WEIGHTS",alternatives:[{kind:"EQUAL_WEIGHTS",sampleMeanPercent:0.12,sampleVolatilityPercent:0.82,largestWeightPercent:50,oneWayTurnoverPercent:30,weights:[{isin:"INE002A01018",symbol:"TEST",weightPercent:50}]}],notice:"In-sample only."};
  const diversification={status:"CLASSIFIED_PRICED_HOLDINGS",unpriced_count:0,unresolved_identity_count:0,resolved_identity_count:1,top_three_resolved_weight_percent:100,asset_exposure:[],direct_equity_sector_exposure:[],fund_category_exposure:[],sector_coverage_percent:100,fund_category_coverage_percent:null,review_prompts:[],notice:"Recorded prices."};
  vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-25T10:00:00Z",holding_count:1,attention_count:0,data_gap_count:0,notice:"Research only",holdings:[holding],diversification,equity_correlation:{status:"AVAILABLE",historical_allocation,notice:"Adjusted history."}})})));
  render(<PortfolioDoctor revision={0} onSettings={()=>{}}/>);
@@ -206,6 +206,9 @@ it("shows historical fixed-weight alternatives and observed variability automati
  expect(screen.getByText("0.82%")).toBeTruthy();
  expect(screen.getByText("30.00%")).toBeTruthy();
  expect(screen.getByText("In-sample only.")).toBeTruthy();
+ expect(screen.getByText("Chronological allocation validation")).toBeTruthy();
+ expect(screen.getByText(/higher observed holdout variability/)).toBeTruthy();
+ expect(screen.getByText("Conditional on current holdings, not a point-in-time backtest.")).toBeTruthy();
  expect(fetch).toHaveBeenCalledTimes(1);
 });
 
