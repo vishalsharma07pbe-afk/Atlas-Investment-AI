@@ -112,7 +112,8 @@ def normalize(report, isin, instant):
                 if any(v is not None for v in values.values()):
                     rows.append({"period":text(point["period"]),**values})
             if rows:
-                data={"units":text(raw.get("units_in")),"rows":rows}
+                data={"units":text(raw.get("units_in")),"rows":rows,
+                      "statement_type":text(raw.get("type")),"time_period":text(raw.get("time_period"))}
         elif key=="shareholding":
             data=history(raw)
         elif key in ("corporate_actions","competitors") and isinstance(raw,list):
