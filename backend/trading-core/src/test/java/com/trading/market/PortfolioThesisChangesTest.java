@@ -12,7 +12,7 @@ class PortfolioThesisChangesTest {
   private final Instant now=Instant.parse("2026-11-25T10:00:00Z");
   private Map<String,Object> report(String isin,int year,int previous,int latest,boolean stale){
     var trend=Map.of("metric","NET_PROFIT","previous_year",year-1,"latest_year",year,
-      "previous_value",previous,"latest_value",latest,"latest_period","March "+year,"unit","crore",
+      "previous_value",previous,"latest_value",latest,"latest_period","March "+year,"previous_period","March "+(year-1),"unit","crore",
       "latest_period_may_be_stale",stale);
     var holding=Map.of("id",1,"asset_type","EQUITY","exchange","NSE","isin",isin,
       "thesis_evidence",Map.of("company_evidence",Map.of("financial_trends",Map.of("items",List.of(trend)))));
