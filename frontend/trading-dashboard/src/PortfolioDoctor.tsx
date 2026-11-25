@@ -1,3 +1,4 @@
+import PortfolioBenchmarkRisk,{type BenchmarkRisk} from "./PortfolioBenchmarkRisk";
 import {visiblePolling} from "./visiblePolling";
 import {useEffect,useState} from "react";
 import CompanyEvidenceCard,{type CompanyEvidence} from "./CompanyEvidenceCard";
@@ -14,7 +15,7 @@ type Correlation={status:string;comparable_pairs?:number;attempted_pairs?:number
 type OpportunityContext={status:string;held_excluded_count:number;ready_sections:string[];blocked_sections:string[];notice:string;
  equities:{isin:string;symbol:string;exchange:string;horizon:string;as_of:string;sector:string|null;sector_weight_percent:number|null;context:string;identity_status:string;adjustment_status:string;blockers:string[]}[];
  funds:{scheme_code:string;name:string;category:string;as_of:string;cagr_3y_percent:number;drawdown_3y_percent:number;context:string;identity_status:string}[]};
-type Review={opportunity_context?:OpportunityContext;diversification?:Diversification;equity_correlation?:Correlation;thesis_review_count?:number;generated_at:string;holding_count:number;attention_count:number;data_gap_count:number;holdings:HoldingReview[];notice:string};
+type Review={benchmark_risk_estimate?:BenchmarkRisk;opportunity_context?:OpportunityContext;diversification?:Diversification;equity_correlation?:Correlation;thesis_review_count?:number;generated_at:string;holding_count:number;attention_count:number;data_gap_count:number;holdings:HoldingReview[];notice:string};
 const pct=(value:number|null)=>value==null?"—":(value>0?"+":"")+value.toFixed(2)+"%";
 const statuses={REVIEW_REQUIRED:"Needs review",MONITOR:"Monitor",EVIDENCE_GAP:"Data needed"};
 
@@ -116,6 +117,7 @@ export default function PortfolioDoctor({revision,onSettings,compact=false,onOpe
       {item.asset_type==="MUTUAL_FUND"&&<details><summary>Exact scheme historical evidence</summary>{item.fund_history_evidence?<><p>{item.fund_history_evidence.scheme_name} · NAV ₹{item.fund_history_evidence.nav.toFixed(2)} · {item.fund_history_evidence.nav_date}</p><dl><div><dt>3-year CAGR</dt><dd>{pct(item.fund_history_evidence.cagr_3y_percent)}</dd></div><div><dt>Observed drawdown</dt><dd>{pct(item.fund_history_evidence.drawdown_3y_percent)}</dd></div><div><dt>Weekly volatility proxy</dt><dd>{pct(item.fund_history_evidence.weekly_volatility_percent??null)}</dd></div></dl><p className="muted tiny">Sources: {item.fund_history_evidence.sources.join(" · ")}. {item.fund_history_evidence.notice}</p></>:<p>Exact-scheme history insufficient or unavailable.</p>}</details>}
     </article>)}</div>
     {review.holdings.length>5&&<button type="button" className="secondary" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}>{expanded?"Show fewer holdings":"Show all holdings"}</button>}
+    {review.benchmark_risk_estimate&&<PortfolioBenchmarkRisk report={review.benchmark_risk_estimate} compact/>}
     {review.diversification&&<DiversificationDigest report={review.diversification} correlation={review.equity_correlation}/>}
     {review.opportunity_context&&<OpportunityDigest report={review.opportunity_context}/>}
     <p className="muted tiny">Reviewed {new Date(review.generated_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})} IST. {review.notice}</p>

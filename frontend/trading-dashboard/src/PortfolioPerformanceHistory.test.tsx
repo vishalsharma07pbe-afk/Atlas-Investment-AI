@@ -100,3 +100,19 @@ it("distinguishes exact-date price reference from portfolio estimates and unavai
   expect(screen.getByText("Exact starting valuation missing.")).toBeTruthy();
   expect(screen.getByText(/Insufficient contiguous weekly evidence/)).toBeTruthy();
 });
+
+it("shows relative risk estimates as a review flag, not a trading signal",async()=>{
+  vi.spyOn(globalThis,"fetch").mockResolvedValue(new Response(JSON.stringify({
+    transaction_count:0,snapshot_count:14,xirr_percent:null,maximum_drawdown_percent:null,
+    xirr_status:"UNAVAILABLE",drawdown_status:"UNAVAILABLE",methodology:"Recorded valuations.",
+    benchmark_risk_estimate:{status:"AVAILABLE_PRICE_REFERENCE_ESTIMATE",matchedWeeks:13,
+      from:"2026-08-21",through:"2026-11-20",portfolioReturnPercent:1,benchmarkReturnPercent:8,
+      relativePercentagePoints:-7,beta:0.75,annualizedTrackingErrorPercent:4,informationRatio:-1.2,
+      attentionStatus:"REVIEW_RELATIVE_LAG"}
+  }),{status:200}));
+  render(<PortfolioPerformanceHistory/>);
+  expect(await screen.findByText(/recorded portfolio lagged/)).toBeTruthy();
+  expect(screen.getByText("-7.00 pp")).toBeTruthy();
+  expect(screen.getByText("0.75")).toBeTruthy();
+  expect(screen.getByText(/not a buy or sell signal/)).toBeTruthy();
+});
