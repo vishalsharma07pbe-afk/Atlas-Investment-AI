@@ -2,7 +2,7 @@ import sqlite3
 import tempfile
 import unittest
 from datetime import datetime,timedelta,timezone
-from app.automatic_strategy_validation import refresh,read
+from app.automatic_strategy_validation import refresh,read,CACHE_VERSION
 from app.horizon_research import VERSION
 from unittest.mock import patch
 
@@ -16,13 +16,13 @@ class AutomaticValidationTests(unittest.TestCase):
             now=datetime(2026,11,24,10,tzinfo=timezone.utc)
             snapshot={"enabled":True,"sections":[{"section":"NSE","status":"READY","result":{"horizons":{}}}]}
             calls=[]
-            registry=[{"id":i,"symbol":f"TEST{i}","active":True,"listing_status":"ACTIVE","series":"EQ","exchange":"NSE","instrument_type":"EQUITY"} for i in (1,2)]
+            registry=[{"id":i,"symbol":f"TEST{i}","active":True,"listing_status":"ACTIVE","series":"EQ","exchange":"NSE","instrument_type":"EQUITY","isin":f"INE000A010{i:02d}"} for i in (1,2)]
             def loader(path):
                 calls.append(path)
                 if path.startswith("/api/v1/market-data/discovery-universe?"):
                     return registry
                 i=int(path.split("/")[5])
-                return {"instrument":{"id":i,"symbol":f"TEST{i}","exchange":"NSE"},"candles":[]}
+                return {"instrument":{"id":i,"symbol":f"TEST{i}","exchange":"NSE","isin":f"INE000A010{i:02d}"},"candles":[]}
             with patch("app.automatic_strategy_validation.replay",return_value={"status":"INSUFFICIENT_HISTORY","horizons":{}}):
                 for _ in range(3):
                     refresh(snapshot,connect,loader,now)
@@ -42,16 +42,22 @@ class AutomaticValidationTests(unittest.TestCase):
                 db.row_factory=sqlite3.Row
                 return db
             instant=datetime(2026,11,24,10,tzinfo=timezone.utc)
-            result={"as_of":"2026-11-23","horizons":{"SWING":{"status":"REPLAY_OBSERVED",
+            result={"as_of":"2026-11-23","isin":"INE002A01018","replay_evidence_hash":"a"*64,"horizons":{"SWING":{"status":"REPLAY_OBSERVED",
                 "trades":3,"small_sample":True,"cost_scenarios":[]}}}
             with connect() as db:
                 _table(db)
                 db.execute("INSERT INTO strategy_validation VALUES(?,?,?,?,?,?,?)",
-                    ("NSE",1,"TEST",VERSION,instant.isoformat(),"HISTORICAL_REPLAY_ONLY",json.dumps(result)))
+                    ("NSE",1,"TEST",CACHE_VERSION,instant.isoformat(),"HISTORICAL_REPLAY_ONLY",json.dumps(result)))
             items=[{"id":1,"symbol":"TEST","exchange":"NSE","as_of":"2026-11-23"},
                    {"id":2,"symbol":"TEST","exchange":"NSE","as_of":"2026-11-23"},
                    {"id":1,"symbol":"OTHER","exchange":"NSE","as_of":"2026-11-23"},
                    {"id":1,"symbol":"TEST","exchange":"NSE","as_of":"2026-11-22"}]
+            for item in items:
+                item.update({"isin":"INE002A01018","replay_evidence_hash":"a"*64,"adjustment_status":"ADJUSTED"})
+            items.extend([{**items[0],"isin":"INE002A01019"},
+                          {**items[0],"replay_evidence_hash":"b"*64,"matched_strategy_replay":{"trades":99}},
+                          {**items[0],"replay_evidence_hash":None},
+                          {**items[0],"adjustment_status":"RAW_UNADJUSTED"}])
             snapshot={"enabled":True,"sections":[{"section":"NSE","status":"READY",
                 "result":{"horizons":{"SWING":{"candidates":items}}}}]}
             read(connect,instant,snapshot=snapshot)

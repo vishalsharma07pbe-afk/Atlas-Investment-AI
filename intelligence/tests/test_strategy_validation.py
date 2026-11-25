@@ -60,3 +60,14 @@ class StrategyValidationTests(unittest.TestCase):
         self.assertAlmostEqual(result["max_drawdown_percent"],-10.27,places=2)
         self.assertEqual(result["wins"],1)
         self.assertEqual(result["losses"],0)
+
+    def test_cost_adjusted_same_stock_reference_uses_identical_holdout(self):
+        rows=history()["candles"]
+        with patch("app.strategy_validation.evaluate",return_value={h:("TECHNICAL_WATCH",{}) for h in ("SWING","SHORT_TERM","LONG_TERM")}):
+            result=replay({"candles":rows},TODAY)
+        for horizon in result["horizons"].values():
+            for cost in horizon["cost_scenarios"]:
+                reference=(rows[-1]["close"]/rows[301]["open"])*(1-cost["cost_bps_per_side"]/10000)**2
+                self.assertAlmostEqual(cost["net_same_stock_buy_hold_percent"],(reference-1)*100,places=3)
+                self.assertAlmostEqual(cost["net_difference_vs_same_stock_pp"],
+                    cost["net_return_percent"]-cost["net_same_stock_buy_hold_percent"],places=3)
