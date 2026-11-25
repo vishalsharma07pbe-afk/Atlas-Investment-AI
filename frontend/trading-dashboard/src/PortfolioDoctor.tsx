@@ -18,8 +18,8 @@ type AllocationResearch={status:string;recorded_value?:number;current_largest_pe
 type ExposureStress={status:string;recorded_value?:number;scenarios:{kind:string;title:string;shocks:{exposure:string;label:string;assumedChangePercent:number;recordedExposure:number;valueChange:number}[];changeAmount:number;changePercent:number;stressedValue:number}[];withheld:string[];notice:string};
 type LookThrough={sector_status?:string;sector_classified_portfolio_percent?:number;sector_unclassified_mapped_value?:number;sector_review_count?:number;sector_count?:number;sector_notice?:string;sector_exposures?:{sector:string;directValue:number;indirectValue:number;estimatedValue:number;portfolioPercent:number;reviewConcentration:boolean}[];risk_observation_count?:number;status:string;portfolio_date?:string;matched_fund_value_percent?:number;mapped_portfolio_percent?:number;unmodeled_value?:number;matched_scheme_count?:number;mapped_equity_count?:number;overlap_pair_count?:number;exposures:{isin:string;directValue:number;indirectValue:number;estimatedValue:number;portfolioPercent:number;contributingSchemes:number}[];overlap_pairs:{schemeA:string;schemeB:string;sameUnderlyingFund:boolean;commonEquities:number;sharedWeightPercent:number;coverageA:number;coverageB:number}[];notice:string};
 type Diversification={look_through?:LookThrough;exposure_stress?:ExposureStress;allocation_research?:AllocationResearch;status:string;unpriced_count:number;unresolved_identity_count:number;resolved_identity_count:number;top_three_resolved_weight_percent:number|null;asset_exposure:Exposure[];direct_equity_sector_exposure:Exposure[];fund_category_exposure:Exposure[];sector_coverage_percent:number|null;fund_category_coverage_percent:number|null;review_prompts:string[];notice:string};
-type HistoricalAllocation={status:string;observations?:number;first_date?:string;last_date?:string;direct_equity_value?:number;lowest_observed_variability?:string;alternatives:{kind:string;sampleMeanPercent:number;sampleVolatilityPercent:number;largestWeightPercent:number;oneWayTurnoverPercent:number;weights:{isin:string;symbol:string;weightPercent:number}[]}[];notice:string};
-type Correlation={historical_allocation?:HistoricalAllocation;status:string;comparable_pairs?:number;attempted_pairs?:number;high_positive_pair_count?:number;pairs?:{first_symbol:string;second_symbol:string;first_isin:string;second_isin:string;correlation:number;observations:number;first_date:string;last_date:string;high_positive_correlation:boolean}[];notice:string};
+type HistoricalAllocation={equity_identity_count?:number;fund_identity_count?:number;nav_sources?:Record<string,string>;status:string;observations?:number;first_date?:string;last_date?:string;direct_equity_value?:number;lowest_observed_variability?:string;alternatives:{kind:string;sampleMeanPercent:number;sampleVolatilityPercent:number;largestWeightPercent:number;oneWayTurnoverPercent:number;weights:{isin?:string;identity?:string;symbol:string;weightPercent:number}[]}[];notice:string};
+type Correlation={historical_allocation?:HistoricalAllocation;cross_asset_allocation?:HistoricalAllocation;status:string;comparable_pairs?:number;attempted_pairs?:number;high_positive_pair_count?:number;pairs?:{first_symbol:string;second_symbol:string;first_isin:string;second_isin:string;correlation:number;observations:number;first_date:string;last_date:string;high_positive_correlation:boolean}[];notice:string};
 type OpportunityContext={status:string;held_excluded_count:number;ready_sections:string[];blocked_sections:string[];notice:string;
  equities:{isin:string;symbol:string;exchange:string;horizon:string;as_of:string;sector:string|null;sector_weight_percent:number|null;context:string;identity_status:string;adjustment_status:string;blockers:string[]}[];
  funds:{scheme_code:string;name:string;category:string;as_of:string;cagr_3y_percent:number;drawdown_3y_percent:number;context:string;identity_status:string}[]};
@@ -89,21 +89,24 @@ function LookThroughDigest({report}:{report:LookThrough}){
   <p className="muted tiny">{report.notice}</p>
  </section>;
 }
-function HistoricalAllocationDigest({report}:{report:HistoricalAllocation}){
+function HistoricalAllocationDigest({report,mixed=false}:{report:HistoricalAllocation;mixed?:boolean}){
  const labels:Record<string,string>={CURRENT_WEIGHTS:"Current weights",HALFWAY_TO_EQUAL:"Halfway to equal weights",EQUAL_WEIGHTS:"Equal weights"};
  const label=(kind:string)=>labels[kind]??kind.replace(/_/g," ").toLowerCase();
- return <section className="thesis-digest" aria-label="Historical allocation alternatives">
-  <h4>Historical allocation alternatives</h4>
+ if(mixed&&report.status==="NO_MIXED_POSITIVE_HOLDINGS")return null;
+ const title=mixed?"Mixed stock and fund allocation alternatives":"Historical allocation alternatives";
+ return <section className="thesis-digest" aria-label={title}>
+  <h4>{title}</h4>
   {report.status==="HISTORICAL_COMPARISON_AVAILABLE"?<>
-   <p>Direct equities only · {report.observations} matched return intervals · {report.first_date} to {report.last_date}.</p>
+   <p>{mixed?`${report.equity_identity_count??0} equity identities and ${report.fund_identity_count??0} fund schemes`:"Direct equities only"} · {report.observations} matched return intervals · {report.first_date} to {report.last_date}.</p>
    <p>Lowest observed variability in this sample: <strong>{label(report.lowest_observed_variability??"")}</strong>. This is not a recommendation.</p>
    <div className="tablewrap"><table><thead><tr><th>Alternative</th><th>Mean per interval</th><th>Sample volatility per interval</th><th>Largest weight</th><th>One-way turnover</th></tr></thead><tbody>
     {report.alternatives.map(a=><tr key={a.kind}><td>{label(a.kind)}</td><td>{a.sampleMeanPercent.toFixed(2)}%</td><td>{a.sampleVolatilityPercent.toFixed(2)}%</td><td>{a.largestWeightPercent.toFixed(2)}%</td><td>{a.oneWayTurnoverPercent.toFixed(2)}%</td></tr>)}
    </tbody></table></div>
-   <details><summary>Hypothetical weights within the direct-equity sleeve</summary>
-    {report.alternatives.map(a=><div key={a.kind}><h5>{label(a.kind)}</h5><ul>{a.weights.map(w=><li key={w.isin}>{w.symbol} · {w.weightPercent.toFixed(2)}%</li>)}</ul></div>)}
+   <details><summary>{mixed?"Hypothetical weights across recorded stocks and funds":"Hypothetical weights within the direct-equity sleeve"}</summary>
+    {report.alternatives.map(a=><div key={a.kind}><h5>{label(a.kind)}</h5><ul>{a.weights.map(w=><li key={w.identity??w.isin}>{w.symbol} · {w.weightPercent.toFixed(2)}%</li>)}</ul></div>)}
    </details>
-  </>:<p>{report.status==="INSUFFICIENT_RECENT_EXACT_DIRECT_EQUITY_COVERAGE"?"Requires complete recent exact valuations for 2–12 direct-equity identities.":"Comparable adjusted return history is insufficient for a full direct-equity comparison."}</p>}
+   {mixed&&report.nav_sources&&<p className="muted tiny">NAV history sources: {Object.entries(report.nav_sources).map(([id,source])=>id+" · "+source).join("; ")}.</p>}
+  </>:<p>{mixed?"Mixed-asset comparisons require complete recent valuations, exact Growth schemes and comparable single-source NAV and adjusted equity history across 2–12 investment identities.":report.status==="INSUFFICIENT_RECENT_EXACT_DIRECT_EQUITY_COVERAGE"?"Requires complete recent exact valuations for 2–12 direct-equity identities.":"Comparable adjusted return history is insufficient for a full direct-equity comparison."}</p>}
   <p className="muted tiny">{report.notice}</p>
  </section>;
 }
@@ -126,6 +129,7 @@ function DiversificationDigest({report,correlation}:{report:Diversification;corr
    <p>Unresolved priced identities: {report.unresolved_identity_count}</p>
   </details>
   {correlation?.historical_allocation&&<HistoricalAllocationDigest report={correlation.historical_allocation}/>}
+  {correlation?.cross_asset_allocation&&<HistoricalAllocationDigest report={correlation.cross_asset_allocation} mixed/>}
   {correlation&&<details><summary>Historical equity correlation</summary>
    <p>{correlation.comparable_pairs??0}/{correlation.attempted_pairs??0} pairs comparable · {correlation.high_positive_pair_count??0} highly positively correlated</p>
    {correlation.pairs?.length?<div className="tablewrap"><table><thead><tr><th>Equity pair</th><th>Correlation</th><th>Matched intervals</th></tr></thead><tbody>{correlation.pairs.map(p=><tr key={p.first_isin+":"+p.second_isin}><td>{p.first_symbol} / {p.second_symbol}{p.high_positive_correlation?" · Review":""}</td><td>{p.correlation.toFixed(2)}</td><td>{p.observations} · {p.first_date} to {p.last_date}</td></tr>)}</tbody></table></div>:<p>Comparable adjusted return history unavailable.</p>}
