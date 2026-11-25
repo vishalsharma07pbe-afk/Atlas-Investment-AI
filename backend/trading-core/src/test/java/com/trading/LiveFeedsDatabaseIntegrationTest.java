@@ -366,7 +366,7 @@ class LiveFeedsDatabaseIntegrationTest {
 
  @Test
  @org.springframework.transaction.annotation.Transactional
- void operatorHistoryCooldownPersistsAndBlocksOtherVenue(){
+ void operatorHistoryCooldownPersistsAndBlocksOtherVenue()throws Exception{
   db.update("DELETE FROM operator_feed_cooldown");
   db.update("UPDATE instruments SET active=false WHERE exchange_id=(SELECT id FROM exchanges WHERE code='NSE')");
   String isin="INE000A01905";
