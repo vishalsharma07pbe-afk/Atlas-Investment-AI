@@ -151,6 +151,10 @@ public class PortfolioHistoryController {
     result.put("rolling_performance",rolling);
     result.put("weekly_risk_estimate",risk);
     result.put("benchmark_reference","NIFTY 50 price index (not TRI)");
+    var eligibleBenchmark=benchmark.stream().filter(PortfolioRollingPerformance.BenchmarkPoint::eligible).toList();
+    result.put("benchmark_eligible_observation_count",eligibleBenchmark.stream().map(PortfolioRollingPerformance.BenchmarkPoint::date).distinct().count());
+    result.put("benchmark_latest_eligible_date",eligibleBenchmark.stream().map(PortfolioRollingPerformance.BenchmarkPoint::date).max(LocalDate::compareTo).map(LocalDate::toString).orElse(null));
+    result.put("benchmark_history_status",terminal==null?"NO_PORTFOLIO_WINDOW":eligibleBenchmark.isEmpty()?"NO_ELIGIBLE_STORED_OBSERVATIONS":"STORED_OBSERVATIONS_AVAILABLE");
     result.put("rolling_methodology","Exact trailing 30, 90 and 365 calendar-day recorded valuations through the latest saved date; no interpolation. Linked Dietz estimates retain all evidence gates. NIFTY 50 is a broad equity price reference, not a suitable blended benchmark for every portfolio. Comparisons require exact dates, one unambiguous NSE index registry identity, consistent enabled source and validated completed raw index candles mapped to stored regular-session closes. No dividend or total-return comparison, alpha or tracking error. Weekly risk requires thirteen exact seven-day intervals; sample volatility and downside deviation relative to zero are annualized with square root of 52. No risk-free rate or Sharpe/Sortino estimate is assumed.");
     result.put("flow_adjusted_status",adjusted.status());
     result.put("flow_adjusted_return_percent",adjusted.returnPercent()==null?null:BigDecimal.valueOf(adjusted.returnPercent()).setScale(4,RoundingMode.HALF_UP));
