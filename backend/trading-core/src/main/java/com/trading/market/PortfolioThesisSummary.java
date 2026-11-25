@@ -92,7 +92,18 @@ final class PortfolioThesisSummary {
    if(!topics.isEmpty())add(review,"Recent headline topics: "+String.join(", ",topics)+". Open source headlines to verify the events.","Upstox News; headline matches only");
    if(!Set.of("REVIEW_AVAILABLE","NO_RECENT_RETURNED_ARTICLES").contains(news.path("status").asText()))
      gaps.add("Usable recent company news coverage is unavailable.");
-   gaps.add("Official filings, comparable financial periods, intrinsic valuation and company-specific institutional flows remain unverified.");
+   JsonNode ownership=company.path("ownership_research");
+   if("COMPARABLE_QUARTERS".equals(ownership.path("status").asText())){
+    for(JsonNode prompt:ownership.path("review_prompts")){
+      String category=prompt.path("category").asText();
+      Double change=number(prompt,"change_pp");
+      if(Set.of("promoters","fii","other_dii","mutual_funds").contains(category)&&change!=null&&change<=-1&&change>=-100){
+        add(review,"Reported "+category.replace('_',' ')+" ownership fell "+fmt(-change)+" percentage points between "+ownership.path("previous_period").asText()+" and "+ownership.path("latest_period").asText()+". Verify the filing and share-count changes; this is not proof of sales.",
+          "Upstox quarterly shareholding; official filing unverified");
+      }
+    }
+   }else gaps.add("Comparable complete quarterly ownership reports unavailable.");
+   gaps.add("Promoter pledges, bulk/block transactions, official filings, comparable financial periods, intrinsic valuation and company-specific institutional trades remain unverified.");
   }else if("MUTUAL_FUND".equals(row.path("asset_type").asText())){
    JsonNode history=row.path("fund_history_evidence");
    Double cagr=number(history,"cagr_3y_percent"),drawdown=number(history,"drawdown_3y_percent"),vol=number(history,"weekly_volatility_percent");
