@@ -4,6 +4,7 @@ from math import isfinite
 
 from .technical import Candle, compute
 from .horizon_research import evaluate, summarize
+from .price_structure import analyze as price_structure
 
 MIN_HISTORY = 21
 MAX_INSTRUMENTS = 20
@@ -30,11 +31,14 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
             if len(candles) < MIN_HISTORY:
                 skipped["NO_HISTORY"] += 1
                 continue
+            if any(x.adjustment_status not in ("ADJUSTED","RAW_UNADJUSTED") for x in candles):
+                skipped["INVALID"] += 1
+                continue
             if len({x.adjustment_status for x in candles}) != 1:
                 skipped["MIXED_ADJUSTMENT"] += 1
                 continue
             if any(not all(isfinite(v) for v in (x.open,x.high,x.low,x.close))
-                   or x.close <= 0 or x.high < max(x.open,x.close,x.low)
+                   or min(x.open,x.high,x.low,x.close) <= 0 or x.high < max(x.open,x.close,x.low)
                    or x.low > min(x.open,x.close) or x.volume < 0 for x in candles):
                 skipped["INVALID"] += 1
                 continue
@@ -73,7 +77,12 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                 "data_age_calendar_days": age,
             }
             if include_horizons:
-                horizon_evaluations.append(evaluate(candles, ind, row))
+                evaluation=evaluate(candles, ind, row)
+                for horizon, (state,candidate) in evaluation.items():
+                    if candidate is not None:
+                        candidate["price_structure"]=price_structure(candles,ind,horizon,
+                            calendar_verified=batch_loaded and expected_session is not None)
+                horizon_evaluations.append(evaluation)
             rows.append(row)
         except (KeyError, TypeError, ValueError, OverflowError, ZeroDivisionError):
             skipped["INVALID"] += 1
