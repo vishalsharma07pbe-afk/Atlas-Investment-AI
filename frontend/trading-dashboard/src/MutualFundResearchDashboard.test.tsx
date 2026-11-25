@@ -71,3 +71,18 @@ it("distinguishes reported underlying fundamentals from a qualified growth outlo
  expect(screen.getByText("No forecast or qualified Growth Outlook.")).toBeTruthy();
  expect(screen.getAllByText("No fund currently qualifies")).toHaveLength(2);
 });
+
+it("supports debt category navigation without implying an equity ranking",async()=>{
+ const fetchMock=vi.fn(async(url:string)=>{
+  const category=url.includes("category=CORPORATE_BOND")?"CORPORATE_BOND":"LARGE_CAP";
+  return {ok:true,json:async()=>url.includes("historical-watch")?{category,items:[],universe_count:12,sample_count:10,eligible_count:0,category_comparison_enabled:category!=="CORPORATE_BOND",notice:"Historical only"}:{...response,category,qualification_summary:{evaluated_count:0,top_eligible_count:0,growth_eligible_count:0,excluded:[]}}};
+ });
+ vi.stubGlobal("fetch",fetchMock);
+ render(<MutualFundResearchDashboard onExplore={()=>{}}/>);
+ fireEvent.click(screen.getByRole("tab",{name:"Corporate Bond"}));
+ await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("category=CORPORATE_BOND"),expect.anything()));
+ expect(await screen.findByText("Descriptive NAV observations only; category-specific risk or comparable benchmark evidence is required for ranking.")).toBeTruthy();
+ expect(screen.queryByRole("button",{name:"Return versus drawdown"})).toBeNull();
+ expect(await screen.findByText("Qualification evidence (0 sampled schemes)")).toBeTruthy();
+ expect(screen.getAllByText("No fund currently qualifies")).toHaveLength(2);
+});
