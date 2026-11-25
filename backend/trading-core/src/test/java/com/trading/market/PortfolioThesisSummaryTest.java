@@ -68,6 +68,16 @@ class PortfolioThesisSummaryTest {
   assertTrue(report.get("review_prompts").toString().contains("60.00% has annual statement evidence"));
   assertTrue(report.get("observations").toString().contains("0.70%"));
  }
+ @Test void ownershipDeclineIsReviewEvidenceNotProofOfTrades(){
+  var ownership=Map.of("status","COMPARABLE_QUARTERS","previous_period","2026-06-30","latest_period","2026-09-30",
+    "review_prompts",List.of(Map.of("category","promoters","change_pp",-2)));
+  var holding=Map.<String,Object>of("asset_type","EQUITY","thesis_evidence",Map.of("company_evidence",Map.of("ownership_research",ownership)));
+  var result=PortfolioThesisSummary.summarize(holding,json);
+  assertEquals("REVIEW_EVIDENCE",result.get("status"));
+  assertTrue(result.get("review_prompts").toString().contains("ownership fell 2.00 percentage points"));
+  assertTrue(result.get("review_prompts").toString().contains("not proof of sales"));
+  assertTrue(result.get("gaps").toString().contains("Promoter pledges"));
+ }
  @Test void missingEvidenceNeverProducesPositiveVerdict(){
   var result=PortfolioThesisSummary.summarize(Map.of("asset_type","EQUITY"),json);
   assertEquals("INSUFFICIENT_FOR_VERDICT",result.get("status"));

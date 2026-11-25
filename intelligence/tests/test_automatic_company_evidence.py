@@ -49,6 +49,21 @@ class CompanyEvidenceTests(unittest.TestCase):
         company.attach(self.snapshot,research._connect,self.now)
         self.assertEqual(self.item["company_evidence"]["financial_trends"]["items"][0]["latest_year"],2025)
 
+    def test_existing_cached_shareholding_is_enriched_without_extra_provider_call(self):
+        def report(isin,key):
+            result=self.report(isin,key)
+            result["sections"]["shareholding"]={"status":"AVAILABLE","data":[
+                {"category":name,"history":[{"period":"Sep 2026","value":current},{"period":"Jun 2026","value":previous}]}
+                for name,current,previous in zip(
+                    ("promoters","fii","other_dii","mutual_funds","retail_and_other"),
+                    (48,20,11,10,11),(50,19,10,10,11))]}
+            return result
+        company.refresh(self.snapshot,research._connect,report,self.now)
+        company.attach(self.snapshot,research._connect,self.now)
+        ownership=self.item["company_evidence"]["ownership_research"]
+        self.assertEqual(ownership["status"],"COMPARABLE_QUARTERS")
+        self.assertEqual(ownership["review_prompts"][0]["category"],"promoters")
+
     def test_rights_required_and_identity_mismatch_rejected(self):
         with patch.dict(os.environ,{"MARKET_DATA_USAGE_RIGHTS_CONFIRMED":"false"}):
             company.refresh(self.snapshot,research._connect,lambda *a:self.fail("unauthorized"),self.now)
