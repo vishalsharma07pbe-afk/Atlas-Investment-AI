@@ -40,4 +40,23 @@ class PortfolioGoalControllerTest {
     assertThrows(ResponseStatusException.class,()->PortfolioGoalController.validate(goal("0","1.001",TODAY,TODAY),TODAY));
     assertDoesNotThrow(()->PortfolioGoalController.validate(goal("0","0",TODAY,TODAY.minusDays(1)),TODAY));
   }
+  @Test void linkedValuesAddOnlyCompleteRecentRecordedFunding(){
+    var input=goal("40000","15000",TODAY,LocalDate.of(2027,2,15));
+    var holding=new PortfolioGoalController.LinkedHolding(1,"TEST","EQUITY","RECENT_RECORDED",n("20000"));
+    var funding=PortfolioGoalController.funding(input,java.util.List.of(holding));
+    eq("60000",funding.totalRecordedFunding());
+    var p=PortfolioGoalController.linkedProgress(input,funding,TODAY);
+    eq("60",p.recordedProgressPercent());eq("40000",p.recordedGap());eq("13333.34",p.requiredMonthlyContribution());
+    assertEquals("FUNDED_UNDER_ZERO_GROWTH",p.status());
+    for(String status:java.util.List.of("MISSING_HOLDING","UNAVAILABLE_RECENT_VALUE")){
+      var missing=new PortfolioGoalController.LinkedHolding(2,"OTHER","MUTUAL_FUND",status,null);
+      var incomplete=PortfolioGoalController.funding(input,java.util.List.of(holding,missing));
+      assertNull(incomplete.totalRecordedFunding());assertNull(incomplete.linkedValue());
+      var withheld=PortfolioGoalController.linkedProgress(input,incomplete,TODAY);
+      assertEquals("INCOMPLETE_LINKED_VALUATION",withheld.status());assertNull(withheld.recordedProgressPercent());
+      assertNull(withheld.recordedGap());assertNull(withheld.requiredMonthlyContribution());
+    }
+    eq("40000",PortfolioGoalController.funding(input,java.util.List.of()).totalRecordedFunding());
+  }
+
 }

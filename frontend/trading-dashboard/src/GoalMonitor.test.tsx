@@ -33,3 +33,16 @@ it("does not display projected funding values for stale balances",async()=>{
  expect(screen.getAllByText("Unavailable",{exact:false}).length).toBeGreaterThanOrEqual(3);
  expect(screen.queryByText("₹20,000")).toBeNull();
 });
+
+it("withholds combined progress when a linked holding disappears",async()=>{
+ const missing={...goal,progress:{...goal.progress,status:"INCOMPLETE_LINKED_VALUATION",recordedProgressPercent:null,recordedGap:null,
+ zeroGrowthProjectedBalance:null,zeroGrowthShortfall:null,requiredMonthlyContribution:null,additionalMonthlyContribution:null},
+ funding:{linkedValue:null,totalRecordedFunding:null,holdings:[{holdingId:7,symbol:"TEST",assetType:"EQUITY",status:"MISSING_HOLDING",recordedValue:null}]}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({...report,availableHoldings:[],goals:[missing]})})));
+ render(<GoalMonitor/>);
+ expect(await screen.findByText("Linked valuation unavailable")).toBeTruthy();
+ expect(screen.getByText("missing holding")).toBeTruthy();
+ expect(screen.queryByRole("progressbar")).toBeNull();
+ expect(screen.getByText("Combined progress unavailable until linked valuations are complete.")).toBeTruthy();
+ expect(screen.getByRole("button",{name:"Unassign TEST"})).toBeTruthy();
+});
