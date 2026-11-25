@@ -33,7 +33,7 @@ class PortfolioSaleResearchTest {
         "direct_equity_value",1000,"alternatives",List.of(alternative("CURRENT_WEIGHTS",80,20),alternative("EQUAL_WEIGHTS",50,50)))));
   }
   private List<PortfolioSaleResearch.Scenario> scenarios(List<Map<String,Object>> holdings,List<Map<String,Object>> trades){
-    return ((List<?>)PortfolioSaleResearch.assess(holdings,report(holdings,trades),json).get("scenarios")).stream()
+    return ((List<?>)PortfolioSaleResearch.assess(holdings,report(holdings,trades),json,TODAY).get("scenarios")).stream()
       .map(PortfolioSaleResearch.Scenario.class::cast).toList();
   }
   private void equal(String expected,BigDecimal actual){assertEquals(0,n(expected).compareTo(actual));}
