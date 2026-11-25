@@ -176,12 +176,14 @@ public class PortfolioRiskNotifications {
           AND s.result->>'methodology'='PORTFOLIO_REVIEW_V1'
       ), flags AS (
         SELECT f.user_id,f.generated_at,f.week_start,flag,
-          CASE WHEN flag->>'kind'='BENCHMARK_RELATIVE_LAG' THEN 'BENCHMARK' ELSE 'CONCENTRATION' END AS family
+          CASE WHEN flag->>'kind'='BENCHMARK_RELATIVE_LAG' THEN 'BENCHMARK'
+            WHEN flag->>'kind' IN ('HIDDEN_EQUITY_CONCENTRATION','HIGH_FUND_OVERLAP') THEN 'LOOK_THROUGH'
+            ELSE 'CONCENTRATION' END AS family
         FROM fresh f CROSS JOIN LATERAL jsonb_array_elements(
           CASE WHEN jsonb_typeof(f.result->'portfolio_level_risk'->'attention')='array'
             THEN f.result->'portfolio_level_risk'->'attention' ELSE '[]'::jsonb END
         ) flag
-        WHERE flag->>'kind' IN ('BENCHMARK_RELATIVE_LAG','SINGLE_IDENTITY','TOP_THREE','DIRECT_EQUITY_SECTOR')
+        WHERE flag->>'kind' IN ('BENCHMARK_RELATIVE_LAG','SINGLE_IDENTITY','TOP_THREE','DIRECT_EQUITY_SECTOR','HIDDEN_EQUITY_CONCENTRATION','HIGH_FUND_OVERLAP')
           AND length(flag->>'label') BETWEEN 1 AND 200 AND jsonb_typeof(flag->'value')='number'
           AND flag->>'evidenceThrough' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
           AND (
@@ -189,10 +191,18 @@ public class PortfolioRiskNotifications {
               AND f.result->'portfolio_level_risk'->>'benchmark_status'='COMPARABLE_PRICE_REFERENCE'
               AND flag->>'unit'='PP')
             OR
-            (flag->>'kind'<>'BENCHMARK_RELATIVE_LAG'
+            (flag->>'kind' IN ('SINGLE_IDENTITY','TOP_THREE','DIRECT_EQUITY_SECTOR')
               AND f.result->'portfolio_level_risk'->>'concentration_status'='RECENT_RECORDED_EXPOSURES'
               AND flag->>'unit'='PERCENT'
               AND flag->>'evidenceThrough'=(now() AT TIME ZONE 'Asia/Kolkata')::date::text)
+            OR
+            (flag->>'kind' IN ('HIDDEN_EQUITY_CONCENTRATION','HIGH_FUND_OVERLAP')
+              AND f.result->'portfolio_level_risk'->>'look_through_status'='DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE'
+              AND f.result->'diversification'->'look_through'->>'status'='DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE'
+              AND flag->>'unit'='PERCENT'
+              AND flag->>'evidenceThrough'=f.result->'diversification'->'look_through'->>'portfolio_date'
+              AND flag->>'evidenceThrough' BETWEEN ((now() AT TIME ZONE 'Asia/Kolkata')::date-60)::text
+                AND (now() AT TIME ZONE 'Asia/Kolkata')::date::text)
           )
       ), grouped AS (
         SELECT user_id,generated_at,week_start,family,
@@ -202,9 +212,12 @@ public class PortfolioRiskNotifications {
       INSERT INTO user_notification_history(user_id,event_type,title,message,source_code,
         source_reference,occurred_at,details,dedupe_key,delivery_channel,delivery_status)
       SELECT user_id,'PORTFOLIO_RISK',
-        CASE family WHEN 'BENCHMARK' THEN 'Benchmark underperformance review' ELSE 'Portfolio concentration review' END,
+        CASE family WHEN 'BENCHMARK' THEN 'Benchmark underperformance review'
+          WHEN 'LOOK_THROUGH' THEN 'Underlying exposure and fund overlap review'
+          ELSE 'Portfolio concentration review' END,
         CASE family WHEN 'BENCHMARK' THEN
           'Recorded 13-week portfolio return estimate lags the NIFTY 50 price reference by at least five percentage points. Not a personalized benchmark.'
+        WHEN 'LOOK_THROUGH' THEN finding_count||' hidden concentration or high fund overlap observation(s) from dated secondary composition. Partial estimate, not verified live exposure.'
         ELSE finding_count||' aggregate exposure observation(s) exceed review thresholds using recent recorded values. Fund look-through is excluded.' END
           ||' Open My Portfolio for the dated evidence; no trade recommendation.',
         'ATLAS_PORTFOLIO_REVIEW',family||':'||week_start::text,generated_at,
