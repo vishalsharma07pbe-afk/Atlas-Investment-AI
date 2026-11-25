@@ -55,6 +55,8 @@ public class PortfolioThesisService {
   }
   var result=new LinkedHashMap<>(review);result.put("holdings",holdings);
   var diversification=PortfolioDiversification.summarize(holdings,json);
+  diversification.put("look_through",PortfolioLookThrough.assess(holdings,json,java.time.Instant.now()));
+  PortfolioLookThrough.stripWorkingWeights(holdings);
   result.put("diversification",diversification);
   result.put("opportunity_context",PortfolioOpportunityContext.compare(holdings,diversification,publicWatches(),json));
   result.put("thesis_review_count",holdings.stream().filter(h->h.get("thesis_summary") instanceof Map<?,?> m&&"REVIEW_EVIDENCE".equals(m.get("status"))).count());

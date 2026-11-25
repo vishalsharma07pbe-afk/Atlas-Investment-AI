@@ -16,7 +16,8 @@ type HoldingReview={ownership_changes?:OwnershipChange[];ownership_monitor_statu
 type Exposure={label:string;weight_percent:number};
 type AllocationResearch={status:string;recorded_value?:number;current_largest_percent?:number;current_top_three_percent?:number;single_identity_review_threshold_percent:number;top_three_review_threshold_percent:number;scenarios:{hypotheticalNewIdentities:number;additionalCapital:number;equalNewInvestmentAmount:number;projectedLargestPercent:number;projectedTopThreePercent:number;hypotheticalRedistributedCapital:number;redistributedPercent:number}[];notice:string};
 type ExposureStress={status:string;recorded_value?:number;scenarios:{kind:string;title:string;shocks:{exposure:string;label:string;assumedChangePercent:number;recordedExposure:number;valueChange:number}[];changeAmount:number;changePercent:number;stressedValue:number}[];withheld:string[];notice:string};
-type Diversification={exposure_stress?:ExposureStress;allocation_research?:AllocationResearch;status:string;unpriced_count:number;unresolved_identity_count:number;resolved_identity_count:number;top_three_resolved_weight_percent:number|null;asset_exposure:Exposure[];direct_equity_sector_exposure:Exposure[];fund_category_exposure:Exposure[];sector_coverage_percent:number|null;fund_category_coverage_percent:number|null;review_prompts:string[];notice:string};
+type LookThrough={status:string;portfolio_date?:string;matched_fund_value_percent?:number;mapped_portfolio_percent?:number;unmodeled_value?:number;matched_scheme_count?:number;mapped_equity_count?:number;overlap_pair_count?:number;exposures:{isin:string;directValue:number;indirectValue:number;estimatedValue:number;portfolioPercent:number;contributingSchemes:number}[];overlap_pairs:{schemeA:string;schemeB:string;sameUnderlyingFund:boolean;commonEquities:number;sharedWeightPercent:number;coverageA:number;coverageB:number}[];notice:string};
+type Diversification={look_through?:LookThrough;exposure_stress?:ExposureStress;allocation_research?:AllocationResearch;status:string;unpriced_count:number;unresolved_identity_count:number;resolved_identity_count:number;top_three_resolved_weight_percent:number|null;asset_exposure:Exposure[];direct_equity_sector_exposure:Exposure[];fund_category_exposure:Exposure[];sector_coverage_percent:number|null;fund_category_coverage_percent:number|null;review_prompts:string[];notice:string};
 type Correlation={status:string;comparable_pairs?:number;attempted_pairs?:number;high_positive_pair_count?:number;pairs?:{first_symbol:string;second_symbol:string;first_isin:string;second_isin:string;correlation:number;observations:number;first_date:string;last_date:string;high_positive_correlation:boolean}[];notice:string};
 type OpportunityContext={status:string;held_excluded_count:number;ready_sections:string[];blocked_sections:string[];notice:string;
  equities:{isin:string;symbol:string;exchange:string;horizon:string;as_of:string;sector:string|null;sector_weight_percent:number|null;context:string;identity_status:string;adjustment_status:string;blockers:string[]}[];
@@ -58,14 +59,35 @@ function ExposureStressDigest({report}:{report:ExposureStress}){
   <p className="muted tiny">{report.notice}</p>
  </section>;
 }
+function LookThroughDigest({report}:{report:LookThrough}){
+ const money=(v:number)=>new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",minimumFractionDigits:0,maximumFractionDigits:2}).format(v);
+ if(report.status==="NO_POSITIVE_FUND_HOLDINGS")return null;
+ return <section className="thesis-digest" aria-label="Combined equity exposure and fund overlap">
+  <h4>Combined equity exposure and fund overlap</h4>
+  {report.status==="DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE"?<>
+   <p>Fund disclosure date: {report.portfolio_date} · {report.matched_scheme_count} matched schemes covering {report.matched_fund_value_percent?.toFixed(2)}% of recorded fund value.</p>
+   <p>Mapped listed-equity estimate: <strong>{report.mapped_portfolio_percent?.toFixed(2)}%</strong> of recorded portfolio value · unmodeled capital {money(report.unmodeled_value??0)}.</p>
+   <details open><summary>Largest combined equity exposures ({report.mapped_equity_count} mapped, up to 20 shown)</summary>
+   {report.exposures.length?<div className="tablewrap"><table><thead><tr><th>Equity ISIN</th><th>Direct</th><th>Via funds</th><th>Combined estimate</th><th>Portfolio weight</th><th>Contributing schemes</th></tr></thead><tbody>
+    {report.exposures.map(e=><tr key={e.isin}><td>{e.isin}</td><td>{money(e.directValue)}</td><td>{money(e.indirectValue)}</td><td>{money(e.estimatedValue)}</td><td>{e.portfolioPercent.toFixed(2)}%</td><td>{e.contributingSchemes}</td></tr>)}
+   </tbody></table></div>:<p>No exact listed-equity exposures mapped.</p>}</details>
+   <details><summary>Same-date fund overlap ({report.overlap_pair_count} comparable pairs)</summary>
+    {report.overlap_pairs.length?<div className="tablewrap"><table><thead><tr><th>Scheme codes</th><th>Shared equity weight</th><th>Exact coverage A / B</th><th>Common equities</th></tr></thead><tbody>
+    {report.overlap_pairs.map(p=><tr key={p.schemeA+":"+p.schemeB}><td>{p.schemeA} / {p.schemeB}{p.sameUnderlyingFund?" · same underlying fund":""}</td><td>{p.sharedWeightPercent.toFixed(2)}%</td><td>{p.coverageA.toFixed(2)}% / {p.coverageB.toFixed(2)}%</td><td>{p.commonEquities}</td></tr>)}
+    </tbody></table></div>:<p>Insufficient comparable fund composition. This does not establish zero overlap.</p>}</details>
+  </>:<p>{report.status==="NO_MATCHED_FUND_COMPOSITION"?"Current exact-scheme fund composition unavailable.":"Look-through estimates require complete recent recorded values for supported holdings."}</p>}
+  <p className="muted tiny">{report.notice}</p>
+ </section>;
+}
 function DiversificationDigest({report,correlation}:{report:Diversification;correlation?:Correlation}){
  const weight=(value:number|null)=>value==null?"Not available":value.toFixed(2)+"%";
  return <section className="doctor-item" aria-label="Automatic diversification review">
   <h3>Diversification &amp; concentration</h3>
-  <p>{report.status==="NO_PRICED_VALUE"?"Recorded valuations unavailable.":report.status==="PARTIAL_COVERAGE"?"Partial classification or pricing coverage.":"Recorded positions classified; underlying fund exposures remain unknown."}</p>
+  <p>{report.status==="NO_PRICED_VALUE"?"Recorded valuations unavailable.":report.status==="PARTIAL_COVERAGE"?"Partial classification or pricing coverage.":"Recorded positions classified; direct allocation excludes fund underlying exposures."}</p>
   <div className="doctor-stats"><div><span>Resolved investment identities</span><strong>{report.resolved_identity_count}</strong></div><div><span>Top three resolved weights</span><strong>{weight(report.top_three_resolved_weight_percent)}</strong></div><div><span>Unpriced positions</span><strong>{report.unpriced_count}</strong></div></div>
   {report.allocation_research&&<AllocationResearchDigest report={report.allocation_research}/>}
   {report.exposure_stress&&<ExposureStressDigest report={report.exposure_stress}/>}
+  {report.look_through&&<LookThroughDigest report={report.look_through}/>}
   {report.review_prompts.length>0&&<><h4>Portfolio-level review prompts</h4><ul>{report.review_prompts.map(p=><li key={p}>{p}</li>)}</ul></>}
   <details><summary>Asset, sector and fund category exposures</summary>
    <ExposureList title="Asset allocation · priced portfolio" rows={report.asset_exposure}/>
