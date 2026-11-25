@@ -16,6 +16,9 @@ final class PortfolioCrossAssetAllocation {
   }
   static Map<String,Object> collect(JdbcTemplate jdbc,List<Map<String,Object>> rows,
       Map<String,Map<PortfolioEquityCorrelation.Interval,Double>> equitySeries,LocalDate today){
+    if(rows.stream().noneMatch(row->"EQUITY".equals(row.get("asset_type")))||
+        rows.stream().noneMatch(row->"MUTUAL_FUND".equals(row.get("asset_type"))))
+      return unavailable("NO_MIXED_POSITIVE_HOLDINGS");
     Map<String,BigDecimal> values=new TreeMap<>();
     Map<String,String> symbols=new TreeMap<>();
     Map<String,Long> fundCodes=new TreeMap<>();
