@@ -58,6 +58,7 @@ class FinancialTrendsTests(unittest.TestCase):
         by={r["metric"]:r for r in result["items"]}
         self.assertEqual(by["OPERATING_PROFIT"]["latest_period"],"2025-03")
         self.assertEqual(by["OPERATING_PROFIT"]["cagr_3y_percent"],10)
+        self.assertEqual(by["OPERATING_PROFIT"]["annual_observations"],[{"period":f"{y}-03","value":v} for y,v in [(2022,100),(2023,110),(2024,121),(2025,133.1)]])
         self.assertEqual(by["OPERATING_CASH_FLOW"]["change_percent"],20)
         self.assertFalse(by["OPERATING_PROFIT"]["latest_period_may_be_stale"])
         self.assertTrue(summarize(sample,2026,as_of=date(2026,11,25))["items"][0]["latest_period_may_be_stale"])

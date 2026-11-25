@@ -7,7 +7,7 @@ but never use them as a verified current fair-value or qualification input.
 from math import isfinite
 import re
 
-VERSION="FUNDAMENTAL-EVIDENCE-1"
+VERSION="FUNDAMENTAL-EVIDENCE-2"
 ALIASES={
     "PE": {"p/e","pe","price to earnings","price earnings ratio","price to earnings ratio"},
     "PB": {"p/b","pb","price to book","price to book ratio"},
@@ -103,6 +103,76 @@ def _matched_ratio(trends,numerator,denominator,metric,scale):
             "source_metrics":[numerator,denominator],"sources":[a.get("source"),b.get("source")]}
 
 
+def _four_year_series(row):
+    """Only four consecutive, explicitly consolidated fiscal month-end periods."""
+    if not row or row.get("statement_type")!="consolidated" or row.get("period_basis")!="DECLARED_ANNUAL_MONTH_END":
+        return None
+    points=row.get("annual_observations")
+    if not isinstance(points,list) or not 4<=len(points)<=5:
+        return None
+    parsed=[]
+    for point in points:
+        if not isinstance(point,dict):
+            return None
+        period=point.get("period")
+        value=point.get("value")
+        if not isinstance(period,str) or not re.fullmatch(r"20[0-9]{2}-(0[1-9]|1[0-2])",period) or not _number(value):
+            return None
+        parsed.append((period,value))
+    if len({p for p,_ in parsed})!=len(parsed) or parsed!=sorted(parsed):
+        return None
+    parsed=parsed[-4:]
+    if (any(int(b[0][:4])-int(a[0][:4])!=1 or a[0][5:]!=b[0][5:] for a,b in zip(parsed,parsed[1:]))
+            or parsed[-1]!=(row.get("latest_period"),row["latest_value"])
+            or parsed[-2]!=(row.get("previous_period"),row["previous_value"])):
+        return None
+    return parsed
+
+
+def _multi_year(trends):
+    series={k:points for k in ("REVENUE","NET_PROFIT","OPERATING_PROFIT","OPERATING_CASH_FLOW")
+            if (points:=_four_year_series(trends.get(k))) is not None}
+    metrics=[]
+    warnings=[]
+    strengths=[]
+    for key,points in series.items():
+        values=[v for _,v in points]
+        increases=sum(b>a for a,b in zip(values,values[1:]))
+        decreases=sum(b<a for a,b in zip(values,values[1:]))
+        nonpositive=sum(v<=0 for v in values)
+        metrics.append({"metric":key,"unit":trends[key]["unit"],"observations":[{"period":p,"value":v} for p,v in points],
+            "increasing_years":increases,"decreasing_years":decreases,
+            "unchanged_years":3-increases-decreases,"nonpositive_years":nonpositive})
+        if decreases>=2:
+            warnings.append(key+"_MULTI_YEAR_DECLINES_REVIEW")
+        if nonpositive:
+            warnings.append(key+"_NONPOSITIVE_ANNUAL_OBSERVATION_REVIEW")
+        if increases==3 and nonpositive==0:
+            strengths.append(key+"_THREE_CONSECUTIVE_ANNUAL_INCREASES")
+    cash=series.get("OPERATING_CASH_FLOW")
+    profit=series.get("NET_PROFIT")
+    conversion=None
+    if (cash and profit and [p for p,_ in cash]==[p for p,_ in profit]
+            and _unit(trends["OPERATING_CASH_FLOW"]["unit"])==_unit(trends["NET_PROFIT"]["unit"])
+            and all(v>0 for _,v in profit)):
+        total_cash=sum(v for _,v in cash)
+        total_profit=sum(v for _,v in profit)
+        if _number(total_cash) and _number(total_profit) and total_profit>0:
+            ratio=total_cash/total_profit
+            if _number(ratio):
+                conversion={"first_period":profit[0][0],"last_period":profit[-1][0],
+                            "cumulative_operating_cash":total_cash,"cumulative_net_profit":total_profit,
+                            "unit":trends["NET_PROFIT"]["unit"],"cash_to_profit_ratio":round(ratio,4),
+                            "negative_cash_years":sum(v<0 for _,v in cash)}
+                if total_cash<total_profit:
+                    warnings.append("CUMULATIVE_OPERATING_CASH_BELOW_NET_PROFIT_REVIEW")
+    return {"status":"REPORTED_MULTI_YEAR_EVIDENCE" if metrics else "INSUFFICIENT_MATCHED_ANNUAL_HISTORY",
+            "metrics":metrics,"cash_conversion":conversion,
+            "missing_metrics":[k for k in ("REVENUE","NET_PROFIT","OPERATING_PROFIT","OPERATING_CASH_FLOW") if k not in series],
+            "warnings":warnings,"strengths":strengths,
+            "notice":"Four consecutive reported consolidated annual periods; descriptive growth consistency and cumulative operating cash versus net profit. Not free cash flow, a universal sector-quality threshold, forecast or independently verified business rating."}
+
+
 def summarize(report,year):
     trends=_trends(report,year)
     ratios=_ratio_rows(report)
@@ -130,6 +200,9 @@ def summarize(report,year):
         row=derived.get(key)
         if row and (row["latest_value"]<0 or row["change"]<0):
             warnings.append(key+"_DETERIORATION_REVIEW")
+    multi_year=_multi_year(trends)
+    warnings.extend(multi_year["warnings"])
+    strengths.extend(multi_year["strengths"])
     # Financial institutions and industrial firms differ structurally. Do not
     # apply a universal cash-conversion, leverage or sector valuation threshold.
     valuation=[ratios[k] for k in ("PE","PB","EV_EBITDA") if k in ratios]
@@ -139,7 +212,7 @@ def summarize(report,year):
     gaps.extend("MISSING_"+k for k in ALIASES if k not in ratios)
     gaps.extend("MISSING_"+k for k in ("NET_MARGIN","OPERATING_MARGIN","OPERATING_CASH_TO_PROFIT","REPORTED_LIABILITIES_TO_ASSETS") if k not in derived)
     return {"methodology":VERSION,"status":"REVIEW_REQUIRED" if warnings else "PARTIAL_EVIDENCE" if trends or ratios else "UNAVAILABLE",
-            "strengths":strengths,"warnings":warnings,"derived_metrics":list(derived.values()),
+            "strengths":strengths,"warnings":warnings,"multi_year_quality":multi_year,"derived_metrics":list(derived.values()),
             "sector_comparisons":list(ratios.values()),"valuation":{"status":"SECTOR_COMPARISON_ONLY" if valuation else "UNAVAILABLE",
               "comparisons":valuation,"fair_value":None,"scenario_status":"DATED_VALUATION_INPUTS_REQUIRED"},
             "gaps":gaps,

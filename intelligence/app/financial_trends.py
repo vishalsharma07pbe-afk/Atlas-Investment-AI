@@ -115,6 +115,7 @@ def summarize(report,latest_year,*,as_of=None):
                       "statement_type":scope,"previous_value":previous,"latest_value":value,
                       "change":round(change,6),"change_percent":round(percent,4) if percent is not None else None,
                       "cagr_3y_percent":cagr,"direction":direction,"source":block.get("source"),
+                      "annual_observations":[{"period":_label(p),"value":v} for p,v in points],
                       "latest_period_may_be_stale":((as_of.year-period[0])*12+as_of.month-period[1]>18) if period[1] else latest_year-period[0]>1})
     return {"status":"PARTIAL" if items and missing else "AVAILABLE" if items else "UNAVAILABLE",
             "items":items,"missing_metrics":missing,"notice":NOTICE}

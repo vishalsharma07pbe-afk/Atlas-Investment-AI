@@ -17,12 +17,15 @@ it("shows comparable fundamentals and valuation without claiming fair value",()=
  const missing={status:"UNAVAILABLE",data:null,source:null};
  const evidence:CompanyEvidence={isin:"INE002A01018",retrieved_at:"2026-11-24T10:00:00Z",available_sections:1,total_sections:8,notice:"Provider reported.",sections:{profile:missing,ratios:missing,income_statement:missing,cash_flow:missing,balance_sheet:missing,shareholding:missing,corporate_actions:missing,competitors:missing},fundamental_quality:{
  status:"REVIEW_REQUIRED",strengths:[],warnings:["NET_MARGIN_DETERIORATION_REVIEW"],
+ multi_year_quality:{status:"REPORTED_MULTI_YEAR_EVIDENCE",metrics:[{metric:"NET_PROFIT",unit:"INR crore",observations:[{period:"2023-03",value:10},{period:"2024-03",value:20},{period:"2025-03",value:30},{period:"2026-03",value:40}],increasing_years:3,decreasing_years:0,unchanged_years:0,nonpositive_years:0}],cash_conversion:{first_period:"2023-03",last_period:"2026-03",cumulative_operating_cash:40,cumulative_net_profit:100,unit:"INR crore",cash_to_profit_ratio:0.4,negative_cash_years:1},missing_metrics:[],notice:"Reported observations, not a forecast."},
  derived_metrics:[{metric:"NET_MARGIN",previous_year:2024,latest_year:2025,previous_value:20,latest_value:15,change:-5,unit:"PERCENT"}],
  sector_comparisons:[{metric:"PE",company:20,sector:10,unit:"RATIO",difference:10,premium_discount_percent:100,position:"ABOVE_SECTOR"}],
  valuation:{status:"SECTOR_COMPARISON_ONLY",fair_value:null,scenario_status:"DATED_VALUATION_INPUTS_REQUIRED"},gaps:["RATIO_OBSERVATION_PERIOD_UNVERIFIED"],notice:"Comparisons only."}};
  render(<CompanyEvidenceCard evidence={evidence}/>);
  expect(screen.getByText("Reported deterioration requires review")).toBeTruthy();
  expect(screen.getByText("100% premium")).toBeTruthy();
+ expect(screen.getByText("3 up / 0 down / 0 flat")).toBeTruthy();
+ expect(screen.getByText("0.4x")).toBeTruthy();
  expect(screen.getByText("FY2025: 15%")).toBeTruthy();
  expect(screen.getByText(/Fair value and valuation scenarios withheld/)).toBeTruthy();
 });
