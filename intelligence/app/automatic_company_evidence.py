@@ -14,6 +14,7 @@ import re
 from .p1_research import company_research
 from .financial_trends import summarize as financial_trends, earnings_evidence
 from .fundamental_quality import summarize as fundamental_quality
+from . import peer_research
 
 ISIN = re.compile(r"^IN[A-Z0-9]{10}$")
 HORIZONS = ("LONG_TERM", "SHORT_TERM", "SWING")
@@ -86,7 +87,7 @@ def normalize(report, isin, instant):
         raw=section.get("data") if section.get("status")=="AVAILABLE" else None
         data=None
         if key=="profile" and isinstance(raw,dict):
-            data={k:text(raw.get(k)) for k in ("sector","industry","company_name") if text(raw.get(k))}
+            data={k:text(raw.get(k)) for k in ("sector","industry","company_name","company_profile") if text(raw.get(k))}
         elif key=="ratios" and isinstance(raw,list):
             data=[]
             for r in raw[:50]:
@@ -121,7 +122,19 @@ def normalize(report, isin, instant):
                       "statement_type":text(raw.get("type")),"time_period":text(raw.get("time_period"))}
         elif key=="shareholding":
             data=history(raw)
-        elif key in ("corporate_actions","competitors") and isinstance(raw,list):
+        elif key=="competitors" and isinstance(raw,list):
+            data=[]
+            for row in raw[:30]:
+                if not isinstance(row,dict):
+                    continue
+                instrument=row.get("instrument_key")
+                match=peer_research.KEY.fullmatch(instrument) if isinstance(instrument,str) else None
+                name=text(row.get("name") or row.get("company_name"))
+                if match and match.group(2)!=isin:
+                    data.append({"name":name or match.group(2),"instrument_key":instrument,"sector":text(row.get("sector"))})
+                elif name and not instrument:
+                    data.append({"name":name,"sector":text(row.get("sector"))})
+        elif key=="corporate_actions" and isinstance(raw,list):
             data=[]
             for row in raw[:12]:
                 if not isinstance(row,dict):
@@ -156,14 +169,21 @@ def refresh(snapshot, connect, loader=company_research, instant=None):
         return
     with closing(connect()) as db, db:
         _table(db)
-        rows={r["isin"]:r for r in db.execute("SELECT isin,attempted_at,next_attempt_at,status FROM automatic_company_evidence")}
+        rows={r["isin"]:r for r in db.execute("SELECT isin,attempted_at,next_attempt_at,status,payload FROM automatic_company_evidence")}
         # Avoid repeated requests across the universe when the provider rejects access.
         if any(r["status"]=="UNAVAILABLE" and r["attempted_at"]>(instant-timedelta(hours=1)).isoformat() for r in rows.values()):
             return
         due=sorted((isin for isin in candidates if isin not in rows or rows[isin]["next_attempt_at"]<=stamp),
                    key=lambda isin:(rows[isin]["attempted_at"] if isin in rows else "",isin))
         if not due:
-            return
+            # A peer never displaces due primary company research; no additional
+            # provider requests per pass, and no recursive peer expansion.
+            peers=peer_candidates(rows,candidates,instant)
+            due=sorted((i for i in peers if i not in rows or rows[i]["next_attempt_at"]<=stamp),
+                       key=lambda i:(rows[i]["attempted_at"] if i in rows else "",i))
+            if not due:
+                return
+            candidates.update(peers)
         isin=due[0]
         claim=db.execute("""INSERT INTO automatic_company_evidence VALUES(?,?,?,'RUNNING',NULL)
             ON CONFLICT(isin) DO UPDATE SET attempted_at=excluded.attempted_at,
@@ -186,6 +206,35 @@ def refresh(snapshot, connect, loader=company_research, instant=None):
         db.execute("DELETE FROM automatic_company_evidence WHERE attempted_at<?",((instant-timedelta(days=30)).isoformat(),))
 
 
+def peer_candidates(rows,primary,instant):
+    result={}
+    oldest=(instant-timedelta(hours=24)).isoformat()
+    latest=instant.isoformat()
+    for isin in sorted(primary):
+        row=rows.get(isin)
+        if not row or row["status"] not in ("AVAILABLE","PARTIAL") or not oldest<=row["attempted_at"]<=latest or not row["payload"]:
+            continue
+        try:
+            report=json.loads(row["payload"])
+            if report.get("isin")!=isin:
+                continue
+            for peer,key in peer_research.selected(report):
+                if peer not in primary:
+                    result.setdefault(peer,key)
+                if len(result)>=peer_research.MAX_ROTATION:
+                    return result
+        except (ValueError,TypeError,AttributeError):
+            continue
+    return result
+
+
+def _enrich(report,today):
+    report["financial_trends"]=financial_trends(report,today.year,as_of=today)
+    report["reported_earnings"]=earnings_evidence(report,today)
+    report["fundamental_quality"]=fundamental_quality(report,today.year)
+    return report
+
+
 def attach(snapshot,connect,instant=None):
     snapshot["automatic_company_status"]="DISABLED_OR_NOT_AUTHORIZED"
     if not snapshot["enabled"] or not permitted():
@@ -196,13 +245,24 @@ def attach(snapshot,connect,instant=None):
         _table(db)
         rows={r["isin"]:r for r in db.execute("SELECT * FROM automatic_company_evidence WHERE status IN ('AVAILABLE','PARTIAL') AND attempted_at BETWEEN ? AND ?",
               ((instant-timedelta(hours=24)).isoformat(),instant.isoformat()))}
-    for item,isin in identify(snapshot):
+    today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
+    # Enrich only primary identities and their explicitly selected one-hop peers.
+    primary=list(identify(snapshot))
+    wanted={isin for _,isin in primary}
+    wanted.update(peer_candidates(rows,wanted,instant))
+    reports={}
+    for isin in wanted:
         row=rows.get(isin)
         if row and row["payload"]:
-            report=json.loads(row["payload"])
-            today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
-            report["financial_trends"]=financial_trends(report,today.year,as_of=today)
-            report["reported_earnings"]=earnings_evidence(report,today)
-            report["fundamental_quality"]=fundamental_quality(report,today.year)
+            try:
+                report=json.loads(row["payload"])
+                if report.get("isin")==isin:
+                    reports[isin]=_enrich(report,today)
+            except (ValueError,TypeError,AttributeError,KeyError,OverflowError):
+                continue
+    for item,isin in primary:
+        report=reports.get(isin)
+        if report:
+            report["peer_research"]=peer_research.summarize(report,reports)
             item["company_evidence"]=report
     return snapshot

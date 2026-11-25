@@ -209,6 +209,7 @@ def attach_conclusions(snapshot):
                         "historical_validation":"MATCHED_REPLAY_AVAILABLE" if replay_observed else "UNAVAILABLE",
                         "ai":"COMMENTARY_AVAILABLE" if reviews else "UNAVAILABLE",
                         "valuation":"SECTOR_COMPARISON_ONLY" if (quality.get("valuation") or {}).get("status")=="SECTOR_COMPARISON_ONLY" else "NOT_VERIFIED",
+                        "peer_comparison":(company.get("peer_research") or {}).get("status","UNAVAILABLE"),
                         "business_quality":quality.get("status","UNAVAILABLE"),"institutional":"STOCK_LEVEL_NOT_VERIFIED",
                         "market_regime":"NOT_VALIDATED"},
                     "reassessment_conditions":conditions,

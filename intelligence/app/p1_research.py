@@ -121,16 +121,11 @@ def company_research(isin: str, instrument_key: str | None = None) -> dict:
         "corporate_actions": _safe_section("corporate_actions", f"/v2/fundamentals/{encoded_isin}/corporate-actions",
             lambda: _get(f"/v2/fundamentals/{encoded_isin}/corporate-actions")),
     }
-    if instrument_key:
-        encoded_key = quote(instrument_key, safe="")
-        sections["competitors"] = _safe_section(
-            "competitors", f"/v2/fundamentals/{encoded_key}/competitors",
-            lambda: _get(f"/v2/fundamentals/{encoded_key}/competitors"))
-    else:
-        sections["competitors"] = {
-            "name": "competitors", "status": "UNAVAILABLE", "data": None,
-            "source": None, "error": "INSTRUMENT_KEY_REQUIRED",
-        }
+    # The documented competitor endpoint is ISIN based. Retain the optional
+    # instrument_key argument and response field for existing API callers.
+    sections["competitors"] = _safe_section(
+        "competitors", f"/v2/fundamentals/{encoded_isin}/competitors",
+        lambda: _get(f"/v2/fundamentals/{encoded_isin}/competitors"))
     available = sum(1 for value in sections.values() if value["status"] == "AVAILABLE")
     return {
         "isin": isin,

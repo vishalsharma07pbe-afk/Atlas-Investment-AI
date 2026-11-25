@@ -8,15 +8,16 @@ type DerivedMetric={previous_period?:string|null;latest_period?:string|null;metr
 type SectorComparison={metric:string;company:number;sector:number;unit:string;difference:number;premium_discount_percent:number|null;position:string};
 type FundamentalQuality={status:string;strengths:string[];warnings:string[];derived_metrics:DerivedMetric[];sector_comparisons:SectorComparison[];valuation:{status:string;fair_value:null;scenario_status:string};gaps:string[];notice:string};
 type ReportedEarnings={status:string;items:{metric:string;observations:{period:string;reported_value:number}[];latest_period_may_be_stale:boolean}[];valuation_eligible:boolean;notice:string};
-export type CompanyEvidence={reported_earnings?:ReportedEarnings;fundamental_quality?:FundamentalQuality;financial_trends?:FinancialTrends;isin:string;retrieved_at:string;available_sections:number;total_sections:number;notice:string;sections:{
- profile:Section<{sector?:string;industry?:string;company_name?:string}>;
+type PeerResearch={status:string;selected_peer_count:number;cached_same_sector_count:number;minimum_peers_per_metric:number;sample_limit:number;metrics:{metric:string;period:string;unit:string;company_value:number;peer_median:number;peer_count:number;peers_above:number;peers_below:number;peers:{isin:string;instrument_key:string;value:number}[]}[];notice:string};
+export type CompanyEvidence={peer_research?:PeerResearch;reported_earnings?:ReportedEarnings;fundamental_quality?:FundamentalQuality;financial_trends?:FinancialTrends;isin:string;retrieved_at:string;available_sections:number;total_sections:number;notice:string;sections:{
+ profile:Section<{sector?:string;industry?:string;company_name?:string;company_profile?:string}>;
  ratios:Section<Ratio[]>;
  income_statement:Section<{units:string|null;rows:Metric[]}>;
  cash_flow:Section<{units:string|null;rows:Metric[]}>;
  balance_sheet:Section<{units:string|null;rows:{period:string;total_asset:number|null;total_liability:number|null}[]}>;
  shareholding:Section<Metric[]>;
  corporate_actions:Section<{name:string;date:string|null}[]>;
- competitors:Section<{name:string;sector:string|null}[]>;
+ competitors:Section<{name:string;sector:string|null;instrument_key?:string}[]>;
 }};
 const words=(v:string)=>v.replace(/_/g," ").toLowerCase();
 const fmt=(n:number|null)=>n==null?"—":new Intl.NumberFormat("en-IN",{maximumFractionDigits:2}).format(n);
@@ -41,6 +42,10 @@ export default function CompanyEvidenceCard({evidence,status}:{evidence?:Company
  <details><summary>Outstanding fundamental evidence</summary><ul>{evidence.fundamental_quality.gaps.map(g=><li key={g}>{words(g)}</li>)}</ul></details>
  <p className="muted tiny">{evidence.fundamental_quality.notice}</p>
  </section>}
+ {s.profile.data?.company_profile&&<p>{s.profile.data.company_profile}</p>}
+ {evidence.peer_research&&<section aria-label="Peer-relative business research"><h4>Peer-relative business research</h4><p>{evidence.peer_research.cached_same_sector_count} / {evidence.peer_research.selected_peer_count} selected peers with cached same-sector evidence. Minimum {evidence.peer_research.minimum_peers_per_metric} comparable peers per metric.</p>
+ {evidence.peer_research.metrics.length?<div className="tablewrap"><table><thead><tr><th>Matched period</th><th>Company</th><th>Peer median</th><th>Sample comparison</th></tr></thead><tbody>{evidence.peer_research.metrics.map(m=><tr key={m.metric}><td>{words(m.metric)} · {m.period}</td><td>{fmt(m.company_value)}{m.unit==="PERCENT"?"%":" Cr"}</td><td>{fmt(m.peer_median)}{m.unit==="PERCENT"?"%":" Cr"}</td><td>{m.peers_above} above · {m.peers_below} below · {m.peer_count} peers</td></tr>)}</tbody></table></div>:<p>Insufficient comparable peer financial statements; no peer ranking.</p>}
+ {evidence.peer_research.metrics.length>0&&<details><summary>Underlying peer observations</summary>{evidence.peer_research.metrics.map(m=><div key={m.metric}><strong>{words(m.metric)}</strong><ul>{m.peers.map(p=><li key={p.isin}>{p.instrument_key}: {fmt(p.value)}{m.unit==="PERCENT"?"%":" Cr"}</li>)}</ul></div>)}</details>}<p className="muted tiny">{evidence.peer_research.notice}</p></section>}
  <h4>Annual financial trends</h4>
  {evidence.financial_trends?.items.length?<div className="tablewrap"><table><thead><tr><th>Metric</th><th>Prior year</th><th>Latest year</th><th>Annual change</th><th>3-year CAGR</th></tr></thead><tbody>{evidence.financial_trends.items.map(t=><tr key={t.metric}><td>{t.metric.replace(/_/g," ").toLowerCase()}<small> · {t.unit}</small></td><td>{t.previous_period??`FY${t.previous_year}`}: {fmt(t.previous_value)}</td><td>{t.latest_period??`FY${t.latest_year}`}: {fmt(t.latest_value)}{t.latest_period_may_be_stale?" (older period)":""}</td><td>{t.change_percent===null?"Not comparable":fmt(t.change_percent)+"%"} · {t.direction.toLowerCase()}</td><td>{t.cagr_3y_percent==null?"Not comparable":fmt(t.cagr_3y_percent)+"%"}</td></tr>)}</tbody></table></div>:<p>Comparable annual statement trends unavailable.</p>}
  {evidence.financial_trends&&<p className="muted tiny">{evidence.financial_trends.missing_metrics.length?("Missing comparisons: "+evidence.financial_trends.missing_metrics.map(m=>m.replace(/_/g," ").toLowerCase()).join(", ")+". "):""}{evidence.financial_trends.notice}</p>}

@@ -83,3 +83,22 @@ class CompanyEvidenceTests(unittest.TestCase):
         self.assertEqual(rows["REPORTED_LIABILITIES_TO_ASSETS"]["latest_period"],"2026-03")
         self.assertEqual(evidence["reported_earnings"]["items"][0]["observations"][-1]["reported_value"],12)
         self.assertFalse(evidence["reported_earnings"]["valuation_eligible"])
+
+    def test_peer_collection_reuses_existing_rotation_and_cache(self):
+        peers=["INE242A01010","INE009A01021","INE467B01029"]
+        calls=[]
+        def report(isin,key):
+            calls.append(isin)
+            return {"isin":isin,"sections":{
+                "profile":{"status":"AVAILABLE","data":{"sector":"Refineries","company_profile":"Business description"}},
+                "competitors":{"status":"AVAILABLE","data":[{"instrument_key":"NSE_EQ|"+p,"sector":"Refineries"} for p in peers]},
+                "income_statement":{"status":"AVAILABLE","data":{"type":"consolidated","time_period":"yearly","units_in":"crore",
+                    "income_statement":[{"category":"revenue","history":[{"period":"Mar 2025","value":100},{"period":"Mar 2026","value":120}]}]}}}}
+        for _ in range(5):
+            company.refresh(self.snapshot,research._connect,report,self.now)
+        self.assertEqual(calls,[self.isin]+sorted(peers))
+        company.attach(self.snapshot,research._connect,self.now)
+        evidence=self.item["company_evidence"]
+        self.assertEqual(evidence["peer_research"]["status"],"SAMPLED_PEER_COMPARISON")
+        self.assertEqual(evidence["peer_research"]["cached_same_sector_count"],3)
+        self.assertEqual(evidence["sections"]["competitors"]["data"][0]["instrument_key"],"NSE_EQ|"+peers[0])

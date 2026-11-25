@@ -148,8 +148,12 @@ def refresh(db_connect=connect,loader=backend_json,runner=ai_failover.grounded_r
         news._table(db)
         active_isins={isin for _,isin in active}
         active_keys={ex+"_EQ|"+isin for ex,isin in active}
-        for row in db.execute("SELECT isin FROM automatic_company_evidence").fetchall():
-            if row["isin"] not in active_isins:
+        records={row["isin"]:row for row in db.execute("SELECT isin,status,attempted_at,payload FROM automatic_company_evidence")}
+        # Keep only held identities and their current explicitly selected peers
+        # inside the private cache. Never move held-derived selections to public discovery.
+        retained=active_isins | set(company.peer_candidates(records,active_isins,instant))
+        for row in records.values():
+            if row["isin"] not in retained:
                 db.execute("DELETE FROM automatic_company_evidence WHERE isin=?",(row["isin"],))
         for row in db.execute("SELECT instrument_key FROM automatic_news_state").fetchall():
             if row["instrument_key"] not in active_keys:
