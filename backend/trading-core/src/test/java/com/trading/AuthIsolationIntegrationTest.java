@@ -249,7 +249,8 @@ class AuthIsolationIntegrationTest {
       .andExpect(jsonPath("$.rolling_performance[0].status").value("AVAILABLE_ESTIMATE"))
       .andExpect(jsonPath("$.rolling_performance[0].returnPercent").value(org.hamcrest.Matchers.closeTo(10.0,0.001)))
       .andExpect(jsonPath("$.rolling_performance[1].status").value("UNAVAILABLE_EXACT_START_DATE"))
-      .andExpect(jsonPath("$.weekly_risk_estimate.status").value("UNAVAILABLE_EXACT_WEEKLY_HISTORY"));
+      .andExpect(jsonPath("$.weekly_risk_estimate.status").value("UNAVAILABLE_EXACT_WEEKLY_HISTORY"))
+      .andExpect(jsonPath("$.benchmark_risk_estimate.attentionStatus").value("INSUFFICIENT_EVIDENCE"));
     mvc.perform(get("/api/v1/portfolio/history/performance").header("Authorization",b))
       .andExpect(status().isOk()).andExpect(jsonPath("$.rolling_performance[0].status").value("UNAVAILABLE_REQUIRES_TWO_VALUATIONS"))
       .andExpect(jsonPath("$.rolling_performance[0].returnPercent").isEmpty());
