@@ -268,6 +268,14 @@ def job_status():
 
 def _execute_job(job):
     """Dispatch existing bounded engines, with explicit evidence/config gates."""
+    if job=="FUND_COMPANY_EVIDENCE":
+        if not fund_portfolios.permitted() or not automatic_company_evidence.permitted():
+            return "DISABLED_OR_NOT_AUTHORIZED"
+        ids=fund_portfolios.research_identities()
+        if not ids:
+            return "WAITING_EVIDENCE"
+        automatic_company_evidence.refresh({"enabled":True,"sections":[]},_connect,explicit_isins=ids)
+        return "PASS_COMPLETED"
     if job=="FUND_PORTFOLIOS":
         if not fund_portfolios.permitted():
             return "DISABLED_OR_NOT_AUTHORIZED"
