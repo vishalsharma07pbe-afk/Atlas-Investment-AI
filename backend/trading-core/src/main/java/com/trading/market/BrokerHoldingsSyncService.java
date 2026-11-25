@@ -2,6 +2,7 @@ package com.trading.market;
 
 import java.util.*;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Service;
 public class BrokerHoldingsSyncService {
   private final JdbcTemplate jdbc;
   private final UpstoxFeedService stocks;
+  @Value("${atlas.broker.holdings.enabled:true}") boolean enabled;
   public BrokerHoldingsSyncService(JdbcTemplate jdbc,UpstoxFeedService stocks){
     this.jdbc=jdbc;this.stocks=stocks;
   }
@@ -51,7 +53,7 @@ public class BrokerHoldingsSyncService {
 
   @Scheduled(initialDelayString="${atlas.broker.holdings.initial-ms:45000}",
              fixedDelayString="${atlas.broker.holdings.poll-ms:60000}")
-  public void scheduled(){runOne();}
+  public void scheduled(){if(enabled)runOne();}
 
   public boolean runOne(){
     UUID claim=UUID.randomUUID();
