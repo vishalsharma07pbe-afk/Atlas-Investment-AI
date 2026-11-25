@@ -171,4 +171,42 @@ class RecommendationEngineTests(unittest.TestCase):
         for key,value in (("matched_windows",83),("minimum_peer_count",3),("above_median_percent",90),("median_difference_pp",float("nan")),("tied_windows",0)):
             self.assertIsNone(_rolling_peer_context({"rolling_peer_consistency":{**block,key:value}}))
 
+    def test_unified_assessment_keeps_reported_strengths_conflicts_and_gates_separate(self):
+        fund=strong(identifier="123456",expense_ratio=None,benchmark_hit_rate=None,worst_rolling_return=-8)
+        ranked=rank_candidates([fund],"LARGE_CAP",84,"HIGH")
+        rolling={"status":"MATCHED_SAMPLE_ONLY","matched_windows":100,"total_windows":105,
+                 "minimum_peer_count":4,"above_median_windows":30,"below_median_windows":60,"tied_windows":10,
+                 "above_median_percent":30.0,"median_difference_pp":-1.5,"worst_difference_pp":-10}
+        source=[{"scheme_code":123456,"sources":["AMFI","MFAPI"],"rolling_peer_consistency":rolling}]
+        disclosure=[{"scheme_code":"123456","conflicts":["BENCHMARK_CONFLICT"]}]
+        portfolio={"scheme_code":"123456","status":"SECONDARY_COMPOSITION_ONLY","exact_listed_equity_weight_percent":80,
+                   "underlying_research":{"multi_year_quality":{"status":"REPORTED_MULTI_YEAR_EXPOSURE",
+                        "assessed_weight_percent":65,"review_weight_percent":25},"relative_valuation":[{"metric":"PE"}]},
+                   "concentration_research":{"category":"LARGE_CAP","status":"EXACT_EQUITY_SUBSET_ONLY",
+                       "exact_equity_weight_percent":80,"largest_equity_weight_percent":12,
+                       "largest_classified_sector_weight_percent":40,"sector_classified_weight_percent":65,
+                       "missing_risk_evidence":["COMPLETE_SECTOR_AND_MARKET_CAP_COVERAGE_REQUIRED"]}}
+        result=_research_reports([fund],ranked,source,disclosure,[portfolio])[0]
+        assessment=result["research_assessment"]
+        self.assertEqual(assessment["status"],"REVIEW_REQUIRED")
+        self.assertIn("POSITIVE_REPORTED_THREE_YEAR_CAGR",{r["code"] for r in assessment["supporting_evidence"]})
+        codes={r["code"] for r in assessment["review_findings"]}
+        self.assertTrue({"BELOW_PEER_MEDIAN_IN_MAJORITY_OF_MATCHED_WINDOWS","REPORTED_MULTI_YEAR_BUSINESS_REVIEW_EXPOSURE",
+                         "LARGEST_EXACT_EQUITY_AT_LEAST_TEN_PERCENT","CLASSIFIED_SECTOR_AT_LEAST_THIRTY_PERCENT",
+                         "REPORTED_DISCLOSURE_CONFLICTS_REQUIRE_REVIEW","NEGATIVE_WORST_ROLLING_YEAR"}<=codes)
+        self.assertIn("PARTIAL_MULTI_YEAR_COMPANY_COVERAGE",assessment["next_evidence_checks"])
+        self.assertIn("BENCHMARK_HIT_RATE",assessment["next_evidence_checks"])
+        self.assertIn("DATED_UNDERLYING_VALUATION_EVIDENCE_REQUIRED",assessment["next_evidence_checks"])
+        self.assertEqual(result["top_performer"]["status"],"WITHHELD")
+        self.assertEqual(result["growth_outlook"]["status"],"WITHHELD")
+        for portfolios in ([{**portfolio,"scheme_code":"999999"}],[portfolio,portfolio]):
+            other=_research_reports([fund],ranked,source,[],portfolios)[0]["research_assessment"]
+            self.assertNotIn("REPORTED_MULTI_YEAR_BUSINESS_REVIEW_EXPOSURE",{r["code"] for r in other["review_findings"]})
+            self.assertIn("MATCHED_REPORTED_PORTFOLIO_REQUIRED",other["next_evidence_checks"])
+        bad={**portfolio,"underlying_research":{"multi_year_quality":{"status":"REPORTED_MULTI_YEAR_EXPOSURE",
+                 "assessed_weight_percent":20,"review_weight_percent":90}}}
+        other=_research_reports([fund],ranked,source,[],[bad])[0]["research_assessment"]
+        self.assertNotIn("REPORTED_MULTI_YEAR_BUSINESS_REVIEW_EXPOSURE",{r["code"] for r in other["review_findings"]})
+
+
 if __name__=="__main__":unittest.main()
