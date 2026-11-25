@@ -12,16 +12,24 @@ final class PortfolioHistoricalAllocation {
     double largestWeightPercent,double oneWayTurnoverPercent,List<Weight> weights){}
   static Map<String,Object> assess(Map<String,BigDecimal> values,Map<String,String> symbols,
       Map<String,Map<PortfolioEquityCorrelation.Interval,Double>> series,LocalDate today,boolean complete){
+    return calculate(values,symbols,series,today,complete,false);
+  }
+  static Map<String,Object> assessMixed(Map<String,BigDecimal> values,Map<String,String> symbols,
+      Map<String,Map<PortfolioEquityCorrelation.Interval,Double>> series,LocalDate today,boolean complete){
+    return calculate(values,symbols,series,today,complete,true);
+  }
+  private static Map<String,Object> calculate(Map<String,BigDecimal> values,Map<String,String> symbols,
+      Map<String,Map<PortfolioEquityCorrelation.Interval,Double>> series,LocalDate today,boolean complete,boolean mixed){
     var out=new LinkedHashMap<String,Object>();
-    out.put("notice","Historical fixed-weight direct-equity sleeve comparisons only. Each alternative uses the same matched observed return intervals and sample standard deviation per interval, not annualized volatility or forecast return. Assumes frictionless constant weights across the historical sample. Mutual funds, cash, taxes, fees and trading constraints are excluded. Lowest observed variability is in-sample, not an optimal or recommended allocation.");
+    out.put("notice",mixed?"Historical fixed-weight comparisons across held direct equities and exact Growth mutual fund schemes. Uses common return intervals from adjusted equity closes and single-source NAV series, not annualized volatility or a forecast. Equal weights refer to investment identities, not asset classes. Assumes frictionless constant weights. Cash outside recorded holdings, distributions, taxes, fees and execution constraints are excluded. Lowest observed variability is in-sample, not an optimal or recommended allocation.":"Historical fixed-weight direct-equity sleeve comparisons only. Each alternative uses the same matched observed return intervals and sample standard deviation per interval, not annualized volatility or forecast return. Assumes frictionless constant weights across the historical sample. Mutual funds, cash, taxes, fees and trading constraints are excluded. Lowest observed variability is in-sample, not an optimal or recommended allocation.");
     out.put("alternatives",List.of());
     int n=values.size();
     if(!complete||n<2||n>12||values.values().stream().anyMatch(v->v==null||v.signum()<=0||!Double.isFinite(v.doubleValue()))){
-      out.put("status","INSUFFICIENT_RECENT_EXACT_DIRECT_EQUITY_COVERAGE");return out;
+      out.put("status",mixed?"INSUFFICIENT_RECENT_EXACT_MIXED_COVERAGE":"INSUFFICIENT_RECENT_EXACT_DIRECT_EQUITY_COVERAGE");return out;
     }
     var ids=values.keySet().stream().sorted().toList();
-    if(ids.stream().anyMatch(id->!id.matches("INE[A-Z0-9]{9}")||!series.containsKey(id)||series.get(id).isEmpty())){
-      out.put("status","INSUFFICIENT_ADJUSTED_HISTORY");return out;
+    if(ids.stream().anyMatch(id->!(id.matches("INE[A-Z0-9]{9}")||(mixed&&id.matches("AMFI:[1-9][0-9]{5,8}")))||!series.containsKey(id)||series.get(id).isEmpty())){
+      out.put("status",mixed?"INSUFFICIENT_COMPARABLE_HISTORY":"INSUFFICIENT_ADJUSTED_HISTORY");return out;
     }
     var common=new HashSet<>(series.get(ids.getFirst()).keySet());
     for(String id:ids)common.retainAll(series.get(id).keySet());
@@ -76,8 +84,14 @@ final class PortfolioHistoricalAllocation {
     var lowest=alternatives.stream().min(Comparator.comparingDouble(Alternative::sampleVolatilityPercent)).orElseThrow();
     out.put("status","HISTORICAL_COMPARISON_AVAILABLE");out.put("observations",dates.size());
     out.put("first_date",dates.getFirst().start().toString());out.put("last_date",dates.getLast().end().toString());
-    out.put("direct_equity_value",values.values().stream().reduce(BigDecimal.ZERO,BigDecimal::add));
-    out.put("lowest_observed_variability",lowest.kind());out.put("alternatives",alternatives);
+    out.put(mixed?"recorded_value":"direct_equity_value",values.values().stream().reduce(BigDecimal.ZERO,BigDecimal::add));
+    out.put("lowest_observed_variability",lowest.kind());
+    if(mixed){
+      out.put("alternatives",alternatives.stream().map(a->Map.of(
+        "kind",a.kind(),"sampleMeanPercent",a.sampleMeanPercent(),"sampleVolatilityPercent",a.sampleVolatilityPercent(),
+        "largestWeightPercent",a.largestWeightPercent(),"oneWayTurnoverPercent",a.oneWayTurnoverPercent(),
+        "weights",a.weights().stream().map(w->Map.of("identity",w.isin(),"symbol",w.symbol(),"weightPercent",w.weightPercent())).toList())).toList());
+    }else out.put("alternatives",alternatives);
     return out;
   }
 }
