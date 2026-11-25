@@ -116,6 +116,7 @@ public class PortfolioReviewService {
     }catch(com.fasterxml.jackson.core.JsonProcessingException ignored){/* Invalid cache has no baseline. */}
     report=PortfolioThesisChanges.attach(thesis.enrich(report),previous,json,now);
     report=PortfolioFundThesisChanges.attach(report,previous,json,now);
+    report=PortfolioOwnershipChanges.attach(report,previous,json,now);
     report.put("thesis_monitor_version","ANNUAL_DIRECTION_V1");
     try{
       jdbc.update("""
