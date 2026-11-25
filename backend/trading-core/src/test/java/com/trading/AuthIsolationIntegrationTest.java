@@ -525,4 +525,27 @@ class AuthIsolationIntegrationTest {
       .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
   }
 
+  @Test void journalLotsReconcileOnlyOwnerTradesAndRefreshAfterJournalDeletion()throws Exception{
+    String a=create("lot-a-"+UUID.randomUUID()+"@example.test"),b=create("lot-b-"+UUID.randomUUID()+"@example.test");
+    String holding="{\"symbol\":\"LOTTEST\",\"assetType\":\"EQUITY\",\"quantity\":2,\"averageCost\":100,\"lastPrice\":120}";
+    for(String user:java.util.List.of(a,b))
+      mvc.perform(post("/api/v1/portfolio/holdings").header("Authorization",user)
+        .contentType(MediaType.APPLICATION_JSON).content(holding)).andExpect(status().isOk());
+    mvc.perform(get("/api/v1/portfolio/review").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.journal_lot_reconciliation.holdings[0].status").value("NO_RECORDED_TRADES"));
+    String day=LocalDate.now(com.trading.market.MarketCalendarService.IST).minusDays(400).toString();
+    String body="{\"symbol\":\"LOTTEST\",\"assetType\":\"EQUITY\",\"transactionType\":\"BUY\",\"transactionDate\":\""+day+"\",\"quantity\":2,\"unitPrice\":100,\"cashAmount\":200}";
+    var response=mvc.perform(post("/api/v1/portfolio/history/transactions").header("Authorization",a)
+      .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk()).andReturn().getResponse();
+    String transaction=mapper.readTree(response.getContentAsString()).path("id").asText();
+    mvc.perform(get("/api/v1/portfolio/review").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.journal_lot_reconciliation.reconciled_count").value(1))
+      .andExpect(jsonPath("$.journal_lot_reconciliation.holdings[0].openLots[0].calendarDaysHeld").value(400));
+    mvc.perform(get("/api/v1/portfolio/review").header("Authorization",b))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.journal_lot_reconciliation.holdings[0].status").value("NO_RECORDED_TRADES"));
+    mvc.perform(delete("/api/v1/portfolio/history/transactions/"+transaction).header("Authorization",a)).andExpect(status().isOk());
+    mvc.perform(get("/api/v1/portfolio/review").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.journal_lot_reconciliation.holdings[0].status").value("NO_RECORDED_TRADES"));
+  }
+
 }
