@@ -224,6 +224,24 @@ import org.springframework.transaction.annotation.Transactional;
   jdbc.update("INSERT INTO instrument_source_freshness(instrument_id,source_id,last_synced_at,latest_candle_at) VALUES (?,?,now(),(SELECT max(candle_time) FROM market_candles WHERE instrument_id=? AND timeframe=?)) ON CONFLICT(instrument_id,source_id) DO UPDATE SET last_synced_at=now(),latest_candle_at=EXCLUDED.latest_candle_at",instrument,source,instrument,timeframe);
   return count;
  }
+ /** Revalidate the persisted claim and credential revision under transaction
+  * locks before touching the existing reconciliation path. A changed token,
+  * revoked consent or superseded lease cannot authorize an old claim. */
+ @Transactional(rollbackFor=Exception.class)
+ public int syncClaimedHoldings(UUID user,UUID claim)throws Exception{
+  UUID locked=jdbc.queryForObject("SELECT id FROM atlas_users WHERE id=? FOR UPDATE",UUID.class,user);
+  if(!user.equals(locked))throw new IllegalStateException("Holding owner unavailable");
+  var valid=jdbc.queryForList("""
+    SELECT s.user_id FROM broker_holdings_sync s JOIN broker_credentials b
+      ON b.user_id=s.user_id AND b.broker_name='UPSTOX'
+    WHERE s.user_id=? AND s.enabled AND s.status='RUNNING' AND s.claim_id=?
+      AND s.lease_until>now() AND b.token_expires_at>now()
+      AND b.updated_at=s.credential_updated_at
+    FOR UPDATE OF s,b
+    """,UUID.class,user,claim);
+  if(valid.size()!=1)throw new IllegalStateException("Holdings sync claim unavailable");
+  return syncHoldings(user);
+ }
  @Transactional(rollbackFor=Exception.class)
  public int syncHoldings(UUID user)throws Exception{
   UUID locked=jdbc.queryForObject("SELECT id FROM atlas_users WHERE id=? FOR UPDATE",UUID.class,user);
