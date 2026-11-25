@@ -281,3 +281,17 @@ it("shows combined funding components without treating unknown fund tax as zero"
  expect(screen.getByText("Conditional funding only.")).toBeTruthy();
  expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+it("shows automatic no-sale monthly contribution research without asking for a budget",async()=>{
+ const holding={id:1,symbol:"TEST",asset_type:"EQUITY",exchange:"NSE",status:"MONITOR",weight_percent:100,recorded_return_percent:1,evidence_date:null,history_count:0,change_20_observations_percent:null,recent_peak_change_percent:null,findings:[],missing_evidence:[]};
+ const monthly_contribution_research={status:"MONTHLY_ILLUSTRATIONS_AVAILABLE",plans:[{kind:"NEW_DISTINCT_IDENTITIES",months:12,hypotheticalNewIdentities:5,monthlyContribution:250,totalContribution:3000,monthlyChargeAt50Bps:1.25,monthlyCashAt50Bps:251.25,midpointLargestPercent:40,midpointTopThreePercent:64,finalLargestPercent:25,finalTopThreePercent:55,meetsIllustrativeLimits:true,allocations:[{identity:"HYPOTHETICAL:1",label:"New identity 1",monthlyAmount:50}]}],notice:"No assumed budget."};
+ const diversification={status:"CLASSIFIED_PRICED_HOLDINGS",unpriced_count:0,unresolved_identity_count:0,resolved_identity_count:1,top_three_resolved_weight_percent:100,asset_exposure:[],direct_equity_sector_exposure:[],fund_category_exposure:[],sector_coverage_percent:100,fund_category_coverage_percent:100,review_prompts:[],notice:"Recorded prices.",monthly_contribution_research};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-25T10:00:00Z",holding_count:1,attention_count:0,data_gap_count:0,notice:"Research only",holdings:[holding],diversification})})));
+ render(<PortfolioDoctor revision={0} onSettings={()=>{}}/>);
+ expect(await screen.findByRole("heading",{name:"Automatic monthly contribution research"})).toBeTruthy();
+ expect(screen.getByText("₹251.25")).toBeTruthy();
+ expect(screen.getByText(/25.0000% \/ 55.0000% · Within illustrative limits/)).toBeTruthy();
+ expect(screen.getByText("New identity 1: ₹50")).toBeTruthy();
+ expect(screen.getByText("No assumed budget.")).toBeTruthy();
+ expect(fetch).toHaveBeenCalledTimes(1);
+});

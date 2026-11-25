@@ -348,6 +348,7 @@ class AuthIsolationIntegrationTest {
       .andExpect(jsonPath("$.fund_thesis_changed_count").value(0))
       .andExpect(jsonPath("$.fund_thesis_attention_count").value(0))
       .andExpect(jsonPath("$.diversification.allocation_research.status").value("INSUFFICIENT_RECENT_EXACT_VALUATIONS"))
+      .andExpect(jsonPath("$.diversification.monthly_contribution_research.status").value("INSUFFICIENT_RECENT_EXACT_VALUATIONS"))
       .andExpect(jsonPath("$.diversification.exposure_stress.status").value("PARTIAL_SCENARIO_COVERAGE"))
       .andExpect(jsonPath("$.equity_correlation.historical_allocation.status").value("INSUFFICIENT_RECENT_EXACT_DIRECT_EQUITY_COVERAGE"))
       .andExpect(jsonPath("$.equity_correlation.cross_asset_allocation.status").value("NO_MIXED_POSITIVE_HOLDINGS"))

@@ -89,8 +89,13 @@ final class PortfolioDiversification {
   out.put("review_prompts",prompts);
   out.put("concentration_observations",concentration);
   boolean recent=holdings.stream().allMatch(h->Boolean.TRUE.equals(h.get("recorded_valuation_recent")));
-  out.put("allocation_research",PortfolioAllocationResearch.assess(ranked.stream().map(Position::value).toList(),
-    total,recent&&unpriced==0&&unresolved==0));
+  var allocation=PortfolioAllocationResearch.assess(ranked.stream().map(Position::value).toList(),
+    total,recent&&unpriced==0&&unresolved==0);
+  out.put("allocation_research",allocation);
+  out.put("monthly_contribution_research",PortfolioMonthlyContributions.assess(identities.entrySet().stream()
+    .map(e->new PortfolioMonthlyContributions.Identity(e.getKey(),e.getValue().label(),e.getValue().value())).toList(),
+    total,allocation,recent&&unpriced==0&&unresolved==0&&identities.keySet().stream()
+      .allMatch(id->id.matches("ISIN:INE[A-Z0-9]{9}|AMFI:[1-9][0-9]{5,8}"))));
   out.put("exposure_stress",PortfolioExposureStress.assess(total,assets,identities.entrySet().stream()
     .map(e->new PortfolioExposureStress.Exposure(e.getKey(),e.getValue().label(),e.getValue().value())).toList(),
     sectors,recent&&unpriced==0,unresolved==0,knownEquity.compareTo(directEquity)==0));
