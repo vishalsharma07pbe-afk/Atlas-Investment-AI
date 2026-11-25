@@ -190,6 +190,31 @@ class LiveFeedsDatabaseIntegrationTest {
   }finally{autoSync.preference(owner,false);}
  }
 
+ @Test void automaticSyncRecoversExpiredClaimAndRetainsRetryBackoff()throws Exception{
+  UUID owner=UUID.randomUUID();
+  db.update("INSERT INTO atlas_users(id,email,password_hash) VALUES (?,'sync-lease-owner@example.test','test')",owner);
+  db.update("""
+    INSERT INTO broker_credentials(user_id,broker_name,encrypted_access_token,iv_nonce,token_expires_at,key_version)
+    VALUES (?,'UPSTOX',decode('01','hex'),decode(repeat('00',12),'hex'),now()+interval '1 hour',1)
+    """,owner);
+  when(vault.decrypt(owner,"UPSTOX")).thenReturn("lease-test-token");
+  when(http.text(contains("long-term-holdings"),eq("lease-test-token"),anyInt()))
+    .thenThrow(new FeedHttp.ProviderHttpException(429));
+  try{
+   autoSync.preference(owner,true);
+   db.update("""
+     UPDATE broker_holdings_sync s SET status='RUNNING',claim_id=?,lease_until=now()-interval '1 second',
+       next_attempt_at=now()-interval '1 second',credential_updated_at=b.updated_at
+     FROM broker_credentials b WHERE s.user_id=? AND b.user_id=s.user_id
+     """,UUID.randomUUID(),owner);
+   assertThat(autoSync.status(owner)).containsEntry("status","RECOVERY_PENDING");
+   assertThat(autoSync.runOne()).isTrue();
+   assertThat(autoSync.status(owner)).containsEntry("status","RETRY").containsEntry("error_code","PROVIDER_RATE_LIMITED");
+   assertThat(autoSync.runOne()).isFalse();
+   assertThat(db.queryForObject("SELECT next_attempt_at>now() FROM broker_holdings_sync WHERE user_id=?",Boolean.class,owner)).isTrue();
+   verify(http,times(1)).text(contains("long-term-holdings"),eq("lease-test-token"),anyInt());
+  }finally{autoSync.preference(owner,false);}
+ }
  @Test void staleOrRevokedHoldingsSyncClaimCannotAccessBroker()throws Exception{
   UUID owner=UUID.randomUUID();
   db.update("INSERT INTO atlas_users(id,email,password_hash) VALUES (?,'revoked-sync-owner@example.test','test')",owner);
