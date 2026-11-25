@@ -31,6 +31,9 @@ type Performance={
   rolling_performance?:RollingWindow[];
   weekly_risk_estimate?:WeeklyRisk;
   benchmark_reference?:string;
+  benchmark_eligible_observation_count?:number;
+  benchmark_latest_eligible_date?:string|null;
+  benchmark_history_status?:string;
   rolling_methodology?:string;
 };
 
@@ -97,6 +100,7 @@ export default function PortfolioPerformanceHistory({revision=0}:{revision?:numb
     {performance.rolling_performance&&<section aria-label="Trailing portfolio performance">
       <h3>Trailing portfolio returns and benchmark reference</h3>
       <p className="muted tiny">{performance.benchmark_reference} · Price reference only, not total return or a personalized benchmark.</p>
+      {performance.benchmark_history_status&&<p className="muted tiny">{performance.benchmark_history_status==="STORED_OBSERVATIONS_AVAILABLE"?`${performance.benchmark_eligible_observation_count??0} eligible stored index dates in the portfolio history window · latest ${performance.benchmark_latest_eligible_date??"unknown"}. Coverage does not guarantee matched benchmark endpoints.`:"No eligible index history for this portfolio window. Automatic collection requires authorized data access and a stored exchange calendar."}</p>}
       <div className="portfolio-history-metrics">
       {performance.rolling_performance.map(window=><div key={window.days}><small>{window.days} DAYS</small><strong>{percent(window.returnPercent)}</strong>
         <span>Adjusted drawdown: {percent(window.drawdownPercent)}</span>
