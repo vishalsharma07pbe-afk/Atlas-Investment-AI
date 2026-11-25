@@ -76,3 +76,12 @@ it("shows independent international observations and unavailable instruments",as
  expect(screen.getByText("+1.50% / — / —")).toBeTruthy();
  expect(screen.getByText("disabled or not authorized")).toBeTruthy();
 });
+
+it("shows integrated global evidence coverage without a composite market prediction",async()=>{
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[],global_context:{status:"PARTIAL",available_count:1,total_count:17,groups:[{group:"CURRENCIES",available_count:1,total_count:6,items:[{key:"USD_INR",label:"USD/INR",source:"ECB derived cross-rate",as_of:"2026-11-24",change:{start_date:"2026-11-17",end_date:"2026-11-24",value:1.2,unit:"PERCENT"}}]}],notice:"Not synchronized or a forecast."}})})));
+ render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}}>{null}</AutonomousOverview>);
+ expect(await screen.findByRole("region",{name:"Integrated global research"})).toBeTruthy();
+ expect(screen.getByText("1/17 dated indicators")).toBeTruthy();
+ expect(screen.getByText("+1.20% over 5 observed dates")).toBeTruthy();
+ expect(screen.getByText("Not synchronized or a forecast.")).toBeTruthy();
+});

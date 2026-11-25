@@ -189,3 +189,14 @@ it("shows unusual price volume research separately from technical picks",async()
  expect(screen.getByText(/3× preceding median volume/)).toBeTruthy();
  expect(screen.getByText("Technical watch candidates")).toBeTruthy();
 });
+
+it("shows sector research questions separately from qualification",async()=>{
+ const item={...candidate,global_exposure:{status:"SECTOR_QUESTIONS_ONLY",sector:"Information Technology",questions:[{factor:"USD_INR",indicator:"USD/INR",as_of:"2026-11-23",change:{start_date:"2026-11-16",end_date:"2026-11-23",value:2,unit:"PERCENT"},question:"Check actual export revenue and currency hedges."}],missing_factors:["NASDAQCOM"],notice:"No company sensitivity established."}};
+ const market={...section,result:{...section.result,horizons:{...section.result.horizons,SWING:{...section.result.horizons.SWING,candidates:[item]}}}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[market]})})));
+ render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+ fireEvent.click(await screen.findByText("Global sector exposure research"));
+ expect(screen.getByText("Check actual export revenue and currency hedges.")).toBeTruthy();
+ expect(screen.getByText(/Missing relevant evidence: nasdaqcom/)).toBeTruthy();
+ expect(screen.getByText(/event risk not verified/)).toBeTruthy();
+});
