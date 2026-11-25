@@ -69,6 +69,19 @@ class DataReadinessTests(unittest.TestCase):
         self.assertEqual(result["research_jobs"]["jobs"][0]["status"],"PASS_COMPLETED")
         self.assertEqual([row["status"] for row in result["backend_evidence"]],["RECENT_LOCAL_EVIDENCE"]*3)
 
+    def test_public_feed_schedule_only_exposes_fixed_job_fields(self):
+        jobs=[{"provider":"UPSTOX","status":"RETRY","attempts":2,"interruptions":1,
+               "next_attempt_at":NOW.isoformat(),"error_code":"PROVIDER_RATE_LIMITED","token":"not public"},
+              {"provider":"AMFI","status":"SUCCESS","attempts":1,"interruptions":0,
+               "last_success_at":NOW.isoformat(),"error_code":"private provider message"}]
+        result=data_readiness.public_feed_schedule({"scheduledFeedsEnabled":True,"publicFeedSchedule":jobs})
+        self.assertEqual(result["status"],"PERSISTED_PUBLIC_FEED_SCHEDULE")
+        self.assertTrue(result["enabled"])
+        self.assertNotIn("token",result["jobs"][0])
+        self.assertIsNone(result["jobs"][1]["error_code"])
+        self.assertEqual(result["jobs"][0]["error_code"],"PROVIDER_RATE_LIMITED")
+        self.assertEqual(data_readiness.public_feed_schedule({"publicFeedSchedule":[jobs[0],jobs[0]]})["status"],"UNAVAILABLE")
+
     def test_fresh_tick_not_configuration_is_required(self):
         from types import SimpleNamespace
         from app.upstox_quote_worker import quote_worker

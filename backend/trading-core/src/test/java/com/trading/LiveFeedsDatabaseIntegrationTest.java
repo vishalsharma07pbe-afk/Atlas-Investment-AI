@@ -386,6 +386,37 @@ class LiveFeedsDatabaseIntegrationTest {
   }finally{org.springframework.test.util.ReflectionTestUtils.setField(discovery,"accessToken","");}
  }
 
+ @Test
+ @org.springframework.transaction.annotation.Transactional
+ void publicCatalogJobsDeduplicateRecoverAndIsolateProviders()throws Exception{
+  db.update("UPDATE public_feed_schedule SET status='IDLE',attempts=0,claim_id=NULL,lease_until=NULL,next_attempt_at=now(),error_code=NULL");
+  var stockMock=mock(UpstoxFeedService.class);
+  var fundMock=mock(AmfiFeedService.class);
+  var scheduler=new FeedRefreshScheduler(db,stockMock,fundMock,mock(MarketCalendarService.class),
+    new org.springframework.transaction.support.TransactionTemplate(
+      new org.springframework.jdbc.datasource.DataSourceTransactionManager(Objects.requireNonNull(db.getDataSource()))));
+  when(stockMock.syncMaster()).thenThrow(new FeedHttp.ProviderHttpException(429,600)).thenReturn(3);
+  when(fundMock.refresh()).thenReturn(5);
+  assertThat((Boolean)org.springframework.test.util.ReflectionTestUtils.invokeMethod(scheduler,"attempt","UPSTOX","MASTER",false)).isTrue();
+  assertThat(db.queryForMap("SELECT status,attempts,error_code FROM public_feed_schedule WHERE provider='UPSTOX'"))
+    .containsEntry("status","RETRY").containsEntry("attempts",1).containsEntry("error_code","PROVIDER_RATE_LIMITED");
+  assertThat(db.queryForObject("SELECT next_attempt_at>=now()+interval '599 seconds' FROM public_feed_schedule WHERE provider='UPSTOX'",Boolean.class)).isTrue();
+  assertThat((Boolean)org.springframework.test.util.ReflectionTestUtils.invokeMethod(scheduler,"attempt","UPSTOX","MASTER_AUTO",false)).isFalse();
+  assertThat((Boolean)org.springframework.test.util.ReflectionTestUtils.invokeMethod(scheduler,"attempt","AMFI","NAV",false)).isTrue();
+  assertThat((Boolean)org.springframework.test.util.ReflectionTestUtils.invokeMethod(scheduler,"attempt","AMFI","NAV_AUTO",false)).isFalse();
+  // Simulate an interrupted persisted run, then recover it through the retry path.
+  UUID old=UUID.randomUUID();
+  db.update("UPDATE public_feed_schedule SET status='RUNNING',claim_id=?,lease_until=now()-interval '1 second',next_attempt_at=now()-interval '1 second' WHERE provider='UPSTOX'",old);
+  db.update("INSERT INTO market_provider_runs(provider,job_name,status,claim_id) VALUES ('UPSTOX','MASTER_RETRY','RUNNING',?)",old);
+  assertThat((Boolean)org.springframework.test.util.ReflectionTestUtils.invokeMethod(scheduler,"attempt","UPSTOX","MASTER_RETRY",true)).isTrue();
+  assertThat(db.queryForMap("SELECT status,attempts,interruptions FROM public_feed_schedule WHERE provider='UPSTOX'"))
+    .containsEntry("status","SUCCESS").containsEntry("attempts",2);
+  assertThat(db.queryForObject("SELECT status FROM market_provider_runs WHERE claim_id=?",String.class,old)).isEqualTo("FAILED");
+  assertThat((Boolean)org.springframework.test.util.ReflectionTestUtils.invokeMethod(scheduler,"attempt","UPSTOX","MASTER_RETRY",true)).isFalse();
+  verify(stockMock,times(2)).syncMaster();
+  verify(fundMock,times(1)).refresh();
+ }
+
  @Test void providerHistoryDoesNotOverwriteAdjustedManualCandle()throws Exception{
   db.update("INSERT INTO instruments(exchange_id,symbol,series,source,isin,instrument_type) VALUES ((SELECT id FROM exchanges WHERE code='NSE'),'ADJUSTEDTEST','EQ','MANUAL_CSV','INE000A01003','EQ')");
   db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,instrument_type,isin) VALUES ('NSE_EQ|INE000A01003','NSE','ADJUSTEDTEST','EQ','INE000A01003')");

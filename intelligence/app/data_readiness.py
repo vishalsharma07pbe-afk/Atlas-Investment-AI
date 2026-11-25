@@ -89,6 +89,42 @@ def backend_evidence(health, now):
     return rows
 
 
+def public_feed_schedule(health):
+    """Allowlist only the fixed public job state; never pass through provider payloads."""
+    raw=health.get("publicFeedSchedule") if isinstance(health,dict) else None
+    if not isinstance(raw,list) or len(raw)!=2:
+        return {"status":"UNAVAILABLE","jobs":[]}
+    jobs=[]
+    seen=set()
+    for row in raw:
+        if not isinstance(row,dict):
+            return {"status":"UNAVAILABLE","jobs":[]}
+        provider=row.get("provider")
+        state=row.get("status")
+        if provider not in ("UPSTOX","AMFI") or provider in seen or state not in (
+                "IDLE","RUNNING","RETRY","SUCCESS","FAILED","RECOVERY_PENDING"):
+            return {"status":"UNAVAILABLE","jobs":[]}
+        seen.add(provider)
+        counts={k:row.get(k) for k in ("attempts","interruptions")}
+        if any(type(v) is not int or v<0 for v in counts.values()):
+            return {"status":"UNAVAILABLE","jobs":[]}
+        error=row.get("error_code")
+        safe_errors=("PROVIDER_RATE_LIMITED","PROVIDER_ACCESS_REJECTED","PROVIDER_HTTP_FAILED",
+                     "PROVIDER_TRANSPORT_FAILURE","INTERRUPTED_REQUEST","FEED_VALIDATION_OR_STORAGE_FAILED")
+        stamps={}
+        for key in ("last_attempt_at","last_success_at","next_attempt_at"):
+            value=row.get(key)
+            try:
+                dt=datetime.fromisoformat(value)
+                stamps[key]=dt.isoformat() if dt.tzinfo is not None else None
+            except (ValueError,TypeError,OverflowError):
+                stamps[key]=None
+        jobs.append({"provider":provider,"status":state,**counts,**stamps,
+                     "error_code":error if error in safe_errors else None})
+    return {"status":"PERSISTED_PUBLIC_FEED_SCHEDULE","jobs":jobs,
+            "enabled":health.get("scheduledFeedsEnabled") is True}
+
+
 def readiness(now: datetime | None = None, health_loader=None):
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
@@ -160,6 +196,7 @@ def readiness(now: datetime | None = None, health_loader=None):
         "research_sections": research_sections,
         "research_jobs": research_jobs,
         "provider_http_recovery": quote_recovery.status(now.timestamp()),
+        "public_feed_schedule":public_feed_schedule(health),
         "blockers": blockers,
         "datasets": datasets,
         "backend_evidence": provider_rows,

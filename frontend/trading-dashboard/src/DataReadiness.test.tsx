@@ -41,3 +41,16 @@ it("shows persistent provider cooldown separately from streaming verification",a
  expect(screen.getByText("NOT OBSERVED")).toBeTruthy();
  expect(screen.getByText(/Live feed: not verified/)).toBeTruthy();
 });
+
+it("shows separate automatic catalog recovery states",async()=>{
+ const public_feed_schedule={status:"PERSISTED_PUBLIC_FEED_SCHEDULE",enabled:true,jobs:[
+ {provider:"UPSTOX",status:"RETRY",attempts:2,interruptions:1,error_code:"PROVIDER_RATE_LIMITED",last_success_at:null,next_attempt_at:"2026-11-25T03:00:00Z"},
+ {provider:"AMFI",status:"SUCCESS",attempts:1,interruptions:0,error_code:null,last_success_at:"2026-11-25T02:30:00Z",next_attempt_at:null}]};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-25T02:30:00Z",provider_mode:"UPSTOX",automatic_research_enabled:true,live_market_data_connected:false,blockers:[],datasets:[],public_feed_schedule})})));
+ render(<DataReadiness/>);
+ expect(await screen.findByText("Automatic catalog synchronization")).toBeTruthy();
+ expect(screen.getByText("Upstox instruments")).toBeTruthy();
+ expect(screen.getByText("AMFI NAV")).toBeTruthy();
+ expect(screen.getByText("2 / 1")).toBeTruthy();
+ expect(screen.getByText(/Live feed: not verified/)).toBeTruthy();
+});
