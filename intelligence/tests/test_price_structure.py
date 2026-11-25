@@ -72,7 +72,13 @@ class PriceStructureTests(unittest.TestCase):
         self.assertGreater(a["illustrative_price_ceiling"],d["illustrative_price_ceiling"])
         self.assertAlmostEqual(b["illustrative_price_ceiling"],(121+2*89)*.997/(3*1.003),places=3)
         self.assertLess(b["stressed_reward_to_risk"],b["reward_to_risk"])
-        self.assertIsNone(b["stressed_price_ceiling"])
+        # The base-cost stressed ceiling remains just inside the bracket.
+        expected_stressed=(121+2*89*(100/120))*.997/(3*1.003)
+        self.assertAlmostEqual(b["stressed_price_ceiling"],expected_stressed,places=3)
+        self.assertGreater(b["stressed_price_ceiling"],89)
+        # Higher friction pushes the ceiling outside the bracket.
+        self.assertLess((121+2*89*(100/120))*.994/(3*1.006),89)
+        self.assertIsNone(d["stressed_price_ceiling"])
         self.assertFalse(b["reference_meets_stressed_ratio"])
 
     def test_sensitivity_withheld_without_verified_adjusted_bracket(self):
