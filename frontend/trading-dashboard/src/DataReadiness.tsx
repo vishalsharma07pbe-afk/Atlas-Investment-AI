@@ -1,7 +1,8 @@
 import {useEffect,useState} from "react";
 
 type Dataset={code:string;label:string;records:number|null;latest_observed_at:string|null;age:number|null;age_unit:string;freshness_threshold:number;status:string;ingestion_mode:string;independently_verified:boolean;automatic_collection_enabled:boolean;usable_as_live_market_data:boolean};
-type Readiness={generated_at:string;status:string;provider_mode:string;live_market_data_connected:boolean;automatic_research_enabled:boolean;actionable_recommendations_enabled:boolean;blockers:string[];datasets:Dataset[];backend_evidence?:Dataset[];research_sections?:{section:string;status:string;generated_at:string|null}[];notice:string};
+type ResearchJobs={status:string;jobs:{job:string;status:string;attempted_at:string|null;last_completed_at:string|null;next_due_at:string|null;consecutive_failures:number;interrupted_attempts:number;error_code:string|null}[];notice?:string};
+type Readiness={research_jobs?:ResearchJobs;generated_at:string;status:string;provider_mode:string;live_market_data_connected:boolean;automatic_research_enabled:boolean;actionable_recommendations_enabled:boolean;blockers:string[];datasets:Dataset[];backend_evidence?:Dataset[];research_sections?:{section:string;status:string;generated_at:string|null}[];notice:string};
 
 export default function DataReadiness(){
   const [data,setData]=useState<Readiness|null>(null);
@@ -34,6 +35,7 @@ export default function DataReadiness(){
           <td>{d.automatic_collection_enabled?"Automatic configured":d.ingestion_mode.replace(/_/g," ").toLowerCase()}</td>
         </tr>)}</tbody></table></div>
       {data.research_sections?.length?<div><h3>Research snapshot status</h3><div className="tablewrap"><table><thead><tr><th>Section</th><th>Status</th><th>Generated</th></tr></thead><tbody>{data.research_sections.map(row=><tr key={row.section}><td>{row.section.replace(/_/g," ")}</td><td>{row.status}</td><td>{row.generated_at?new Date(row.generated_at).toLocaleString("en-IN"):"Not yet generated"}</td></tr>)}</tbody></table></div></div>:null}
+      {data.research_jobs&&data.automatic_research_enabled&&<details><summary>Background research job diagnostics</summary><p>{data.research_jobs.status.replace(/_/g," ")}</p>{data.research_jobs.jobs.length>0&&<div className="tablewrap"><table><thead><tr><th>Job</th><th>State</th><th>Last completed pass</th><th>Next due</th><th>Retries / interruptions</th></tr></thead><tbody>{data.research_jobs.jobs.map(job=><tr key={job.job}><td>{job.job.replace(/_/g," ").replace("SECTION:","Snapshot · ")}</td><td>{job.status.replace(/_/g," ")}{job.error_code&&<small> · {job.error_code.replace(/_/g," ")}</small>}</td><td>{job.last_completed_at?new Date(job.last_completed_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"}):"—"}</td><td>{job.next_due_at?new Date(job.next_due_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"}):"—"}</td><td>{job.consecutive_failures} / {job.interrupted_attempts}</td></tr>)}</tbody></table></div>}<p className="muted tiny">{data.research_jobs.notice}</p></details>}
       {data.blockers.length>0&&<p><strong>Outstanding data checks:</strong> {data.blockers.map(x=>x.replace(/_/g," ")).join(" · ")}</p>}
       <p className="muted tiny">Fully qualified investment recommendations are not enabled by this status check.</p>
       <p>{data.notice}</p>

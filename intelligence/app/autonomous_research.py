@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from .market_client import backend_json
 from .screener import screen
 from .mutual_fund_recommendations import CATEGORIES, dashboard
-from . import daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
+from . import research_jobs, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
 
 SECTIONS = ("NSE", "BSE", *CATEGORIES)
 DEFAULT_INTERVAL = 900
@@ -250,72 +250,112 @@ def read_snapshot(include_ai=True):
     return snapshot
 
 
+def job_status():
+    enabled,_=config()
+    if not enabled:
+        return {"status":"DISABLED","jobs":[]}
+    return research_jobs.status(_connect,research_jobs.definitions(SECTIONS),now().timestamp())
+
+
+def _execute_job(job):
+    """Dispatch existing bounded engines, with explicit evidence/config gates."""
+    if job.startswith("SECTION:"):
+        section=job.split(":",1)[1]
+        if section not in SECTIONS:
+            raise ValueError("INVALID_RESEARCH_SECTION")
+        try:
+            result=market_snapshot(section) if section in ("NSE","BSE") else fund_snapshot(section)
+            _save(section,result)
+        except Exception:
+            _save(section)
+            raise
+        return "PASS_COMPLETED"
+    if job=="PORTFOLIO_REVIEW":
+        if not portfolio_thesis.enabled():
+            return "DISABLED_OR_NOT_AUTHORIZED"
+        portfolio_thesis.refresh()
+        return "PASS_COMPLETED"
+    if job=="INSTITUTIONAL_FLOWS":
+        if not automatic_institutional.permitted():
+            return "DISABLED_OR_NOT_AUTHORIZED"
+        automatic_institutional.refresh(_connect)
+        return "PASS_COMPLETED"
+    if job=="COMPANY_EVIDENCE" and not automatic_company_evidence.permitted():
+        return "DISABLED_OR_NOT_AUTHORIZED"
+    if job=="COMPANY_NEWS" and not automatic_news.permitted():
+        return "DISABLED_OR_NOT_AUTHORIZED"
+    if job=="AI_REVIEW" and (not automatic_ai_review.enabled() or not automatic_ai_review.providers()):
+        return "DISABLED_OR_NOT_AUTHORIZED"
+    snapshot=read_snapshot(False)
+    if not snapshot["enabled"]:
+        return "DISABLED_OR_NOT_AUTHORIZED"
+    # Previously published mature watches still need outcome evaluation even
+    # when today's discovery failed; new publication uses READY sections only.
+    if job=="WATCH_OUTCOMES":
+        watch_outcomes.refresh(snapshot,_connect)
+        return "PASS_COMPLETED"
+    if not any(s["section"] in ("NSE","BSE") and s["status"]=="READY" for s in snapshot["sections"]):
+        return "WAITING_EVIDENCE"
+    if job=="COMPANY_EVIDENCE":
+        automatic_company_evidence.refresh(snapshot,_connect)
+    elif job=="COMPANY_NEWS":
+        automatic_news.refresh(snapshot,_connect)
+    elif job=="STRATEGY_REPLAY":
+        automatic_strategy_validation.refresh(snapshot,_connect)
+    elif job=="AI_REVIEW":
+        automatic_company_evidence.attach(snapshot,_connect)
+        automatic_strategy_validation.read(_connect,snapshot=snapshot)
+        automatic_ai_review.refresh(snapshot,_connect)
+    else:
+        raise ValueError("UNKNOWN_RESEARCH_JOB")
+    return "PASS_COMPLETED"
+
+
+def run_one_job(interval):
+    """Claim one due job, run it outside the transaction, persist its result."""
+    claimed=research_jobs.claim(_connect,research_jobs.definitions(SECTIONS),now().timestamp())
+    if claimed is None:
+        return False
+    job,token=claimed
+    try:
+        outcome=_execute_job(job)
+    except Exception:
+        outcome="FAILED"
+    research_jobs.finish(_connect,job,token,now().timestamp(),interval,outcome)
+    return True
+
+
 class ResearchScheduler:
     def __init__(self):
-        self.task = None
-        self.stopping = None
+        self.task=None
+        self.stopping=None
 
     async def start(self):
-        enabled, interval = config()
+        enabled,interval=config()
         if enabled and self.task is None:
-            self.stopping = asyncio.Event()
-            self.task = asyncio.create_task(self._loop(interval))
+            self.stopping=asyncio.Event()
+            self.task=asyncio.create_task(self._loop(interval))
 
-    async def _loop(self, interval):
+    async def _loop(self,interval):
         while not self.stopping.is_set():
             try:
-                try:
-                    await asyncio.to_thread(automatic_institutional.refresh, _connect)
-                except Exception:
-                    pass  # Aggregate flows never block other research sections.
-                await asyncio.to_thread(refresh_once)
-                snapshot = await asyncio.to_thread(read_snapshot, False)
-                try:
-                    await asyncio.to_thread(watch_outcomes.refresh, snapshot, _connect)
-                except Exception:
-                    pass  # Outcome collection cannot block AI or deterministic research.
-                try:
-                    await asyncio.to_thread(automatic_company_evidence.refresh, snapshot, _connect)
-                except Exception:
-                    pass  # Company evidence must not block the existing research engine.
-                try:
-                    await asyncio.to_thread(automatic_news.refresh, snapshot, _connect)
-                except Exception:
-                    pass  # Provider news failure must not block research.
-                try:
-                    await asyncio.to_thread(portfolio_thesis.refresh)
-                except Exception:
-                    pass  # Private company research is independent of public discovery.
-                try:
-                    await asyncio.to_thread(automatic_strategy_validation.refresh, snapshot, _connect)
-                except Exception:
-                    pass  # Validation cannot block other research.
-                # Use the same cached evidence enrichment as the browser read
-                # path, before constructing allowlisted public AI evidence packs.
-                try:
-                    await asyncio.to_thread(automatic_company_evidence.attach, snapshot, _connect)
-                except Exception:
-                    pass
-                try:
-                    await asyncio.to_thread(automatic_strategy_validation.read, _connect, snapshot=snapshot)
-                except Exception:
-                    pass
-                await asyncio.to_thread(automatic_ai_review.refresh, snapshot, _connect)
+                worked=await asyncio.to_thread(run_one_job,interval)
             except Exception:
-                # Storage failures must not terminate future attempts.
-                pass
-            try:
-                await asyncio.wait_for(self.stopping.wait(), timeout=interval)
-            except asyncio.TimeoutError:
-                pass
+                # Storage outage: retry with bounded idle polling rather than spin.
+                worked=False
+            if not worked:
+                try:
+                    await asyncio.wait_for(self.stopping.wait(),timeout=research_jobs.POLL_SECONDS)
+                except asyncio.TimeoutError:
+                    pass
 
     async def stop(self):
         if self.task is not None:
             self.stopping.set()
-            # A thread cannot be forcibly cancelled safely. Wait for the current
-            # bounded pass, allowing the container shutdown timeout to apply.
+            # Do not cancel a worker thread mid-write. Stop after the current
+            # bounded job, not after the entire former serial research pass.
             await self.task
-            self.task = None
+            self.task=None
 
 
-scheduler = ResearchScheduler()
+scheduler=ResearchScheduler()

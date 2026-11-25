@@ -59,12 +59,14 @@ class DataReadinessTests(unittest.TestCase):
                 "upstoxDailyHistory":{"records":1000,"latest":"2026-11-12"}}
         with patch.dict("os.environ",{"ATLAS_AUTONOMOUS_RESEARCH_ENABLED":"true"}), \
              patch("app.autonomous_research.read_snapshot",return_value={"sections":[{"section":"NSE","status":"READY","generated_at":NOW.isoformat()}]}), \
+             patch("app.autonomous_research.job_status",return_value={"status":"PERSISTED_LOCAL_JOB_LEDGER","jobs":[{"job":"SECTION:NSE","status":"PASS_COMPLETED"}]}), \
              patch.object(data_readiness,"live_feed_observation",return_value=False):
             result=data_readiness.readiness(NOW,lambda _:health)
         self.assertTrue(result["automatic_research_enabled"])
         self.assertFalse(result["live_market_data_connected"])
         self.assertFalse(result["actionable_recommendations_enabled"])
         self.assertEqual(result["research_sections"][0]["status"],"READY")
+        self.assertEqual(result["research_jobs"]["jobs"][0]["status"],"PASS_COMPLETED")
         self.assertEqual([row["status"] for row in result["backend_evidence"]],["RECENT_LOCAL_EVIDENCE"]*3)
 
     def test_fresh_tick_not_configuration_is_required(self):
