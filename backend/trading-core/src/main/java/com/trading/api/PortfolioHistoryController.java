@@ -3,6 +3,7 @@ package com.trading.api;
 import java.math.*;
 import java.time.LocalDate;
 import com.trading.market.MarketCalendarService;
+import com.trading.market.PortfolioFlowAdjustedPerformance;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import org.springframework.http.HttpStatus;
@@ -104,6 +105,7 @@ public class PortfolioHistoryController {
     int afterTerminal=0,externalCount=0;
     boolean interveningFlow=false;
     List<CashFlow> flows=new ArrayList<>();
+    List<PortfolioFlowAdjustedPerformance.Flow> adjustmentFlows=new ArrayList<>();
     for(Map<String,Object> row:transactions){
       String type=(String)row.get("transaction_type");
       // DIVIDEND and FEE represent explicitly external cash flows in the
@@ -111,9 +113,10 @@ public class PortfolioHistoryController {
       if(!Set.of("DEPOSIT","WITHDRAWAL","DIVIDEND","FEE").contains(type))continue;
       LocalDate date=day(row.get("transaction_date"));
       if(terminal==null||date.isAfter(terminal)){afterTerminal++;continue;}
-      double cash=((BigDecimal)row.get("cash_amount")).doubleValue();
-      if("DEPOSIT".equals(type)||"FEE".equals(type))cash=-cash;
-      flows.add(new CashFlow(date,cash));externalCount++;
+      BigDecimal cash=(BigDecimal)row.get("cash_amount");
+      if("DEPOSIT".equals(type)||"FEE".equals(type))cash=cash.negate();
+      flows.add(new CashFlow(date,cash.doubleValue()));externalCount++;
+      adjustmentFlows.add(new PortfolioFlowAdjustedPerformance.Flow(date,cash.negate()));
       if(firstSnapshot!=null&&date.isAfter(firstSnapshot))interveningFlow=true;
     }
     String xirrStatus="UNAVAILABLE_REQUIRES_EXTERNAL_CASH_FLOWS_AND_VALUATION";
@@ -136,7 +139,19 @@ public class PortfolioHistoryController {
         drawdownStatus=drawdown==null?"UNAVAILABLE_INVALID_VALUATION_HISTORY":"AVAILABLE";
       }
     }
+    var adjusted=PortfolioFlowAdjustedPerformance.calculate(dated.stream()
+      .map(row->new PortfolioFlowAdjustedPerformance.Observation(day(row.get("valuation_date")),
+        (BigDecimal)row.get("total_value"),complete(row))).toList(),adjustmentFlows);
     Map<String,Object> result=new LinkedHashMap<>();
+    result.put("flow_adjusted_status",adjusted.status());
+    result.put("flow_adjusted_return_percent",adjusted.returnPercent()==null?null:round(adjusted.returnPercent()));
+    result.put("flow_adjusted_drawdown_percent",adjusted.drawdownPercent()==null?null:round(adjusted.drawdownPercent()));
+    result.put("flow_adjusted_interval_count",adjusted.intervals());
+    result.put("flow_adjusted_cash_flow_count",adjusted.flowCount());
+    result.put("flow_adjusted_max_interval_days",adjusted.maximumIntervalDays());
+    result.put("flow_adjusted_from",adjusted.from());
+    result.put("flow_adjusted_through",adjusted.through());
+    result.put("flow_adjusted_methodology","Linked Modified Dietz estimate, not exact time-weighted return. Dated external flows are weighted by remaining calendar days; first-date flows are opening capital, end-date flows occur after returns. Intervals over seven days, incomplete valuations and invalid capital bases are withheld. Externally paid fees follow the existing negative investor-flow convention. Holdings-only valuations and recorded ledger flows may omit cash, fees and transactions. Drawdown uses the estimated wealth index at observation dates.");
     result.put("transaction_count",transactions.size());result.put("snapshot_count",snapshots.size());
     result.put("external_cash_flow_count",externalCount);result.put("external_flows_after_valuation",afterTerminal);
     result.put("incomplete_snapshot_count",incomplete);result.put("future_snapshot_count",snapshots.size()-dated.size());
