@@ -8,23 +8,32 @@ type Performance={
   maximum_drawdown_percent:number|null;
   drawdown_status:string;
   methodology:string;
+  external_cash_flow_count?:number;
+  external_flows_after_valuation?:number;
+  incomplete_snapshot_count?:number;
+  future_snapshot_count?:number;
+  valuation_through?:string|null;
 };
 
 const empty:Performance={transaction_count:0,snapshot_count:0,xirr_percent:null,xirr_status:"UNAVAILABLE",maximum_drawdown_percent:null,drawdown_status:"UNAVAILABLE",methodology:""};
-const percent=(value:number|null)=>value==null?"Not enough history":`${value.toFixed(2)}%`;
+const percent=(value:number|null)=>value==null?"Unavailable":`${value.toFixed(2)}%`;
+const istToday=()=>new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+const statusText=(status:string)=>({UNAVAILABLE_INCOMPLETE_TERMINAL_VALUATION:"Latest valuation is incomplete.",UNAVAILABLE_AMBIGUOUS_OR_UNSUPPORTED_CASH_FLOWS:"Cash-flow sequence does not support a unique return within the calculation range.",UNAVAILABLE_EXTERNAL_FLOWS_REQUIRE_FLOW_ADJUSTED_HISTORY:"External flows require flow-adjusted history.",UNAVAILABLE_INCOMPLETE_VALUATION_HISTORY:"Historical valuations contain gaps.",UNAVAILABLE_INVALID_VALUATION_HISTORY:"Valuation history is invalid."} as Record<string,string>)[status]??"More dated evidence is needed.";
 
 export default function PortfolioPerformanceHistory({revision=0}:{revision?:number}){
   const [performance,setPerformance]=useState<Performance>(empty);
+  const [unavailable,setUnavailable]=useState(false);
   const [type,setType]=useState("DEPOSIT");
   const [amount,setAmount]=useState("");
-  const [date,setDate]=useState(()=>new Date().toISOString().slice(0,10));
+  const [date,setDate]=useState(()=>istToday());
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState("");
   const load=useCallback(async()=>{
     try{
       const response=await fetch("/api/v1/portfolio/history/performance",{cache:"no-store"});
-      if(response.ok)setPerformance(await response.json());
-    }catch{/* Keep an explicit unavailable state while offline. */}
+      if(!response.ok)throw new Error("Performance unavailable");
+      setPerformance(await response.json());setUnavailable(false);
+    }catch{setPerformance(empty);setUnavailable(true);}
   },[]);
   useEffect(()=>{void load();},[load,revision]);
   const snapshot=async()=>{
@@ -32,6 +41,8 @@ export default function PortfolioPerformanceHistory({revision=0}:{revision?:numb
     try{
       const response=await fetch("/api/v1/portfolio/history/snapshots/current",{method:"POST"});
       if(!response.ok)throw new Error("Could not record valuation");
+      const result=await response.json();
+      if(result.recorded===false)throw new Error("Valuation not recorded: prices are missing, aged or undated. Refresh holdings first.");
       setMessage("Today's valuation was recorded.");await load();
     }catch(error){setMessage(error instanceof Error?error.message:"Could not record valuation");}
     finally{setBusy(false);}
@@ -47,14 +58,16 @@ export default function PortfolioPerformanceHistory({revision=0}:{revision?:numb
   };
   return <section className="portfolio-history" aria-labelledby="portfolio-history-title">
     <div className="sectionhead"><div><small className="section-kicker">PERFORMANCE HISTORY</small><h2 id="portfolio-history-title">Returns &amp; drawdown</h2></div><button type="button" className="secondary" disabled={busy} onClick={()=>void snapshot()}>Record today&apos;s value</button></div>
-    <p className="muted tiny">Record dated valuations and external cash flows to calculate money-weighted return. Buying or selling a holding is not treated as money entering or leaving the portfolio.</p>
+    <p className="muted tiny">Record dated valuations and external cash flows to calculate money-weighted return. Buying or selling a holding is not treated as money entering or leaving the portfolio. Record dividends and fees here only when cash crosses the portfolio boundary; do not double count internal cash movements.</p>
+    {unavailable&&<p role="alert">Performance data is unavailable. Previously calculated figures have been cleared.</p>}
     <div className="portfolio-history-metrics">
-      <div><small>XIRR</small><strong>{percent(performance.xirr_percent)}</strong><span>{performance.transaction_count} cash-flow records</span></div>
-      <div><small>MAX DRAWDOWN</small><strong>{percent(performance.maximum_drawdown_percent)}</strong><span>{performance.snapshot_count} dated valuations</span></div>
+      <div><small>XIRR</small><strong>{percent(performance.xirr_percent)}</strong><span>{performance.external_cash_flow_count??performance.transaction_count} cash-flow records</span>{performance.xirr_percent==null&&<span>{statusText(performance.xirr_status)}</span>}</div>
+      <div><small>MAX DRAWDOWN</small><strong>{percent(performance.maximum_drawdown_percent)}</strong><span>{performance.snapshot_count} dated valuations</span>{performance.maximum_drawdown_percent==null&&<span>{statusText(performance.drawdown_status)}</span>}</div>
     </div>
+    {performance.valuation_through&&<p className="muted tiny">Performance through {performance.valuation_through} · {performance.external_flows_after_valuation??0} later external flows excluded · {performance.incomplete_snapshot_count??0} incomplete historical valuations · {performance.future_snapshot_count??0} future valuations excluded.</p>}
     <form className="portfolio-cashflow-form" onSubmit={event=>void saveFlow(event)}>
-      <label>Cash-flow type<select value={type} onChange={event=>setType(event.target.value)}><option value="DEPOSIT">Money added</option><option value="WITHDRAWAL">Money withdrawn</option><option value="DIVIDEND">Dividend received</option><option value="FEE">Fee paid</option></select></label>
-      <label>Date<input type="date" max={new Date().toISOString().slice(0,10)} value={date} onChange={event=>setDate(event.target.value)} required/></label>
+      <label>Cash-flow type<select value={type} onChange={event=>setType(event.target.value)}><option value="DEPOSIT">Money added</option><option value="WITHDRAWAL">Money withdrawn</option><option value="DIVIDEND">Dividend paid out to you</option><option value="FEE">Fee paid from outside portfolio</option></select></label>
+      <label>Date<input type="date" max={istToday()} value={date} onChange={event=>setDate(event.target.value)} required/></label>
       <label>Amount (₹)<input type="number" min="0.01" step="0.01" value={amount} onChange={event=>setAmount(event.target.value)} required/></label>
       <button type="submit" disabled={busy||!amount}>Save cash flow</button>
     </form>
