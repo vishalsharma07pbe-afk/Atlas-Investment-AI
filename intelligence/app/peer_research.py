@@ -5,7 +5,9 @@ same-sector peers with consolidated annual statements for identical periods
 and units. Never interpret sector market cap as company market cap or revenue
 scale as market share. No provider calls or private fields in this module.
 """
+from datetime import datetime,timedelta
 from math import isfinite
+from .fundamental_quality import ALIASES, _name
 from statistics import median
 import re
 
@@ -92,6 +94,82 @@ def _metric(report,key):
     return period,unit,value
 
 
+VALUATION_METRICS=("PE","PB","EV_EBITDA")
+
+
+def _industry(report):
+    block=report.get("sections",{}).get("profile",{})
+    value=(block.get("data") or {}).get("industry") if block.get("status")=="AVAILABLE" else None
+    return " ".join(value.casefold().split()) if isinstance(value,str) and value.strip() else None
+
+
+def _valuation_multiple(report,key):
+    """Provider-reported company multiple only; observation basis is unverified."""
+    block=report.get("sections",{}).get("ratios",{})
+    rows=block.get("data") if block.get("status")=="AVAILABLE" else None
+    source=block.get("source")
+    if not isinstance(rows,list) or not isinstance(source,dict) or source.get("provider")!="UPSTOX":
+        return None
+    isin=report.get("isin")
+    if not isinstance(isin,str) or not re.fullmatch(r"INE[A-Z0-9]{9}",isin) or source.get("endpoint")!=f"/v2/fundamentals/{isin}/key-ratios":
+        return None
+    try:
+        retrieved=datetime.fromisoformat(source["retrieved_at"])
+        if retrieved.tzinfo is None:
+            return None
+    except (ValueError,TypeError,KeyError,OverflowError):
+        return None
+    matches=[row for row in rows if isinstance(row,dict) and _name(row.get("name")) in ALIASES[key]]
+    if len(matches)!=1:
+        return None
+    value=matches[0].get("company_value")
+    if matches[0].get("unit")!="RATIO" or type(value) not in (int,float) or not isfinite(value) or value<=0:
+        return None
+    return value,retrieved
+
+
+def _valuation(report,compatible):
+    industry=_industry(report)
+    same_industry=[(isin,key,peer) for isin,key,peer in compatible if industry and _industry(peer)==industry]
+    metrics=[]
+    for metric in VALUATION_METRICS:
+        target=_valuation_multiple(report,metric)
+        if not target:
+            continue
+        value,stamp=target
+        matched=[]
+        for isin,key,peer in same_industry:
+            observation=_valuation_multiple(peer,metric)
+            if observation and abs(observation[1]-stamp)<=timedelta(hours=24):
+                matched.append({"isin":isin,"instrument_key":key,"value":observation[0],
+                                "retrieved_at":observation[1].isoformat()})
+        if len(matched)<3:
+            continue
+        stamps=[stamp]+[datetime.fromisoformat(row["retrieved_at"]) for row in matched]
+        if max(stamps)-min(stamps)>timedelta(hours=24):
+            continue
+        values=[row["value"] for row in matched]
+        mid=median(values)
+        premium=(value/mid-1)*100
+        if not isfinite(premium):
+            continue
+        metrics.append({"metric":metric,"company_value":value,"peer_median":mid,
+                        "peer_min":min(values),"peer_max":max(values),"peer_count":len(matched),
+                        "premium_discount_percent":round(premium,4),"company_retrieved_at":stamp.isoformat(),
+                        "observation_period":"UNVERIFIED","peers":matched})
+    quality=report.get("fundamental_quality") or {}
+    warnings=quality.get("warnings") or []
+    discounted=[m["metric"] for m in metrics if m["company_value"]<m["peer_median"]]
+    # A low multiple plus deterioration is a research prompt, never a value-trap diagnosis.
+    review="DISCOUNT_WITH_REPORTED_DETERIORATION_REVIEW" if discounted and warnings else None
+    return {"status":"UNDATED_PEER_MULTIPLES" if metrics else "INSUFFICIENT_COMPARABLE_MULTIPLES",
+            "same_industry_cached_count":len(same_industry),"metrics":metrics,
+            "discounted_metrics":discounted,"review_prompt":review,
+            "quality_status":quality.get("status","UNAVAILABLE"),
+            "observation_period_verified":False,"fair_value":None,"valuation_eligible":False,
+            "notice":"Positive provider-reported company multiples within a 24-hour retrieval window, not matched valuation dates or earnings bases. Same-sector and same-industry sample only; not an industry-wide ranking. A discount is not undervaluation, and a premium is not overvaluation. No price target or forecast."}
+
+
 def summarize(report,reports):
     peers=selected(report)
     compatible=[]
@@ -121,4 +199,5 @@ def summarize(report,reports):
     return {"status":"SAMPLED_PEER_COMPARISON" if metrics else "INSUFFICIENT_COMPARABLE_PEERS",
             "selected_peer_count":len(peers),"cached_same_sector_count":len(compatible),
             "minimum_peers_per_metric":3,"sample_limit":MAX_PEERS,"metrics":metrics,
+            "valuation_research":_valuation(report,compatible),
             "notice":"Bounded provider-listed same-sector sample, not a market-leadership or market-share ranking. Annual figures are provider-reported, not independently filing-verified; differences in business mix remain possible. No fair-value estimate or investment qualification."}
