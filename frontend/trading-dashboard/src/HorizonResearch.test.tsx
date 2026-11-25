@@ -211,3 +211,16 @@ it("shows current matching regime cohort without upgrading qualification",async(
  expect(screen.getByText("-6%")).toBeTruthy();
  expect(screen.getByText(/event risk not verified/)).toBeTruthy();
 });
+
+it("shows independent committee roles and incomplete citation coverage",async()=>{
+ const item={...candidate,ai_review:{reviews:[{provider:"OLLAMA",role:"TECHNICAL_EVIDENCE",findings:[{statement:"Dated observation.",evidence_ids:["OBS"]}]}],reviewed_at:"2026-11-24T10:00:00Z",notice:"Unverified commentary.",committee:{status:"PARTIAL_REVIEWS",configured_count:2,reviewed_count:1,members:[{provider:"OLLAMA",role:"TECHNICAL_EVIDENCE",status:"REVIEW_RETURNED",cited_domains:["OBS"]},{provider:"GEMINI",role:"ADVERSARIAL_RISK",status:"PENDING",cited_domains:[]}],available_domains:["OBS","LIMITS"],cited_domains:["OBS"],uncited_domains:["LIMITS"],agreement_status:"NOT_ASSESSED",notice:"Citation coverage is not factual validation."}}};
+ const market={...section,result:{...section.result,horizons:{...section.result.horizons,SWING:{...section.result.horizons.SWING,candidates:[item]}}}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[market]})})));
+ render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+ fireEvent.click(await screen.findByText("Automatic AI evidence review (1 provider)"));
+ expect(screen.getByRole("region",{name:"AI committee coverage"})).toBeTruthy();
+ expect(screen.getByText(/1\/2 configured reviews returned/)).toBeTruthy();
+ expect(screen.getByText("adversarial risk")).toBeTruthy();
+ expect(screen.getByText(/Uncited available domains: LIMITS/)).toBeTruthy();
+ expect(screen.getByText(/event risk not verified/)).toBeTruthy();
+});

@@ -16,7 +16,16 @@ import sqlite3
 
 from . import ai_failover
 
-VERSION = "AUTO-GROUNDED-2"
+VERSION = "AUTO-GROUNDED-3"
+BATCH_SIZE = 2
+ROLES = ("TECHNICAL_EVIDENCE", "ADVERSARIAL_RISK", "FINANCIAL_EVIDENCE", "HISTORICAL_VALIDATION", "EVIDENCE_COMPLETENESS")
+ROLE_TASKS = {
+    "TECHNICAL_EVIDENCE": "Review dated price, volatility and technical observations; distinguish raw and adjusted evidence.",
+    "ADVERSARIAL_RISK": "Challenge overinterpretation, missing evidence and historical performance limitations.",
+    "FINANCIAL_EVIDENCE": "Review reported annual financial trends if supplied; explicitly identify valuation and business evidence gaps.",
+    "HISTORICAL_VALIDATION": "Review supplied historical simulations, costs, drawdowns and small-sample limitations.",
+    "EVIDENCE_COMPLETENESS": "Review missing evidence and inconsistencies across available domains; identify what cannot be established.",
+}
 HORIZONS = ("SWING", "SHORT_TERM", "LONG_TERM")
 SYMBOL = re.compile(r"^[A-Z0-9._&-]{1,40}$")
 UNSAFE = re.compile(r"\b(?:buy|sell|stop.loss|price target|guaranteed|guarantee|risk.free)\b", re.I)
@@ -33,7 +42,7 @@ def providers():
     order = ai_failover._order()
     # Local-first even if the manual router has a different preference.
     ordered = sorted(order, key=lambda p: p != "OLLAMA")
-    return [p for p in ordered if (p == "OLLAMA" or external) and ai_failover._enabled(p)][:2]
+    return [p for p in ordered if (p == "OLLAMA" or external) and ai_failover._enabled(p)][:5]
 
 
 def evidence(candidate, horizon):
@@ -97,8 +106,10 @@ def evidence(candidate, horizon):
     return pack
 
 
-def identity(pack):
-    return sha256(json.dumps(pack, sort_keys=True, allow_nan=False).encode()).hexdigest()
+def identity(pack, selected=None):
+    # A changed permitted provider plan never silently reuses a completed committee.
+    scope={"evidence":pack,"plan":list(selected or [])}
+    return sha256(json.dumps(scope, sort_keys=True, allow_nan=False).encode()).hexdigest()
 
 
 def _table(db):
@@ -117,24 +128,33 @@ def _read(connect, key):
 def _claim(connect, key, now):
     with closing(connect()) as db, db:
         _table(db)
-        cursor = db.execute("""INSERT INTO automatic_ai_reviews VALUES(?,?,'RUNNING','{}')
+        db.execute("BEGIN IMMEDIATE")
+        row=db.execute("SELECT attempted_at,status,result FROM automatic_ai_reviews WHERE evidence_hash=?",(key,)).fetchone()
+        previous={}
+        if row:
+            status=row[1]
+            if status=="COMPLETE":
+                return None
+            if status!="PENDING_MEMBERS" and row[0]>(now-timedelta(hours=6)).isoformat():
+                return None
+            previous=json.loads(row[2])
+        db.execute("""INSERT INTO automatic_ai_reviews VALUES(?,?,'RUNNING',?)
             ON CONFLICT(evidence_hash) DO UPDATE SET attempted_at=excluded.attempted_at,
-            status='RUNNING',result='{}'
-            WHERE automatic_ai_reviews.status!='COMPLETE'
-              AND automatic_ai_reviews.attempted_at<=?""",
-            (key, now.isoformat(), (now-timedelta(hours=6)).isoformat()))
-        return cursor.rowcount == 1
+            status='RUNNING',result=excluded.result""",
+            (key,now.isoformat(),json.dumps(previous,allow_nan=False)))
+        return previous
 
 
-def _finish(connect, key, status, result):
+def _finish(connect, key, claimed_at, status, result):
     with closing(connect()) as db, db:
-        db.execute("UPDATE automatic_ai_reviews SET status=?,result=? WHERE evidence_hash=?",
-                   (status, json.dumps(result, allow_nan=False), key))
+        db.execute("""UPDATE automatic_ai_reviews SET status=?,result=?
+            WHERE evidence_hash=? AND status='RUNNING' AND attempted_at=?""",
+            (status,json.dumps(result,allow_nan=False),key,claimed_at.isoformat()))
         db.execute("DELETE FROM automatic_ai_reviews WHERE attempted_at<?",
                    ((datetime.now(timezone.utc)-timedelta(days=14)).isoformat(),))
 
 
-def _review(pack, provider, runner):
+def _review(pack, provider, runner, role="TECHNICAL_EVIDENCE"):
     # Text is entirely constructed from public, typed observations.
     facts={k:v for k,v in pack.items() if k not in ("missing","financial_trends","historical_replay")}
     supplied={"OBS":facts,"LIMITS":pack["missing"]}
@@ -143,6 +163,8 @@ def _review(pack, provider, runner):
     if "historical_replay" in pack:
         supplied["REPLAY"]=pack["historical_replay"]
     prompt = ("Review this dated research watch for research purposes only. "
+              "Assigned independent review role: "+ROLE_TASKS[role]+" "
+              "Do not claim other reviewers agree with you. If your assigned domain is missing, cite LIMITS. "
               "Use only the supplied evidence. Give cautious descriptive findings, "
               "not trade actions, targets, predictions or confidence percentages. "
               "Cite OBS for technical observations, FUND for reported annual trends if supplied, "
@@ -165,14 +187,14 @@ def _review(pack, provider, runner):
         if (not isinstance(statement, str) or not 1<=len(statement)<=500
                 or ai_failover.BLOCKED.search(statement) or UNSAFE.search(statement)
                 or not isinstance(citations, list) or not 1<=len(citations)<=5
-                or any(c not in supplied for c in citations)):
+                or any(not isinstance(c,str) or c not in supplied for c in citations)):
             return None
         clean.append({"statement": statement, "evidence_ids": citations})
     # Never persist raw prompts, raw answers, actions, confidence, or provider errors.
-    return {"provider": provider, "findings": clean}
+    return {"provider": provider, "role":role,"findings": clean}
 
 
-def candidates(snapshot):
+def candidates(snapshot, selected=None):
     for section in snapshot["sections"]:
         if section["section"] not in ("NSE", "BSE") or section["status"]!="READY":
             continue
@@ -180,50 +202,88 @@ def candidates(snapshot):
             for item in (section.get("result") or {}).get("horizons", {}).get(horizon, {}).get("candidates", []):
                 try:
                     pack = evidence(item, horizon)
-                    yield item, pack, identity(pack)
+                    yield item, pack, identity(pack,selected)
                 except (ValueError, KeyError, TypeError, OverflowError):
                     continue
+
+
+def _committee(pack, selected, reviews, attempted):
+    indexed={r["provider"]:r for r in reviews if r.get("provider") in selected}
+    expected=["OBS","LIMITS"]
+    if "financial_trends" in pack:
+        expected.append("FUND")
+    if "historical_replay" in pack:
+        expected.append("REPLAY")
+    cited={c for r in indexed.values() for f in r["findings"] for c in f["evidence_ids"]}
+    members=[{"provider":p,"role":ROLES[i],"status":"REVIEW_RETURNED" if p in indexed else
+              "NO_USABLE_REVIEW" if p in attempted else "PENDING",
+              "cited_domains":sorted({c for f in indexed[p]["findings"] for c in f["evidence_ids"]}) if p in indexed else []}
+             for i,p in enumerate(selected)]
+    return {"status":"ALL_CONFIGURED_REVIEWS_RETURNED" if len(indexed)==len(selected) and selected else
+            "PARTIAL_REVIEWS" if indexed else "AWAITING_REVIEWS",
+            "configured_count":len(selected),"reviewed_count":len(indexed),"members":members,
+            "available_domains":expected,"cited_domains":[k for k in expected if k in cited],
+            "uncited_domains":[k for k in expected if k not in cited],
+            "agreement_status":"NOT_ASSESSED","notice":"Independent assigned reviews; citation coverage is not factual validation, agreement, confidence or investment qualification."}
 
 
 def refresh(snapshot, connect, runner=ai_failover.grounded_research):
     if not snapshot["enabled"] or not enabled():
         return
-    selected = providers()
+    selected=providers()
     if not selected:
         return
-    now = datetime.now(timezone.utc)
-    # One new/expired evidence pack per pass, at most two provider calls.
-    # Persist the claim before I/O so failures and restarts cannot spin.
-    for _, pack, key in candidates(snapshot):
-        if not _claim(connect, key, now):
+    now=datetime.now(timezone.utc)
+    # Up to two calls per pass, one evidence pack; up to five permitted
+    # providers across passes. Keep valid reviews while retrying missing roles.
+    for _,pack,key in candidates(snapshot,selected):
+        previous=_claim(connect,key,now)
+        if previous is None:
             continue
-        reviews = []
-        for provider in selected:
+        reviews=[r for r in previous.get("reviews",[]) if r["provider"] in selected]
+        completed={r["provider"] for r in reviews}
+        attempted=set(previous.get("attempted_providers",[]))&set(selected)
+        if set(selected)<=attempted:
+            attempted=set(completed)
+        pending=[p for p in selected if p not in attempted and p not in completed]
+        for provider in pending[:BATCH_SIZE]:
+            attempted.add(provider)
             try:
-                review = _review(pack, provider, runner)
+                review=_review(pack,provider,runner,ROLES[selected.index(provider)])
                 if review is not None:
-                    reviews.append(review)
+                    reviews.append({**review,"reviewed_at":now.isoformat()})
             except Exception:
-                # Provider failure must not disrupt deterministic research.
+                # Do not store raw provider errors or let a model block research.
                 continue
-        result = {"reviews": reviews, "evidence": pack, "reviewed_at": now.isoformat(),
-                  "notice": "Unverified model commentary on the same dated evidence; citations are not proof of correctness. No consensus trade verdict."}
-        _finish(connect, key, "COMPLETE" if len(reviews)==len(selected) else "PARTIAL" if reviews else "UNAVAILABLE", result)
+        completed={r["provider"] for r in reviews}
+        result={"reviews":reviews,"evidence":pack,"reviewed_at":now.isoformat(),
+                "attempted_providers":[p for p in selected if p in attempted],
+                "notice":"Unverified independent model commentary on the same dated evidence; no consensus trade verdict.",
+                "committee":_committee(pack,selected,reviews,attempted)}
+        status=("COMPLETE" if len(completed)==len(selected) else
+                "PENDING_MEMBERS" if any(p not in attempted for p in selected) else
+                "PARTIAL" if reviews else "UNAVAILABLE")
+        _finish(connect,key,now,status,result)
         return
 
 
 def attach(snapshot, connect):
-    # Only display reviews for the exact current evidence and permitted providers.
+    # Only display reviews for the exact current evidence and permitted plan.
     if not snapshot["enabled"] or not enabled():
-        snapshot["automatic_ai_status"] = "DISABLED"
+        snapshot["automatic_ai_status"]="DISABLED"
         return snapshot
-    allowed = providers()
-    snapshot["automatic_ai_status"] = "ENABLED" if allowed else "NO_CONFIGURED_PROVIDER"
-    for item, _, key in candidates(snapshot):
-        row = _read(connect, key)
-        if row and row[1] in ("COMPLETE", "PARTIAL"):
-            result = row[2]
-            reviews = [r for r in result.get("reviews", []) if r["provider"] in allowed]
-            if reviews:
-                item["ai_review"] = {**result, "reviews": reviews}
+    allowed=providers()
+    snapshot["automatic_ai_status"]="ENABLED" if allowed else "NO_CONFIGURED_PROVIDER"
+    if not allowed:
+        return snapshot
+    for item,pack,key in candidates(snapshot,allowed):
+        item.pop("ai_review",None)
+        row=_read(connect,key)
+        if not row or row[1] not in ("COMPLETE","PARTIAL","PENDING_MEMBERS","RUNNING"):
+            continue
+        result=row[2]
+        reviews=[r for r in result.get("reviews",[]) if r["provider"] in allowed]
+        if reviews:
+            item["ai_review"]={**result,"reviews":reviews,
+                "committee":_committee(pack,allowed,reviews,set(result.get("attempted_providers",[])))}
     return snapshot
