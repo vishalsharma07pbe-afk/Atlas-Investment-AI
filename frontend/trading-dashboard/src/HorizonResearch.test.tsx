@@ -224,3 +224,16 @@ it("shows independent committee roles and incomplete citation coverage",async()=
  expect(screen.getByText(/Uncited available domains: LIMITS/)).toBeTruthy();
  expect(screen.getByText(/event risk not verified/)).toBeTruthy();
 });
+
+it("separates strict investment qualification from technical watches",async()=>{
+ const item={...candidate,stock_qualification:{status:"WITHHELD_EVIDENCE_GAPS",gates:[{domain:"VALUATION",status:"PARTIAL_CONTEXT",requirements:["DATED_INTRINSIC_VALUATION_REQUIRED"]}],blockers:["DATED_INTRINSIC_VALUATION_REQUIRED"],review_findings:[],notice:"Watch only."}};
+ const market={...section,result:{...section.result,horizons:{...section.result.horizons,SWING:{...section.result.horizons.SWING,candidates:[item]}}}};
+ const qualification={horizons:{SWING:{status:"NO_QUALIFIED_IN_REVIEWED_SAMPLE",reviewed_count:1,review_required_count:0,qualified_count:0,recommendations:[],leading_blockers:[{code:"DATED_INTRINSIC_VALUATION_REQUIRED",count:1}],notice:"Bounded sample only."}}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[market],stock_qualification:qualification})})));
+ render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+ expect(await screen.findByRole("region",{name:"Investment qualification results"})).toBeTruthy();
+ expect(screen.getByText(/0 qualified · 1 technical watches assessed/)).toBeTruthy();
+ fireEvent.click(await screen.findByText("Investment qualification · withheld evidence gaps"));
+ expect(screen.getByText("partial context")).toBeTruthy();
+ expect(screen.getByText("Technical watch candidates")).toBeTruthy();
+});
