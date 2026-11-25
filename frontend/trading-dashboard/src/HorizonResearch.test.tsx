@@ -44,7 +44,7 @@ it("displays automated historical replay without removing strategy research bloc
  render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
  expect(await screen.findByRole("heading",{name:"Historical strategy replay"})).toBeTruthy();
  fireEvent.click(screen.getByText(/REPLAY · NSE · 3 simulated positions/));
- expect(screen.getByText("30 bps")).toBeTruthy();
+ expect(screen.getAllByText("30 bps")).toHaveLength(2);
  expect(screen.getByText("7.35%")).toBeTruthy();
  expect(screen.getByText("-5.35 pp")).toBeTruthy();
  expect(screen.getByText("Signal-date market trend cohorts")).toBeTruthy();
