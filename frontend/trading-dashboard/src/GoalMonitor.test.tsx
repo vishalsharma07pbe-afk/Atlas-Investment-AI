@@ -63,3 +63,27 @@ it("requires confirmation before assigning a whole holding and refreshes funding
  await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith("/api/v1/portfolio/goals/goal-1/holdings/7",expect.objectContaining({method:"POST",body:JSON.stringify({confirmSeparateBalance:true})})));
  await waitFor(()=>expect(fetchMock.mock.calls.filter(c=>!c[1]?.method)).toHaveLength(2));
 });
+
+it("shows goal-specific independent downside and gross withdrawal funding gaps",async()=>{
+ const risk={status:"ILLUSTRATIVE_STRESS_AVAILABLE",daysToDeadline:82,reservedSavings:40000,equityValue:20000,fundValue:10000,
+ grossWithdrawalGap:60000,projectedWithdrawalGap:15000,grossFundingNotCoveredByAssignedHoldings:30000,recordedFundingSurplus:0,
+ reviewPriority:"NEAR_DEADLINE_FUNDING_REVIEW",notice:"Illustrative shocks only; not executable redemption values.",scenarios:[
+ {kind:"COMBINED_DECLINE",equityDeclinePercent:20,fundDeclinePercent:10,hypotheticalLoss:5000,stressedRecordedFunding:65000,projectedFunding:110000,projectedShortfall:0,requiredMonthlyContribution:11666.67,additionalMonthlyContribution:0}]};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({...report,goalRisk:{"goal-1":risk}})})));
+ render(<GoalMonitor/>);
+ fireEvent.click(await screen.findByText(/Goal stress & withdrawal readiness/));
+ expect(screen.getByText("Equity −20% / Fund NAV −10%")).toBeTruthy();
+ expect(screen.getByText("₹11,666.67")).toBeTruthy();
+ expect(screen.getByText(/Target less recorded reserved savings: ₹60,000/)).toBeTruthy();
+ expect(screen.getByText("Illustrative shocks only; not executable redemption values.")).toBeTruthy();
+});
+it("withholds goal stress when required funding evidence is unavailable",async()=>{
+ const risk={status:"INSUFFICIENT_FUNDING_EVIDENCE",daysToDeadline:82,reservedSavings:40000,equityValue:null,fundValue:null,
+ grossWithdrawalGap:null,projectedWithdrawalGap:null,grossFundingNotCoveredByAssignedHoldings:null,recordedFundingSurplus:null,
+ reviewPriority:"REVIEW_EVIDENCE",notice:"Missing evidence.",scenarios:[]};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({...report,goalRisk:{"goal-1":risk}})})));
+ render(<GoalMonitor/>);
+ fireEvent.click(await screen.findByText(/Goal stress & withdrawal readiness/));
+ expect(screen.getByText("Stress and withdrawal research withheld until assigned valuations and reserved balance are current.")).toBeTruthy();
+ expect(screen.queryByText("Independent shock")).toBeNull();
+});
