@@ -28,15 +28,28 @@ public class PortfolioThesisService {
   List<Map<String,String>> identities=holdings.stream()
     .filter(h->"EQUITY".equals(h.get("asset_type"))&&h.get("isin") instanceof String isin&&isin.matches("IN[A-Z0-9]{10}")&&("NSE".equals(h.get("exchange"))||"BSE".equals(h.get("exchange"))))
     .map(h->Map.of("isin",(String)h.get("isin"),"exchange",(String)h.get("exchange"))).distinct().limit(100).toList();
-  Map<String,JsonNode> evidence=identities.isEmpty()?Map.of():cached(identities);
+  List<Map<String,Object>> fundIdentities=new ArrayList<>();
+  Set<Long> fundCodes=new LinkedHashSet<>();
+  for(var h:holdings){
+   if(!"MUTUAL_FUND".equals(h.get("asset_type"))||!(h.get("exact_scheme_code") instanceof Number n))continue;
+   long code=n.longValue();
+   if(code<100000||code>999999999||fundCodes.size()>=20||!fundCodes.add(code))continue;
+   try{var identity=funds.holdingIdentity(code);if(identity!=null)fundIdentities.add(identity);}
+   catch(RuntimeException ignored){/* Metadata unavailable. */}
+  }
+  JsonNode evidence=identities.isEmpty()&&fundIdentities.isEmpty()?json.createObjectNode():cached(identities,fundIdentities);
+  Set<String> allowedFunds=new HashSet<>();
+  for(var identity:fundIdentities)allowedFunds.add(String.valueOf(identity.get("scheme_code")));
   int fundReads=0;
   for(var h:holdings){
    if("EQUITY".equals(h.get("asset_type"))){
     String key=h.get("exchange")+":"+h.get("isin");
-    if(evidence.containsKey(key))h.put("thesis_evidence",evidence.get(key));
+    if(evidence.path("items").path(key).isObject())h.put("thesis_evidence",evidence.path("items").path(key));
    }else if("MUTUAL_FUND".equals(h.get("asset_type"))&&h.get("symbol") instanceof String code&&code.matches("[0-9]{1,18}")&&fundReads++<20){
     try{var historical=funds.holdingEvidence(Long.parseLong(code));if(historical!=null)h.put("fund_history_evidence",historical);}
     catch(RuntimeException ignored){/* Never fabricate missing fund evidence. */}
+    JsonNode fund=evidence.path("fund_items").path(code);
+    if(allowedFunds.contains(code)&&fund.isObject()&&"SECONDARY_REPORTED_EVIDENCE".equals(fund.path("status").asText())&&code.equals(fund.path("disclosure").path("scheme_code").asText()))h.put("fund_thesis_evidence",fund);
    }
    h.put("thesis_summary",PortfolioThesisSummary.summarize(h,json));
   }
@@ -65,27 +78,21 @@ public class PortfolioThesisService {
   catch(Exception ex){return json.createObjectNode();}
  }
 
- private Map<String,JsonNode> cached(List<Map<String,String>> identities){
-  if(serviceToken==null||serviceToken.length()<32)return Map.of();
+ private JsonNode cached(List<Map<String,String>> identities,List<Map<String,Object>> fundIdentities){
+  if(serviceToken==null||serviceToken.length()<32)return json.createObjectNode();
   try{
    var request=HttpRequest.newBuilder(URI.create(intelligenceUrl+"/api/v1/internal/portfolio-thesis"))
     .timeout(Duration.ofSeconds(4)).header("Content-Type","application/json")
     .header("X-Atlas-Service-Token",serviceToken)
-    .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(Map.of("identities",identities)))).build();
+    .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(Map.of("identities",identities,"funds",fundIdentities)))).build();
    var response=client.send(request,HttpResponse.BodyHandlers.ofInputStream());
    try(InputStream body=response.body()){
-    if(response.statusCode()!=200)return Map.of();
-    byte[] bytes=body.readNBytes(2_000_001);if(bytes.length>2_000_000)return Map.of();
-    JsonNode root=json.readTree(bytes),items=root.path("items");
-    Map<String,JsonNode> result=new HashMap<>();
-    for(var identity:identities){
-     String key=identity.get("exchange")+":"+identity.get("isin");
-     JsonNode item=items.path(key);
-     if(item.isObject())result.put(key,item);
-    }
-    return result;
+    if(response.statusCode()!=200)return json.createObjectNode();
+    byte[] bytes=body.readNBytes(2_000_001);if(bytes.length>2_000_000)return json.createObjectNode();
+    JsonNode root=json.readTree(bytes);
+    return root!=null&&root.isObject()?root:json.createObjectNode();
    }
-  }catch(InterruptedException ex){Thread.currentThread().interrupt();return Map.of();}
-  catch(Exception ex){return Map.of();}
+  }catch(InterruptedException ex){Thread.currentThread().interrupt();return json.createObjectNode();}
+  catch(Exception ex){return json.createObjectNode();}
  }
 }
