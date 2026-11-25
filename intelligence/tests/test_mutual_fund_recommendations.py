@@ -1,5 +1,10 @@
 import unittest
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
+from unittest.mock import patch
+import json
+import sqlite3
+from app import mutual_fund_recommendations as recommendations
 from app.mutual_fund_recommendations import FundEvidence,rank_candidates,suitability,_official_history_candidates,_research_reports
 
 def strong(**changes):
@@ -120,6 +125,37 @@ class RecommendationEngineTests(unittest.TestCase):
         report=_research_reports([incomplete],ranked,[],[],[])[0]
         self.assertIsNone(report["historical"]["returns_3y"])
         self.assertIsNone(report["historical"]["sample_peer_percentile"])
+
+    def test_dashboard_persists_the_same_reports_without_secondary_promotion(self):
+        today=datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+        row={"scheme_code":123456,"scheme_name":"Integrated Fund",
+             "category":"Open Ended Schemes(Equity Scheme - Large Cap Fund)",
+             "amfi_plan":"DIRECT","amfi_option":"GROWTH","isin_growth":"INF179K01BB2",
+             "amfi_metadata_date":today,"nav_date":today,"nav":100.5,
+             "observations":700,"sources":["AMFI","MFAPI"],"cagr_3y_percent":14}
+        history={"category":"LARGE_CAP","comparison_date":today,"items":[row],
+                 "research_candidates":[row],"universe_count":1,"eligible_count":1}
+        db=sqlite3.connect(":memory:")
+        try:
+            with patch.object(recommendations,"_catalog_candidates",return_value=([],{"official_category_verified":0,"dated_nav_history_eligible":0})), \
+                 patch.object(recommendations,"backend_json",return_value=history), \
+                 patch.object(recommendations.fund_disclosures,"matched",return_value=[{"scheme_code":"123456","ter_percent":0.1}]), \
+                 patch.object(recommendations.fund_portfolios,"matched",return_value=[]), \
+                 patch.object(recommendations.fund_portfolios,"overlap",return_value={"pairs":[]}), \
+                 patch.object(recommendations.nav_catalog,"_connect",return_value=db):
+                first=recommendations.dashboard("LARGE_CAP",84,"HIGH")
+                second=recommendations.dashboard("LARGE_CAP",84,"HIGH")
+            self.assertEqual(first["snapshot_hash"],second["snapshot_hash"])
+            self.assertEqual(first["top_performers"],[])
+            self.assertEqual(first["growth_outlook"],[])
+            report=first["research_reports"][0]
+            self.assertTrue(report["secondary_disclosure_available"])
+            self.assertIn("EXPENSE_RATIO",report["top_performer"]["missing"])
+            stored=db.execute("SELECT result_json FROM mf_recommendation_snapshots").fetchall()
+            self.assertEqual(len(stored),1)
+            self.assertEqual(json.loads(stored[0][0])["research_reports"],first["research_reports"])
+        finally:
+            db.close()
 
     def test_ties_are_reproducible_by_stable_identifier(self):
         result=rank_candidates([strong(identifier="B"),strong(identifier="A")],"LARGE_CAP",84,"HIGH")
