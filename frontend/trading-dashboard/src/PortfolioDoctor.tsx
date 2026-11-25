@@ -14,7 +14,8 @@ type FundThesisChange={metric:string;previousDate:string;currentDate:string;prev
 type OwnershipChange={category:string;previousDate:string;currentDate:string;previousPercent:number;currentPercent:number;changePp:number;attention:string;observedAt:string};
 type HoldingReview={ownership_changes?:OwnershipChange[];ownership_monitor_status?:string;fund_thesis_changes?:FundThesisChange[];fund_monitor_status?:string;fund_thesis_evidence?:FundThesisEvidence;thesis_changes?:ThesisChange[];thesis_monitor_status?:string;thesis_summary?:ThesisSummary;thesis_evidence?:Thesis;fund_history_evidence?:FundHistory;id:number;symbol:string;asset_type:string;exchange:string|null;status:"REVIEW_REQUIRED"|"MONITOR"|"EVIDENCE_GAP";weight_percent:number|null;recorded_return_percent:number|null;evidence_date:string|null;history_count:number;change_20_observations_percent:number|null;recent_peak_change_percent:number|null;findings:string[];missing_evidence:string[]};
 type Exposure={label:string;weight_percent:number};
-type Diversification={status:string;unpriced_count:number;unresolved_identity_count:number;resolved_identity_count:number;top_three_resolved_weight_percent:number|null;asset_exposure:Exposure[];direct_equity_sector_exposure:Exposure[];fund_category_exposure:Exposure[];sector_coverage_percent:number|null;fund_category_coverage_percent:number|null;review_prompts:string[];notice:string};
+type AllocationResearch={status:string;recorded_value?:number;current_largest_percent?:number;current_top_three_percent?:number;single_identity_review_threshold_percent:number;top_three_review_threshold_percent:number;scenarios:{hypotheticalNewIdentities:number;additionalCapital:number;equalNewInvestmentAmount:number;projectedLargestPercent:number;projectedTopThreePercent:number;hypotheticalRedistributedCapital:number;redistributedPercent:number}[];notice:string};
+type Diversification={allocation_research?:AllocationResearch;status:string;unpriced_count:number;unresolved_identity_count:number;resolved_identity_count:number;top_three_resolved_weight_percent:number|null;asset_exposure:Exposure[];direct_equity_sector_exposure:Exposure[];fund_category_exposure:Exposure[];sector_coverage_percent:number|null;fund_category_coverage_percent:number|null;review_prompts:string[];notice:string};
 type Correlation={status:string;comparable_pairs?:number;attempted_pairs?:number;high_positive_pair_count?:number;pairs?:{first_symbol:string;second_symbol:string;first_isin:string;second_isin:string;correlation:number;observations:number;first_date:string;last_date:string;high_positive_correlation:boolean}[];notice:string};
 type OpportunityContext={status:string;held_excluded_count:number;ready_sections:string[];blocked_sections:string[];notice:string;
  equities:{isin:string;symbol:string;exchange:string;horizon:string;as_of:string;sector:string|null;sector_weight_percent:number|null;context:string;identity_status:string;adjustment_status:string;blockers:string[]}[];
@@ -27,12 +28,27 @@ const statuses={REVIEW_REQUIRED:"Needs review",MONITOR:"Monitor",EVIDENCE_GAP:"D
 function ExposureList({title,rows}:{title:string;rows:Exposure[]}){
  return <div><h4>{title}</h4>{rows.length?<ul>{rows.map(r=><li key={r.label}>{r.label.replace(/_/g," ")}: <strong>{r.weight_percent.toFixed(2)}%</strong></li>)}</ul>:<p className="muted tiny">No recorded positive value in this group.</p>}</div>;
 }
+function AllocationResearchDigest({report}:{report:AllocationResearch}){
+ const money=(v:number)=>new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",minimumFractionDigits:0,maximumFractionDigits:2}).format(v);
+ return <section className="thesis-digest" aria-label="Automatic allocation research">
+  <h4>Automatic allocation research</h4>
+  {report.status==="HYPOTHETICAL_SCENARIOS_AVAILABLE"?<>
+   <p>Largest identity: {report.current_largest_percent?.toFixed(2)}% · Top three: {report.current_top_three_percent?.toFixed(2)}%. Illustrative review limits: {report.single_identity_review_threshold_percent}% and {report.top_three_review_threshold_percent}%.</p>
+   <p>Compare adding capital without selling versus redistributing part of the existing portfolio. Both are mathematical scenarios, not recommendations.</p>
+   <div className="tablewrap"><table><thead><tr><th>Hypothetical distinct new identities</th><th>Additional capital (no sales)</th><th>Equal amount per new identity</th><th>Fixed-capital redistribution (before costs)</th><th>Projected largest / top three</th></tr></thead><tbody>
+    {report.scenarios.map(s=><tr key={s.hypotheticalNewIdentities}><td>{s.hypotheticalNewIdentities}</td><td>{money(s.additionalCapital)}</td><td>{money(s.equalNewInvestmentAmount)}</td><td>{money(s.hypotheticalRedistributedCapital)} ({s.redistributedPercent.toFixed(2)}%)</td><td>{s.projectedLargestPercent.toFixed(2)}% / {s.projectedTopThreePercent.toFixed(2)}%</td></tr>)}
+   </tbody></table></div>
+  </>:report.status==="WITHIN_ILLUSTRATIVE_CONCENTRATION_LIMITS"?<p>Current exact-identity weights are within the illustrative concentration limits. This does not establish suitability or low risk.</p>:<p>Allocation scenarios withheld until all recorded valuations are recent and positive exposures have exact identities.</p>}
+  <p className="muted tiny">{report.notice}</p>
+ </section>;
+}
 function DiversificationDigest({report,correlation}:{report:Diversification;correlation?:Correlation}){
  const weight=(value:number|null)=>value==null?"Not available":value.toFixed(2)+"%";
  return <section className="doctor-item" aria-label="Automatic diversification review">
   <h3>Diversification &amp; concentration</h3>
   <p>{report.status==="NO_PRICED_VALUE"?"Recorded valuations unavailable.":report.status==="PARTIAL_COVERAGE"?"Partial classification or pricing coverage.":"Recorded positions classified; underlying fund exposures remain unknown."}</p>
   <div className="doctor-stats"><div><span>Resolved investment identities</span><strong>{report.resolved_identity_count}</strong></div><div><span>Top three resolved weights</span><strong>{weight(report.top_three_resolved_weight_percent)}</strong></div><div><span>Unpriced positions</span><strong>{report.unpriced_count}</strong></div></div>
+  {report.allocation_research&&<AllocationResearchDigest report={report.allocation_research}/>}
   {report.review_prompts.length>0&&<><h4>Portfolio-level review prompts</h4><ul>{report.review_prompts.map(p=><li key={p}>{p}</li>)}</ul></>}
   <details><summary>Asset, sector and fund category exposures</summary>
    <ExposureList title="Asset allocation · priced portfolio" rows={report.asset_exposure}/>
