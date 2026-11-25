@@ -150,3 +150,17 @@ it("surfaces portfolio-level benchmark lag without requiring a flagged individua
  expect(screen.getByText("-6.00 pp")).toBeTruthy();
  expect(screen.getByText("Price reference, not TRI.")).toBeTruthy();
 });
+
+it("displays automatic allocation alternatives without manual targets or extra requests",async()=>{
+ const holding={id:1,symbol:"TEST",asset_type:"EQUITY",exchange:"NSE",status:"MONITOR",weight_percent:100,recorded_return_percent:1,evidence_date:null,history_count:0,change_20_observations_percent:null,recent_peak_change_percent:null,findings:[],missing_evidence:[]};
+ const allocation_research={status:"HYPOTHETICAL_SCENARIOS_AVAILABLE",recorded_value:1000,current_largest_percent:100,current_top_three_percent:100,single_identity_review_threshold_percent:25,top_three_review_threshold_percent:60,scenarios:[{hypotheticalNewIdentities:5,additionalCapital:3000,equalNewInvestmentAmount:600,projectedLargestPercent:25,projectedTopThreePercent:55,hypotheticalRedistributedCapital:750,redistributedPercent:75}],notice:"Before fees, taxes and execution constraints."};
+ const diversification={status:"CLASSIFIED_PRICED_HOLDINGS",unpriced_count:0,unresolved_identity_count:0,resolved_identity_count:1,top_three_resolved_weight_percent:100,asset_exposure:[],direct_equity_sector_exposure:[],fund_category_exposure:[],sector_coverage_percent:100,fund_category_coverage_percent:null,review_prompts:[],notice:"Recorded prices.",allocation_research};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-25T10:00:00Z",holding_count:1,attention_count:0,data_gap_count:0,notice:"Research only",holdings:[holding],diversification})})));
+ render(<PortfolioDoctor revision={0} onSettings={()=>{}}/>);
+ expect(await screen.findByRole("heading",{name:"Automatic allocation research"})).toBeTruthy();
+ expect(screen.getByText("₹3,000")).toBeTruthy();
+ expect(screen.getByText("₹750 (75.00%)")).toBeTruthy();
+ expect(screen.getByText("25.00% / 55.00%")).toBeTruthy();
+ expect(screen.getByText("Before fees, taxes and execution constraints.")).toBeTruthy();
+ expect(fetch).toHaveBeenCalledTimes(1);
+});
