@@ -161,7 +161,6 @@ class RecommendationEngineTests(unittest.TestCase):
         result=rank_candidates([strong(identifier="B"),strong(identifier="A")],"LARGE_CAP",84,"HIGH")
         self.assertEqual([x["fund"]["identifier"] for x in result["top_performers"]],["A","B"])
 
-if __name__=="__main__":unittest.main()
 
     def test_rolling_peer_context_validated_and_not_benchmark_evidence(self):
         from app.mutual_fund_recommendations import _rolling_peer_context
@@ -171,3 +170,5 @@ if __name__=="__main__":unittest.main()
         self.assertEqual(_rolling_peer_context({"rolling_peer_consistency":block})["above_median_percent"],60)
         for key,value in (("matched_windows",83),("minimum_peer_count",3),("above_median_percent",90),("median_difference_pp",float("nan")),("tied_windows",0)):
             self.assertIsNone(_rolling_peer_context({"rolling_peer_consistency":{**block,key:value}}))
+
+if __name__=="__main__":unittest.main()
