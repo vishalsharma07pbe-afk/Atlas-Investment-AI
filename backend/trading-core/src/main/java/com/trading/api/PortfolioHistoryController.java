@@ -2,6 +2,7 @@ package com.trading.api;
 
 import java.math.*;
 import java.time.LocalDate;
+import com.trading.market.MarketCalendarService;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import org.springframework.http.HttpStatus;
@@ -34,7 +35,7 @@ public class PortfolioHistoryController {
     String asset=upper(input.assetType()),type=upper(input.transactionType());
     if(!Set.of("EQUITY","MUTUAL_FUND","CASH").contains(asset))bad("Invalid asset type");
     if(!Set.of("BUY","SELL","DIVIDEND","FEE","DEPOSIT","WITHDRAWAL").contains(type))bad("Invalid transaction type");
-    if(input.transactionDate()==null||input.transactionDate().isAfter(LocalDate.now())||input.transactionDate().isBefore(LocalDate.of(1970,1,1)))bad("Invalid transaction date");
+    if(input.transactionDate()==null||input.transactionDate().isAfter(LocalDate.now(MarketCalendarService.IST))||input.transactionDate().isBefore(LocalDate.of(1970,1,1)))bad("Invalid transaction date");
     if(input.cashAmount()==null||input.cashAmount().signum()<=0)bad("Cash amount must be positive");
     if(input.quantity()!=null&&input.quantity().signum()<=0)bad("Quantity must be positive");
     if(input.unitPrice()!=null&&input.unitPrice().signum()<0)bad("Unit price cannot be negative");
@@ -64,10 +65,20 @@ public class PortfolioHistoryController {
     Map<String,Object> totals=jdbc.queryForMap("""
       SELECT COALESCE(sum(quantity*last_price) FILTER(WHERE last_price IS NOT NULL),0) total_value,
       count(*) FILTER(WHERE last_price IS NOT NULL) priced,
-      count(*) FILTER(WHERE last_price IS NULL) unpriced
+      count(*) FILTER(WHERE last_price IS NULL) unpriced,
+      count(*) FILTER(WHERE last_price IS NOT NULL AND
+        (price_as_of IS NULL OR price_as_of>now() OR
+          (now() AT TIME ZONE 'Asia/Kolkata')::date-(price_as_of AT TIME ZONE 'Asia/Kolkata')::date>
+            CASE WHEN asset_type='MUTUAL_FUND' THEN 7 ELSE 5 END)) aged_or_undated
       FROM personal_holdings WHERE user_id=?
       """,user);
-    LocalDate date=LocalDate.now();
+    LocalDate date=LocalDate.now(MarketCalendarService.IST);
+    if(((Number)totals.get("priced")).longValue()==0||((Number)totals.get("unpriced")).longValue()>0||
+        ((Number)totals.get("aged_or_undated")).longValue()>0){
+      Map<String,Object> result=new LinkedHashMap<>(totals);result.put("valuation_date",date);
+      result.put("recorded",false);result.put("reason","INCOMPLETE_OR_AGED_RECORDED_VALUATION");
+      return result;
+    }
     jdbc.update("""
       INSERT INTO portfolio_valuation_snapshots(user_id,valuation_date,total_value,priced_positions,unpriced_positions)
       VALUES (?,?,?,?,?) ON CONFLICT(user_id,valuation_date) DO UPDATE SET total_value=EXCLUDED.total_value,
@@ -81,37 +92,96 @@ public class PortfolioHistoryController {
     UUID user=AuthSecurity.currentUser();
     List<Map<String,Object>> snapshots=jdbc.queryForList("SELECT valuation_date,total_value,priced_positions,unpriced_positions FROM portfolio_valuation_snapshots WHERE user_id=? ORDER BY valuation_date",user);
     List<Map<String,Object>> transactions=jdbc.queryForList("SELECT transaction_date,transaction_type,cash_amount FROM portfolio_transactions WHERE user_id=? ORDER BY transaction_date",user);
+    LocalDate today=LocalDate.now(MarketCalendarService.IST);
+    List<Map<String,Object>> dated=snapshots.stream().filter(row->!day(row.get("valuation_date")).isAfter(today)).toList();
+    Map<String,Object> last=dated.isEmpty()?null:dated.get(dated.size()-1);
+    LocalDate terminal=last==null?null:day(last.get("valuation_date"));
+    LocalDate firstSnapshot=dated.isEmpty()?null:day(dated.get(0).get("valuation_date"));
+    int incomplete=(int)dated.stream().filter(row->!complete(row)).count();
+    int afterTerminal=0,externalCount=0;
+    boolean interveningFlow=false;
     List<CashFlow> flows=new ArrayList<>();
     for(Map<String,Object> row:transactions){
-      String type=(String)row.get("transaction_type");double cash=((BigDecimal)row.get("cash_amount")).doubleValue();
-      // Only external portfolio cash flows belong in money-weighted return.
-      // Security buys/sells are internal allocation changes and are excluded.
+      String type=(String)row.get("transaction_type");
+      // DIVIDEND and FEE represent explicitly external cash flows in the
+      // existing ledger contract; internal reinvestments are not external.
+      if(!Set.of("DEPOSIT","WITHDRAWAL","DIVIDEND","FEE").contains(type))continue;
+      LocalDate date=day(row.get("transaction_date"));
+      if(terminal==null||date.isAfter(terminal)){afterTerminal++;continue;}
+      double cash=((BigDecimal)row.get("cash_amount")).doubleValue();
       if("DEPOSIT".equals(type)||"FEE".equals(type))cash=-cash;
-      else if(!"WITHDRAWAL".equals(type)&&!"DIVIDEND".equals(type))continue;
-      flows.add(new CashFlow(((java.sql.Date)row.get("transaction_date")).toLocalDate(),cash));
+      flows.add(new CashFlow(date,cash));externalCount++;
+      if(firstSnapshot!=null&&date.isAfter(firstSnapshot))interveningFlow=true;
     }
-    if(!snapshots.isEmpty()){
-      Map<String,Object> last=snapshots.get(snapshots.size()-1);
-      flows.add(new CashFlow(((java.sql.Date)last.get("valuation_date")).toLocalDate(),((BigDecimal)last.get("total_value")).doubleValue()));
+    String xirrStatus="UNAVAILABLE_REQUIRES_EXTERNAL_CASH_FLOWS_AND_VALUATION";
+    Double xirr=null;
+    if(last!=null&&!complete(last))xirrStatus="UNAVAILABLE_INCOMPLETE_TERMINAL_VALUATION";
+    else if(last!=null&&externalCount>0){
+      flows.add(new CashFlow(terminal,((BigDecimal)last.get("total_value")).doubleValue()));
+      xirr=xirr(flows);
+      xirrStatus=xirr==null?"UNAVAILABLE_AMBIGUOUS_OR_UNSUPPORTED_CASH_FLOWS":"AVAILABLE";
     }
-    Double xirr=xirr(flows),drawdown=maxDrawdown(snapshots);
+    // Raw valuation drawdown is not investment drawdown when external cash
+    // moves within the observation window. Do not bridge incomplete records.
+    Double drawdown=null;
+    String drawdownStatus="UNAVAILABLE_REQUIRES_TWO_VALUATION_DATES";
+    if(dated.size()>=2){
+      if(incomplete>0)drawdownStatus="UNAVAILABLE_INCOMPLETE_VALUATION_HISTORY";
+      else if(interveningFlow)drawdownStatus="UNAVAILABLE_EXTERNAL_FLOWS_REQUIRE_FLOW_ADJUSTED_HISTORY";
+      else {
+        drawdown=maxDrawdown(dated);
+        drawdownStatus=drawdown==null?"UNAVAILABLE_INVALID_VALUATION_HISTORY":"AVAILABLE";
+      }
+    }
     Map<String,Object> result=new LinkedHashMap<>();
     result.put("transaction_count",transactions.size());result.put("snapshot_count",snapshots.size());
-    result.put("xirr_percent",xirr==null?null:round(xirr*100));
-    result.put("xirr_status",xirr==null?"UNAVAILABLE_REQUIRES_EXTERNAL_CASH_FLOWS_AND_VALUATION":"AVAILABLE");
-    result.put("maximum_drawdown_percent",drawdown==null?null:round(drawdown*100));
-    result.put("drawdown_status",drawdown==null?"UNAVAILABLE_REQUIRES_TWO_VALUATION_DATES":"AVAILABLE");
-    result.put("methodology","XIRR uses DEPOSIT, WITHDRAWAL, DIVIDEND and FEE cash flows plus the latest dated portfolio valuation. BUY and SELL are internal allocation changes. Drawdown uses recorded dated portfolio valuations.");
+    result.put("external_cash_flow_count",externalCount);result.put("external_flows_after_valuation",afterTerminal);
+    result.put("incomplete_snapshot_count",incomplete);result.put("future_snapshot_count",snapshots.size()-dated.size());
+    result.put("valuation_through",terminal==null?null:terminal.toString());
+    result.put("xirr_percent",xirr==null?null:round(xirr*100));result.put("xirr_status",xirrStatus);
+    result.put("maximum_drawdown_percent",drawdown==null?null:round(drawdown*100));result.put("drawdown_status",drawdownStatus);
+    result.put("methodology","Recorded holdings-only valuations and explicitly external cash flows through the latest nonfuture valuation date. BUY and SELL are internal allocation changes. Drawdown is withheld for incomplete history or intervening external flows. Unrecorded cash, fees, dividends or transactions can invalidate results; recorded prices are not verified live values.");
     return result;
   }
 
+  private static LocalDate day(Object value){
+    return value instanceof java.sql.Date d?d.toLocalDate():(LocalDate)value;
+  }
+  private static boolean complete(Map<String,Object> row){
+    return ((Number)row.get("priced_positions")).longValue()>0
+      &&((Number)row.get("unpriced_positions")).longValue()==0
+      &&row.get("total_value") instanceof BigDecimal value&&value.signum()>=0
+      &&Double.isFinite(value.doubleValue());
+  }
+
   static Double xirr(List<CashFlow> flows){
-    if(flows.size()<2||flows.stream().noneMatch(f->f.amount<0)||flows.stream().noneMatch(f->f.amount>0))return null;
-    LocalDate first=flows.stream().map(CashFlow::date).min(LocalDate::compareTo).orElseThrow();
+    // Net same-date flows before solving. A single negative-to-positive
+    // transition provides a conservative unique-root condition.
+    TreeMap<LocalDate,Double> daily=new TreeMap<>();
+    for(CashFlow flow:flows){
+      if(!Double.isFinite(flow.amount()))return null;
+      daily.merge(flow.date(),flow.amount(),Double::sum);
+    }
+    List<CashFlow> net=new ArrayList<>();
+    boolean positive=false;
+    for(var entry:daily.entrySet()){
+      double value=entry.getValue();
+      if(!Double.isFinite(value))return null;
+      if(value==0)continue;
+      if(value>0)positive=true;
+      else if(positive)return null;
+      net.add(new CashFlow(entry.getKey(),value));
+    }
+    if(net.size()<2||net.get(0).amount()>=0||!positive)return null;
+    flows=net;
+    LocalDate first=net.get(0).date();
     double low=-0.9999,high=10.0,a=npv(flows,first,low),b=npv(flows,first,high);
-    if(!Double.isFinite(a)||!Double.isFinite(b)||Math.signum(a)==Math.signum(b))return null;
+    if(!Double.isFinite(a)||!Double.isFinite(b))return null;
+    if(a==0)return low;if(b==0)return high;
+    if(Math.signum(a)==Math.signum(b))return null;
     for(int i=0;i<160;i++){
       double mid=(low+high)/2,value=npv(flows,first,mid);
+      if(!Double.isFinite(value))return null;
       if(Math.abs(value)<1e-8)return mid;
       if(Math.signum(value)==Math.signum(a)){low=mid;a=value;}else high=mid;
     }
@@ -121,7 +191,7 @@ public class PortfolioHistoryController {
     double total=0;for(CashFlow flow:flows){double years=ChronoUnit.DAYS.between(first,flow.date())/365.0;total+=flow.amount()/Math.pow(1+rate,years);}return total;
   }
   private static Double maxDrawdown(List<Map<String,Object>> snapshots){
-    if(snapshots.size()<2)return null;double peak=-1,drawdown=0;
+    if(snapshots.size()<2||((BigDecimal)snapshots.get(0).get("total_value")).signum()<=0)return null;double peak=-1,drawdown=0;
     for(Map<String,Object> row:snapshots){double value=((BigDecimal)row.get("total_value")).doubleValue();peak=Math.max(peak,value);if(peak>0)drawdown=Math.min(drawdown,value/peak-1);}
     return drawdown;
   }

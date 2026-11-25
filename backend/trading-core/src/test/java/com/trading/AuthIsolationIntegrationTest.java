@@ -196,6 +196,60 @@ class AuthIsolationIntegrationTest {
       .andExpect(jsonPath("$.xirr_status").value("UNAVAILABLE_REQUIRES_EXTERNAL_CASH_FLOWS_AND_VALUATION"));
   }
 
+  @Test void historicalPerformanceRejectsPartialValuationsAndSeparatesCashFlows()throws Exception{
+    String email="performance-integrity-"+UUID.randomUUID()+"@example.test";
+    String a=create(email);
+    UUID user=jdbc.queryForObject("SELECT id FROM atlas_users WHERE email=?",UUID.class,email);
+    LocalDate today=LocalDate.now(com.trading.market.MarketCalendarService.IST);
+    LocalDate start=today.minusDays(370),terminal=today.minusDays(5);
+    for(var flow:java.util.List.of(
+        Map.of("transactionDate",start.toString(),"transactionType","DEPOSIT","cashAmount",1000),
+        Map.of("transactionDate",today.toString(),"transactionType","DEPOSIT","cashAmount",500))){
+      var input=new java.util.HashMap<String,Object>(flow);
+      input.put("symbol","CASH");input.put("assetType","CASH");
+      mvc.perform(post("/api/v1/portfolio/history/transactions").header("Authorization",a)
+        .contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(input))).andExpect(status().isOk());
+    }
+    jdbc.update("INSERT INTO portfolio_valuation_snapshots(user_id,valuation_date,total_value,priced_positions,unpriced_positions) VALUES (?,?,1000,1,0),(?,?,1100,1,0),(?,?,2000,1,0)",user,start,user,terminal,user,today.plusDays(1));
+    mvc.perform(get("/api/v1/portfolio/history/performance").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.xirr_percent").value(org.hamcrest.Matchers.closeTo(10.0,0.1)))
+      .andExpect(jsonPath("$.valuation_through").value(terminal.toString()))
+      .andExpect(jsonPath("$.external_flows_after_valuation").value(1))
+      .andExpect(jsonPath("$.future_snapshot_count").value(1));
+    mvc.perform(post("/api/v1/portfolio/history/transactions").header("Authorization",a)
+      .contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(Map.of(
+        "symbol","CASH","assetType","CASH","transactionType","WITHDRAWAL",
+        "transactionDate",start.plusDays(30).toString(),"cashAmount",50)))).andExpect(status().isOk());
+    mvc.perform(get("/api/v1/portfolio/history/performance").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.drawdown_status").value("UNAVAILABLE_EXTERNAL_FLOWS_REQUIRE_FLOW_ADJUSTED_HISTORY"));
+    mvc.perform(post("/api/v1/portfolio/history/transactions").header("Authorization",a)
+      .contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(Map.of(
+        "symbol","CASH","assetType","CASH","transactionType","DEPOSIT",
+        "transactionDate",start.plusDays(60).toString(),"cashAmount",50)))).andExpect(status().isOk());
+    mvc.perform(get("/api/v1/portfolio/history/performance").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.xirr_status").value("UNAVAILABLE_AMBIGUOUS_OR_UNSUPPORTED_CASH_FLOWS"));
+    jdbc.update("UPDATE portfolio_valuation_snapshots SET unpriced_positions=1 WHERE user_id=? AND valuation_date=?",user,terminal);
+    mvc.perform(get("/api/v1/portfolio/history/performance").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.xirr_status").value("UNAVAILABLE_INCOMPLETE_TERMINAL_VALUATION"))
+      .andExpect(jsonPath("$.drawdown_status").value("UNAVAILABLE_INCOMPLETE_VALUATION_HISTORY"));
+  }
+
+  @Test void agedHoldingsCannotReplaceRecordedValuation()throws Exception{
+    String email="snapshot-integrity-"+UUID.randomUUID()+"@example.test";
+    String a=create(email);
+    UUID user=jdbc.queryForObject("SELECT id FROM atlas_users WHERE email=?",UUID.class,email);
+    LocalDate today=LocalDate.now(com.trading.market.MarketCalendarService.IST);
+    mvc.perform(post("/api/v1/portfolio/holdings").header("Authorization",a)
+      .contentType(MediaType.APPLICATION_JSON).content("{\"symbol\":\"SNAPTEST\",\"assetType\":\"EQUITY\",\"quantity\":2,\"averageCost\":100,\"lastPrice\":125}")).andExpect(status().isOk());
+    mvc.perform(post("/api/v1/portfolio/history/snapshots/current").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.recorded").value(true));
+    jdbc.update("UPDATE personal_holdings SET price_as_of=now()-interval '10 days',last_price=999 WHERE user_id=?",user);
+    mvc.perform(post("/api/v1/portfolio/history/snapshots/current").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.recorded").value(false));
+    org.junit.jupiter.api.Assertions.assertEquals(0,new java.math.BigDecimal("250").compareTo(
+      jdbc.queryForObject("SELECT total_value FROM portfolio_valuation_snapshots WHERE user_id=? AND valuation_date=?",java.math.BigDecimal.class,user,today)));
+  }
+
   @Test void automaticPortfolioReviewIsOwnerScopedAndUpdatesAfterDeletion()throws Exception{
     String a=create("doctor-a-"+UUID.randomUUID()+"@example.test");
     String b=create("doctor-b-"+UUID.randomUUID()+"@example.test");
