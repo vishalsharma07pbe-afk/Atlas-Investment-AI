@@ -89,6 +89,19 @@ class FundPortfoliosTests(unittest.TestCase):
                                  {**cash_b,"pct_of_fund":"30"}),TODAY,INSTANT.isoformat())
         self.assertEqual(portfolios.overlap(identities,INSTANT)["pairs"],[])
 
+    def test_internal_exact_weights_are_complete_and_opt_in(self):
+        equities=[row(isin=f"INE{i:09d}",isin_as_filed=f"INE{i:09d}",
+                      security_name=f"Equity {i}",pct_of_fund="8") for i in range(12)]
+        portfolios.store(payload(*equities,{**CASH,"pct_of_fund":"4"}),TODAY,INSTANT.isoformat())
+        identity={"fund_id":"fund:123","scheme_code":"123456","scheme_name":"Example"}
+        with patch.object(portfolios,"company_coverage",return_value={}):
+            public=portfolios.matched([identity],INSTANT)[0]
+            internal=portfolios.matched([identity],INSTANT,include_exact_weights=True)[0]
+        self.assertNotIn("exact_equity_weights",public)
+        self.assertEqual(len(internal["top_holdings"]),10)
+        self.assertEqual(len(internal["exact_equity_weights"]),12)
+        self.assertEqual(sum(internal["exact_equity_weights"].values()),96)
+
     def test_authorization_gate(self):
         with patch.dict("os.environ",{"MARKET_DATA_USAGE_RIGHTS_CONFIRMED":"false"}),patch.object(portfolios.httpx,"Client") as client:
             self.assertEqual(autonomous_research._execute_job("FUND_PORTFOLIOS"),"DISABLED_OR_NOT_AUTHORIZED")
