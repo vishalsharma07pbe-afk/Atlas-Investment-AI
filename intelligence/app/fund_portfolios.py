@@ -170,7 +170,9 @@ def matched(disclosures,instant=None):
                 if report.get("fund_id")!=fund or not fund_disclosures._day(report["portfolio_date"],today,60):
                     continue
                 equities=report.pop("equities")
+                from .fund_underlying_research import summarize
                 result.append({**report,**company_coverage(equities,instant),
+                    "underlying_research":summarize(equities,instant),
                     "scheme_code":item["scheme_code"],"scheme_name":item["scheme_name"],
                     "collected_at":found["collected_at"],"top_holdings":equities[:10],
                     "status":"SECONDARY_COMPOSITION_ONLY"})
