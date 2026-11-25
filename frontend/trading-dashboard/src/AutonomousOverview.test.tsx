@@ -94,3 +94,13 @@ it("shows official economic announcements with source and publication date",asyn
  expect(screen.getByText("monetary policy")).toBeTruthy();
  expect(screen.getByText("Published feed headline, not a forecast.")).toBeTruthy();
 });
+
+it("keeps scheduled macro events separate from published announcements",async()=>{
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[],economic_calendar:{status:"CURRENT_SCHEDULE",source_url:"https://www.bls.gov/help/hlpiCAL.htm",events:[{id:"one",headline:"Consumer Price Index",topic:"INFLATION",scheduled_at:"2026-11-26T13:30:00+00:00",status:"SCHEDULED",review_window:true},{id:"two",headline:"Employment Situation",topic:"EMPLOYMENT",scheduled_at:"2026-11-25T13:30:00+00:00",status:"SCHEDULE_TIME_PASSED_RELEASE_UNVERIFIED",review_window:false}],notice:"Scheduled time does not establish publication."}})})));
+ render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}}>{null}</AutonomousOverview>);
+ expect(await screen.findByRole("region",{name:"Upcoming economic release calendar"})).toBeTruthy();
+ expect(screen.getByText("Consumer Price Index")).toBeTruthy();
+ expect(screen.getByText(/Upcoming within 24 hours/)).toBeTruthy();
+ expect(screen.getByText(/schedule time passed release unverified/)).toBeTruthy();
+ expect(screen.getByText("Scheduled time does not establish publication.")).toBeTruthy();
+});
