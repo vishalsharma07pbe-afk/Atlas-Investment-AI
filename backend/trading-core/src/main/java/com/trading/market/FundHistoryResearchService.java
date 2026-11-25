@@ -181,135 +181,15 @@ public class FundHistoryResearchService {
 
   /** Exact catalog metadata, independent of whether three years of NAV history exist. */
   public Map<String,Object> holdingIdentity(long schemeCode){
+    LocalDate today=LocalDate.now(MarketCalendarService.IST);
     var rows=jdbc.queryForList("""
       SELECT scheme_code,scheme_name,category,amfi_plan,amfi_option,
         amfi_metadata_date::text AS amfi_metadata_date,isin_growth
       FROM mutual_fund_schemes WHERE scheme_code=? AND amfi_option='GROWTH'
-        AND amfi_plan IN ('DIRECT','REGULAR') AND isin_growth ~ '^IN[A-Z0-9]{10}
-  public Map<String,Object> holdingEvidence(long schemeCode){
-    LocalDate today=LocalDate.now(MarketCalendarService.IST);
-    var schemes=jdbc.queryForList("SELECT scheme_code,scheme_name,category,amfi_plan,amfi_option,amfi_metadata_date,isin_growth,amc_name FROM mutual_fund_schemes WHERE scheme_code=?",schemeCode);
-    if(schemes.isEmpty())return null;
-    var rows=jdbc.queryForList("""
-      SELECT nav_date,nav,source_code FROM mutual_fund_nav
-      WHERE scheme_code=? AND nav_date BETWEEN ?::date-1120 AND ?::date
-        AND source_code IN ('AMFI','MFAPI') ORDER BY nav_date
-      """,schemeCode,today,today);
-    var result=metrics(rows,today);
-    if(result==null)return null;
-    result.putAll(schemes.getFirst());
-    result.put("notice","Historical NAV observations for the exact saved scheme. Official benchmark, TER, Riskometer and holdings evidence remain unverified.");
-    return result;
-  }
-
-  static Map<String,Object> metrics(List<Map<String,Object>> rows,LocalDate today){
-    if(rows.size()<650)return null;
-    var last=rows.getLast();
-    LocalDate end=date(last.get("nav_date"));
-    if(end==null||end.isAfter(today)||end.isBefore(today.minusDays(7))||!"AMFI".equals(last.get("source_code")))return null;
-    LocalDate target3=end.minusYears(3),target1=end.minusYears(1),prior=null;
-    double current=((BigDecimal)last.get("nav")).doubleValue(),base3=0,base1=0,peak=0,drawdown=0;
-    LocalDate start3=null,start1=null;
-    int count=0;
-    for(var row:rows){
-      LocalDate d=date(row.get("nav_date"));
-      double nav=((BigDecimal)row.get("nav")).doubleValue();
-      if(d==null||!Double.isFinite(nav)||nav<=0||d.isAfter(end)||prior!=null&&!d.isAfter(prior))return null;
-      if(!d.isAfter(target3)){base3=nav;start3=d;}
-      if(!d.isAfter(target1)){base1=nav;start1=d;}
-      if(!d.isBefore(target3)){
-        if(prior!=null&&ChronoUnit.DAYS.between(prior,d)>14)return null;
-        peak=Math.max(peak,nav);drawdown=Math.min(drawdown,nav/peak-1);count++;
-      }
-      prior=d;
-    }
-    if(count<650||start3==null||start1==null||start3.isBefore(target3.minusDays(14))||start1.isBefore(target1.minusDays(14)))return null;
-    Map<String,Object> result=new LinkedHashMap<>();
-    result.put("nav",current);result.put("nav_date",end.toString());
-    result.put("cagr_3y_percent",round(100*(Math.pow(current/base3,365.2425/ChronoUnit.DAYS.between(start3,end))-1)));
-    result.put("cagr_1y_percent",round(100*(Math.pow(current/base1,365.2425/ChronoUnit.DAYS.between(start1,end))-1)));
-    result.put("drawdown_3y_percent",round(drawdown*100));result.put("observations",count);
-    result.putAll(weeklyRisk(rows,end));
-    double annual=((Number)result.get("cagr_3y_percent")).doubleValue();
-    // No infinite ratio, and no ratio for effectively flat/no-drawdown histories.
-    result.put("return_to_drawdown",annual>0&&drawdown<=-0.01?round(annual/(-100*drawdown)):null);
-    // Observed underwater period, not an interpolated daily path.
-    double previousPeak=0;
-    LocalDate peakDate=null,drawdownStart=null;
-    long longest=0;
-    for(var row:rows){
-      LocalDate day=date(row.get("nav_date"));
-      if(day.isBefore(target3))continue;
-      double value=((BigDecimal)row.get("nav")).doubleValue();
-      if(value>=previousPeak){
-        if(drawdownStart!=null)longest=Math.max(longest,ChronoUnit.DAYS.between(drawdownStart,day));
-        previousPeak=value;peakDate=day;drawdownStart=null;
-      }else{
-        if(drawdownStart==null)drawdownStart=peakDate;
-        longest=Math.max(longest,ChronoUnit.DAYS.between(drawdownStart,day));
-      }
-    }
-    result.put("longest_observed_underwater_days",longest);
-    result.put("current_observed_underwater_days",drawdownStart==null?0L:ChronoUnit.DAYS.between(drawdownStart,end));
-    result.put("sources",rows.stream().map(r->String.valueOf(r.get("source_code"))).distinct().sorted().toList());
-    return result;
-  }
-  /** Fixed seven-day target dates, using a NAV at most three days earlier.
-   * Returns are weekly close proxies (not equally spaced daily returns).
-   * No interpolation; any missing/duplicate anchor makes risk unavailable.
-   */
-  static Map<String,Object> weeklyRisk(List<Map<String,Object>> rows,LocalDate end){
-    NavigableMap<LocalDate,Double> series=new TreeMap<>();
-    for(var row:rows){
-      LocalDate d=date(row.get("nav_date"));Object value=row.get("nav");
-      if(d==null||!(value instanceof Number n)||!Double.isFinite(n.doubleValue())||n.doubleValue()<=0||series.putIfAbsent(d,n.doubleValue())!=null)return Map.of();
-    }
-    List<Double> anchors=new ArrayList<>();LocalDate prior=null;
-    for(int i=156;i>=0;i--){
-      LocalDate target=end.minusWeeks(i);
-      var point=series.floorEntry(target);
-      if(point==null||point.getKey().isBefore(target.minusDays(3))||prior!=null&&!point.getKey().isAfter(prior))return Map.of();
-      anchors.add(point.getValue());prior=point.getKey();
-    }
-    double sum=0,sumSq=0,downsideSq=0,worst=Double.POSITIVE_INFINITY;int positive=0,rolling=0,negativeWeeks=0;
-    List<Double> rollingReturns=new ArrayList<>();
-    for(int i=1;i<anchors.size();i++){
-      double r=anchors.get(i)/anchors.get(i-1)-1;sum+=r;sumSq+=r*r;
-      if(r<0){downsideSq+=r*r;negativeWeeks++;}
-      if(i>=52){
-        double annual=100*(Math.pow(anchors.get(i)/anchors.get(i-52),365.2425/364)-1);
-        if(!Double.isFinite(annual))return Map.of();
-        worst=Math.min(worst,annual);if(annual>0)positive++;rolling++;rollingReturns.add(annual);
-      }
-    }
-    int n=anchors.size()-1;double variance=Math.max(0,(sumSq-sum*sum/n)/(n-1));
-    double volatility=100*Math.sqrt(variance*52);
-    if(!Double.isFinite(volatility))return Map.of();
-    rollingReturns.sort(Double::compare);
-    double downside=100*Math.sqrt(52*downsideSq/n);
-    double median=rollingReturns.size()%2==0
-        ? (rollingReturns.get(rolling/2-1)+rollingReturns.get(rolling/2))/2
-        : rollingReturns.get(rolling/2);
-    if(!Double.isFinite(downside)||!Double.isFinite(median))return Map.of();
-    Map<String,Object> result=new LinkedHashMap<>();
-    result.put("weekly_volatility_percent",round(volatility));
-    result.put("worst_rolling_52w_annualized_percent",round(worst));
-    result.put("median_rolling_52w_annualized_percent",round(median));
-    result.put("best_rolling_52w_annualized_percent",round(rollingReturns.getLast()));
-    result.put("positive_rolling_52w_percent",round(100.0*positive/rolling));
-    result.put("weekly_downside_deviation_percent",round(downside));
-    result.put("negative_week_percent",round(100.0*negativeWeeks/n));
-    result.put("rolling_windows",rolling);
-    result.put("weekly_intervals",n);
-    return result;
-  }
-  private static LocalDate date(Object d){return d instanceof java.sql.Date x?x.toLocalDate():d instanceof LocalDate x?x:null;}
-  private static double round(double n){return Math.round(n*10000d)/10000d;}
-}
-
+        AND amfi_plan IN ('DIRECT','REGULAR') AND isin_growth ~ '^IN[A-Z0-9]{10}$'
         AND amfi_metadata_date BETWEEN ?::date-7 AND ?::date
         AND length(scheme_name) BETWEEN 1 AND 300 AND length(category) BETWEEN 1 AND 300
-      """,schemeCode,LocalDate.now(MarketCalendarService.IST),LocalDate.now(MarketCalendarService.IST));
+      """,schemeCode,today,today);
     return rows.size()==1?rows.getFirst():null;
   }
 
