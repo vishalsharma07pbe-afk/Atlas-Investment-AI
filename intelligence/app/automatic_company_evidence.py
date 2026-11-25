@@ -12,6 +12,7 @@ import re
 
 from .p1_research import company_research
 from .financial_trends import summarize as financial_trends
+from .fundamental_quality import summarize as fundamental_quality
 
 ISIN = re.compile(r"^IN[A-Z0-9]{10}$")
 HORIZONS = ("LONG_TERM", "SHORT_TERM", "SWING")
@@ -94,7 +95,8 @@ def normalize(report, isin, instant):
                 sector=number(r.get("sector_value"))
                 if company is not None:
                     data.append({"name":text(r["name"]),"company_value":company,"sector_value":sector,
-                                 "unit":r.get("unit") if r.get("unit") in ("PERCENT","RATIO") else "UNKNOWN"})
+                                 "unit":r.get("unit") if r.get("unit") in ("PERCENT","RATIO") else "UNKNOWN",
+                                 "sector_unit":r.get("sector_unit") if r.get("sector_unit") in ("PERCENT","RATIO") else "UNKNOWN"})
         elif key in ("income_statement","cash_flow") and isinstance(raw,dict):
             rows=history(raw.get(key))
             if rows:
@@ -191,5 +193,6 @@ def attach(snapshot,connect,instant=None):
         if row and row["payload"]:
             report=json.loads(row["payload"])
             report["financial_trends"]=financial_trends(report,instant.year)
+            report["fundamental_quality"]=fundamental_quality(report,instant.year)
             item["company_evidence"]=report
     return snapshot

@@ -84,9 +84,11 @@ def _normalize_ratios(rows) -> list[dict]:
             "company_value": company,
             "sector_value": sector,
             "unit": "PERCENT" if "%" in str(row.get("company_value", "")) else "RATIO",
+            "sector_unit": "PERCENT" if "%" in str(row.get("sector_value", "")) else "RATIO",
             "relative_difference_percent": (
                 round((company - sector) / abs(sector) * 100, 2)
-                if company is not None and sector not in (None, 0) else None
+                if company is not None and sector not in (None, 0)
+                and ("%" in str(row.get("company_value", ""))) == ("%" in str(row.get("sector_value", ""))) else None
             ),
         })
     return result

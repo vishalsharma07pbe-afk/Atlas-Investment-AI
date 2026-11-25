@@ -175,6 +175,8 @@ def attach_conclusions(snapshot):
                 warnings=list(reliability.get("warnings",[]))
                 blockers=sorted(set(group.get("blockers",[]))|set(reliability.get("blockers",[])))
                 company=item.get("company_evidence") or {}
+                quality=company.get("fundamental_quality") or {}
+                warnings.extend(quality.get("warnings",[]))
                 replay=item.get("matched_strategy_replay") or {}
                 reviews=(item.get("ai_review") or {}).get("reviews",[])
                 news=item.get("news_evidence") or {}
@@ -206,7 +208,8 @@ def attach_conclusions(snapshot):
                                "NO_RETURNED_ARTICLES" if news.get("status")=="NO_RECENT_RETURNED_ARTICLES" else "UNAVAILABLE",
                         "historical_validation":"MATCHED_REPLAY_AVAILABLE" if replay_observed else "UNAVAILABLE",
                         "ai":"COMMENTARY_AVAILABLE" if reviews else "UNAVAILABLE",
-                        "valuation":"NOT_VERIFIED","institutional":"STOCK_LEVEL_NOT_VERIFIED",
+                        "valuation":"SECTOR_COMPARISON_ONLY" if (quality.get("valuation") or {}).get("status")=="SECTOR_COMPARISON_ONLY" else "NOT_VERIFIED",
+                        "business_quality":quality.get("status","UNAVAILABLE"),"institutional":"STOCK_LEVEL_NOT_VERIFIED",
                         "market_regime":"NOT_VALIDATED"},
                     "reassessment_conditions":conditions,
                     "notice":"Deterministic watch-only research conclusion; not a recommendation, target, stop-loss or calibrated probability."}
