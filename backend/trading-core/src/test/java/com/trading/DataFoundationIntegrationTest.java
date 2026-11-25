@@ -68,10 +68,9 @@ class DataFoundationIntegrationTest {
     assertThat(report.get("through")).isEqualTo("2026-11-12");
     var rows=(java.util.List<?>)report.get("days");
     assertThat(rows).hasSize(1100);
-    assertThat(rows).contains(java.util.Map.of("trade_date","2026-11-10","state","CLOSED"),
-      java.util.Map.of("trade_date","2026-11-11","state","REGULAR"));
-    // The last weekday may be locally seeded; never assume an absent row is open.
-    assertThat(rows).contains(java.util.Map.of("trade_date","2026-11-08","state","CLOSED"));
+    assertThat(rows.contains(java.util.Map.of("trade_date","2026-11-10","state","CLOSED"))).isTrue();
+    assertThat(rows.contains(java.util.Map.of("trade_date","2026-11-11","state","REGULAR"))).isTrue();
+    assertThat(rows.contains(java.util.Map.of("trade_date","2026-11-08","state","CLOSED"))).isTrue();
   }
 
   @Test @Order(2) void identicalArtifactIsIdempotent() throws Exception {
