@@ -26,13 +26,16 @@ import org.springframework.transaction.annotation.Transactional;
    Set<String> seen=new HashSet<>();
    for(JsonNode item:root){
     String key=item.path("instrument_key").asText(""),symbol=item.path("trading_symbol").asText("");
-    if(!Set.of("EQ","EQUITY").contains(item.path("instrument_type").asText(""))||
+    String type=item.path("instrument_type").asText("");
+    boolean equity=Set.of("EQ","EQUITY").contains(type)||("BSE".equals(exchange)&&Set.of("A","B").contains(type));
+    if(!equity||
        !exchange.equals(item.path("exchange").asText(""))||!symbol.matches("[A-Za-z0-9._&-]{1,50}"))continue;
     String displayName=item.path("name").asText(item.path("short_name").asText(""));
     if(displayName.isBlank())displayName=null;
     else if(displayName.length()>240)displayName=displayName.substring(0,240);
     String isin=item.path("isin").asText("");
     if(!validEquityIdentity(exchange,key,isin))continue;
+    if(key.matches("BSE_EQ[|][0-9]{1,10}")&&!key.equals("BSE_EQ|"+item.path("exchange_token").asText("")))continue;
     if(!seen.add(key))throw new IllegalStateException("Duplicate provider instrument identity");
     // Do not relabel existing historical observations to a different security.
     int mapped=jdbc.update("""
@@ -46,7 +49,7 @@ import org.springframework.transaction.annotation.Transactional;
         source='UPSTOX',source_revision='UPSTOX_INSTRUMENT_MASTER',updated_at=now()
       WHERE instruments.isin=EXCLUDED.isin OR (instruments.isin IS NULL AND NOT EXISTS(
         SELECT 1 FROM market_candles c WHERE c.instrument_id=instruments.id))
-      """,exchange,symbol,isin,displayName,item.path("instrument_type").asText());
+      """,exchange,symbol,isin,displayName,"EQ");
     if(mapped!=1)continue;
     int written=jdbc.update("""
       INSERT INTO upstox_instrument_map(instrument_key,exchange_code,isin,trading_symbol,instrument_type,display_name)
@@ -55,7 +58,7 @@ import org.springframework.transaction.annotation.Transactional;
         instrument_type=EXCLUDED.instrument_type,display_name=EXCLUDED.display_name,updated_at=now()
       WHERE upstox_instrument_map.exchange_code=EXCLUDED.exchange_code
         AND (upstox_instrument_map.isin IS NULL OR upstox_instrument_map.isin=EXCLUDED.isin)
-      """,key,exchange,isin,symbol,item.path("instrument_type").asText(),displayName);
+      """,key,exchange,isin,symbol,"EQ",displayName);
     if(written!=1)throw new IllegalStateException("Provider instrument identity conflict");
     count++;accepted++;
    }
