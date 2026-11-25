@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from .market_client import backend_json
 from .screener import screen
 from .mutual_fund_recommendations import CATEGORIES, dashboard
-from . import economic_calendar, global_releases, global_context, global_markets, global_macro, global_fx, automatic_deals, fund_portfolios, fund_disclosures, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
+from . import release_reconciliation, economic_calendar, global_releases, global_context, global_markets, global_macro, global_fx, automatic_deals, fund_portfolios, fund_disclosures, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
 
 SECTIONS = ("NSE", "BSE", *CATEGORIES)
 DEFAULT_INTERVAL = 900
@@ -274,6 +274,7 @@ def read_snapshot(include_ai=True):
             snapshot["economic_calendar"]=economic_calendar.read(_connect,current) if enabled else economic_calendar.empty("AUTOMATION_DISABLED")
         except (ValueError,OSError,sqlite3.Error):
             snapshot["economic_calendar"]=economic_calendar.empty("UNAVAILABLE")
+        release_reconciliation.attach(snapshot,current)
         global_context.attach(snapshot,current)
         research_reliability.attach_conclusions(snapshot)
         snapshot["daily_briefing"] = daily_briefing.summarize(snapshot)
