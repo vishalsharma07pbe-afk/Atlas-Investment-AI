@@ -140,3 +140,13 @@ it("prioritizes recent quarterly ownership declines without implying trades",asy
  expect(screen.getByText(/50.00% \(2026-06-30\) → 48.00% \(2026-09-30\)/)).toBeTruthy();
  expect(screen.getByText(/not proof of trades/)).toBeTruthy();
 });
+
+it("surfaces portfolio-level benchmark lag without requiring a flagged individual holding",async()=>{
+ const holding={id:1,symbol:"EXAMPLE",asset_type:"EQUITY",exchange:"NSE",status:"MONITOR",weight_percent:100,recorded_return_percent:2,evidence_date:null,history_count:0,change_20_observations_percent:null,recent_peak_change_percent:null,findings:[],missing_evidence:[]};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-25T10:00:00Z",holding_count:1,attention_count:0,data_gap_count:0,notice:"Research only",holdings:[holding],
+ portfolio_level_risk:{benchmark_status:"COMPARABLE_PRICE_REFERENCE",concentration_status:"INSUFFICIENT_EVIDENCE",sector_status:"INSUFFICIENT_EVIDENCE",attention:[{kind:"BENCHMARK_RELATIVE_LAG",label:"13-week lag versus NIFTY 50 price index",value:-6,threshold:-5,unit:"PP",evidenceThrough:"2026-11-25"}],notice:"Price reference, not TRI."}})})));
+ render(<PortfolioDoctor revision={0} onSettings={()=>{}}/>);
+ expect(await screen.findByText("Portfolio-level risk monitoring")).toBeTruthy();
+ expect(screen.getByText("-6.00 pp")).toBeTruthy();
+ expect(screen.getByText("Price reference, not TRI.")).toBeTruthy();
+});
