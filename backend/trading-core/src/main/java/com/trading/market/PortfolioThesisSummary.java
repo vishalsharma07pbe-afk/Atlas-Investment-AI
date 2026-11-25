@@ -37,7 +37,7 @@ final class PortfolioThesisSummary {
     Double a=number(r,"company_value"),b=number(r,"sector_value");
     String unit=r.path("unit").asText();
     boolean profitability=Set.of("ROE","ROCE").contains(key);
-    if(a==null||b==null||!(profitability?"PERCENT":"RATIO").equals(unit))continue;
+    if(a==null||b==null||!(profitability?"PERCENT":"RATIO").equals(unit)||!unit.equals(r.path("sector_unit").asText()))continue;
     if(!profitability&&(a<=0||b<=0))continue;
     comparisons++;
     String label=switch(key){case "PE"->"P/E";case "PB"->"P/B";case "DEBT_EQUITY"->"Debt/equity";default->key;};
@@ -73,6 +73,18 @@ final class PortfolioThesisSummary {
    if(trendCount==0)gaps.add("Recent, consecutive annual financial statement comparisons unavailable.");
    else if(!"AVAILABLE".equals(trends.path("status").asText())||trendCount<trends.path("items").size())
      gaps.add("Annual financial statement coverage is partial; some metrics or recent periods are unavailable.");
+   JsonNode quality=company.path("fundamental_quality");
+   for(JsonNode metric:quality.path("derived_metrics")){
+    String key=metric.path("metric").asText();
+    if(!Set.of("NET_MARGIN","OPERATING_CASH_TO_PROFIT","REPORTED_LIABILITIES_TO_ASSETS").contains(key))continue;
+    Double previous=number(metric,"previous_value"),latest=number(metric,"latest_value");
+    if(previous==null||latest==null)continue;
+    String label=switch(key){case "NET_MARGIN"->"Net margin";case "OPERATING_CASH_TO_PROFIT"->"Operating cash/profit";default->"Reported liabilities/assets";};
+    String suffix="PERCENT".equals(metric.path("unit").asText())?"%":"x";
+    String statement=label+" changed from "+fmt(previous)+suffix+" to "+fmt(latest)+suffix+" in matched annual periods.";
+    boolean reviewMetric=!"REPORTED_LIABILITIES_TO_ASSETS".equals(key)&&(latest<previous||latest<0);
+    add(reviewMetric?review:observations,statement,"Upstox matched annual statements; filings unverified");
+   }
    JsonNode news=thesis.path("news_evidence");
    SortedSet<String> topics=new TreeSet<>();
    for(JsonNode article:news.path("articles"))for(JsonNode topic:article.path("topics"))
