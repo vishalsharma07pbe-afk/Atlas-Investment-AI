@@ -57,14 +57,35 @@ final class PortfolioThesisChanges {
         if(before==null||s.year()>before.year()||(s.year()==before.year()&&s.period().equals(before.period())&&s.unit().equals(before.unit())))
           baseline.put(s.metric(),s);
       }
-      if(!changes.isEmpty())changed++;
+      boolean newlyChanged=!changes.isEmpty();
+      // Retain recent observed changes across routine refreshes, but do not
+      // display them as current when the corresponding evidence disappears.
+      for(var previousChange:old.path("thesis_recent_changes")){
+        String metric=previousChange.path("metric").asText();
+        if(changes.stream().anyMatch(x->metric.equals(x.get("metric"))))continue;
+        try{
+          Instant at=Instant.parse(previousChange.path("observed_at").asText());
+          if(at.isAfter(now)||at.isBefore(now.minus(java.time.Duration.ofDays(7))))continue;
+          Signal currentSignal=baseline.get(metric);
+          if(currentSignal==null||!currentSignal.period().equals(previousChange.path("current_period").asText())||
+              !currentSignal.direction().equals(previousChange.path("current_direction").asText()))continue;
+          Map<String,String> retained=new LinkedHashMap<>();
+          for(String field:List.of("metric","previous_period","current_period","previous_direction","current_direction","observed_at"))
+            retained.put(field,previousChange.path(field).asText());
+          changes.add(retained);
+        }catch(RuntimeException ignored){/* Invalid stored timestamp. */}
+      }
+      h.put("thesis_recent_changes",changes);
+      var visible=changes.stream().filter(change->fresh.stream().anyMatch(s->s.metric().equals(change.get("metric"))&&
+        s.period().equals(change.get("current_period"))&&s.direction().equals(change.get("current_direction")))).toList();
+      if(!visible.isEmpty())changed++;
       h.put("thesis_direction_baseline",List.copyOf(baseline.values()));
-      h.put("thesis_changes",changes);
-      h.put("thesis_monitor_status",fresh.isEmpty()?"NO_CURRENT_DATED_TRENDS":changes.isEmpty()?"NO_NEW_DIRECTION_CHANGE":"NEW_REPORTED_DIRECTION_CHANGE");
+      h.put("thesis_changes",visible);
+      h.put("thesis_monitor_status",fresh.isEmpty()?"NO_CURRENT_DATED_TRENDS":visible.isEmpty()?"NO_NEW_DIRECTION_CHANGE":newlyChanged?"NEW_REPORTED_DIRECTION_CHANGE":"RECENT_REPORTED_DIRECTION_CHANGE");
       holdings.add(h);
     }
     var result=new LinkedHashMap<>(report);result.put("holdings",holdings);
-    result.put("thesis_changed_count",changed);result.put("thesis_monitor_notice","New consecutive annual reported direction changes only; missing evidence never implies recovery. No investment verdict.");
+    result.put("thesis_changed_count",changed);result.put("thesis_monitor_notice","Consecutive annual reported direction changes observed in the last seven days only; missing evidence never implies recovery. No investment verdict.");
     return result;
   }
   private static String identity(JsonNode h){
