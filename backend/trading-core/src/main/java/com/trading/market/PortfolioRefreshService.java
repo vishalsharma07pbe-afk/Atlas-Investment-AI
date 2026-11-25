@@ -61,7 +61,14 @@ public class PortfolioRefreshService {
           List<String> keys=jdbc.queryForList("""
             SELECT m.instrument_key FROM upstox_instrument_map m JOIN exchanges e ON e.code=m.exchange_code
             JOIN instruments i ON i.exchange_id=e.id AND i.symbol=m.trading_symbol AND i.isin=m.isin
-            WHERE upper(m.trading_symbol)=upper(?) AND m.isin ~ '^IN[A-Z0-9]{10}
+            WHERE upper(m.trading_symbol)=upper(?) AND m.isin ~ '^IN[A-Z0-9]{10}$'
+              AND m.instrument_type IN ('EQ','EQUITY') AND i.active AND i.series='EQ'
+              AND i.listing_status='ACTIVE' AND i.instrument_type IN ('EQ','EQUITY','STOCK')
+              AND NOT EXISTS(SELECT 1 FROM instruments other JOIN exchanges venue ON venue.id=other.exchange_id
+                WHERE venue.code IN ('NSE','BSE') AND upper(other.symbol)=upper(m.trading_symbol)
+                  AND other.active AND other.series='EQ' AND other.listing_status='ACTIVE'
+                  AND other.isin IS DISTINCT FROM m.isin)
+            ORDER BY CASE WHEN m.exchange_code='NSE' THEN 0 ELSE 1 END,m.instrument_key LIMIT 1
             """,String.class,symbol);
           if(keys.isEmpty()){skipped.add(issue(symbol,"INSTRUMENT_NOT_MAPPED"));continue;}
           String key=keys.get(0);
@@ -90,77 +97,6 @@ public class PortfolioRefreshService {
                   AND c.is_complete AND c.quality_status IN ('VALIDATED_MANUAL','PROVIDER_VALIDATED')
                 JOIN upstox_instrument_map m ON m.exchange_code=e.code AND m.trading_symbol=i.symbol AND m.isin=i.isin
                 AND i.series='EQ' AND i.active AND i.listing_status='ACTIVE'
-                WHERE m.instrument_key=? GROUP BY i.id
-                """,key);
-              long count=((Number)history.get("candle_count")).longValue();
-              Object raw=history.get("latest_date");
-              LocalDate latest=raw instanceof java.sql.Date d?d.toLocalDate():raw instanceof LocalDate d?d:null;
-              if(count<21||latest==null||latest.isBefore(today.minusDays(5)))
-                historySynced+=upstox.dailyCandles(user,key,today.minusMonths(6),end);
-            }catch(Exception ex){skipped.add(issue(symbol,"HISTORY_SYNC_FAILED"));}
-          }
-        }else if(symbol.matches("[0-9]{1,18}")){
-          List<Map<String,Object>> nav=jdbc.queryForList("""
-            SELECT nav,nav_date FROM mutual_fund_nav WHERE scheme_code=?
-            ORDER BY nav_date DESC LIMIT 2
-            """,Long.parseLong(symbol));
-          if(nav.isEmpty()){skipped.add(issue(symbol,"NAV_NOT_AVAILABLE"));continue;}
-          Object previous=nav.size()>1?nav.get(1).get("nav"):null;
-          updated+=jdbc.update("""
-            UPDATE personal_holdings SET last_price=?,previous_close=?,price_as_of=?::date,updated_at=now()
-            WHERE id=? AND user_id=? AND symbol=? AND asset_type='MUTUAL_FUND'
-            AND (price_as_of IS NULL OR price_as_of::date<=?::date)
-            """,nav.get(0).get("nav"),previous,nav.get(0).get("nav_date"),id,user,symbol,nav.get(0).get("nav_date"));
-        }else skipped.add(issue(symbol,"SCHEME_CODE_REQUIRED"));
-      }catch(Exception ex){
-        // Never expose arbitrary exception messages, URLs, or provider credentials.
-        String reason="Upstox credential unavailable".equals(ex.getMessage())?
-          "Upstox credential unavailable":"PROVIDER_REFRESH_FAILED";
-        skipped.add(issue(symbol,reason));
-      }
-    }
-    Map<String,Object> result=new LinkedHashMap<>();
-    result.put("updated",updated);result.put("history_synced",historySynced);
-    result.put("total",rows.size());result.put("skipped",skipped);
-    result.put("refreshed_at",Instant.now());
-    return result;
-  }
-
-  private static Map<String,String> issue(String symbol,String reason){
-    return Map.of("symbol",symbol,"reason",reason);
-  }
-}
-
-              AND m.instrument_type IN ('EQ','EQUITY') AND i.active AND i.series='EQ'
-              AND i.listing_status='ACTIVE' AND i.instrument_type IN ('EQ','EQUITY','STOCK')
-              AND NOT EXISTS(SELECT 1 FROM instruments other JOIN exchanges venue ON venue.id=other.exchange_id
-                WHERE venue.code IN ('NSE','BSE') AND upper(other.symbol)=upper(m.trading_symbol)
-                  AND other.active AND other.series='EQ' AND other.listing_status='ACTIVE'
-                  AND other.isin IS DISTINCT FROM m.isin)
-            ORDER BY CASE WHEN m.exchange_code='NSE' THEN 0 ELSE 1 END,m.instrument_key LIMIT 1
-            """,String.class,symbol);
-          if(keys.isEmpty()){skipped.add(issue(symbol,"INSTRUMENT_NOT_MAPPED"));continue;}
-          String key=keys.get(0);
-          JsonNode quote=upstox.quote(user,key);
-          if(!quote.path("ltp").isNumber()||quote.path("ltp").decimalValue().signum()<=0)
-            throw new IllegalStateException("INVALID_QUOTE");
-          BigDecimal price=quote.path("ltp").decimalValue();
-          BigDecimal previous=quote.path("previous_close").isNumber()?quote.path("previous_close").decimalValue():null;
-          updated+=jdbc.update("""
-            UPDATE personal_holdings SET last_price=?,previous_close=?,price_as_of=now(),updated_at=now()
-            WHERE id=? AND user_id=? AND symbol=? AND asset_type='EQUITY'
-            """,price,previous,id,user,symbol);
-          if(includeHistory){
-            try{
-              LocalDate today=LocalDate.now(MarketCalendarService.IST);
-              // Never mark a possibly unfinished current-day candle complete.
-              LocalDate end=today.minusDays(1);
-              Map<String,Object> history=jdbc.queryForMap("""
-                SELECT count(c.*) candle_count,max(c.candle_time)::date latest_date
-                FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
-                LEFT JOIN market_candles c ON c.instrument_id=i.id AND c.timeframe='1d'
-                  AND c.is_complete AND c.quality_status IN ('VALIDATED_MANUAL','PROVIDER_VALIDATED')
-                JOIN upstox_instrument_map m ON m.exchange_code=e.code AND m.trading_symbol=i.symbol
                 WHERE m.instrument_key=? GROUP BY i.id
                 """,key);
               long count=((Number)history.get("candle_count")).longValue();
