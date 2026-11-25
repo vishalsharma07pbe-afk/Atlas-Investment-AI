@@ -1,4 +1,4 @@
-import {useEffect,useState} from "react";
+import {useEffect,useState,type FormEvent} from "react";
 import {visiblePolling} from "./visiblePolling";
 
 type Input={name:string;targetAmount:string;reservedAmount:string;balanceDate:string;deadline:string;monthlyContribution:string};
@@ -32,7 +32,7 @@ export default function GoalMonitor(){
    setForm({name:goal.name,targetAmount:String(goal.targetAmount),reservedAmount:String(goal.reservedAmount),
      balanceDate:goal.balanceDate,deadline:goal.deadline,monthlyContribution:String(goal.monthlyContribution)});
  }
- async function save(event:React.FormEvent){
+ async function save(event:FormEvent){
    event.preventDefault();if(!form||busy)return;
    setError("");setBusy(true);
    try{
