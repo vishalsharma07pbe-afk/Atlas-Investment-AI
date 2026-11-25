@@ -23,9 +23,11 @@ public class FundHistoryResearchService {
   static final String UNIVERSE="""
     FROM mutual_fund_schemes s
     WHERE lower(trim(s.category)) LIKE ?
-      AND s.scheme_name ~* '(^|[^a-z])direct([^a-z]|$)'
-      AND s.scheme_name ~* '(^|[^a-z])growth([^a-z]|$)'
-      AND s.scheme_name !~* '(idcw|dividend|regular|bonus)'
+      AND ((s.amfi_plan='DIRECT' AND s.amfi_option='GROWTH')
+        OR (s.amfi_plan IS NULL AND s.amfi_option IS NULL
+          AND s.scheme_name ~* '(^|[^a-z])direct([^a-z]|$)'
+          AND s.scheme_name ~* '(^|[^a-z])growth([^a-z]|$)'
+          AND s.scheme_name !~* '(idcw|dividend|regular|bonus)'))
     """;
 
   private static String categoryPattern(String category){
@@ -101,7 +103,7 @@ public class FundHistoryResearchService {
     // A shared official NAV date prevents comparing different trailing windows.
     LocalDate commonEnd=jdbc.query("SELECT max((SELECT max(n.nav_date) FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code AND n.source_code='AMFI' AND n.nav_date BETWEEN ?::date-7 AND ?::date)) "+UNIVERSE,
       rs->{if(!rs.next())return null;var d=rs.getDate(1);return d==null?null:d.toLocalDate();},today,today,pattern);
-    var sample=jdbc.queryForList("SELECT s.scheme_code,s.scheme_name,s.category "+UNIVERSE+"""
+    var sample=jdbc.queryForList("SELECT s.scheme_code,s.scheme_name,s.category,s.amfi_plan,s.amfi_option,s.amfi_metadata_date,s.isin_growth,s.amc_name "+UNIVERSE+"""
       AND EXISTS(SELECT 1 FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code
         AND n.source_code='AMFI' AND n.nav_date BETWEEN ?::date-7 AND ?::date)
       ORDER BY (SELECT count(*) FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code
@@ -164,7 +166,7 @@ public class FundHistoryResearchService {
   /** Exact saved scheme only; not a category ranking or forward recommendation. */
   public Map<String,Object> holdingEvidence(long schemeCode){
     LocalDate today=LocalDate.now(MarketCalendarService.IST);
-    var schemes=jdbc.queryForList("SELECT scheme_code,scheme_name,category FROM mutual_fund_schemes WHERE scheme_code=?",schemeCode);
+    var schemes=jdbc.queryForList("SELECT scheme_code,scheme_name,category,amfi_plan,amfi_option,amfi_metadata_date,isin_growth,amc_name FROM mutual_fund_schemes WHERE scheme_code=?",schemeCode);
     if(schemes.isEmpty())return null;
     var rows=jdbc.queryForList("""
       SELECT nav_date,nav,source_code FROM mutual_fund_nav

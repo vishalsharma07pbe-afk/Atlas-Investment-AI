@@ -5,8 +5,11 @@ recommendations. Rankings require dated, source-attributed evidence.
 """
 from __future__ import annotations
 from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
-from decimal import Decimal
+from datetime import datetime, timezone, date
+from zoneinfo import ZoneInfo
+from math import isfinite
+import re
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 
@@ -196,6 +199,56 @@ def _catalog_candidates(category:str):
     return candidates,{"name_matched_schemes":matched,"exact_direct_growth_schemes":direct_growth,
                        "official_category_verified":0,"dated_nav_history_eligible":0,"portfolio_disclosures_eligible":0}
 
+OFFICIAL_CATEGORY_LABELS={"LARGE_CAP":"large cap fund","MID_CAP":"mid cap fund","SMALL_CAP":"small cap fund",
+                          "FLEXI_CAP":"flexi cap fund","INDEX":"index funds"}
+
+
+def _official_history_candidates(historical,category,today):
+    """Join only dated, explicitly identified Direct Growth evidence by AMFI code.
+    Do not merge an inferred Upstox ticker/name match or invent missing factors."""
+    label=OFFICIAL_CATEGORY_LABELS[category]
+    items=historical.get("items",[])
+    if not isinstance(items,list) or len(items)>5:
+        return []
+    ids=[r.get("scheme_code") for r in items if isinstance(r,dict)]
+    if len(ids)!=len(items) or any(type(i) is not int or not 1<=i<=999999999 for i in ids) or len(set(ids))!=len(ids):
+        return []
+    output=[]
+    for row in items:
+        try:
+            nav_day=date.fromisoformat(row["nav_date"])
+            metadata_day=date.fromisoformat(row["amfi_metadata_date"])
+            nav_age=(today-nav_day).days
+            if (not 0<=nav_age<=7 or not 0<=(today-metadata_day).days<=7
+                or row["nav_date"]!=historical.get("comparison_date") or metadata_day!=nav_day
+                or row.get("amfi_plan")!="DIRECT" or row.get("amfi_option")!="GROWTH"
+                or not isinstance(row.get("category"),str) or not row["category"].lower().strip().endswith(" - "+label+")")
+                or not isinstance(row.get("isin_growth"),str) or not re.fullmatch(r"IN[A-Z0-9]{10}",row["isin_growth"])
+                or not isinstance(row.get("scheme_name"),str) or not row["scheme_name"].strip()
+                or type(row.get("observations")) is not int or row["observations"]<650
+                or not isinstance(row.get("sources"),list) or "AMFI" not in row["sources"]
+                or any(source not in ("AMFI","MFAPI") for source in row["sources"])):
+                continue
+            nav=Decimal(str(row["nav"]))
+            if not nav.is_finite() or not 0<nav<=Decimal("1000000000"):
+                continue
+            def metric(key,lower=None,upper=None):
+                x=row.get(key)
+                if type(x) not in (int,float) or not isfinite(x):
+                    return None
+                return x if (lower is None or x>=lower) and (upper is None or x<=upper) else None
+            output.append(FundEvidence(identifier=str(row["scheme_code"]),name=row["scheme_name"],category=category,
+                category_verified=True,plan="DIRECT",option="GROWTH",passive=category=="INDEX",
+                nav=nav,nav_date=row["nav_date"],nav_age_days=nav_age,history_years=3,
+                returns_1y=metric("cagr_1y_percent",-100),returns_3y=metric("cagr_3y_percent",-100),
+                peer_percentile=metric("sample_peer_percentile",0,100) if category!="INDEX" else None,
+                worst_rolling_return=metric("worst_rolling_52w_annualized_percent",-100),
+                max_drawdown=metric("drawdown_3y_percent",-100,0),volatility=metric("weekly_volatility_percent",0)))
+        except (TypeError,ValueError,KeyError,InvalidOperation,OverflowError):
+            continue
+    return output
+
+
 def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str="MODERATE"):
     if category not in CATEGORIES:raise ValueError("UNSUPPORTED_CATEGORY")
     if horizon_months<12 or horizon_months>360:raise ValueError("INVALID_HORIZON")
@@ -216,7 +269,11 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
             coverage["dated_nav_history_eligible"]=observed["eligible_count"]
     except Exception:
         pass  # Local backend unavailability is not permission to fabricate history.
-    ranked=rank_candidates(candidates,category,horizon_months,risk_tolerance)
+    official=_official_history_candidates(historical,category,datetime.now(ZoneInfo("Asia/Kolkata")).date()) if historical else []
+    coverage["explicit_amfi_history_candidates"]=len(official)
+    # Public catalog discovery remains separate from exact AMFI scheme evidence.
+    # Unknown fee, benchmark, holdings and risk data still block recommendations.
+    ranked=rank_candidates(official,category,horizon_months,risk_tolerance)
     blockers=["OFFICIAL_CATEGORY_SOURCE_NOT_CONNECTED","DATED_NAV_HISTORY_INSUFFICIENT",
               "BENCHMARK_TRI_NOT_CONNECTED","OFFICIAL_RISKOMETER_NOT_CONNECTED",
               "PORTFOLIO_DISCLOSURES_NOT_CONNECTED","HOLDING_FUNDAMENTALS_NOT_CONNECTED",
