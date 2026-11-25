@@ -30,7 +30,23 @@ class LiveFeedsMockHttpTest {
   JsonNode result=new UpstoxFeedService(db,http,vault).quote(user,"NSE_EQ|INE002A01018");
   assertThat(result.path("ltp").decimalValue()).isEqualByComparingTo(new BigDecimal("2500.50"));
   assertThat(result.path("previous_close").decimalValue()).isEqualByComparingTo(new BigDecimal("2475.00"));
+  assertThat(result.path("as_of").asText()).isEqualTo(Instant.ofEpochMilli(1760000000000L).toString());
+  assertThat(result.path("timestamp_basis").asText()).isEqualTo("LAST_TRADE_TIME");
   verify(db).update(contains("market_quotes"),any(),any(),any());
+ }
+ @Test void quoteRejectsWrongIdentityOrMissingTradeTime()throws Exception{
+  JdbcTemplate db=mock(JdbcTemplate.class);FeedHttp http=mock(FeedHttp.class);VersionedVaultReader vault=mock(VersionedVaultReader.class);
+  UUID user=UUID.randomUUID();when(vault.decrypt(user,"UPSTOX")).thenReturn("test-only");
+  when(db.queryForObject(contains("upstox_instrument_map"),eq(Integer.class),any())).thenReturn(1);
+  var service=new UpstoxFeedService(db,http,vault);
+  for(String item:List.of(
+     "{\"instrument_token\":\"NSE_EQ|INE000A01001\",\"last_price\":100}",
+     "{\"instrument_token\":\"NSE_EQ|INE002A01018\",\"last_price\":100}")){
+   when(http.text(contains("/v3/market-quote/quotes"),eq("test-only"),anyInt()))
+     .thenReturn("{\"status\":\"success\",\"data\":{\"quote\":"+item+"}}");
+   assertThatThrownBy(()->service.quote(user,"NSE_EQ|INE002A01018")).isInstanceOf(IllegalStateException.class);
+  }
+  verify(db,never()).update(contains("market_quotes"),any(),any(),any());
  }
  @Test void amfiParserAndHistoricalNavHttp()throws Exception{
   JdbcTemplate db=mock(JdbcTemplate.class);FeedHttp http=mock(FeedHttp.class);AmfiFeedService svc=new AmfiFeedService(db,http);
