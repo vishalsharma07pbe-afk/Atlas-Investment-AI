@@ -21,7 +21,7 @@ class CompanyEvidenceTests(unittest.TestCase):
 
     def report(self,isin,key):
         self.assertEqual(key,"NSE_EQ|"+self.isin)
-        return {"isin":isin,"sections":{"ratios":{"status":"AVAILABLE","data":[{"name":"P/E","company_value":20,"sector_value":10,"unit":"RATIO"},{"name":"bad","company_value":"NaN"}]},"income_statement":{"status":"AVAILABLE","data":{"units_in":"crore","income_statement":[{"category":"Revenue","history":[{"period":"FY2025","value":100}]}]}}}}
+        return {"isin":isin,"sections":{"ratios":{"status":"AVAILABLE","data":[{"name":"P/E","company_value":20,"sector_value":10,"unit":"RATIO","sector_unit":"RATIO"},{"name":"bad","company_value":"NaN"}]},"income_statement":{"status":"AVAILABLE","data":{"units_in":"crore","income_statement":[{"category":"Revenue","history":[{"period":"FY2025","value":100}]}]}}}}
 
     def test_cached_partial_evidence_and_expiry(self):
         company.refresh(self.snapshot,research._connect,self.report,self.now)
@@ -30,6 +30,8 @@ class CompanyEvidenceTests(unittest.TestCase):
         r=self.item["company_evidence"]
         self.assertEqual(r["available_sections"],2)
         self.assertEqual(len(r["sections"]["ratios"]["data"]),1)
+        self.assertEqual(r["fundamental_quality"]["valuation"]["comparisons"][0]["premium_discount_percent"],100)
+        self.assertIsNone(r["fundamental_quality"]["valuation"]["fair_value"])
         self.assertEqual(r["sections"]["income_statement"]["data"]["rows"][0]["history"][0]["period"],"FY2025")
         self.assertEqual(r["sections"]["cash_flow"]["status"],"UNAVAILABLE")
         self.item.pop("company_evidence")
