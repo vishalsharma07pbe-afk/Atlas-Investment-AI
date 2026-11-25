@@ -11,7 +11,9 @@ type AiReview={reviews:{provider:string;findings:{statement:string;evidence_ids:
 type CandidateReliability={status:string;blockers:string[];warnings:string[];prospective_status:string;notice:string};
 type ResearchConclusion={status:string;summary:string;blockers:string[];warnings:string[];evidence:Record<string,string>;reassessment_conditions:string[];notice:string};
 type MatchedReplay={as_of:string;trades:number;small_sample:boolean;cost_scenarios:{cost_bps_per_side:number;net_return_percent:number;max_drawdown_percent:number}[];notice:string};
-type Candidate={research_conclusion?:ResearchConclusion;matched_strategy_replay?:MatchedReplay;research_reliability?:CandidateReliability;news_evidence?:NewsEvidence;company_evidence?:CompanyEvidence;ai_review?:AiReview;id:number;symbol:string;exchange:string;as_of:string;close:number;rank_score:number;review_horizon:string;history_count:number;atr_percent:number;median_daily_traded_value:number;reasons:string[];warnings:string[]};
+type Pivot={price:number;observed_on:string;confirmed_on:string};
+type PriceStructure={status:string;scenario_status:string;support:Pivot[];resistance:Pivot[];indicators?:Record<string,number>;weekly?:{status:string;last_observed_date?:string;week_count?:number;trend?:string;sma_10?:number;sma_20?:number|null};scenario:{reference_close:number;lower_reference:number;upper_reference:number;cost_bps_per_side:number;downside_percent:number;upside_percent:number;reward_to_risk:number}|null;notice:string};
+type Candidate={price_structure?:PriceStructure;research_conclusion?:ResearchConclusion;matched_strategy_replay?:MatchedReplay;research_reliability?:CandidateReliability;news_evidence?:NewsEvidence;company_evidence?:CompanyEvidence;ai_review?:AiReview;id:number;symbol:string;exchange:string;as_of:string;close:number;rank_score:number;review_horizon:string;history_count:number;atr_percent:number;median_daily_traded_value:number;reasons:string[];warnings:string[]};
 type HorizonResult={status:string;candidates:Candidate[];matched_count:number;evaluated_count:number;blockers:string[];exclusions:Record<string,number>};
 type Section={section:string;status:string;generated_at:string|null;result:{universe_size:number;eligible_count:number;discovery_coverage?:{recent_registry_count:number;selected_count:number;calendar_status?:string;expected_session?:string|null};skipped?:Record<string,number>;horizons?:Partial<Record<Horizon,HorizonResult>>}|null};
 type ReplayCost={cost_bps_per_side:number;net_return_percent:number;matched_gross_exposure_return_percent:number;max_drawdown_percent:number;win_rate_percent:number|null;wins:number;losses:number;flat:number};
@@ -88,6 +90,7 @@ export default function HorizonResearch({horizon,children,onSettings}:{horizon:H
     <p className="muted tiny">Daily close · {candidate.as_of}</p><p>{candidate.review_horizon}</p>
     <dl><div><dt>ATR / price</dt><dd>{candidate.atr_percent.toFixed(2)}%</dd></div><div><dt>History</dt><dd>{candidate.history_count} sessions</dd></div></dl>
     <details><summary>Why this appears &amp; risks</summary><ul>{candidate.reasons.map(reason=><li key={reason}>{reason}</li>)}</ul><p>{candidate.warnings.join(" ")}</p><p className="muted tiny">Median historical daily traded value: {money(candidate.median_daily_traded_value)}</p></details>
+    {candidate.price_structure&&<PriceStructureDetails evidence={candidate.price_structure}/>}
     {candidate.research_reliability&&<details><summary>{candidate.research_reliability.status==="REVIEW_CONFLICTING_EVIDENCE"?"Conflicting evidence · review needed":"Evidence reliability · watch only"}</summary>
      {candidate.research_reliability.warnings.length>0&&<ul>{candidate.research_reliability.warnings.map(w=><li key={w}>{words(w)}</li>)}</ul>}
      <p>Unresolved requirements: {candidate.research_reliability.blockers.map(words).join(" · ")||"Full strategy validation still required"}.</p>
@@ -113,4 +116,14 @@ function DeferredTools({children}:{children:ReactNode}){
  // Existing tools are preserved. Explicitly mount only after user request.
  const [open,setOpen]=useState(false);
  return <div className="advanced-tools-content">{open?children:<button type="button" className="secondary" onClick={()=>setOpen(true)}>Load detailed tools</button>}</div>;
+}
+
+function PriceStructureDetails({evidence}:{evidence:PriceStructure}){
+ return <details><summary>Price structure &amp; risk scenarios</summary>
+ {evidence.status==="HISTORICAL_STRUCTURE"?<><dl>{Object.entries(evidence.indicators??{}).map(([key,value])=><div key={key}><dt>{words(key)}</dt><dd>{key==="historical_volatility_20"?(value*100).toFixed(2)+"%":value.toFixed(2)}</dd></div>)}</dl>
+ {(["support","resistance"] as const).map(kind=><div key={kind}><strong>{kind==="support"?"Confirmed support below close":"Confirmed resistance above close"}</strong>{evidence[kind].length?<ul>{evidence[kind].map(p=><li key={p.observed_on}>{money(p.price)} · observed {p.observed_on} · confirmed {p.confirmed_on}</li>)}</ul>:<p>No confirmed reference level.</p>}</div>)}
+ {evidence.weekly?.status==="OBSERVED_WEEK_AGGREGATES"?<p>Observed-week trend: {words(evidence.weekly.trend??"UNKNOWN")} · through {evidence.weekly.last_observed_date} · {evidence.weekly.week_count} weeks. Not calendar-verified complete weekly bars.</p>:<p>Weekly trend evidence unavailable.</p>}
+ </>:<p>Price structure evidence unavailable.</p>}
+ {evidence.scenario?<><h4>Illustrative historical geometry</h4><dl><div><dt>Dated reference close</dt><dd>{money(evidence.scenario.reference_close)}</dd></div><div><dt>Lower reference</dt><dd>{money(evidence.scenario.lower_reference)}</dd></div><div><dt>Upper reference</dt><dd>{money(evidence.scenario.upper_reference)}</dd></div><div><dt>Illustrative downside</dt><dd>{evidence.scenario.downside_percent.toFixed(2)}%</dd></div><div><dt>Illustrative upside</dt><dd>{evidence.scenario.upside_percent.toFixed(2)}%</dd></div><div><dt>Reward / risk</dt><dd>{evidence.scenario.reward_to_risk.toFixed(2)}×</dd></div></dl><p>Assumed cost: {evidence.scenario.cost_bps_per_side} bps each side.</p></>:<p>Scenario withheld: {words(evidence.scenario_status)}.</p>}
+ <p className="muted tiny">{evidence.notice}</p></details>;
 }
