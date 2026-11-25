@@ -29,7 +29,7 @@ function ExposureList({title,rows}:{title:string;rows:Exposure[]}){
  return <div><h4>{title}</h4>{rows.length?<ul>{rows.map(r=><li key={r.label}>{r.label.replace(/_/g," ")}: <strong>{r.weight_percent.toFixed(2)}%</strong></li>)}</ul>:<p className="muted tiny">No recorded positive value in this group.</p>}</div>;
 }
 function AllocationResearchDigest({report}:{report:AllocationResearch}){
- const money=(v:number)=>new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",maximumFractionDigits:2}).format(v);
+ const money=(v:number)=>new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",minimumFractionDigits:0,maximumFractionDigits:2}).format(v);
  return <section className="thesis-digest" aria-label="Automatic allocation research">
   <h4>Automatic allocation research</h4>
   {report.status==="HYPOTHETICAL_SCENARIOS_AVAILABLE"?<>
