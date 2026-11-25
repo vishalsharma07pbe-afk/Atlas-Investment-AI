@@ -255,3 +255,16 @@ it("shows provisional recorded acquisition dates and reconciliation gaps",async(
  expect(screen.getByText(/Missing tax evidence/)).toBeTruthy();
  expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+it("shows conditional current fund exit loads and withholds unsupported scenario totals",async()=>{
+ const holding={id:1,symbol:"123456",asset_type:"MUTUAL_FUND",exchange:null,status:"MONITOR",weight_percent:100,recorded_return_percent:1,evidence_date:null,history_count:0,change_20_observations_percent:null,recent_peak_change_percent:null,findings:[],missing_evidence:[]};
+ const fund_exit_load_research={status:"FUND_EXIT_LOAD_RESEARCH",scenarios:[{scope:"CONCENTRATION_REDISTRIBUTION",kind:"5 new identities",status:"INCOMPLETE_EXIT_LOAD_EVIDENCE",hypotheticalFundExitLoad:null,funds:[{schemeCode:"123456",status:"CONDITIONAL_CURRENT_TERMS",disclosureDate:"2026-10-31",disclosureText:"1% if redeemed on or before 365 days from the date of allotment. Nil thereafter.",hypotheticalLoad:4,proceedsAfterLoad:796,reason:null},{schemeCode:"654321",status:"EXIT_LOAD_WITHHELD",disclosureDate:"2026-10-31",disclosureText:"Unknown terms",hypotheticalLoad:null,proceedsAfterLoad:null,reason:"Complex or incomplete terms require official scheme review."}]}],notice:"Current secondary terms only."};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-25T10:00:00Z",holding_count:1,attention_count:0,data_gap_count:0,notice:"Research only",holdings:[holding],fund_exit_load_research})})));
+ render(<PortfolioDoctor revision={0} onSettings={()=>{}}/>);
+ expect(await screen.findByRole("heading",{name:"Conditional fund exit-load research"})).toBeTruthy();
+ expect(screen.getByText("₹796")).toBeTruthy();
+ expect(screen.getByText("Complex or incomplete terms require official scheme review.")).toBeTruthy();
+ expect(screen.getAllByText("Withheld")).toHaveLength(2);
+ expect(screen.getByText("Current secondary terms only.")).toBeTruthy();
+ expect(fetch).toHaveBeenCalledTimes(1);
+});

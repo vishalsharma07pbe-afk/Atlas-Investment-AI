@@ -141,6 +141,7 @@ public class PortfolioReviewService {
     report=PortfolioOwnershipChanges.attach(report,previous,json,now);
     report.put("portfolio_level_risk",PortfolioLevelRisk.assess(report,json,today));
     report.put("sale_research",PortfolioSaleResearch.assess(rows,report,json,today));
+    report.put("fund_exit_load_research",PortfolioFundExitLoad.assess(report,json,now));
     report.put("thesis_monitor_version","ANNUAL_DIRECTION_V1");
     try{
       jdbc.update("""
