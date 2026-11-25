@@ -10,7 +10,10 @@ import org.springframework.stereotype.Service;
  private final HttpClient client=HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NORMAL).build();
  public static final class ProviderHttpException extends IOException {
   private final int status;
-  public ProviderHttpException(int status){super("Provider HTTP "+status);this.status=status;}
+  private final long retryAfterSeconds;
+  public ProviderHttpException(int status){this(status,0);}
+  public ProviderHttpException(int status,long retryAfterSeconds){super("Provider HTTP "+status);this.status=status;this.retryAfterSeconds=Math.max(0,Math.min(3600,retryAfterSeconds));}
+  public long retryAfterSeconds(){return retryAfterSeconds;}
   public int status(){return status;}
   public String reason(){return switch(status){
    case 401->"UPSTOX_REAUTHORIZATION_REQUIRED";
@@ -19,6 +22,10 @@ import org.springframework.stereotype.Service;
    default->"PROVIDER_HTTP_FAILED";
   };}
  }
+ static long numericRetryAfter(String value){
+  if(value==null||!value.matches("[0-9]{1,18}"))return 0;
+  try{return Math.min(3600,Long.parseLong(value));}catch(NumberFormatException ex){return 0;}
+ }
  public byte[] get(String url,String token,int maxBytes) throws Exception{
   URI uri=URI.create(url);
   if(!"https".equals(uri.getScheme()))throw new IllegalArgumentException("HTTPS required");
@@ -26,7 +33,7 @@ import org.springframework.stereotype.Service;
   if(token!=null)b.header("Authorization","Bearer "+token);
   HttpResponse<InputStream> response=client.send(b.build(),HttpResponse.BodyHandlers.ofInputStream());
   try(InputStream raw=response.body()){
-   if(response.statusCode()!=200)throw new ProviderHttpException(response.statusCode());
+   if(response.statusCode()!=200)throw new ProviderHttpException(response.statusCode(),numericRetryAfter(response.headers().firstValue("Retry-After").orElse(null)));
    InputStream stream=url.endsWith(".gz")?new GZIPInputStream(raw):raw;
    try(stream){byte[] bytes=stream.readNBytes(maxBytes+1);if(bytes.length>maxBytes)throw new IOException("Provider response too large");return bytes;}
   }
