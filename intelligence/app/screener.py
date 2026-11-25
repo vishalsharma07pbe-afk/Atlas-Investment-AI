@@ -6,7 +6,8 @@ from .technical import Candle, compute
 from .horizon_research import evaluate, summarize, MIN_HISTORY as HORIZON_MIN_HISTORY
 from .price_structure import analyze as price_structure
 from .corporate_action_normalization import preview as action_preview
-from .replay_evidence import fingerprint
+from .replay_evidence import fingerprint, exact_isin
+from . import price_volume_pressure
 
 MIN_HISTORY = 21
 MAX_INSTRUMENTS = 20
@@ -17,6 +18,8 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
     today = as_of or date.today()
     rows = []
     horizon_evaluations = []
+    pressure_rows=[]
+    pressure_eligible=0
     action_previews=[]
     action_preview_count=0
     action_preview_withheld=0
@@ -89,6 +92,15 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                 "adjustment_status": candles[-1].adjustment_status,
                 "data_age_calendar_days": age,
             }
+            if include_horizons and batch_loaded:
+                pressure=price_volume_pressure.analyze(candles, calendar_verified=expected_session is not None)
+                row["price_volume_pressure"]=pressure
+                if pressure["status"]=="OBSERVED_PRICE_VOLUME_ONLY":
+                    pressure_eligible+=1
+                    if pressure["findings"]:
+                        pressure_rows.append({"id":row["id"],"symbol":row["symbol"],"exchange":row["exchange"],
+                            "isin":instrument.get("isin") if exact_isin(instrument.get("isin")) else None,
+                            "as_of":row["as_of"],"price_volume_pressure":pressure})
             if include_horizons:
                 evidence_hash=fingerprint(raw,today) if batch_loaded else None
                 evaluation=evaluate(candles, ind, row)
@@ -127,6 +139,14 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
             "notice":"Recorded split/bonus normalization diagnostics only. These histories remain excluded from rankings and backtesting."}
     if include_horizons:
         result["horizons"] = summarize(horizon_evaluations)
+        if batch_loaded:
+            result["price_volume_review"]={"evaluated_count":pressure_eligible,
+                "flagged_count":len(pressure_rows),
+                "downside_items":sorted([r for r in pressure_rows if any(f in price_volume_pressure.DOWNSIDE for f in r["price_volume_pressure"]["findings"])],
+                    key=lambda r:(-r["price_volume_pressure"]["relative_volume"],r["symbol"],r["id"]))[:5],
+                "upside_items":sorted([r for r in pressure_rows if any(f in price_volume_pressure.UPSIDE for f in r["price_volume_pressure"]["findings"])],
+                    key=lambda r:(-r["price_volume_pressure"]["relative_volume"],r["symbol"],r["id"]))[:5],
+                "notice":price_volume_pressure.NOTICE}
         result["history_coverage"] = {h:{"minimum_observations":minimum,"eligible_histories":history_coverage[h]}
                                       for h,minimum in HORIZON_MIN_HISTORY.items()}
     return result

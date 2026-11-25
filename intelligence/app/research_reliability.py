@@ -265,6 +265,12 @@ def attach_conclusions(snapshot):
                         warnings.append("MATCHED_REPLAY_SMALL_SAMPLE")
                 supporting,context_warnings,priorities,context_evidence=_report_context(item,company,replay_observed,horizon)
                 warnings.extend(context_warnings)
+                pressure=item.get("price_volume_pressure") or {}
+                if pressure.get("status")=="OBSERVED_PRICE_VOLUME_ONLY" and pressure.get("as_of")==item.get("as_of"):
+                    from .price_volume_pressure import DOWNSIDE
+                    warnings.extend(f for f in pressure.get("findings",[]) if f in DOWNSIDE)
+                    if any(f in DOWNSIDE for f in pressure.get("findings",[])):
+                        priorities.append("PRICE_VOLUME_PRESSURE_CAUSE_UNVERIFIED")
                 thesis="Technical watch meets the current horizon rules; a full investment verdict is withheld."
                 if warnings:
                     thesis="Technical watch meets the current horizon rules, but risk or conflicting evidence requires review."

@@ -142,8 +142,23 @@ def attach(snapshot,connect,instant=None):
     for r in rows:
         indexed.setdefault((r["exchange"],r["symbol"],r["isin"]),[]).append(r)
     from .automatic_company_evidence import identify
-    for item,isin in identify(snapshot):
+    items=list(identify(snapshot))
+    for section in snapshot.get("sections",[]):
+        if section.get("status")!="READY" or section.get("section") not in ("NSE","BSE"):
+            continue
+        review=(section.get("result") or {}).get("price_volume_review") or {}
+        for key in ("downside_items","upside_items"):
+            for item in review.get(key,[]):
+                if item.get("exchange")==section["section"]:
+                    items.append((item,item.get("isin")))
+    for item,isin in items:
         found=indexed.get((item["exchange"],item.get("symbol"),isin))
         if found:
             item["deal_evidence"]=_summarize(found)
+            # Compare only same observed date, never a rolling total to a daily bar.
+            dated=[r for r in found if r["trade_date"]==item.get("as_of")]
+            pressure=item.get("price_volume_pressure") or {}
+            if dated and pressure.get("status")=="OBSERVED_PRICE_VOLUME_ONLY" and pressure.get("as_of")==item.get("as_of"):
+                item["deal_evidence"]["same_date_groups"]=_summarize(dated)["groups"]
+                item["deal_evidence"]["same_date_notice"]="Coincident supplied deal sides, not a causal or institutional attribution."
     return snapshot
