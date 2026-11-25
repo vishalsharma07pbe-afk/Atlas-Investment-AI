@@ -70,10 +70,14 @@ public class PortfolioRefreshService {
             throw new IllegalStateException("INVALID_QUOTE");
           BigDecimal price=quote.path("ltp").decimalValue();
           BigDecimal previous=quote.path("previous_close").isNumber()?quote.path("previous_close").decimalValue():null;
+          Instant observed=Instant.parse(quote.path("as_of").asText());
+          if(observed.isAfter(Instant.now()))throw new IllegalStateException("INVALID_QUOTE_TIME");
+          var stamp=java.sql.Timestamp.from(observed);
           updated+=jdbc.update("""
-            UPDATE personal_holdings SET last_price=?,previous_close=?,price_as_of=now(),updated_at=now()
+            UPDATE personal_holdings SET last_price=?,previous_close=?,price_as_of=?,updated_at=now()
             WHERE id=? AND user_id=? AND symbol=? AND asset_type='EQUITY'
-            """,price,previous,id,user,symbol);
+            AND (price_as_of IS NULL OR price_as_of<=?)
+            """,price,previous,stamp,id,user,symbol,stamp);
           if(includeHistory){
             try{
               LocalDate today=LocalDate.now(MarketCalendarService.IST);
