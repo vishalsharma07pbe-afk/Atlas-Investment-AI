@@ -234,6 +234,29 @@ class AuthIsolationIntegrationTest {
       .andExpect(jsonPath("$.drawdown_status").value("UNAVAILABLE_INCOMPLETE_VALUATION_HISTORY"));
   }
 
+  @Test void linkedDietzSeparatesRecordedCapitalFlowsFromPerformance()throws Exception{
+    String email="dietz-"+UUID.randomUUID()+"@example.test";
+    String a=create(email),b=create("dietz-other-"+UUID.randomUUID()+"@example.test");
+    UUID owner=jdbc.queryForObject("SELECT id FROM atlas_users WHERE email=?",UUID.class,email);
+    LocalDate today=LocalDate.now(com.trading.market.MarketCalendarService.IST);
+    LocalDate start=today.minusDays(3),middle=today.minusDays(2),end=today.minusDays(1);
+    jdbc.update("INSERT INTO portfolio_valuation_snapshots(user_id,valuation_date,total_value,priced_positions,unpriced_positions) VALUES (?,?,1000,1,0),(?,?,1500,1,0),(?,?,1350,1,0)",owner,start,owner,middle,owner,end);
+    mvc.perform(post("/api/v1/portfolio/history/transactions").header("Authorization",a)
+      .contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(Map.of(
+        "symbol","CASH","assetType","CASH","transactionType","DEPOSIT",
+        "transactionDate",middle.toString(),"cashAmount",500)))).andExpect(status().isOk());
+    mvc.perform(get("/api/v1/portfolio/history/performance").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.flow_adjusted_status").value("AVAILABLE_ESTIMATE"))
+      .andExpect(jsonPath("$.flow_adjusted_return_percent").value(-10.0))
+      .andExpect(jsonPath("$.flow_adjusted_drawdown_percent").value(-10.0))
+      .andExpect(jsonPath("$.flow_adjusted_cash_flow_count").value(1))
+      .andExpect(jsonPath("$.flow_adjusted_through").value(end.toString()))
+      .andExpect(jsonPath("$.drawdown_status").value("UNAVAILABLE_EXTERNAL_FLOWS_REQUIRE_FLOW_ADJUSTED_HISTORY"));
+    mvc.perform(get("/api/v1/portfolio/history/performance").header("Authorization",b))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.flow_adjusted_status").value("UNAVAILABLE_REQUIRES_TWO_VALUATIONS"))
+      .andExpect(jsonPath("$.flow_adjusted_return_percent").isEmpty());
+  }
+
   @Test void automaticValuationsAreOwnerScopedIdempotentAndDoNotOverwriteManualRecords()throws Exception{
     String suffix=UUID.randomUUID().toString();
     String email="auto-value-"+suffix+"@example.test",other="auto-manual-"+suffix+"@example.test",aged="auto-aged-"+suffix+"@example.test";

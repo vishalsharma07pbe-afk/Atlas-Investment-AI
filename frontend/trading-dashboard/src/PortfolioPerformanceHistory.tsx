@@ -17,10 +17,20 @@ type Performance={
   latest_capture_source?:string|null;
   latest_oldest_price_at?:string|null;
   latest_newest_price_at?:string|null;
+  flow_adjusted_status?:string;
+  flow_adjusted_return_percent?:number|null;
+  flow_adjusted_drawdown_percent?:number|null;
+  flow_adjusted_interval_count?:number;
+  flow_adjusted_cash_flow_count?:number;
+  flow_adjusted_max_interval_days?:number|null;
+  flow_adjusted_from?:string|null;
+  flow_adjusted_through?:string|null;
+  flow_adjusted_methodology?:string;
 };
 
 const empty:Performance={transaction_count:0,snapshot_count:0,xirr_percent:null,xirr_status:"UNAVAILABLE",maximum_drawdown_percent:null,drawdown_status:"UNAVAILABLE",methodology:""};
 const percent=(value:number|null)=>value==null?"Unavailable":`${value.toFixed(2)}%`;
+const adjustedStatus=(status:string)=>({UNAVAILABLE_REQUIRES_TWO_VALUATIONS:"At least two dated valuations are required.",UNAVAILABLE_INCOMPLETE_VALUATIONS:"Incomplete valuations prevent adjustment.",UNAVAILABLE_VALUATION_GAPS:"Valuation intervals exceed seven calendar days.",UNAVAILABLE_NONPOSITIVE_CAPITAL_BASE:"A positive investment base is required.",UNAVAILABLE_INCONSISTENT_CASH_FLOWS:"Recorded flows and valuations are inconsistent.",UNAVAILABLE_INVALID_VALUATION_ORDER:"Valuation dates are not strictly increasing.",UNAVAILABLE_NUMERIC_RANGE:"The calculated return exceeds the supported range."} as Record<string,string>)[status]??"Insufficient recorded evidence.";
 const istToday=()=>new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
 const statusText=(status:string)=>({UNAVAILABLE_INCOMPLETE_TERMINAL_VALUATION:"Latest valuation is incomplete.",UNAVAILABLE_AMBIGUOUS_OR_UNSUPPORTED_CASH_FLOWS:"Cash-flow sequence does not support a unique return within the calculation range.",UNAVAILABLE_EXTERNAL_FLOWS_REQUIRE_FLOW_ADJUSTED_HISTORY:"External flows require flow-adjusted history.",UNAVAILABLE_INCOMPLETE_VALUATION_HISTORY:"Historical valuations contain gaps.",UNAVAILABLE_INVALID_VALUATION_HISTORY:"Valuation history is invalid."} as Record<string,string>)[status]??"More dated evidence is needed.";
 
@@ -68,6 +78,16 @@ export default function PortfolioPerformanceHistory({revision=0}:{revision?:numb
       <div><small>XIRR</small><strong>{percent(performance.xirr_percent)}</strong><span>{performance.external_cash_flow_count??performance.transaction_count} cash-flow records</span>{performance.xirr_percent==null&&<span>{statusText(performance.xirr_status)}</span>}</div>
       <div><small>MAX DRAWDOWN</small><strong>{percent(performance.maximum_drawdown_percent)}</strong><span>{performance.snapshot_count} dated valuations</span>{performance.maximum_drawdown_percent==null&&<span>{statusText(performance.drawdown_status)}</span>}</div>
     </div>
+    {performance.flow_adjusted_status&&<section aria-label="Cash-flow-adjusted performance">
+      <h3>Cash-flow-adjusted performance estimate</h3>
+      <div className="portfolio-history-metrics">
+        <div><small>LINKED DIETZ RETURN</small><strong>{percent(performance.flow_adjusted_return_percent??null)}</strong><span>Non-annualized estimate, not exact TWR</span></div>
+        <div><small>ADJUSTED DRAWDOWN</small><strong>{percent(performance.flow_adjusted_drawdown_percent??null)}</strong><span>Estimated wealth index at recorded dates</span></div>
+      </div>
+      {performance.flow_adjusted_status!=="AVAILABLE_ESTIMATE"&&<p className="muted tiny">{adjustedStatus(performance.flow_adjusted_status)}</p>}
+      {performance.flow_adjusted_from&&<p className="muted tiny">{performance.flow_adjusted_from} to {performance.flow_adjusted_through} · {performance.flow_adjusted_interval_count??0} intervals · {performance.flow_adjusted_cash_flow_count??0} external flows · longest gap {performance.flow_adjusted_max_interval_days??"unknown"} days.</p>}
+      <p className="muted tiny">{performance.flow_adjusted_methodology}</p>
+    </section>}
     {performance.valuation_through&&<p className="muted tiny">Performance through {performance.valuation_through} · {performance.external_flows_after_valuation??0} later external flows excluded · {performance.incomplete_snapshot_count??0} incomplete historical valuations · {performance.future_snapshot_count??0} future valuations excluded.</p>}
     {performance.automatic_snapshot_count!==undefined&&<div className="muted tiny"><p>Automatic evening valuation records: {performance.automatic_snapshot_count}. Automatic capture runs while the local backend is enabled and has sufficient recorded prices; missing days are not reconstructed.</p>{performance.latest_capture_source&&<p>Latest capture: {performance.latest_capture_source==="AUTO_RECORDED"?"Automatic":performance.latest_capture_source==="MANUAL_RECORDED"?"Manual":"Legacy recorded"}{performance.latest_oldest_price_at&&performance.latest_newest_price_at?` · Price observations: ${performance.latest_oldest_price_at} to ${performance.latest_newest_price_at}`:" · Price observation timestamps unavailable"}. Recorded values are not certified market closes.</p>}</div>}
     <form className="portfolio-cashflow-form" onSubmit={event=>void saveFlow(event)}>

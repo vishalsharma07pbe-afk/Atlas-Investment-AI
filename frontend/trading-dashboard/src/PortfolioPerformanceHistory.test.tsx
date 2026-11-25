@@ -53,3 +53,30 @@ it("shows automatic capture provenance without presenting recorded prices as mar
   expect(screen.getByText(/Latest capture: Automatic/)).toBeTruthy();
   expect(screen.getByText(/not certified market closes/)).toBeTruthy();
 });
+
+it("shows linked cash-flow-adjusted estimates separately from XIRR and raw drawdown",async()=>{
+  vi.spyOn(globalThis,"fetch").mockResolvedValue(new Response(JSON.stringify({
+    transaction_count:1,snapshot_count:3,xirr_percent:null,maximum_drawdown_percent:null,
+    xirr_status:"UNAVAILABLE",drawdown_status:"UNAVAILABLE_EXTERNAL_FLOWS_REQUIRE_FLOW_ADJUSTED_HISTORY",
+    flow_adjusted_status:"AVAILABLE_ESTIMATE",flow_adjusted_return_percent:8.5,flow_adjusted_drawdown_percent:-3.25,
+    flow_adjusted_interval_count:2,flow_adjusted_cash_flow_count:1,flow_adjusted_max_interval_days:2,
+    flow_adjusted_from:"2026-11-20",flow_adjusted_through:"2026-11-23",
+    flow_adjusted_methodology:"Linked Modified Dietz estimate.",methodology:"Recorded valuations."
+  }),{status:200}));
+  render(<PortfolioPerformanceHistory/>);
+  expect(await screen.findByText("8.50%")).toBeTruthy();
+  expect(screen.getByText("-3.25%")).toBeTruthy();
+  expect(screen.getByText("Non-annualized estimate, not exact TWR")).toBeTruthy();
+  expect(screen.getByText(/longest gap 2 days/)).toBeTruthy();
+});
+
+it("withholds adjusted performance for sparse valuations",async()=>{
+  vi.spyOn(globalThis,"fetch").mockResolvedValue(new Response(JSON.stringify({
+    transaction_count:0,snapshot_count:2,xirr_percent:null,maximum_drawdown_percent:null,
+    xirr_status:"UNAVAILABLE",drawdown_status:"UNAVAILABLE",
+    flow_adjusted_status:"UNAVAILABLE_VALUATION_GAPS",flow_adjusted_return_percent:null,
+    flow_adjusted_drawdown_percent:null,methodology:"Recorded valuations."
+  }),{status:200}));
+  render(<PortfolioPerformanceHistory/>);
+  expect(await screen.findByText("Valuation intervals exceed seven calendar days.")).toBeTruthy();
+});
