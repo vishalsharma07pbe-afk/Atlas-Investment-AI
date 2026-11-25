@@ -3,6 +3,7 @@ from datetime import date, timedelta
 from math import isfinite
 from statistics import mean, median
 from .technical import Candle, compute
+from . import regime_features
 from .horizon_research import evaluate, MIN_HISTORY, VERSION
 
 WINDOWS = {"SWING":10,"SHORT_TERM":40,"LONG_TERM":120}
@@ -70,8 +71,8 @@ def _comparison(trades,cost_bps,entry,exit_price):
     metrics["net_difference_vs_same_stock_pp"]=round(metrics["net_return_percent"]-(reference-1)*100,4)
     return metrics
 
-REGIME_LOOKBACK=60
-REGIME_THRESHOLD=5.0
+REGIME_LOOKBACK=regime_features.LOOKBACK
+REGIME_THRESHOLD=regime_features.TREND_THRESHOLD
 REGIMES=("RISING","FALLING","SIDEWAYS","UNKNOWN")
 
 def _market_regimes(equity,index,positions):
@@ -169,8 +170,10 @@ def attach_market_benchmark(result,payload,benchmark,today,*,positions=None):
                     _attach_index_interval(fold,equity,index)
             continue
         horizon.pop("market_regime_research",None)
+        horizon.pop("joint_regime_research",None)
         if positions is not None and len(positions.get(name,[]))==horizon["trades"]:
             horizon["market_regime_research"]=_market_regimes(equity,index,positions[name])
+            horizon["joint_regime_research"]=_joint_regimes(equity,index,positions[name])
         _attach_index_interval(horizon,equity,index)
         for fold in horizon.get("chronological_validation",{}).get("folds",[]):
             if fold["status"]=="REPLAY_OBSERVED":
@@ -337,3 +340,53 @@ def replay(payload, today, *, positions=None):
     return {"status":"HISTORICAL_REPLAY_ONLY","methodology":VERSION,
             "history_count":len(candles),"as_of":candles[-1].date,"horizons":results,
             "notice":"Fixed technical rules, chronological holdout, next-session open and fixed-session close. Costs are illustrative; cost-adjusted same-stock buy-and-hold uses the same test interval with one round trip; it and matched gross exposure are not market index benchmarks. Current registry selection and revised history can introduce bias. No validated forward performance or recommendation."}
+
+
+def _joint_regimes(equity,index,positions):
+    """Classify by information available at the signal, never by its outcome."""
+    dates=[c.date for c in equity]
+    by_date={d:i for i,d in enumerate(dates)}
+    index_dates=sorted(index)
+    def features(at):
+        i=by_date.get(at)
+        if i is None or i<REGIME_LOOKBACK:
+            return None
+        window=dates[i-REGIME_LOOKBACK:i+1]
+        if window!=[d for d in index_dates if window[0]<=d<=at]:
+            return None
+        return regime_features.describe(window,[index[d][1] for d in window])
+    groups={(trend,vol):[] for trend in ("RISING","FALLING","SIDEWAYS")
+            for vol in ("HIGH_HISTORICAL_VOLATILITY","BELOW_HIGH_THRESHOLD")}
+    unknown=0
+    for signal,trade in positions:
+        feature=features(signal)
+        if feature is None:
+            unknown+=1
+        else:
+            groups[(feature["trend"],feature["volatility_regime"])].append(trade)
+    rows=[]
+    for (trend,vol),trades in groups.items():
+        costs=[]
+        for cost in COSTS:
+            if not trades:
+                continue
+            outcomes=[100*((exit_price/entry)*(1-cost/10000)**2-1) for entry,exit_price,_ in trades]
+            # Within-position close-marked drawdown, not an equity curve
+            # constructed by stitching disconnected historical episodes.
+            drawdowns=[_metrics([trade],cost)["max_drawdown_percent"] for trade in trades]
+            metrics=_metrics(trades,cost)
+            costs.append({"cost_bps_per_side":cost,"mean_trade_return_percent":metrics["mean_trade_return_percent"],
+                "median_trade_return_percent":round(median(outcomes),4),
+                "worst_trade_return_percent":round(min(outcomes),4),
+                "worst_position_drawdown_percent":min(drawdowns),
+                "win_rate_percent":metrics["win_rate_percent"],"wins":metrics["wins"],
+                "losses":metrics["losses"],"flat":metrics["flat"]})
+        rows.append({"trend":trend,"volatility_regime":vol,"trades":len(trades),
+                     "small_sample":len(trades)<30,"cost_scenarios":costs})
+    classified=len(positions)-unknown
+    latest=features(dates[-1]) if dates else None
+    return {"status":"MATCHED" if classified and not unknown else "PARTIAL" if classified else "UNAVAILABLE",
+            "methodology":regime_features.VERSION,"classified_trades":classified,"unknown_trades":unknown,
+            "total_trades":len(positions),"groups":rows,
+            "latest_benchmark_context":{**latest,"as_of":dates[-1]} if latest else None,
+            "notice":"Signal-close trend and volatility from matched prior index dates only. After-cost position outcomes and worst within-position close-marked drawdown are descriptive, not a portfolio return, calibrated probability or validated regime-dependent strategy. Small and missing cohorts never qualify an investment."}
