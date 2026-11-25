@@ -14,7 +14,8 @@ type FxContext={status:string;retrieved_at?:string;items:FxItem[];notice:string}
 type MacroSource={source:string;status:string;retrieved_at?:string;items:{series:string;label:string;unit:string;status:string;as_of:string|null;value:number|null;changes:{observations:number;start_date:string;end_date:string;value:number;unit:string}[]}[]};
 type MacroContext={status:string;sources:MacroSource[];notice:string};
 type GlobalMarketContext={status:string;notice:string;items:{series:string;label:string;source:string;unit:string;status:string;as_of?:string|null;value?:number|null;changes:{observations:number;start_date:string;end_date:string;percent:number}[]}[]};
-type Snapshot={global_markets?:GlobalMarketContext;global_macro?:MacroContext;global_fx?:FxContext;daily_briefing?:Briefing;recent_company_news?:Article[];institutional_activity?:InstitutionalActivity;enabled:boolean;interval_seconds:number;sections:{section:string;status:string;generated_at:string|null;attempted_at:string|null;result:Result|null}[]};
+type GlobalContext={status:string;available_count:number;total_count:number;groups:{group:string;available_count:number;total_count:number;items:{key:string;label:string;source:string;as_of:string;change:{start_date:string;end_date:string;value:number;unit:string}|null}[]}[];notice:string};
+type Snapshot={global_context?:GlobalContext;global_markets?:GlobalMarketContext;global_macro?:MacroContext;global_fx?:FxContext;daily_briefing?:Briefing;recent_company_news?:Article[];institutional_activity?:InstitutionalActivity;enabled:boolean;interval_seconds:number;sections:{section:string;status:string;generated_at:string|null;attempted_at:string|null;result:Result|null}[]};
 const labels:Record<string,string>={NSE:"NSE",BSE:"BSE",LARGE_CAP:"Large cap",MID_CAP:"Mid cap",SMALL_CAP:"Small cap",FLEXI_CAP:"Flexi cap",INDEX:"Index funds",LARGE_MID_CAP:"Large & mid cap",MULTI_CAP:"Multi cap",AGGRESSIVE_HYBRID:"Aggressive hybrid",CORPORATE_BOND:"Corporate bond",SHORT_DURATION:"Short duration"};
 const percent=(value:number|null)=>value==null?"—":(value>0?"+":"")+value.toFixed(2)+"%";
 const stamp=(value:string|null)=>value?new Date(value).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",dateStyle:"medium",timeStyle:"short"})+" IST":"Not yet refreshed";
@@ -42,6 +43,7 @@ export default function AutonomousOverview({children,onPortfolio,onFunds,onSetti
    {data?.enabled===false&&<p className="notice warning-notice">Background research is disabled. Check the local configuration in Settings.</p>}
    {current&&data?.daily_briefing&&<DailyBriefing report={data.daily_briefing} onFunds={onFunds} onSettings={onSettings}/>}
    {onHorizon&&<div className="research-shortcuts" aria-label="Automatic equity research shortcuts">{horizonLinks.map(({id,title})=>{const groups=readyMarkets.flatMap(row=>row.result?.horizons?.[id]?[row.result.horizons[id]!]:[]);const count=groups.reduce((n,group)=>n+(group.status==="TECHNICAL_WATCH_ONLY"?group.candidates.length:0),0);return <button key={id} type="button" className="research-shortcut" onClick={()=>onHorizon(id)}><strong>{title}</strong><span>{groups.length?`${count} technical watches`:"Current research pending"}</span><small>Open research →</small></button>;})}</div>}
+   {current&&data?.global_context&&<GlobalResearchSummary report={data.global_context}/>}
    {current&&data?.global_fx&&<GlobalFxContext report={data.global_fx}/>}
    {current&&data?.global_macro&&<GlobalMacroContext report={data.global_macro}/>}
    {current&&data?.global_markets&&<GlobalMarketsContext report={data.global_markets}/>}
@@ -93,5 +95,11 @@ function GlobalMacroContext({report}:{report:MacroContext}){
 function GlobalMarketsContext({report}:{report:GlobalMarketContext}){
  return <section className="autonomous-result" aria-label="International indices and metals"><header><strong>International indices and metals</strong><span>{report.status.toLowerCase().replace(/_/g," ")}</span></header>
  {report.items.length?<div className="tablewrap"><table><thead><tr><th>Indicator / source</th><th>Reference date</th><th>Value</th><th>1 / 5 / 20 observed-date changes</th></tr></thead><tbody>{report.items.map(item=><tr key={item.series}><td>{item.label}<small> · {item.source}</small></td><td>{item.as_of??"Unavailable"}</td><td>{item.value==null?item.status.toLowerCase().replace(/_/g," "):item.value.toLocaleString("en-IN",{maximumFractionDigits:2})+(item.unit==="INDEX_POINTS"?" points":" USD")}</td><td>{[1,5,20].map(n=>{const v=item.changes.find(x=>x.observations===n);return v?percent(v.percent):"—";}).join(" / ")}</td></tr>)}</tbody></table></div>:<p>International market evidence unavailable.</p>}
+ <p className="muted tiny">{report.notice}</p></section>;
+}
+
+function GlobalResearchSummary({report}:{report:GlobalContext}){
+ return <section className="autonomous-result" aria-label="Integrated global research"><header><strong>Integrated global research</strong><span>{report.available_count}/{report.total_count} dated indicators</span></header>
+ {report.groups.map(g=><details key={g.group}><summary>{g.group.replace(/_/g," ").toLowerCase()} · {g.available_count}/{g.total_count} available</summary>{g.items.length?<ul>{g.items.map(item=><li key={item.key}><div><strong>{item.label}</strong><small>{item.source} · {item.as_of}</small></div><b>{item.change?(item.change.value>0?"+":"")+item.change.value.toFixed(2)+(item.change.unit==="BASIS_POINTS"?" bp":"%")+" over 5 observed dates":"Change unavailable"}</b></li>)}</ul>:<p>Current evidence unavailable.</p>}</details>)}
  <p className="muted tiny">{report.notice}</p></section>;
 }
