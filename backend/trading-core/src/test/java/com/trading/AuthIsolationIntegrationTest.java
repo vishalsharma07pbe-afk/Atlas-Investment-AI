@@ -496,4 +496,31 @@ class AuthIsolationIntegrationTest {
       .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
   }
 
+  @Test void lookThroughAlertsUseSeparateWeeklyDigestAndDatedEvidence()throws Exception{
+    String email="look-risk-"+UUID.randomUUID()+"@example.test";
+    String a=create(email),b=create("look-risk-other-"+UUID.randomUUID()+"@example.test");
+    UUID owner=jdbc.queryForObject("SELECT id FROM atlas_users WHERE email=?",UUID.class,email);
+    mvc.perform(post("/api/v1/portfolio/holdings").header("Authorization",a)
+      .contentType(MediaType.APPLICATION_JSON).content("{\"symbol\":\"LOOKTEST\",\"assetType\":\"EQUITY\",\"quantity\":2,\"averageCost\":100}"))
+      .andExpect(status().isOk());
+    mvc.perform(get("/api/v1/portfolio/review").header("Authorization",a)).andExpect(status().isOk());
+    var today=LocalDate.now(com.trading.market.MarketCalendarService.IST);
+    String day=today.minusDays(20).toString();
+    var flag=Map.of("kind","HIDDEN_EQUITY_CONCENTRATION","label","Combined exposure","value",30,"threshold",25,"unit","PERCENT","evidenceThrough",day);
+    var risk=Map.of("look_through_status","DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE","attention",java.util.List.of(flag));
+    var look=Map.of("status","DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE","portfolio_date",today.minusDays(61).toString());
+    jdbc.update("UPDATE portfolio_review_snapshots SET generated_at=now(),result=jsonb_set(jsonb_set(result,'{portfolio_level_risk}',?::jsonb),'{diversification,look_through}',?::jsonb) WHERE user_id=?",
+      mapper.writeValueAsString(risk),mapper.writeValueAsString(look),owner);
+    riskNotifications.evaluate();
+    mvc.perform(get("/api/v1/research-workspace/notifications").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+    jdbc.update("UPDATE portfolio_review_snapshots SET generated_at=now(),result=jsonb_set(result,'{diversification,look_through,portfolio_date}',to_jsonb(?::text)) WHERE user_id=?",day,owner);
+    riskNotifications.evaluate();riskNotifications.evaluate();
+    mvc.perform(get("/api/v1/research-workspace/notifications").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1))
+      .andExpect(jsonPath("$[0].title").value("Underlying exposure and fund overlap review"));
+    mvc.perform(get("/api/v1/research-workspace/notifications").header("Authorization",b))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+  }
+
 }

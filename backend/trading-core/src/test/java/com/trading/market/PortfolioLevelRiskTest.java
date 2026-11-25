@@ -45,4 +45,22 @@ class PortfolioLevelRiskTest {
     assertEquals("INSUFFICIENT_EVIDENCE",result.get("concentration_status"));
     assertEquals(List.of(),result.get("attention"));
   }
+  @Test void lookThroughRequiresCurrentValuationsAndDatedMatchingObservations(){
+    var holdings=List.of(Map.of("recorded_market_value",100,"recorded_valuation_recent",true));
+    var flag=Map.of("kind","HIDDEN_EQUITY_CONCENTRATION","label","Combined exposure","value",30,
+      "threshold",25,"unit","PERCENT","evidenceThrough","2026-10-31");
+    var look=new LinkedHashMap<String,Object>(Map.of("status","DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE",
+      "portfolio_date","2026-10-31","risk_observations",List.of(flag)));
+    var report=Map.<String,Object>of("holdings",holdings,"diversification",Map.of("look_through",look));
+    var result=PortfolioLevelRisk.assess(report,json,today);
+    assertEquals("DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE",result.get("look_through_status"));
+    assertEquals(1,((List<?>)result.get("attention")).size());
+    look.put("portfolio_date","2026-09-01");
+    result=PortfolioLevelRisk.assess(report,json,today);
+    assertEquals("INSUFFICIENT_EVIDENCE",result.get("look_through_status"));
+    assertEquals(List.of(),result.get("attention"));
+    look.put("portfolio_date","2026-11-01");
+    assertEquals(List.of(),PortfolioLevelRisk.assess(report,json,today).get("attention"));
+  }
+
 }

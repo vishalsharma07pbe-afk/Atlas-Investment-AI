@@ -58,12 +58,28 @@ final class PortfolioLevelRisk {
         attention.add(new Attention(type,label,weight,threshold,"PERCENT",today.toString()));
       }
     }
+    JsonNode look=diversification.path("look_through");
+    LocalDate disclosure=day(look,"portfolio_date");
+    boolean lookReady=valuationsComplete&&"DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE".equals(look.path("status").asText())
+      &&disclosure!=null&&!disclosure.isAfter(today)&&!disclosure.isBefore(today.minusDays(60))
+      &&look.path("risk_observations").isArray();
+    if(lookReady){
+      for(JsonNode flag:look.path("risk_observations")){
+        String kind=flag.path("kind").asText(),label=flag.path("label").asText();
+        int threshold=switch(kind){case "HIDDEN_EQUITY_CONCENTRATION"->25;case "HIGH_FUND_OVERLAP"->50;default->-1;};
+        Double value=number(flag,"value");
+        if(threshold<0||label.isBlank()||label.length()>200||value==null||value<threshold||value>100||
+            !disclosure.toString().equals(flag.path("evidenceThrough").asText())||!"PERCENT".equals(flag.path("unit").asText()))continue;
+        attention.add(new Attention(kind,label,value,threshold,"PERCENT",disclosure.toString()));
+      }
+    }
     var result=new LinkedHashMap<String,Object>();
     result.put("benchmark_status",benchmarkReady?"COMPARABLE_PRICE_REFERENCE":"INSUFFICIENT_EVIDENCE");
     result.put("concentration_status",concentrationReady?"RECENT_RECORDED_EXPOSURES":"INSUFFICIENT_EVIDENCE");
     result.put("sector_status",concentrationReady&&sectorCoverage!=null&&sectorCoverage==100.0?"CLASSIFIED_DIRECT_EQUITY":"INSUFFICIENT_EVIDENCE");
+    result.put("look_through_status",lookReady?"DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE":"INSUFFICIENT_EVIDENCE");
     result.put("attention",attention);
-    result.put("notice","Benchmark comparison uses a price index, not TRI or a personalized benchmark. Concentration uses recent recorded values, not live verified prices, and excludes fund look-through. Review thresholds are illustrative, not trade instructions.");
+    result.put("notice","Benchmark comparison uses a price index, not TRI or a personalized benchmark. Direct concentration uses recent recorded values. Separate look-through flags use partial dated secondary fund weights, not live verified exposure. Review thresholds are illustrative, not trade instructions.");
     return result;
   }
 }

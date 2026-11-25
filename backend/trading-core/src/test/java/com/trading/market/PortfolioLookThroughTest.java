@@ -39,6 +39,11 @@ class PortfolioLookThroughTest {
     assertEquals(590.0,largest.path("estimatedValue").asDouble());
     assertEquals(59.0,largest.path("portfolioPercent").asDouble());
     assertEquals(50.0,result.path("overlap_pairs").get(0).path("sharedWeightPercent").asDouble());
+    assertEquals(3,result.path("risk_observation_count").asInt());
+    assertEquals(2,java.util.stream.StreamSupport.stream(result.path("risk_observations").spliterator(),false)
+      .filter(n->"HIDDEN_EQUITY_CONCENTRATION".equals(n.path("kind").asText())).count());
+    assertEquals(1,java.util.stream.StreamSupport.stream(result.path("risk_observations").spliterator(),false)
+      .filter(n->"HIGH_FUND_OVERLAP".equals(n.path("kind").asText())).count());
   }
   @Test void excludesDifferentDatesAndReportsUnmodeledCapital(){
     var rows=List.of(direct(200),fund("123456","fund:a",500,"2026-10-31",60,20),
@@ -63,4 +68,17 @@ class PortfolioLookThroughTest {
     var aged=new HashMap<>(direct(200));aged.put("recorded_valuation_recent",false);
     assertEquals("INSUFFICIENT_RECENT_VALUATIONS",PortfolioLookThrough.assess(List.of(aged,stale),json,now).get("status"));
   }
+  @Test void doesNotRepeatAlreadyVisibleDirectConcentrationOrFlagExactThreshold(){
+    var result=json.valueToTree(PortfolioLookThrough.assess(List.of(direct(500),
+      fund("123456","fund:a",500,"2026-10-31",30,50)),json,now));
+    assertEquals(0,result.path("risk_observation_count").asInt());
+  }
+  @Test void noSameDatePairDoesNotImplyHighOverlap(){
+    var result=json.valueToTree(PortfolioLookThrough.assess(List.of(direct(200),
+      fund("123456","fund:a",500,"2026-10-31",60,20),
+      fund("123457","fund:b",300,"2026-09-30",30,60)),json,now));
+    assertFalse(java.util.stream.StreamSupport.stream(result.path("risk_observations").spliterator(),false)
+      .anyMatch(n->"HIGH_FUND_OVERLAP".equals(n.path("kind").asText())));
+  }
+
 }
