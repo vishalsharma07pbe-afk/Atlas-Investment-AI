@@ -276,6 +276,8 @@ def _research_reports(candidates, ranked, source_rows, disclosed, portfolios):
     and qualification decisions used by the existing recommendation endpoint.
     Secondary evidence is descriptive and never substitutes for missing gates.
     """
+    if not candidates:
+        return []
     exclusions={row["identifier"]:row for row in ranked["excluded"]}
     top_ranks={row["fund"]["identifier"]:row["rank"] for row in ranked["top_performers"]}
     growth_ranks={row["fund"]["identifier"]:row["rank"] for row in ranked["growth_outlook"]}
@@ -306,7 +308,7 @@ def _research_reports(candidates, ranked, source_rows, disclosed, portfolios):
             "top_performer":top,"growth_outlook":growth,
             "suitability":ranked["suitability"],
             "conclusion":"Evidence gates met for both research lists." if not top_missing and not growth_missing
-                else "Historical research only; neither research list qualifies." if top_missing and growth_missing
+                else "Neither research list qualifies; review the available research evidence." if top_missing and growth_missing
                 else "Only one research list meets its evidence gates; review the separate decisions.",
             "reassessment":"Re-evaluate when missing dated evidence is acquired or suitability changes. Historical returns are not a forecast."
         })
