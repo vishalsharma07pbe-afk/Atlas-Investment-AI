@@ -12,7 +12,7 @@ import os
 import re
 
 from .p1_research import company_research
-from .financial_trends import summarize as financial_trends
+from .financial_trends import summarize as financial_trends, earnings_evidence
 from .fundamental_quality import summarize as fundamental_quality
 
 ISIN = re.compile(r"^IN[A-Z0-9]{10}$")
@@ -103,6 +103,11 @@ def normalize(report, isin, instant):
             if rows:
                 data={"units":text(raw.get("units_in")),"rows":rows,
                       "statement_type":text(raw.get("type")),"time_period":text(raw.get("time_period"))}
+                if key=="income_statement" and data["statement_type"]=="consolidated" and data["time_period"]=="yearly":
+                    # Full statement EPS lines have a different dimensional meaning
+                    # from the aggregate monetary statement. Do not apply crore units.
+                    data["eps_rows"]=[r for r in history(raw.get("full_statement"),category="particular")
+                                      if r["name"].strip().casefold() in ("eps - basic","eps - diluted")]
         elif key=="balance_sheet" and isinstance(raw,dict):
             rows=[]
             for point in raw.get("history",[])[:5] if isinstance(raw.get("history"),list) else []:
@@ -197,6 +202,7 @@ def attach(snapshot,connect,instant=None):
             report=json.loads(row["payload"])
             today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
             report["financial_trends"]=financial_trends(report,today.year,as_of=today)
+            report["reported_earnings"]=earnings_evidence(report,today)
             report["fundamental_quality"]=fundamental_quality(report,today.year)
             item["company_evidence"]=report
     return snapshot
