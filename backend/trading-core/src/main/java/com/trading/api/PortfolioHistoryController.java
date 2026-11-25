@@ -5,6 +5,8 @@ import java.time.LocalDate;
 import com.trading.market.MarketCalendarService;
 import com.trading.market.PortfolioFlowAdjustedPerformance;
 import com.trading.market.PortfolioRollingPerformance;
+import com.trading.market.PortfolioBenchmarkEvidence;
+import com.trading.market.PortfolioBenchmarkRisk;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import org.springframework.http.HttpStatus;
@@ -144,12 +146,13 @@ public class PortfolioHistoryController {
       .map(row->new PortfolioFlowAdjustedPerformance.Observation(day(row.get("valuation_date")),
         (BigDecimal)row.get("total_value"),complete(row))).toList();
     var adjusted=PortfolioFlowAdjustedPerformance.calculate(observations,adjustmentFlows);
-    var benchmark=terminal==null?List.<PortfolioRollingPerformance.BenchmarkPoint>of():benchmarkPoints(terminal,today);
+    var benchmark=terminal==null?List.<PortfolioRollingPerformance.BenchmarkPoint>of():PortfolioBenchmarkEvidence.points(jdbc,terminal,today);
     var rolling=PortfolioRollingPerformance.windows(observations,adjustmentFlows,benchmark);
     var risk=PortfolioRollingPerformance.risk(observations,adjustmentFlows);
     Map<String,Object> result=new LinkedHashMap<>();
     result.put("rolling_performance",rolling);
     result.put("weekly_risk_estimate",risk);
+    result.put("benchmark_risk_estimate",PortfolioBenchmarkRisk.assess(observations,adjustmentFlows,benchmark,today));
     result.put("benchmark_reference","NIFTY 50 price index (not TRI)");
     var eligibleBenchmark=benchmark.stream().filter(PortfolioRollingPerformance.BenchmarkPoint::eligible).toList();
     result.put("benchmark_eligible_observation_count",eligibleBenchmark.stream().map(PortfolioRollingPerformance.BenchmarkPoint::date).distinct().count());
@@ -177,34 +180,6 @@ public class PortfolioHistoryController {
     result.put("maximum_drawdown_percent",drawdown==null?null:round(drawdown*100));result.put("drawdown_status",drawdownStatus);
     result.put("methodology","Recorded holdings-only valuations and explicitly external cash flows through the latest nonfuture valuation date. BUY and SELL are internal allocation changes. Drawdown is withheld for incomplete history or intervening external flows. Unrecorded cash, fees, dividends or transactions can invalidate results; recorded prices are not verified live values.");
     return result;
-  }
-
-  private List<PortfolioRollingPerformance.BenchmarkPoint> benchmarkPoints(LocalDate terminal,LocalDate today){
-    // Historical reference only; never use the live index strip or a fund as an index substitute.
-    var rows=jdbc.queryForList("""
-      WITH candidate AS (
-        SELECT i.id,i.exchange_id FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
-        WHERE e.code='NSE' AND i.active AND i.listing_status='ACTIVE'
-          AND i.instrument_type='INDEX' AND i.exchange_token='NSE_INDEX|Nifty 50'
-      )
-      SELECT (c.candle_time AT TIME ZONE 'Asia/Kolkata')::date AS trade_date,c.close,
-        ds.source_code,
-        (c.is_complete AND c.quality_status IN ('VALIDATED_MANUAL','PROVIDER_VALIDATED')
-          AND c.adjustment_status='RAW_UNADJUSTED' AND ds.enabled
-          AND EXISTS(SELECT 1 FROM market_sessions s WHERE s.exchange_id=i.exchange_id
-            AND s.session_date=(c.candle_time AT TIME ZONE 'Asia/Kolkata')::date
-            AND s.session_type='REGULAR' AND s.is_trading_day AND s.close_time=c.candle_time)
-          AND c.candle_time<=now()) AS eligible
-      FROM candidate i JOIN market_candles c ON c.instrument_id=i.id
-      LEFT JOIN data_sources ds ON ds.id=c.source_id
-      WHERE (SELECT count(*) FROM candidate)=1 AND c.timeframe='1d'
-        AND (c.candle_time AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ? AND ?
-        AND (c.candle_time AT TIME ZONE 'Asia/Kolkata')::date<=?
-      ORDER BY c.candle_time
-      """,terminal.minusDays(365),terminal,today);
-    return rows.stream().map(row->new PortfolioRollingPerformance.BenchmarkPoint(
-      day(row.get("trade_date")),(BigDecimal)row.get("close"),(String)row.get("source_code"),
-      Boolean.TRUE.equals(row.get("eligible")))).toList();
   }
 
   private static LocalDate day(Object value){
