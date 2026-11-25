@@ -43,7 +43,7 @@ class AutomaticValidationTests(unittest.TestCase):
                 return db
             instant=datetime(2026,11,24,10,tzinfo=timezone.utc)
             result={"as_of":"2026-11-23","isin":"INE002A01018","replay_evidence_hash":"a"*64,"horizons":{"SWING":{"status":"REPLAY_OBSERVED",
-                "trades":3,"small_sample":True,"cost_scenarios":[],"history_provenance":{"status":"NO_COMPARABLE_PRIOR_CAPTURE","corporate_action_status":"NO_RECORDED_CROSSING_ACTION"}}}}
+                "trades":3,"small_sample":True,"cost_scenarios":[],"history_provenance":{"status":"NO_COMPARABLE_PRIOR_CAPTURE","corporate_action_status":"NO_RECORDED_CROSSING_ACTION","calendar_continuity":{"status":"STORED_SESSIONS_MATCHED"}}}}}
             with connect() as db:
                 _table(db)
                 db.execute("INSERT INTO strategy_validation VALUES(?,?,?,?,?,?,?)",
@@ -86,9 +86,17 @@ class AutomaticValidationTests(unittest.TestCase):
                        "candles":[{"trade_date":row["trade_date"],"open":100,"close":100+i*.2,
                                    "revision":1,"source_code":"UPSTOX"} for i,row in enumerate(candles[-300:])]}
             calls=[]
+            calendar_today=[today]
+            calendar_override={}
             def loader(path):
                 calls.append(path)
                 if "discovery-universe" in path:return [identity]
+                if "strategy-calendar" in path:
+                    through=calendar_today[0]-timedelta(days=1)
+                    days=[{"trade_date":row["trade_date"],"state":calendar_override.get(row["trade_date"],"REGULAR")} for row in candles]
+                    for i in range((calendar_today[0]-today).days):
+                        days.append({"trade_date":(today+timedelta(days=i)).isoformat(),"state":"CLOSED"})
+                    return {"exchange":"NSE","through":through.isoformat(),"days":days}
                 if path.endswith("strategy-benchmark"):return benchmark
                 return {"instrument":identity,"candles":candles}
             with patch("app.strategy_validation.evaluate",return_value={h:("TECHNICAL_WATCH",{}) for h in ("SWING","SHORT_TERM","LONG_TERM")}):
@@ -107,16 +115,27 @@ class AutomaticValidationTests(unittest.TestCase):
             # Same-date older revision is detected on the next ordinary pass.
             candles[0]["revision"]=2
             later=now+timedelta(hours=25)
+            calendar_today[0]=today+timedelta(days=1)
             with patch("app.strategy_validation.evaluate",return_value={h:("TECHNICAL_WATCH",{}) for h in ("SWING","SHORT_TERM","LONG_TERM")}):
                 refresh(snapshot,connect,loader,later)
                 revised=read(connect,later)["horizons"]["SWING"]["items"][0]
                 self.assertEqual(revised["history_provenance"]["status"],"REVISIONS_DETECTED")
                 self.assertEqual(revised["history_provenance"]["changed_observations"],1)
+                self.assertEqual(revised["history_provenance"]["calendar_continuity"]["status"],"STORED_SESSIONS_MATCHED")
+                calendar_override[candles[100]["trade_date"]]="CLOSED"
+                blocked=later+timedelta(hours=25)
+                calendar_today[0]=today+timedelta(days=2)
+                refresh(snapshot,connect,loader,blocked)
+                report=read(connect,blocked)["horizons"]["SWING"]
+                self.assertEqual(report["counts"],{"HISTORICAL_SESSION_MISMATCH":1})
+                self.assertEqual(report["calendar_withheld"][0]["unexpected_observations"],1)
+                self.assertEqual(report["items"],[])
                 # A newly recorded crossing event withholds even provider-labeled adjusted replay.
                 import json
                 identity["latest_action_date"]=candles[100]["trade_date"]
                 identity["corporate_action_context"]=json.dumps([{"ex_date":identity["latest_action_date"],"action_type":"SPLIT"}])
-                final=later+timedelta(hours=25)
+                final=blocked+timedelta(hours=25)
+                calendar_today[0]=today+timedelta(days=3)
                 refresh(snapshot,connect,loader,final)
                 report=read(connect,final)["horizons"]["SWING"]
                 self.assertEqual(report["counts"],{"RECORDED_ACTION_RECONCILIATION_REQUIRED":1})

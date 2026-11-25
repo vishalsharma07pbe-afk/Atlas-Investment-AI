@@ -42,6 +42,14 @@ class MarketClientTest(unittest.TestCase):
         with self.assertRaises(HTTPException):
             market_client._internal_path("/api/v1/market-data/session-context?exchange=OTHER")
 
+    def test_strategy_calendar_is_bounded_to_known_venues(self):
+        for venue in ("NSE","BSE"):
+            self.assertEqual(market_client._internal_path("/api/v1/market-data/strategy-calendar?exchange="+venue),
+                             "/api/v1/internal/feed/strategy-calendar?exchange="+venue)
+        for suffix in ("","?exchange=OTHER","?exchange=NSE&limit=5000"):
+            with self.assertRaises(HTTPException):
+                market_client._internal_path("/api/v1/market-data/strategy-calendar"+suffix)
+
     def test_strategy_benchmark_uses_fixed_internal_route(self):
         self.assertEqual(market_client._internal_path("/api/v1/market-data/strategy-benchmark"),
                          "/api/v1/internal/feed/strategy-benchmark")

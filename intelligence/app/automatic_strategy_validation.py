@@ -7,8 +7,8 @@ from .market_client import backend_json
 from .strategy_validation import replay, WINDOWS, attach_market_benchmark
 from .horizon_research import VERSION
 from .replay_evidence import (VERSION as EVIDENCE_VERSION, exact_isin, fingerprint,
-    full_manifest, corporate_action_status, revision_audit)
-CACHE_VERSION = VERSION + ':' + EVIDENCE_VERSION + ':market-price-index-v1:signal-regime-v1:chronological-folds-v1:execution-proxy-v1:full-provenance-v1'
+    full_manifest, corporate_action_status, revision_audit, session_audit)
+CACHE_VERSION = VERSION + ':' + EVIDENCE_VERSION + ':market-price-index-v1:signal-regime-v1:chronological-folds-v1:execution-proxy-v1:full-provenance-v1:session-continuity-v1'
 
 IST=ZoneInfo("Asia/Kolkata")
 def _table(db):
@@ -73,12 +73,20 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
                         result={"status":action,"horizons":{}}
                     else:
                         try:
-                            benchmark=loader("/api/v1/market-data/strategy-benchmark")
+                            calendar=loader(f"/api/v1/market-data/strategy-calendar?exchange={exchange}")
                         except Exception:
-                            benchmark=None
-                        attach_market_benchmark(result,payload,benchmark,today,positions=positions)
-                        for horizon in result["horizons"].values():
-                            horizon["history_provenance"]=audit
+                            calendar=None
+                        continuity=session_audit(manifest,calendar,exchange,today)
+                        if continuity["status"]!="STORED_SESSIONS_MATCHED":
+                            result={"status":continuity["status"],"horizons":{},"calendar_continuity":continuity}
+                        else:
+                            try:
+                                benchmark=loader("/api/v1/market-data/strategy-benchmark")
+                            except Exception:
+                                benchmark=None
+                            attach_market_benchmark(result,payload,benchmark,today,positions=positions)
+                            for horizon in result["horizons"].values():
+                                horizon["history_provenance"]={**audit,"calendar_continuity":continuity}
             result["isin"]=identity["isin"]
             result["replay_evidence_hash"]=fingerprint(payload["candles"],today)
         except Exception:
@@ -122,6 +130,7 @@ def read(connect,instant=None,*,snapshot=None):
                             and payload.get("as_of")==item.get("as_of") and replay_result.get("status")=="REPLAY_OBSERVED"
                             and replay_result.get("history_provenance",{}).get("status") in ("OVERLAP_UNCHANGED","NO_COMPARABLE_PRIOR_CAPTURE")
                             and replay_result.get("history_provenance",{}).get("corporate_action_status")=="NO_RECORDED_CROSSING_ACTION"
+                            and replay_result.get("history_provenance",{}).get("calendar_continuity",{}).get("status")=="STORED_SESSIONS_MATCHED"
                             and 1<=(today-date.fromisoformat(payload["as_of"])).days<=5):
                         item["matched_strategy_replay"]={"as_of":payload["as_of"],"attempted_at":row["attempted_at"],
                             **replay_result,"notice":"Exact ISIN and shared recent adjusted history match the cached replay. Full history was audited at replay time, not revalidated by this snapshot; later revisions and missing corporate actions remain possible. Not a forward performance estimate."}
@@ -129,6 +138,7 @@ def read(connect,instant=None,*,snapshot=None):
     for horizon in WINDOWS:
         items=[]
         counts={}
+        calendar_withheld=[]
         for row in rows:
             payload=json.loads(row["payload"] or "{}")
             result=payload.get("horizons",{}).get(horizon)
@@ -141,8 +151,10 @@ def read(connect,instant=None,*,snapshot=None):
                 except (ValueError,TypeError,KeyError):
                     status="STALE"
             counts[status]=counts.get(status,0)+1
+            if payload.get("calendar_continuity") and len(calendar_withheld)<10:
+                calendar_withheld.append({"exchange":row["exchange"],"symbol":row["symbol"],**payload["calendar_continuity"]})
             if result and status=="REPLAY_OBSERVED":
                 items.append({"exchange":row["exchange"],"symbol":row["symbol"],"as_of":payload["as_of"],**result})
-        horizons[horizon]={"counts":counts,"observed_instruments":len(items),"items":items[:10]}
+        horizons[horizon]={"counts":counts,"observed_instruments":len(items),"items":items[:10],"calendar_withheld":calendar_withheld}
     return {"methodology":VERSION,"evidence_version":EVIDENCE_VERSION,"sample_count":len(rows),"horizons":horizons,
         "notice":"Bounded rotating current-registry sample, not selected by current watch score. Per-instrument replay only; results are not independent or a portfolio backtest. Nifty 50 price-index comparison and signal-date trend cohorts require matching observed dates; Repeated fixed-rule test windows are descriptive; no prospective validation. No recommendation gate is lifted."}

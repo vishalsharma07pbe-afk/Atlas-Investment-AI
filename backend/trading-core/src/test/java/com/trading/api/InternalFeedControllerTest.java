@@ -67,6 +67,20 @@ class InternalFeedControllerTest {
     verify(jdbc).queryForList(contains("NSE_INDEX|Nifty 50"));
   }
 
+  @Test void strategyCalendarRequiresCredentialAndKnownVenue() {
+    JdbcTemplate jdbc=mock(JdbcTemplate.class);
+    HttpServletRequest request=mock(HttpServletRequest.class);
+    var api=controller(jdbc,"service-secret");
+    assertThatThrownBy(()->api.strategyCalendar(request,"NSE")).isInstanceOf(ResponseStatusException.class);
+    when(request.getHeader("X-Atlas-Service-Token")).thenReturn("service-secret");
+    assertThatThrownBy(()->api.strategyCalendar(request,"OTHER")).isInstanceOf(ResponseStatusException.class);
+    verifyNoInteractions(jdbc);
+    when(jdbc.queryForList(contains("generate_series(1,1100)"),any(java.time.LocalDate.class),eq("NSE")))
+      .thenReturn(List.of(Map.of("trade_date","2026-11-11","state","REGULAR")));
+    assertThat(api.strategyCalendar(request,"NSE")).containsEntry("exchange","NSE").containsKey("days");
+    verify(jdbc).queryForList(contains("generate_series(1,1100)"),any(java.time.LocalDate.class),eq("NSE"));
+  }
+
   @Test void sessionContextRequiresInternalCredential() {
     JdbcTemplate jdbc=mock(JdbcTemplate.class);
     HttpServletRequest request=mock(HttpServletRequest.class);

@@ -2,7 +2,7 @@
 import hashlib
 import json
 import re
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
 VERSION = "REPLAY-EVIDENCE-2"
@@ -105,3 +105,53 @@ def revision_audit(manifest,previous):
             "history_observations":len(current),"first_date":manifest["first_date"],"last_date":manifest["last_date"],
             "overlap_observations":len(overlap),"changed_observations":len(changed),
             "changed_dates":changed[:10],"history_fingerprint":manifest["digest"]}
+
+def session_audit(manifest,calendar,exchange,today):
+    """Match the entire observed period through yesterday to stored venue dates."""
+    result={"status":"HISTORICAL_CALENDAR_UNAVAILABLE","calendar_days":0,"regular_sessions":0,
+            "missing_sessions":0,"unexpected_observations":0,"unknown_days":0,"special_days":0,
+            "missing_dates":[],"unexpected_dates":[],"unknown_dates":[],"special_dates":[],
+            "notice":"Comparison against locally stored regular sessions and closure policy only; not independent official calendar or point-in-time certification."}
+    try:
+        first=date.fromisoformat(manifest["first_date"])
+        through=today-timedelta(days=1)
+        span=(through-first).days+1
+        if not 1<=span<=1100 or not isinstance(calendar,dict) or calendar.get("exchange")!=exchange or calendar.get("through")!=through.isoformat():
+            return result
+        rows=calendar["days"]
+        if not isinstance(rows,list) or len(rows)>1100:
+            return result
+        states={}
+        for row in rows:
+            day=date.fromisoformat(row["trade_date"])
+            state=row["state"]
+            if day in states or day>through or day<today-timedelta(days=1100) or state not in ("REGULAR","CLOSED","UNKNOWN","SPECIAL_SESSION_UNSUPPORTED"):
+                return result
+            states[day]=state
+        regular=set()
+        unknown=[]
+        special=[]
+        closed=set()
+        for i in range(span):
+            day=first+timedelta(days=i)
+            key=day.isoformat()
+            state=states.get(day,"UNKNOWN")
+            if state=="REGULAR":
+                regular.add(key)
+            elif state=="CLOSED":
+                closed.add(key)
+            elif state=="SPECIAL_SESSION_UNSUPPORTED":
+                special.append(key)
+            else:
+                unknown.append(key)
+        observed=set(manifest["observations"])
+        missing=sorted(regular-observed)
+        unexpected=sorted(observed&closed)
+        result.update(calendar_days=span,regular_sessions=len(regular),missing_sessions=len(missing),
+                      unexpected_observations=len(unexpected),unknown_days=len(unknown),special_days=len(special),
+                      missing_dates=missing[:10],unexpected_dates=unexpected[:10],unknown_dates=unknown[:10],special_dates=special[:10])
+        result["status"]=("HISTORICAL_SESSION_MISMATCH" if missing or unexpected else
+                          "HISTORICAL_CALENDAR_INCOMPLETE" if unknown or special else "STORED_SESSIONS_MATCHED")
+        return result
+    except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
+        return result
