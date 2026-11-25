@@ -43,6 +43,22 @@ class PortfolioRefreshServiceTest {
     verify(jdbc,never()).queryForList(contains("SELECT m.instrument_key"),eq(String.class),eq("TWO"));
   }
 
+  @Test void invalidAndFutureNavObservationsCannotOverwriteHoldings(){
+    JdbcTemplate jdbc=mock(JdbcTemplate.class);
+    UpstoxFeedService provider=mock(UpstoxFeedService.class);
+    UUID owner=UUID.randomUUID();
+    when(jdbc.queryForList(contains("SELECT id,user_id,symbol,asset_type"),eq(owner)))
+      .thenReturn(List.of(Map.of("id",7L,"user_id",owner,"symbol","123","asset_type","MUTUAL_FUND")));
+    when(jdbc.queryForList(contains("FROM mutual_fund_nav"),eq(123L)))
+      .thenReturn(List.of(Map.of("nav",BigDecimal.ONE,"nav_date",LocalDate.now(MarketCalendarService.IST).plusDays(1))),
+                  List.of(Map.of("nav",BigDecimal.ZERO,"nav_date",LocalDate.now(MarketCalendarService.IST))));
+    var service=new PortfolioRefreshService(jdbc,provider);
+    assertTrue(service.refreshUser(owner,false).get("skipped").toString().contains("INVALID_NAV_OBSERVATION"));
+    assertTrue(service.refreshUser(owner,false).get("skipped").toString().contains("INVALID_NAV_OBSERVATION"));
+    verify(jdbc,never()).update(anyString(),any(),any(),any(),any(),any(),any(),any());
+    verifyNoInteractions(provider);
+  }
+
   @Test void boundedBackgroundBatchUsesOwnerFromClaimedRow(){
     JdbcTemplate jdbc=mock(JdbcTemplate.class);
     UpstoxFeedService provider=mock(UpstoxFeedService.class);
