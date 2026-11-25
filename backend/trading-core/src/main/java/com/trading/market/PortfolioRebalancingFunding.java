@@ -78,7 +78,7 @@ final class PortfolioRebalancingFunding {
       if(equityOnly)exit=ZERO;
       else if(fundSale&&load!=null&&"CONDITIONAL_CURRENT_TERMS".equals(load.status())&&
           load.hypotheticalFundExitLoad()!=null&&load.hypotheticalFundExitLoad().signum()>=0&&
-          load.hypotheticalFundExitLoad().compareTo(sale.grossProceeds())<=0)exit=load.hypotheticalFundExitLoad();
+          matchedFundLoads(sale,load))exit=load.hypotheticalFundExitLoad();
       else gaps.add("Complete conditional fund exit-load evidence required.");
       var tax=sale.taxReference();
       if(equityOnly&&tax!=null&&"CONDITIONAL_REFERENCE_ONLY".equals(tax.status())&&
@@ -96,4 +96,21 @@ final class PortfolioRebalancingFunding {
     return new Comparison(scope,kind,gaps.isEmpty()?"CONDITIONAL_COMPONENTS_AVAILABLE":"PARTIAL_COMPONENTS",
       row.purchaseNotional(),row.saleNotional(),row.additionalCashBeforeCost(),exit,unused,used,estimates,List.copyOf(gaps));
   }
+  private static boolean matchedFundLoads(PortfolioSaleResearch.Scenario sale,PortfolioFundExitLoad.Scenario load){
+    Map<String,BigDecimal> proceeds=new HashMap<>();
+    for(var position:sale.sales())if("MUTUAL_FUND".equals(position.assetType())){
+      if(proceeds.putIfAbsent(position.symbol(),position.grossProceeds())!=null)return false;
+    }
+    BigDecimal sum=ZERO;
+    for(var fund:load.funds()){
+      BigDecimal gross=proceeds.remove(fund.schemeCode());
+      if(gross==null||!"CONDITIONAL_CURRENT_TERMS".equals(fund.status())||
+        fund.hypotheticalLoad()==null||fund.hypotheticalLoad().signum()<0||
+        fund.hypotheticalLoad().compareTo(gross)>0||fund.proceedsAfterLoad()==null||
+        gross.subtract(fund.hypotheticalLoad()).compareTo(fund.proceedsAfterLoad())!=0)return false;
+      sum=sum.add(fund.hypotheticalLoad());
+    }
+    return proceeds.isEmpty()&&sum.compareTo(load.hypotheticalFundExitLoad())==0;
+  }
+
 }
