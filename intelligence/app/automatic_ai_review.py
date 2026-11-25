@@ -14,17 +14,17 @@ import os
 import re
 import sqlite3
 
-from . import ai_failover
+from . import ai_failover, ai_public_evidence
 
-VERSION = "AUTO-GROUNDED-3"
+VERSION = "AUTO-GROUNDED-4"
 BATCH_SIZE = 2
 ROLES = ("TECHNICAL_EVIDENCE", "ADVERSARIAL_RISK", "FINANCIAL_EVIDENCE", "HISTORICAL_VALIDATION", "EVIDENCE_COMPLETENESS")
 ROLE_TASKS = {
     "TECHNICAL_EVIDENCE": "Review dated price, volatility and technical observations; distinguish raw and adjusted evidence.",
-    "ADVERSARIAL_RISK": "Challenge overinterpretation, missing evidence and historical performance limitations.",
-    "FINANCIAL_EVIDENCE": "Review reported annual financial trends if supplied; explicitly identify valuation and business evidence gaps.",
+    "ADVERSARIAL_RISK": "Challenge overinterpretation, missing evidence, headline topics and market-level risk limitations.",
+    "FINANCIAL_EVIDENCE": "Review reported annual financial trends, quarterly ownership and peer multiples if supplied; explicitly identify valuation and business evidence gaps.",
     "HISTORICAL_VALIDATION": "Review supplied historical simulations, costs, drawdowns and small-sample limitations.",
-    "EVIDENCE_COMPLETENESS": "Review missing evidence and inconsistencies across available domains; identify what cannot be established.",
+    "EVIDENCE_COMPLETENESS": "Review missing evidence and inconsistencies across available domains, including separately dated global context and reported institutional flows; identify what cannot be established.",
 }
 HORIZONS = ("SWING", "SHORT_TERM", "LONG_TERM")
 SYMBOL = re.compile(r"^[A-Z0-9._&-]{1,40}$")
@@ -45,7 +45,7 @@ def providers():
     return [p for p in ordered if (p == "OLLAMA" or external) and ai_failover._enabled(p)][:5]
 
 
-def evidence(candidate, horizon):
+def evidence(candidate, horizon, context=None):
     if horizon not in HORIZONS or candidate.get("exchange") not in ("NSE", "BSE"):
         raise ValueError("INVALID_CANDIDATE")
     symbol = candidate.get("symbol")
@@ -69,8 +69,8 @@ def evidence(candidate, horizon):
     pack = {"version": VERSION, "symbol": symbol, "exchange": candidate["exchange"],
             "as_of": observed, "horizon": horizon, "adjustment": adjustment,
             "observations": numeric,
-            "missing": ["Live liquidity", "Current company fundamentals", "Valuation",
-                        "Institutional flows", "Material news", "Strategy validation"]}
+            "missing": ["Live liquidity", "Independently verified current company fundamentals", "Dated intrinsic valuation",
+                        "Stock-level institutional transactions", "Verified material news and impact", "Prospective strategy validation"]}
     # Only dated, allowlisted numeric summaries for the same public ISIN.
     # Never forward provider prose, URLs, notes, holdings or arbitrary fields.
     company=candidate.get("company_evidence") or {}
@@ -103,6 +103,8 @@ def evidence(candidate, horizon):
                 costs.append({k:row[k] for k in ("cost_bps_per_side","net_return_percent","max_drawdown_percent")})
         if costs:
             pack["historical_replay"]={"trades":replay["trades"],"cost_scenarios":costs,"small_sample":replay["trades"]<30}
+    if context is not None:
+        pack.update(ai_public_evidence.summarize(candidate, context, observed))
     return pack
 
 
@@ -156,19 +158,17 @@ def _finish(connect, key, claimed_at, status, result):
 
 def _review(pack, provider, runner, role="TECHNICAL_EVIDENCE"):
     # Text is entirely constructed from public, typed observations.
-    facts={k:v for k,v in pack.items() if k not in ("missing","financial_trends","historical_replay")}
-    supplied={"OBS":facts,"LIMITS":pack["missing"]}
-    if "financial_trends" in pack:
-        supplied["FUND"]=pack["financial_trends"]
-    if "historical_replay" in pack:
-        supplied["REPLAY"]=pack["historical_replay"]
+    supplied=_supplied(pack)
     prompt = ("Review this dated research watch for research purposes only. "
               "Assigned independent review role: "+ROLE_TASKS[role]+" "
               "Do not claim other reviewers agree with you. If your assigned domain is missing, cite LIMITS. "
               "Use only the supplied evidence. Give cautious descriptive findings, "
               "not trade actions, targets, predictions or confidence percentages. "
               "Cite OBS for technical observations, FUND for reported annual trends if supplied, "
-              "REPLAY for historical simulations if supplied, or LIMITS for missing evidence. "
+              "REPLAY for historical simulations if supplied, LIMITS for missing evidence, and the exact named IDs for any additional supplied domains. "
+              "Ownership percentages are not trades; institutional flows are market-level, not stock-specific. "
+              "News categories are unverified headline topics; global changes are not synchronized sessions or company sensitivity. "
+              "Peer valuation observation periods are unverified, not fair value. "
               "Annual trends are not independently verified; replay is not forward performance. "
               "Do not invent facts. Return the required JSON.\n"
               + json.dumps(supplied, ensure_ascii=True))
@@ -201,7 +201,7 @@ def candidates(snapshot, selected=None):
         for horizon in HORIZONS:
             for item in (section.get("result") or {}).get("horizons", {}).get(horizon, {}).get("candidates", []):
                 try:
-                    pack = evidence(item, horizon)
+                    pack = evidence(item, horizon, snapshot if snapshot.get("scope")=="PUBLIC_MARKET_RESEARCH_ONLY" else None)
                     yield item, pack, identity(pack,selected)
                 except (ValueError, KeyError, TypeError, OverflowError):
                     continue
@@ -209,11 +209,7 @@ def candidates(snapshot, selected=None):
 
 def _committee(pack, selected, reviews, attempted):
     indexed={r["provider"]:r for r in reviews if r.get("provider") in selected}
-    expected=["OBS","LIMITS"]
-    if "financial_trends" in pack:
-        expected.append("FUND")
-    if "historical_replay" in pack:
-        expected.append("REPLAY")
+    expected=list(_supplied(pack))
     cited={c for r in indexed.values() for f in r["findings"] for c in f["evidence_ids"]}
     members=[{"provider":p,"role":ROLES[i],"status":"REVIEW_RETURNED" if p in indexed else
               "NO_USABLE_REVIEW" if p in attempted else "PENDING",
@@ -287,3 +283,13 @@ def attach(snapshot, connect):
             item["ai_review"]={**result,"reviews":reviews,
                 "committee":_committee(pack,allowed,reviews,set(result.get("attempted_providers",[])))}
     return snapshot
+
+
+def _supplied(pack):
+    domains={"financial_trends":"FUND","historical_replay":"REPLAY",**ai_public_evidence.DOMAINS}
+    # OBS remains an explicit field allowlist, never an arbitrary remainder.
+    supplied={"OBS":{k:pack[k] for k in ("version","symbol","exchange","as_of","horizon","adjustment","observations")},"LIMITS":pack["missing"]}
+    for key,identifier in domains.items():
+        if key in pack:
+            supplied[identifier]=pack[key]
+    return supplied

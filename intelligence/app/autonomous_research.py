@@ -223,6 +223,7 @@ def read_snapshot(include_ai=True):
                          "result": result, "error_code": error_code})
     snapshot = {"enabled": enabled, "interval_seconds": interval, "sections": sections,
             "scope": "PUBLIC_MARKET_RESEARCH_ONLY",
+            "research_date":current.astimezone(ZoneInfo("Asia/Kolkata")).date().isoformat(),
             "notice": "Snapshot time is not the underlying observation time. Missing evidence never becomes a recommendation."}
     if include_ai:
         try:
@@ -263,10 +264,6 @@ def read_snapshot(include_ai=True):
             snapshot["research_reliability"] = {"status":"UNAVAILABLE"}
         research_reliability.attach(snapshot,snapshot["research_reliability"],current.astimezone(ZoneInfo("Asia/Kolkata")).date())
         try:
-            automatic_ai_review.attach(snapshot, _connect)
-        except (ValueError, OSError, sqlite3.Error):
-            snapshot["automatic_ai_status"] = "UNAVAILABLE"
-        try:
             snapshot["global_releases"]=global_releases.read(_connect,current) if enabled else {"status":"AUTOMATION_DISABLED","sources":[],"events":[],"notice":global_releases.NOTICE}
         except (ValueError,OSError,sqlite3.Error):
             snapshot["global_releases"]={"status":"UNAVAILABLE","sources":[],"events":[],"notice":global_releases.NOTICE}
@@ -280,6 +277,10 @@ def read_snapshot(include_ai=True):
             market_regime.attach(snapshot,_connect,current)
         except (ValueError,OSError,sqlite3.Error):
             snapshot["market_regime"]=market_regime.empty("UNAVAILABLE")
+        try:
+            automatic_ai_review.attach(snapshot, _connect)
+        except (ValueError, OSError, sqlite3.Error):
+            snapshot["automatic_ai_status"] = "UNAVAILABLE"
         research_reliability.attach_conclusions(snapshot)
         snapshot["daily_briefing"] = daily_briefing.summarize(snapshot)
     return snapshot
@@ -380,7 +381,7 @@ def _execute_job(job):
         return "DISABLED_OR_NOT_AUTHORIZED"
     if job=="AI_REVIEW" and (not automatic_ai_review.enabled() or not automatic_ai_review.providers()):
         return "DISABLED_OR_NOT_AUTHORIZED"
-    snapshot=read_snapshot(False)
+    snapshot=read_snapshot(job=="AI_REVIEW")
     if not snapshot["enabled"]:
         return "DISABLED_OR_NOT_AUTHORIZED"
     # Previously published mature watches still need outcome evaluation even
@@ -397,8 +398,7 @@ def _execute_job(job):
     elif job=="STRATEGY_REPLAY":
         automatic_strategy_validation.refresh(snapshot,_connect)
     elif job=="AI_REVIEW":
-        automatic_company_evidence.attach(snapshot,_connect)
-        automatic_strategy_validation.read(_connect,snapshot=snapshot)
+        # Same cached public evidence assembly as the dashboard; no extra provider calls.
         automatic_ai_review.refresh(snapshot,_connect)
     else:
         raise ValueError("UNKNOWN_RESEARCH_JOB")
