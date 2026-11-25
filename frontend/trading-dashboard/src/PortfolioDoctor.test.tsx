@@ -268,3 +268,16 @@ it("shows conditional current fund exit loads and withholds unsupported scenario
  expect(screen.getByText("Current secondary terms only.")).toBeTruthy();
  expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+it("shows combined funding components without treating unknown fund tax as zero",async()=>{
+ const holding={id:1,symbol:"123456",asset_type:"MUTUAL_FUND",exchange:null,status:"MONITOR",weight_percent:100,recorded_return_percent:1,evidence_date:null,history_count:0,change_20_observations_percent:null,recent_peak_change_percent:null,findings:[],missing_evidence:[]};
+ const rebalancing_funding={status:"FUNDING_COMPARISONS_AVAILABLE",comparisons:[{scope:"MIXED_ALLOCATION",kind:"EQUAL_WEIGHTS",status:"PARTIAL_COMPONENTS",purchaseNotional:10000,saleNotional:10000,additionalCashBeforeCost:0,conditionalExitLoad:25,conditionalTaxIfThresholdUnused:null,conditionalTaxIfThresholdUsed:null,estimates:[{basisPointsPerSide:50,transactionCost:100,additionalCashIncludingTransactionCost:100,additionalCashWithKnownExitLoad:125,conditionalCashIfThresholdUnused:null,conditionalCashIfThresholdUsed:null}],evidenceGaps:["Fund tax classification and applicable acquisition-specific treatment are not verified."]}],notice:"Conditional funding only."};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-25T10:00:00Z",holding_count:1,attention_count:0,data_gap_count:0,notice:"Research only",holdings:[holding],rebalancing_funding})})));
+ render(<PortfolioDoctor revision={0} onSettings={()=>{}}/>);
+ expect(await screen.findByRole("heading",{name:"Combined rebalancing funding research"})).toBeTruthy();
+ expect(screen.getByText("₹125")).toBeTruthy();
+ expect(screen.getByText("Unavailable / Unavailable")).toBeTruthy();
+ expect(screen.getByText(/Fund tax classification and applicable acquisition-specific treatment/)).toBeTruthy();
+ expect(screen.getByText("Conditional funding only.")).toBeTruthy();
+ expect(fetch).toHaveBeenCalledTimes(1);
+});
