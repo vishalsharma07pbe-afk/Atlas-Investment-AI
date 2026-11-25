@@ -11,6 +11,7 @@ it("distinguishes unavailable evidence from observed price changes",async()=>{
  ],notice:"Public technical watch history, not trades or validated strategy performance."})})));
  render(<WatchOutcomeHistory horizon="SWING"/>);
  expect(await screen.findByText(/4\.25%/)).toBeTruthy();
+ expect(screen.getByText(/Legacy evidence — excluded from current reliability metrics/)).toBeTruthy();
  expect(screen.getByText("EVIDENCE GAP")).toBeTruthy();
  expect(screen.getByText("—")).toBeTruthy();
  expect(screen.getByText(/not trades or validated strategy performance/)).toBeTruthy();

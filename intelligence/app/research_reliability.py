@@ -6,7 +6,9 @@ from statistics import mean, median
 from zoneinfo import ZoneInfo
 import json
 
-from .watch_outcomes import HORIZONS, _table
+from .watch_outcomes import HORIZONS, _table, OUTCOME_EVIDENCE_VERSION
+from .replay_evidence import exact_isin
+import re
 from .horizon_research import VERSION
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -17,7 +19,7 @@ COHORT_DAYS = 365
 MAX_ROWS = 5000
 COSTS = (15, 30, 60)
 NOTICE = ("Descriptive prospective watch outcomes, not independent trades or calibrated probabilities. "
-          "No index benchmark, point-in-time universe or verified execution. No recommendation gate is lifted.")
+          "Only current session-evidence outcomes enter metrics; legacy observations remain in the denominator. No index benchmark, point-in-time universe or verified execution. No recommendation gate is lifted.")
 
 def _stamp(value):
     dt = datetime.fromisoformat(value)
@@ -32,6 +34,10 @@ def _outcome(row, published, maturity, today):
     if row["status"] != "OBSERVED":
         return None
     outcome = json.loads(row["outcome"] or "{}")
+    if (outcome.get("evidence_version")!=OUTCOME_EVIDENCE_VERSION or outcome.get("calendar_status")!="STORED_SESSIONS_MATCHED"
+            or type(outcome.get("observations")) is not int or not 2<=outcome["observations"]<=500
+            or not isinstance(outcome.get("history_fingerprint"),str) or not re.fullmatch(r"[0-9a-f]{64}",outcome["history_fingerprint"])):
+        return None
     start,end = date.fromisoformat(outcome["entry_date"]),date.fromisoformat(outcome["exit_date"])
     a,b = outcome["entry_close"],outcome["exit_close"]
     if not (published<start<=published+timedelta(days=7) and maturity<=end<=maturity+timedelta(days=7)
@@ -45,7 +51,7 @@ def cohort(rows, horizon, today, truncated=False):
     # Select by publication and predeclared review dates, not by realized results.
     selected = []
     last_window = {}
-    overlap = immature = incompatible = invalid = 0
+    overlap = immature = incompatible = invalid = legacy_or_unverified = 0
     for row in rows:
         try:
             evidence=json.loads(row["evidence"])
@@ -61,7 +67,7 @@ def cohort(rows, horizon, today, truncated=False):
                 continue
             identity=evidence.get("isin")
             # Older publications without an exact ISIN cannot be reliably deduplicated across venues.
-            if not isinstance(identity,str) or len(identity)!=12 or not identity.startswith("IN") or not identity.isalnum():
+            if not exact_isin(identity):
                 incompatible+=1
                 continue
             if today<=maturity+timedelta(days=7):
@@ -75,6 +81,8 @@ def cohort(rows, horizon, today, truncated=False):
                 change=_outcome(row,published,maturity,today)
             except (KeyError,ValueError,TypeError,OverflowError):
                 change=None
+            if row["status"]=="OBSERVED" and change is None:
+                legacy_or_unverified+=1
             selected.append((identity,change,published))
         except (KeyError,ValueError,TypeError,OverflowError):
             invalid+=1
@@ -100,6 +108,7 @@ def cohort(rows, horizon, today, truncated=False):
         "observed_outcomes":len(outcomes),"distinct_observed_isins":identities,
         "coverage_percent":round(100*coverage,2),"overlap_excluded":overlap,
         "immature_excluded":immature,"incompatible_excluded":incompatible,"invalid_excluded":invalid,
+        "legacy_or_unverified_observed":legacy_or_unverified,
         "cost_scenarios":metrics,"blockers":blockers,
         "notice":NOTICE}
 

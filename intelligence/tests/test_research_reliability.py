@@ -3,6 +3,7 @@ import json
 from datetime import date,timedelta
 from app.research_reliability import cohort,attach
 from app.horizon_research import VERSION
+from app.watch_outcomes import OUTCOME_EVIDENCE_VERSION
 
 TODAY=date(2026,11,24)
 
@@ -12,7 +13,8 @@ def row(isin="INE002A01018", day=date(2026,8,1), status="OBSERVED", end=110, met
         "observed_date":(day-timedelta(days=1)).isoformat(),"maturity_date":maturity.isoformat(),
         "status":status,"evidence":json.dumps({"isin":isin,"methodology":method,"adjustment_status":"ADJUSTED"}),
         "outcome":json.dumps({"entry_date":(day+timedelta(days=1)).isoformat(),"exit_date":maturity.isoformat(),
-            "entry_close":100,"exit_close":end,"source_code":"TEST"})}
+            "entry_close":100,"exit_close":end,"source_code":"TEST","evidence_version":OUTCOME_EVIDENCE_VERSION,
+            "calendar_status":"STORED_SESSIONS_MATCHED","observations":10,"history_fingerprint":"a"*64})}
 
 class ResearchReliabilityTests(unittest.TestCase):
     def test_missing_early_outcome_does_not_select_later_overlapping_winner(self):
@@ -32,7 +34,7 @@ class ResearchReliabilityTests(unittest.TestCase):
         self.assertFalse(result["cost_scenarios"])
 
     def test_cost_sensitive_descriptive_sample_never_calibrated(self):
-        rows=[row(isin="IN"+str(i).zfill(10),day=day,end=100.5)
+        rows=[row(isin="INE"+str(i).zfill(9),day=day,end=100.5)
               for day in (date(2026,5,1),date(2026,6,1),date(2026,7,1))
               for i in range(10)]
         result=cohort(rows,"SWING",TODAY)
@@ -86,3 +88,14 @@ class ResearchReliabilityTests(unittest.TestCase):
         self.assertIn("NET_MARGIN_DETERIORATION_REVIEW",result["warnings"])
         self.assertEqual(result["evidence"]["valuation"],"SECTOR_COMPARISON_ONLY")
         self.assertIn("VALUATION_NOT_VERIFIED",result["blockers"])
+
+    def test_legacy_observed_outcome_is_not_a_verified_metric_or_removed_from_denominator(self):
+        first=row()
+        outcome=json.loads(first["outcome"])
+        outcome.pop("evidence_version")
+        first["outcome"]=json.dumps(outcome)
+        result=cohort([first,row(day=date(2026,9,1))],"SWING",TODAY)
+        self.assertEqual(result["selected_mature_watches"],2)
+        self.assertEqual(result["observed_outcomes"],1)
+        self.assertEqual(result["legacy_or_unverified_observed"],1)
+        self.assertEqual(result["coverage_percent"],50)
