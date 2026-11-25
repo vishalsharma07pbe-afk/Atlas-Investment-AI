@@ -99,3 +99,15 @@ it("surfaces newly reported financial deterioration ahead of unchanged holdings"
  expect(screen.getAllByRole("article")[0].textContent).toContain("DETERIORATION");
  expect(screen.getByText("Needs review")).toBeTruthy();
 });
+
+it("shows exact held fund secondary disclosures and composition without a recommendation ranking",async()=>{
+ const holding={id:1,symbol:"118955",asset_type:"MUTUAL_FUND",exchange:null,status:"MONITOR",weight_percent:100,recorded_return_percent:1,evidence_date:null,history_count:0,change_20_observations_percent:null,recent_peak_change_percent:null,findings:[],missing_evidence:[],fund_thesis_evidence:{
+ status:"SECONDARY_REPORTED_EVIDENCE",notice:"Not independently verified.",disclosure:{scheme_name:"Held Example Fund",source:"TIGZIG_AMFI_DERIVED",plan:"REGULAR",ter_percent:1.4,riskometer:"VERY_HIGH"},portfolio:{portfolio_date:"2026-10-31",source:"TIGZIG_AMC_DERIVED",exact_listed_equity_weight_percent:90,top_10_exact_equity_weight_percent:40,top_holdings:[{isin:"INE002A01018",name:"Example Company",weight_percent:10}],underlying_research:{status:"REPORTED_HISTORICAL_DRIVERS_ONLY",annual_statement_weight_percent:60,deterioration_review_weight_percent:25,notice:"Historical only."},notice:"Reported composition."}}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-25T10:00:00Z",holding_count:1,attention_count:0,data_gap_count:0,notice:"Research only",holdings:[holding]})})));
+ render(<PortfolioDoctor revision={0} onSettings={()=>{}}/>);
+ expect(await screen.findByText("Held Example Fund · REGULAR")).toBeTruthy();
+ expect(screen.getByText(/1.40%/)).toBeTruthy();
+ expect(screen.getByText(/Underlying deterioration observations: 25.00%/)).toBeTruthy();
+ expect(screen.getByText(/Example Company · 10.00%/)).toBeTruthy();
+ expect(fetch).toHaveBeenCalledTimes(1);
+});
