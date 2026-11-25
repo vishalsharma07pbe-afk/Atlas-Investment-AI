@@ -127,3 +127,17 @@ it("shows historical liquidity diagnostics separately from executable recommenda
  expect(screen.getByText("-6.12%")).toBeTruthy();
  expect(screen.getByText("Not verified execution.")).toBeTruthy();
 });
+
+it("shows full history provenance without claiming point-in-time certification",async()=>{
+ const enriched={...candidate,matched_strategy_replay:{as_of:"2026-11-23",trades:3,small_sample:true,cost_scenarios:[],notice:"Watch only.",
+ history_provenance:{status:"OVERLAP_UNCHANGED",history_observations:500,first_date:"2025-06-01",last_date:"2026-11-23",overlap_observations:499,changed_observations:0,changed_dates:[],corporate_action_status:"NO_RECORDED_CROSSING_ACTION",notice:"Not point-in-time certified."}}};
+ const market={...section,result:{...section.result,horizons:{...section.result.horizons,SWING:{...section.result.horizons.SWING,candidates:[enriched]}}}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[market]})})));
+ render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+ fireEvent.click(await screen.findByText(/Same-stock historical replay/));
+ fireEvent.click(screen.getByText("Historical evidence provenance"));
+ expect(screen.getByText(/500 observations/)).toBeTruthy();
+ expect(screen.getByText(/499 overlapping observations/)).toBeTruthy();
+ expect(screen.getByText(/no recorded crossing action/)).toBeTruthy();
+ expect(screen.getByText("Not point-in-time certified.")).toBeTruthy();
+});

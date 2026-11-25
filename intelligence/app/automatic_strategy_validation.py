@@ -6,8 +6,9 @@ import json
 from .market_client import backend_json
 from .strategy_validation import replay, WINDOWS, attach_market_benchmark
 from .horizon_research import VERSION
-from .replay_evidence import VERSION as EVIDENCE_VERSION, exact_isin, fingerprint
-CACHE_VERSION = VERSION + ':' + EVIDENCE_VERSION + ':market-price-index-v1:signal-regime-v1:chronological-folds-v1:execution-proxy-v1'
+from .replay_evidence import (VERSION as EVIDENCE_VERSION, exact_isin, fingerprint,
+    full_manifest, corporate_action_status, revision_audit)
+CACHE_VERSION = VERSION + ':' + EVIDENCE_VERSION + ':market-price-index-v1:signal-regime-v1:chronological-folds-v1:execution-proxy-v1:full-provenance-v1'
 
 IST=ZoneInfo("Asia/Kolkata")
 def _table(db):
@@ -45,9 +46,12 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
                 continue
             selected=min(due,key=lambda r:(existing[r["id"]]["attempted_at"] if r["id"] in existing else "",r["id"]))
             i=selected["id"]
+            previous_payload=json.loads(existing[i]["payload"] or "{}") if i in existing else {}
+            prior_manifest=previous_payload.get("_history_manifest") if previous_payload.get("isin")==selected["isin"] else None
             db.execute("""INSERT INTO strategy_validation VALUES(?,?,?,?,?,'RUNNING',NULL)
                 ON CONFLICT(exchange,instrument_id) DO UPDATE SET symbol=excluded.symbol,methodology=excluded.methodology,
                 attempted_at=excluded.attempted_at,status='RUNNING',payload=NULL""",(exchange,i,selected["symbol"],CACHE_VERSION,stamp))
+        manifest=None
         try:
             payload=loader(f"/api/v1/market-data/instruments/{i}/candles?limit=500")
             identity=payload["instrument"]
@@ -57,15 +61,33 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
             positions={}
             result=replay(payload,today,positions=positions)
             if result["status"]=="HISTORICAL_REPLAY_ONLY":
-                try:
-                    benchmark=loader("/api/v1/market-data/strategy-benchmark")
-                except Exception:
-                    benchmark=None
-                attach_market_benchmark(result,payload,benchmark,today,positions=positions)
+                manifest=full_manifest(payload["candles"],today)
+                if manifest is None:
+                    result={"status":"FULL_HISTORY_EVIDENCE_GAP","horizons":{}}
+                else:
+                    action=corporate_action_status(selected,manifest)
+                    audit=revision_audit(manifest,prior_manifest)
+                    audit["corporate_action_status"]=action
+                    audit["notice"]="Full bounded replay input fingerprint, compared with the previous local capture only. No recorded crossing action does not verify adjustment completeness or point-in-time availability."
+                    if action!="NO_RECORDED_CROSSING_ACTION":
+                        result={"status":action,"horizons":{}}
+                    else:
+                        try:
+                            benchmark=loader("/api/v1/market-data/strategy-benchmark")
+                        except Exception:
+                            benchmark=None
+                        attach_market_benchmark(result,payload,benchmark,today,positions=positions)
+                        for horizon in result["horizons"].values():
+                            horizon["history_provenance"]=audit
             result["isin"]=identity["isin"]
             result["replay_evidence_hash"]=fingerprint(payload["candles"],today)
         except Exception:
             result={"status":"UNAVAILABLE","horizons":{}}
+        # Keep the last successful manifest through transient failures; raw
+        # per-date digests stay in this local cache, not in research responses.
+        result["isin"]=selected["isin"]
+        if manifest is not None or prior_manifest is not None:
+            result["_history_manifest"]=manifest if manifest is not None else prior_manifest
         with closing(connect()) as db,db:
             db.execute("""UPDATE strategy_validation SET status=?,payload=? WHERE exchange=? AND instrument_id=?
                 AND attempted_at=?""",(result["status"],json.dumps(result,allow_nan=False),exchange,i,stamp))
@@ -98,9 +120,11 @@ def read(connect,instant=None,*,snapshot=None):
                             and item["replay_evidence_hash"]==payload.get("replay_evidence_hash")
                             and item.get("adjustment_status")=="ADJUSTED"
                             and payload.get("as_of")==item.get("as_of") and replay_result.get("status")=="REPLAY_OBSERVED"
+                            and replay_result.get("history_provenance",{}).get("status") in ("OVERLAP_UNCHANGED","NO_COMPARABLE_PRIOR_CAPTURE")
+                            and replay_result.get("history_provenance",{}).get("corporate_action_status")=="NO_RECORDED_CROSSING_ACTION"
                             and 1<=(today-date.fromisoformat(payload["as_of"])).days<=5):
                         item["matched_strategy_replay"]={"as_of":payload["as_of"],"attempted_at":row["attempted_at"],
-                            **replay_result,"notice":"Exact ISIN and shared recent adjusted history match the cached replay; older replay observations may still have been revised. Not a forward performance estimate."}
+                            **replay_result,"notice":"Exact ISIN and shared recent adjusted history match the cached replay. Full history was audited at replay time, not revalidated by this snapshot; later revisions and missing corporate actions remain possible. Not a forward performance estimate."}
     horizons={}
     for horizon in WINDOWS:
         items=[]
