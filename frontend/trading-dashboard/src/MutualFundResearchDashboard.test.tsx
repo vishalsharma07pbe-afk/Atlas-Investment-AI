@@ -89,7 +89,7 @@ it("supports debt category navigation without implying an equity ranking",async(
 
 it("opens an individual scheme report and preserves missing-evidence decisions",async()=>{
  const report={identifier:"123456",name:"Example Integrated Fund",category:"LARGE_CAP",plan:"DIRECT",option:"GROWTH",nav:"100.50",nav_date:"2026-11-24",nav_age_days:1,
-  historical:{sources:["AMFI","MFAPI"],returns_1y:12,returns_3y:14,sample_peer_percentile:80,worst_rolling_return:-8,max_drawdown:-17,volatility:13},
+  historical:{sources:["AMFI","MFAPI"],returns_1y:12,returns_3y:14,sample_peer_percentile:80,worst_rolling_return:-8,max_drawdown:-17,volatility:13,rolling_peer_consistency:{status:"MATCHED_SAMPLE_ONLY",matched_windows:100,total_windows:105,minimum_peer_count:4,above_median_windows:60,below_median_windows:30,tied_windows:10,above_median_percent:60,median_difference_pp:1.5,worst_difference_pp:-10,notice:"Sample only, not benchmark TRI."}},
   secondary_disclosure_available:false,secondary_portfolio_available:false,
   top_performer:{status:"WITHHELD",missing:["BENCHMARK_HIT_RATE"],published_rank:null},
   growth_outlook:{status:"WITHHELD",missing:["FORWARD_EARNINGS_GROWTH"],published_rank:null},
@@ -99,6 +99,7 @@ it("opens an individual scheme report and preserves missing-evidence decisions",
  render(<MutualFundResearchDashboard onExplore={()=>{}}/>);
  await screen.findByText("Individual fund research reports (1)");
  fireEvent.change(screen.getByLabelText("Research report"),{target:{value:"123456"}});
+ expect(screen.getByText(/100\/105 windows/)).toBeTruthy();
  expect(screen.getByText("Example Integrated Fund",{selector:"h4"})).toBeTruthy();
  expect(screen.getByText("12.00% / 14.00%")).toBeTruthy();
  expect(screen.getByText("Top Performer: Withheld")).toBeTruthy();

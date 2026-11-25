@@ -91,6 +91,33 @@ class FundHistoryResearchServiceTest {
   assertEquals(11L,result.get("current_observed_underwater_days"));
   assertEquals(11L,result.get("longest_observed_underwater_days"));
  }
+ @Test void rollingPeerConsistencyRequiresExactDistinctDirectGrowthAndMatchedDates(){
+  LocalDate end=LocalDate.of(2026,11,24);
+  List<Map<String,Object>> funds=new ArrayList<>();
+  Map<Long,List<Map<String,Object>>> histories=new HashMap<>();
+  for(long id=1;id<=5;id++){
+    Map<String,Object> row=new HashMap<>(Map.of("scheme_code",id,"amfi_plan","DIRECT","amfi_option","GROWTH",
+      "isin_growth","INF"+String.format("%09d",id),"amfi_metadata_date",end,"nav_date",end.toString()));
+    funds.add(row);
+    List<Map<String,Object>> points=new ArrayList<>();
+    for(int i=0;i<=156;i++)points.add(Map.of("nav_date",end.minusWeeks(156-i),"nav",BigDecimal.valueOf(100+i*id)));
+    histories.put(id,points);
+  }
+  FundHistoryResearchService.rollingPeerConsistency(funds,histories,end);
+  var highest=(Map<?,?>)funds.getLast().get("rolling_peer_consistency");
+  assertNotNull(highest);assertEquals(105,highest.get("matched_windows"));assertEquals(4,highest.get("minimum_peer_count"));
+  assertEquals(100.0,highest.get("above_median_percent"));
+  var lowest=(Map<?,?>)funds.getFirst().get("rolling_peer_consistency");
+  assertEquals(0.0,lowest.get("above_median_percent"));
+  for(var row:funds)row.remove("rolling_peer_consistency");
+  // A one-day offset is permissible for weekly NAV proxies, but not an exact peer endpoint.
+  histories.put(1L,histories.get(1L).stream().map(p->Map.<String,Object>of("nav_date",((LocalDate)p.get("nav_date")).minusDays(1),"nav",p.get("nav"))).toList());
+  FundHistoryResearchService.rollingPeerConsistency(funds,histories,end);
+  assertTrue(funds.stream().noneMatch(row->row.containsKey("rolling_peer_consistency")));
+  funds.getFirst().put("isin_growth",funds.getLast().get("isin_growth"));
+  FundHistoryResearchService.rollingPeerConsistency(funds,histories,end);
+  assertTrue(funds.stream().noneMatch(row->row.containsKey("rolling_peer_consistency")));
+ }
  @Test void weeklyRiskUsesBoundedAnchorsAndRejectsMissingWeeks(){
   LocalDate end=LocalDate.of(2026,11,24);
   List<Map<String,Object>> rows=new ArrayList<>();
