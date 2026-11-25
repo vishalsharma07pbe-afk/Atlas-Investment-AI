@@ -15,7 +15,8 @@ type OwnershipChange={category:string;previousDate:string;currentDate:string;pre
 type HoldingReview={ownership_changes?:OwnershipChange[];ownership_monitor_status?:string;fund_thesis_changes?:FundThesisChange[];fund_monitor_status?:string;fund_thesis_evidence?:FundThesisEvidence;thesis_changes?:ThesisChange[];thesis_monitor_status?:string;thesis_summary?:ThesisSummary;thesis_evidence?:Thesis;fund_history_evidence?:FundHistory;id:number;symbol:string;asset_type:string;exchange:string|null;status:"REVIEW_REQUIRED"|"MONITOR"|"EVIDENCE_GAP";weight_percent:number|null;recorded_return_percent:number|null;evidence_date:string|null;history_count:number;change_20_observations_percent:number|null;recent_peak_change_percent:number|null;findings:string[];missing_evidence:string[]};
 type Exposure={label:string;weight_percent:number};
 type AllocationResearch={status:string;recorded_value?:number;current_largest_percent?:number;current_top_three_percent?:number;single_identity_review_threshold_percent:number;top_three_review_threshold_percent:number;scenarios:{hypotheticalNewIdentities:number;additionalCapital:number;equalNewInvestmentAmount:number;projectedLargestPercent:number;projectedTopThreePercent:number;hypotheticalRedistributedCapital:number;redistributedPercent:number}[];notice:string};
-type Diversification={allocation_research?:AllocationResearch;status:string;unpriced_count:number;unresolved_identity_count:number;resolved_identity_count:number;top_three_resolved_weight_percent:number|null;asset_exposure:Exposure[];direct_equity_sector_exposure:Exposure[];fund_category_exposure:Exposure[];sector_coverage_percent:number|null;fund_category_coverage_percent:number|null;review_prompts:string[];notice:string};
+type ExposureStress={status:string;recorded_value?:number;scenarios:{kind:string;title:string;shocks:{exposure:string;label:string;assumedChangePercent:number;recordedExposure:number;valueChange:number}[];changeAmount:number;changePercent:number;stressedValue:number}[];withheld:string[];notice:string};
+type Diversification={exposure_stress?:ExposureStress;allocation_research?:AllocationResearch;status:string;unpriced_count:number;unresolved_identity_count:number;resolved_identity_count:number;top_three_resolved_weight_percent:number|null;asset_exposure:Exposure[];direct_equity_sector_exposure:Exposure[];fund_category_exposure:Exposure[];sector_coverage_percent:number|null;fund_category_coverage_percent:number|null;review_prompts:string[];notice:string};
 type Correlation={status:string;comparable_pairs?:number;attempted_pairs?:number;high_positive_pair_count?:number;pairs?:{first_symbol:string;second_symbol:string;first_isin:string;second_isin:string;correlation:number;observations:number;first_date:string;last_date:string;high_positive_correlation:boolean}[];notice:string};
 type OpportunityContext={status:string;held_excluded_count:number;ready_sections:string[];blocked_sections:string[];notice:string;
  equities:{isin:string;symbol:string;exchange:string;horizon:string;as_of:string;sector:string|null;sector_weight_percent:number|null;context:string;identity_status:string;adjustment_status:string;blockers:string[]}[];
@@ -42,6 +43,21 @@ function AllocationResearchDigest({report}:{report:AllocationResearch}){
   <p className="muted tiny">{report.notice}</p>
  </section>;
 }
+function ExposureStressDigest({report}:{report:ExposureStress}){
+ const money=(v:number)=>new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",minimumFractionDigits:0,maximumFractionDigits:2}).format(v);
+ return <section className="thesis-digest" aria-label="Automatic portfolio stress research">
+  <h4>Automatic portfolio stress research</h4>
+  {report.scenarios.length?<>
+   <p>Recorded portfolio value: <strong>{money(report.recorded_value??0)}</strong>. Each scenario is independent; impacts must not be added together.</p>
+   <div className="tablewrap"><table><thead><tr><th>Scenario</th><th>Assumed exposure shocks</th><th>Portfolio impact</th><th>Stressed value</th></tr></thead><tbody>
+    {report.scenarios.map(s=><tr key={s.kind}><td>{s.title}</td><td>{s.shocks.map((shock,i)=><div key={shock.exposure+":"+i}>{shock.label}: {shock.assumedChangePercent}% on {money(shock.recordedExposure)}</div>)}</td><td>{money(s.changeAmount)} ({s.changePercent.toFixed(2)}%)</td><td>{money(s.stressedValue)}</td></tr>)}
+   </tbody></table></div>
+  </>:<p>Stress scenarios withheld until all recorded valuations are recent and the portfolio has positive supported asset values.</p>}
+  {report.withheld.includes("LARGEST_IDENTITY_REQUIRES_COMPLETE_EXACT_IDENTITIES")&&<p className="muted tiny">Largest investment scenario requires complete exact investment identities.</p>}
+  {report.withheld.includes("SECTOR_SHOCK_REQUIRES_COMPLETE_DIRECT_EQUITY_CLASSIFICATION")&&<p className="muted tiny">Largest sector scenario requires complete direct-equity sector classification.</p>}
+  <p className="muted tiny">{report.notice}</p>
+ </section>;
+}
 function DiversificationDigest({report,correlation}:{report:Diversification;correlation?:Correlation}){
  const weight=(value:number|null)=>value==null?"Not available":value.toFixed(2)+"%";
  return <section className="doctor-item" aria-label="Automatic diversification review">
@@ -49,6 +65,7 @@ function DiversificationDigest({report,correlation}:{report:Diversification;corr
   <p>{report.status==="NO_PRICED_VALUE"?"Recorded valuations unavailable.":report.status==="PARTIAL_COVERAGE"?"Partial classification or pricing coverage.":"Recorded positions classified; underlying fund exposures remain unknown."}</p>
   <div className="doctor-stats"><div><span>Resolved investment identities</span><strong>{report.resolved_identity_count}</strong></div><div><span>Top three resolved weights</span><strong>{weight(report.top_three_resolved_weight_percent)}</strong></div><div><span>Unpriced positions</span><strong>{report.unpriced_count}</strong></div></div>
   {report.allocation_research&&<AllocationResearchDigest report={report.allocation_research}/>}
+  {report.exposure_stress&&<ExposureStressDigest report={report.exposure_stress}/>}
   {report.review_prompts.length>0&&<><h4>Portfolio-level review prompts</h4><ul>{report.review_prompts.map(p=><li key={p}>{p}</li>)}</ul></>}
   <details><summary>Asset, sector and fund category exposures</summary>
    <ExposureList title="Asset allocation · priced portfolio" rows={report.asset_exposure}/>

@@ -91,6 +91,9 @@ final class PortfolioDiversification {
   boolean recent=holdings.stream().allMatch(h->Boolean.TRUE.equals(h.get("recorded_valuation_recent")));
   out.put("allocation_research",PortfolioAllocationResearch.assess(ranked.stream().map(Position::value).toList(),
     total,recent&&unpriced==0&&unresolved==0));
+  out.put("exposure_stress",PortfolioExposureStress.assess(total,assets,identities.entrySet().stream()
+    .map(e->new PortfolioExposureStress.Exposure(e.getKey(),e.getValue().label(),e.getValue().value())).toList(),
+    sectors,recent&&unpriced==0,unresolved==0,knownEquity.compareTo(directEquity)==0));
   out.put("notice","Recorded priced holdings only, not independently verified live valuations. Sector weights use direct equity value; fund category weights use fund value. Exact identities aggregate duplicate holdings. Fund underlying exposures, overlap, correlations and optimal allocations are not established. Thresholds are illustrative review triggers, not personalized targets.");
   return out;
  }

@@ -348,11 +348,24 @@ class AuthIsolationIntegrationTest {
       .andExpect(jsonPath("$.fund_thesis_changed_count").value(0))
       .andExpect(jsonPath("$.fund_thesis_attention_count").value(0))
       .andExpect(jsonPath("$.diversification.allocation_research.status").value("INSUFFICIENT_RECENT_EXACT_VALUATIONS"))
+      .andExpect(jsonPath("$.diversification.exposure_stress.status").value("PARTIAL_SCENARIO_COVERAGE"))
+      .andExpect(jsonPath("$.diversification.exposure_stress.scenarios.length()").value(1))
+      .andExpect(jsonPath("$.diversification.exposure_stress.scenarios[0].kind").value("DIRECT_EQUITY_SELL_OFF"))
+      .andExpect(jsonPath("$.diversification.exposure_stress.scenarios[0].changeAmount").value(-32.0))
+      .andExpect(jsonPath("$.diversification.exposure_stress.scenarios[0].stressedValue").value(128.0))
+      .andExpect(jsonPath("$.diversification.exposure_stress.withheld.length()").value(2))
+      .andExpect(jsonPath("$.diversification.exposure_stress.withheld[0]").value("LARGEST_IDENTITY_REQUIRES_COMPLETE_EXACT_IDENTITIES"))
+      .andExpect(jsonPath("$.diversification.exposure_stress.withheld[1]").value("SECTOR_SHOCK_REQUIRES_COMPLETE_DIRECT_EQUITY_CLASSIFICATION"))
       .andExpect(jsonPath("$.holdings[0].thesis_monitor_status").value("NO_CURRENT_DATED_TRENDS"))
       .andExpect(jsonPath("$.attention_count").value(1));
     mvc.perform(get("/api/v1/portfolio/review").header("Authorization",b))
       .andExpect(status().isOk()).andExpect(jsonPath("$.holding_count").value(0));
     long id=jdbc.queryForObject("SELECT id FROM personal_holdings WHERE symbol='DOCTORTEST'",Long.class);
+    jdbc.update("UPDATE personal_holdings SET price_as_of=now()-interval '8 days',updated_at=clock_timestamp() WHERE id=?",id);
+    mvc.perform(get("/api/v1/portfolio/review").header("Authorization",a))
+      .andExpect(status().isOk())
+      .andExpect(jsonPath("$.diversification.exposure_stress.status").value("INSUFFICIENT_RECENT_VALUATIONS"))
+      .andExpect(jsonPath("$.diversification.exposure_stress.scenarios.length()").value(0));
     mvc.perform(delete("/api/v1/portfolio/holdings/"+id).header("Authorization",a)).andExpect(status().isOk());
     mvc.perform(get("/api/v1/portfolio/review").header("Authorization",a))
       .andExpect(status().isOk()).andExpect(jsonPath("$.holding_count").value(0));

@@ -53,4 +53,18 @@ class PortfolioDiversificationTest {
   assertEquals("INSUFFICIENT_RECENT_EXACT_VALUATIONS",stale.get("status"));
  }
 
+ @Test void stressAggregatesDuplicateExactIdentitiesAndWithholdsIncompleteValuations(){
+  var first=equity("FIRST","INE002A01018",60,"Energy");
+  var duplicate=equity("SECOND","INE002A01018",40,"Energy");
+  first.put("recorded_valuation_recent",true);duplicate.put("recorded_valuation_recent",true);
+  var rows=List.of(first,duplicate);
+  var stress=(Map<?,?>)PortfolioDiversification.summarize(rows,json).get("exposure_stress");
+  assertEquals("HYPOTHETICAL_SCENARIOS_AVAILABLE",stress.get("status"));
+  var largest=((List<?>)stress.get("scenarios")).stream().map(PortfolioExposureStress.Scenario.class::cast)
+    .filter(s->"LARGEST_IDENTITY_SHOCK".equals(s.kind())).findFirst().orElseThrow();
+  assertEquals(0,new BigDecimal("-30").compareTo(largest.changeAmount()));
+  duplicate.put("recorded_valuation_recent",false);
+  assertEquals("INSUFFICIENT_RECENT_VALUATIONS",((Map<?,?>)PortfolioDiversification.summarize(rows,json).get("exposure_stress")).get("status"));
+ }
+
 }
