@@ -53,7 +53,7 @@ final class PortfolioThesisSummary {
    int trendCount=0;
    for(JsonNode trend:trends.path("items")){
     String metric=trend.path("metric").asText();
-    String label=switch(metric){case "REVENUE"->"Revenue";case "NET_PROFIT"->"Net profit";
+    String label=switch(metric){case "REVENUE"->"Revenue";case "NET_PROFIT"->"Net profit";case "OPERATING_PROFIT"->"Operating profit";
       case "OPERATING_CASH_FLOW"->"Operating cash flow";case "TOTAL_ASSETS"->"Total assets";
       case "TOTAL_LIABILITIES"->"Total liabilities";default->null;};
     Double previous=number(trend,"previous_value"),latest=number(trend,"latest_value");
@@ -62,10 +62,10 @@ final class PortfolioThesisSummary {
     if(label==null||previous==null||latest==null||start<2000||end-start!=1||unit.isBlank())continue;
     if(trend.path("latest_period_may_be_stale").asBoolean(true))continue;
     trendCount++;
-    String statement=label+" FY"+start+" "+fmt(previous)+" to FY"+end+" "+fmt(latest)+" ("+unit+").";
+    String statement=label+" "+trend.path("previous_period").asText("FY"+start)+" "+fmt(previous)+" to "+trend.path("latest_period").asText("FY"+end)+" "+fmt(latest)+" ("+unit+").";
     Double change=number(trend,"change_percent");
     if(change!=null)statement+=" Reported annual change "+fmt(change)+"%.";
-    boolean operating=Set.of("REVENUE","NET_PROFIT","OPERATING_CASH_FLOW").contains(metric);
+    boolean operating=Set.of("REVENUE","NET_PROFIT","OPERATING_PROFIT","OPERATING_CASH_FLOW").contains(metric);
     if(operating&&(latest<previous||latest<0))
       add(review,statement+" Investigate the reported deterioration or negative value.","Upstox consolidated yearly statements; filings unverified");
     else add(observations,statement+" Historical observation only.","Upstox consolidated yearly statements; filings unverified");
@@ -76,10 +76,10 @@ final class PortfolioThesisSummary {
    JsonNode quality=company.path("fundamental_quality");
    for(JsonNode metric:quality.path("derived_metrics")){
     String key=metric.path("metric").asText();
-    if(!Set.of("NET_MARGIN","OPERATING_CASH_TO_PROFIT","REPORTED_LIABILITIES_TO_ASSETS").contains(key))continue;
+    if(!Set.of("NET_MARGIN","OPERATING_MARGIN","OPERATING_CASH_TO_PROFIT","REPORTED_LIABILITIES_TO_ASSETS").contains(key))continue;
     Double previous=number(metric,"previous_value"),latest=number(metric,"latest_value");
     if(previous==null||latest==null)continue;
-    String label=switch(key){case "NET_MARGIN"->"Net margin";case "OPERATING_CASH_TO_PROFIT"->"Operating cash/profit";default->"Reported liabilities/assets";};
+    String label=switch(key){case "NET_MARGIN"->"Net margin";case "OPERATING_MARGIN"->"Operating margin";case "OPERATING_CASH_TO_PROFIT"->"Operating cash/profit";default->"Reported liabilities/assets";};
     String suffix="PERCENT".equals(metric.path("unit").asText())?"%":"x";
     String statement=label+" changed from "+fmt(previous)+suffix+" to "+fmt(latest)+suffix+" in matched annual periods.";
     boolean reviewMetric=!"REPORTED_LIABILITIES_TO_ASSETS".equals(key)&&(latest<previous||latest<0);
