@@ -48,3 +48,13 @@ it("shows consolidated evidence without calling technical watches qualified reco
  expect(screen.getByText(/1 displayed horizon watches/)).toBeTruthy();
  expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+it("shows sourced reference currency rates and derived changes without calling them live",async()=>{
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[],global_fx:{status:"REFERENCE_RATES_AVAILABLE",items:[{pair:"USD_INR",status:"AVAILABLE",as_of:"2026-11-24",rate:90.125,basis:"DERIVED_ECB_CROSS",changes:[{observations:1,start_date:"2026-11-23",end_date:"2026-11-24",percent:1.2}]}],notice:"Not a live quote or directional forecast."}})})));
+ render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}}>{null}</AutonomousOverview>);
+ expect(await screen.findByRole("region",{name:"Global currency context"})).toBeTruthy();
+ expect(screen.getByText(/USD\/INR/)).toBeTruthy();
+ expect(screen.getByText("90.1250")).toBeTruthy();
+ expect(screen.getByText("+1.20% / — / —")).toBeTruthy();
+ expect(screen.getByText(/ATLAS cross-rate/)).toBeTruthy();
+});
