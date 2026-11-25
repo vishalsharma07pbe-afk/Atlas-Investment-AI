@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class PortfolioThesisSummaryTest {
  private final ObjectMapper json=new ObjectMapper();
  private static Map<String,Object> ratio(String name,double company,double sector,String unit){
-  return Map.of("name",name,"company_value",company,"sector_value",sector,"unit",unit);
+  return Map.of("name",name,"company_value",company,"sector_value",sector,"unit",unit,"sector_unit",unit);
  }
  private static Map<String,Object> equity(List<Map<String,Object>> ratios){
   return Map.of("asset_type","EQUITY","findings",List.of("Recorded concentration risk"),
@@ -49,6 +49,13 @@ class PortfolioThesisSummaryTest {
   assertTrue(result.get("review_prompts").toString().contains("Net profit FY2024"));
   assertFalse(result.get("review_prompts").toString().contains("FY2021"));
   assertTrue(result.get("gaps").toString().contains("Annual financial statement coverage is partial"));
+ }
+ @Test void derivedMarginDeclineAppearsInHoldingReview(){
+  var metric=Map.<String,Object>of("metric","NET_MARGIN","previous_value",20,"latest_value",15,"unit","PERCENT");
+  var holding=Map.<String,Object>of("asset_type","EQUITY","thesis_evidence",Map.of("company_evidence",Map.of("fundamental_quality",Map.of("derived_metrics",List.of(metric)))));
+  var result=PortfolioThesisSummary.summarize(holding,json);
+  assertEquals("REVIEW_EVIDENCE",result.get("status"));
+  assertTrue(result.get("review_prompts").toString().contains("Net margin changed from 20.00% to 15.00%"));
  }
  @Test void missingEvidenceNeverProducesPositiveVerdict(){
   var result=PortfolioThesisSummary.summarize(Map.of("asset_type","EQUITY"),json);
