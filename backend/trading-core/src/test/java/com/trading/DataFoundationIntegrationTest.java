@@ -111,6 +111,11 @@ class DataFoundationIntegrationTest {
     assertThat(jdbc.queryForObject("SELECT raw_payload->>'ratio_basis' FROM corporate_actions WHERE source_revision='legacy-action-1'",String.class)).isNull();
     assertThat(jdbc.queryForObject("SELECT count(*) FROM market_candles WHERE adjustment_status='RAW_UNADJUSTED'",Long.class)).isEqualTo(2L);
     assertThat(jdbc.queryForObject("SELECT max(close) FROM market_candles",java.math.BigDecimal.class)).isEqualByComparingTo("140");
+    long instrument=jdbc.queryForObject("SELECT id FROM instruments WHERE symbol='RELIANCE'",Long.class);
+    mvc.perform(get("/api/v1/market-data/instruments/"+instrument+"/candles"))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.instrument.action_context_through").isString())
+      .andExpect(jsonPath("$.instrument.latest_action_date").value("2026-11-11"))
+      .andExpect(jsonPath("$.instrument.corporate_action_context").value(org.hamcrest.Matchers.containsString("split-revision-1")));
   }
 
   private org.springframework.test.web.servlet.ResultActions upload(String type,String name,String content) throws Exception {

@@ -8,7 +8,7 @@ from .strategy_validation import replay, WINDOWS, attach_market_benchmark
 from .horizon_research import VERSION
 from .replay_evidence import (VERSION as EVIDENCE_VERSION, exact_isin, fingerprint,
     full_manifest, corporate_action_status, revision_audit, session_audit, listing_audit)
-CACHE_VERSION = VERSION + ':' + EVIDENCE_VERSION + ':market-price-index-v1:signal-regime-v1:chronological-folds-v1:execution-proxy-v1:full-provenance-v1:session-continuity-v1:listing-evidence-v1'
+CACHE_VERSION = VERSION + ':' + EVIDENCE_VERSION + ':market-price-index-v1:signal-regime-v1:chronological-folds-v1:execution-proxy-v1:full-provenance-v1:session-continuity-v1:listing-evidence-v1:scoped-action-v1'
 
 IST=ZoneInfo("Asia/Kolkata")
 def _table(db):
@@ -65,7 +65,12 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
                 if manifest is None:
                     result={"status":"FULL_HISTORY_EVIDENCE_GAP","horizons":{}}
                 else:
-                    action=corporate_action_status(selected,manifest)
+                    discovered_action=corporate_action_status(selected,manifest)
+                    action=corporate_action_status(identity,manifest,require_scope=True,today=today)
+                    if discovered_action=="RECORDED_ACTION_RECONCILIATION_REQUIRED":
+                        action=discovered_action
+                    elif discovered_action!="NO_RECORDED_CROSSING_ACTION" and action=="NO_RECORDED_CROSSING_ACTION":
+                        action="ACTION_CONTEXT_UNAVAILABLE"
                     audit=revision_audit(manifest,prior_manifest)
                     audit["corporate_action_status"]=action
                     audit["notice"]="Full bounded replay input fingerprint, compared with the previous local capture only. No recorded crossing action does not verify adjustment completeness or point-in-time availability."

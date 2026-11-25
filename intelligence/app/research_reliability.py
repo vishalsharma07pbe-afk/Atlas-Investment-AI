@@ -35,10 +35,13 @@ def _outcome(row, published, maturity, today):
         return None
     outcome = json.loads(row["outcome"] or "{}")
     if (outcome.get("evidence_version")!=OUTCOME_EVIDENCE_VERSION or outcome.get("calendar_status")!="STORED_SESSIONS_MATCHED"
+            or outcome.get("corporate_action_status")!="NO_RECORDED_CROSSING_ACTION"
             or type(outcome.get("observations")) is not int or not 2<=outcome["observations"]<=500
             or not isinstance(outcome.get("history_fingerprint"),str) or not re.fullmatch(r"[0-9a-f]{64}",outcome["history_fingerprint"])):
         return None
     start,end = date.fromisoformat(outcome["entry_date"]),date.fromisoformat(outcome["exit_date"])
+    if not end<=date.fromisoformat(outcome["action_context_through"])<today:
+        return None
     a,b = outcome["entry_close"],outcome["exit_close"]
     if not (published<start<=published+timedelta(days=7) and maturity<=end<=maturity+timedelta(days=7)
             and start<=end<today and _finite(a) and _finite(b) and a>0 and b>0

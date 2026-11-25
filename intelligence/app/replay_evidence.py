@@ -64,7 +64,7 @@ def full_manifest(rows,today):
             "digest":_digest(["FULL-REPLAY-1",canonical]),
             "observations":{row[0]:_digest(row) for row in canonical}}
 
-def corporate_action_status(instrument,manifest):
+def corporate_action_status(instrument,manifest,*,require_scope=False,today=None):
     """Do not certify adjustments from an empty or incomplete recorded action ledger."""
     try:
         raw=instrument.get("corporate_action_context")
@@ -75,12 +75,19 @@ def corporate_action_status(instrument,manifest):
             return "ACTION_CONTEXT_UNAVAILABLE"
         first=date.fromisoformat(manifest["first_date"])
         last=date.fromisoformat(manifest["last_date"])
+        scope=instrument.get("action_context_through")
+        if require_scope or scope is not None:
+            if today is None or date.fromisoformat(scope)!=today-timedelta(days=1) or last>date.fromisoformat(scope):
+                return "ACTION_CONTEXT_UNAVAILABLE"
+            through=date.fromisoformat(scope)
+        else:
+            through=last
         dates=[]
         for row in rows:
             if not isinstance(row,dict) or not isinstance(row.get("action_type"),str) or not row["action_type"].strip():
                 return "ACTION_CONTEXT_UNAVAILABLE"
             day=date.fromisoformat(row["ex_date"])
-            if day>last:
+            if day>through:
                 return "ACTION_CONTEXT_UNAVAILABLE"
             dates.append(day)
         latest=instrument["latest_action_date"]

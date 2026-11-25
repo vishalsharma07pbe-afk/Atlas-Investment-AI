@@ -13,13 +13,28 @@ public class MarketDataController {
   public MarketDataController(JdbcTemplate jdbc){this.jdbc=jdbc;}
 
   @GetMapping("/instruments/{id}/candles")
+  @org.springframework.transaction.annotation.Transactional(readOnly=true,isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
   public Map<String,Object> candles(@PathVariable long id,@RequestParam(defaultValue="500") int limit){
     int safe=Math.max(1,Math.min(limit,2000));
     List<Map<String,Object>> instrument=jdbc.queryForList("""
       SELECT i.id,e.code exchange,i.symbol,i.series,i.isin,i.security_name,i.listing_status,i.active,i.instrument_type,
         to_char(i.listed_on,'YYYY-MM-DD') AS listed_on,to_char(i.delisted_on,'YYYY-MM-DD') AS delisted_on,
-        i.source AS registry_source,i.source_revision AS registry_revision
-      FROM instruments i JOIN exchanges e ON e.id=i.exchange_id WHERE i.id=?
+        i.source AS registry_source,i.source_revision AS registry_revision,
+        to_char((now() AT TIME ZONE 'Asia/Kolkata')::date-1,'YYYY-MM-DD') AS action_context_through,
+        to_char(a.latest_action_date,'YYYY-MM-DD') AS latest_action_date,
+        a.corporate_action_context
+      FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
+      CROSS JOIN LATERAL (
+        SELECT max(x.ex_date) latest_action_date,
+          coalesce(jsonb_agg(jsonb_build_object('action_type',x.action_type,'ex_date',x.ex_date,
+            'ratio',x.ratio::text,'cash_amount',x.cash_amount::text,'ratio_basis',x.raw_payload->>'ratio_basis',
+            'isin',x.raw_payload->>'isin','source_revision',x.source_revision)
+            ORDER BY x.ex_date DESC,x.action_type,x.source_revision),'[]'::jsonb)::text corporate_action_context
+        FROM (SELECT ca.action_type,ca.ex_date,ca.ratio,ca.cash_amount,ca.raw_payload,ca.source_revision
+          FROM corporate_actions ca WHERE ca.instrument_id=i.id
+            AND ca.ex_date < (now() AT TIME ZONE 'Asia/Kolkata')::date
+          ORDER BY ca.ex_date DESC,ca.action_type,ca.source_revision LIMIT 33) x
+      ) a WHERE i.id=?
       """,id);
     if(instrument.isEmpty())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Instrument not found");
     List<Map<String,Object>> rows=jdbc.queryForList("""

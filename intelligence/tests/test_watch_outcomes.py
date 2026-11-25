@@ -33,7 +33,8 @@ class WatchOutcomeTests(unittest.TestCase):
         points=[{"trade_date":(date(2026,11,24)+timedelta(days=i)).isoformat(),"close":100+i,
                  "open":100+i,"high":101+i,"low":99+i,"volume":10000,"revision":1,
                  "source_code":"TEST_PROVIDER","adjustment_status":"ADJUSTED","quality_status":"PROVIDER_VALIDATED"} for i in range(16)]
-        payload={"instrument":{"id":7,"symbol":"TEST","exchange":"NSE","isin":self.item["isin"]},"candles":points}
+        payload={"instrument":{"id":7,"symbol":"TEST","exchange":"NSE","isin":self.item["isin"],
+            "action_context_through":"2026-12-09","latest_action_date":None,"corporate_action_context":"[]"},"candles":points}
         today=date(2026,12,10)
         calendar={"exchange":"NSE","through":"2026-12-09","days":[{"trade_date":p["trade_date"],"state":"REGULAR"} for p in points]}
         status,result=watch.evaluate(row,payload,today,calendar)
@@ -47,6 +48,11 @@ class WatchOutcomeTests(unittest.TestCase):
         self.assertEqual(watch.evaluate(row,payload,today,None),("CALENDAR_EVIDENCE_GAP",None))
         changed={**calendar,"days":[{**p,"state":"UNKNOWN"} if i==3 else p for i,p in enumerate(calendar["days"])]}
         self.assertEqual(watch.evaluate(row,payload,today,changed),("CALENDAR_EVIDENCE_GAP",None))
+        import json
+        for day,expected_status in (("2026-12-03","RECORDED_ACTION_RECONCILIATION_REQUIRED"),("2026-12-09","OBSERVED")):
+            identity={**payload["instrument"],"latest_action_date":day,"corporate_action_context":json.dumps([{"ex_date":day,"action_type":"DIVIDEND"}])}
+            self.assertEqual(watch.evaluate(row,{**payload,"instrument":identity},today,calendar)[0],expected_status)
+        self.assertEqual(watch.evaluate(row,{**payload,"instrument":{**payload["instrument"],"action_context_through":None}},today,calendar),("ACTION_CONTEXT_UNAVAILABLE",None))
         points[5]["adjustment_status"]="RAW_UNADJUSTED"
         self.assertEqual(watch.evaluate(row,payload,today,calendar),("EVIDENCE_GAP",None))
 

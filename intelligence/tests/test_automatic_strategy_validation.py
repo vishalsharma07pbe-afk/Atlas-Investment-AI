@@ -104,7 +104,7 @@ class AutomaticValidationTests(unittest.TestCase):
                         days.append({"trade_date":(today+timedelta(days=i)).isoformat(),"state":"CLOSED"})
                     return {"exchange":"NSE","through":through.isoformat(),"days":days}
                 if path.endswith("strategy-benchmark"):return benchmark
-                return {"instrument":identity,"candles":candles}
+                return {"instrument":{**identity,"action_context_through":(calendar_today[0]-timedelta(days=1)).isoformat()},"candles":candles}
             with patch("app.strategy_validation.evaluate",return_value={h:("TECHNICAL_WATCH",{}) for h in ("SWING","SHORT_TERM","LONG_TERM")}):
                 refresh(snapshot,connect,loader,now)
                 refresh(snapshot,connect,loader,now)

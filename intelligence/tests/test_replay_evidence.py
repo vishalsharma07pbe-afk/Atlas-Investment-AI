@@ -128,3 +128,16 @@ class ReplayEvidenceTests(unittest.TestCase):
             changed={**identity,field:value}
             self.assertEqual(listing_audit(changed,changed,manifest,TODAY)["status"],"LISTING_CONTEXT_CONTRADICTION")
         self.assertEqual(listing_audit(identity,{**identity,"registry_revision":"r2"},manifest,TODAY)["status"],"LISTING_CONTEXT_CHANGED")
+
+    def test_scoped_action_context_checks_only_the_actual_outcome_interval(self):
+        import json
+        from app.replay_evidence import full_manifest,corporate_action_status
+        manifest=full_manifest(history(20)[:10],TODAY)
+        def record(day):
+            return {"action_context_through":(TODAY-timedelta(days=1)).isoformat(),
+                    "latest_action_date":day,"corporate_action_context":json.dumps([{"ex_date":day,"action_type":"DIVIDEND"}])}
+        later=record(history(20)[-1]["trade_date"])
+        self.assertEqual(corporate_action_status(later,manifest,require_scope=True,today=TODAY),"NO_RECORDED_CROSSING_ACTION")
+        self.assertEqual(corporate_action_status(record(manifest["last_date"]),manifest,require_scope=True,today=TODAY),"RECORDED_ACTION_RECONCILIATION_REQUIRED")
+        self.assertEqual(corporate_action_status({**later,"action_context_through":manifest["last_date"]},manifest,require_scope=True,today=TODAY),"ACTION_CONTEXT_UNAVAILABLE")
+        self.assertEqual(corporate_action_status({"latest_action_date":None,"corporate_action_context":"[]"},manifest,require_scope=True,today=TODAY),"ACTION_CONTEXT_UNAVAILABLE")
