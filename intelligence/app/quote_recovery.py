@@ -1,6 +1,6 @@
-"""Restart-safe cooldown and bounded half-open probes for public quote HTTP.
+"""Restart-safe cooldown and bounded half-open probes for public provider HTTP.
 No identifiers, credentials, request URLs or provider response bodies persist.
-This ledger is shared by equity, index and routed quote HTTP requests only.
+This ledger is shared by the existing Python equity, index and P1 HTTP adapter.
 """
 from contextlib import closing
 from pathlib import Path
@@ -15,10 +15,13 @@ CODES={"PROVIDER_ACCESS_REJECTED":900,"PROVIDER_RATE_LIMITED":60,
        "PROVIDER_REQUEST_FAILED":60,"PROVIDER_HTTP_FAILURE":60}
 
 
-def _connect():
-    # Reuse the existing mounted local research volume.
-    path=Path(os.getenv("ATLAS_QUOTE_RECOVERY_DB",str(Path(os.getenv(
+def _path():
+    return Path(os.getenv("ATLAS_QUOTE_RECOVERY_DB",str(Path(os.getenv(
         "ATLAS_RESEARCH_SNAPSHOT_DB","/app/ingestion-data/research_snapshots.sqlite3")).with_name("quote_recovery.sqlite3"))))
+
+
+def _connect():
+    path=_path()
     path.parent.mkdir(parents=True,exist_ok=True)
     db=sqlite3.connect(path,timeout=2)
     db.row_factory=sqlite3.Row
@@ -67,12 +70,16 @@ def finish(provider,token,reason=None,retry_after=None,now=None):
 def status(now=None):
     now=time.time() if now is None else now
     try:
-        with closing(_connect()) as db:
-            rows={r["provider"]:r for r in db.execute("SELECT * FROM quote_recovery")}
+        path=_path()
+        rows={}
+        if path.is_file():
+            with closing(sqlite3.connect(path.resolve().as_uri()+"?mode=ro",uri=True,timeout=2)) as db:
+                db.row_factory=sqlite3.Row
+                rows={r["provider"]:r for r in db.execute("SELECT * FROM quote_recovery")}
         results=[]
         for provider in PROVIDERS:
             r=rows.get(provider)
-            state="CLOSED"
+            state="CLOSED" if r else "NOT_OBSERVED"
             wait=0
             if r and r["blocked_until"]>now:
                 state="OPEN";wait=max(1,int(r["blocked_until"]-now))
