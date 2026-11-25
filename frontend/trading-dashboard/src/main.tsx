@@ -11,6 +11,7 @@ import StockExplorer from "./StockExplorer";
 import PortfolioStress from "./PortfolioStress";
 import PortfolioAllocation from "./PortfolioAllocation";
 import GoalPlanner from "./GoalPlanner";
+import GoalMonitor from "./GoalMonitor";
 import GoalComparison from "./GoalComparison";
 import ResearchJournal from "./ResearchJournal";
 import FeeImpact from "./FeeImpact";
@@ -257,6 +258,7 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
         </> : tab === 9 ? <>
           <PortfolioDoctor revision={portfolioRevision} onSettings={()=>navigate(6)}/>
           <PortfolioIntelligence holdings={holdings} analysis={analysis}/>
+          <GoalMonitor/>
           <AdvancedSection title="Add or update an investment" description="Search a stock or fund, save a holding or set up an SIP"><HoldingEditor busy={loading} onSave={submitHolding} onSaveSip={submitSip}/></AdvancedSection>
           <AdvancedSection title="Advanced portfolio tools" description="Stress tests, allocation, goals, journal, fees and concentration">
             <PortfolioStress revision={portfolioRevision}/>

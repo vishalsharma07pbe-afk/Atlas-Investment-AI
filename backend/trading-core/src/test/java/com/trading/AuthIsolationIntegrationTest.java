@@ -558,4 +558,33 @@ class AuthIsolationIntegrationTest {
       .andExpect(status().isOk()).andExpect(jsonPath("$.journal_lot_reconciliation.holdings[0].status").value("NO_RECORDED_TRADES"));
   }
 
+  @Test void savedGoalsAreOwnerScopedAndMonitorExplicitReservedBalances()throws Exception{
+    String a=create("goal-a-"+UUID.randomUUID()+"@example.test"),b=create("goal-b-"+UUID.randomUUID()+"@example.test");
+    LocalDate today=LocalDate.now(com.trading.market.MarketCalendarService.IST);
+    String body=mapper.writeValueAsString(Map.of("name","Private goal","targetAmount",100000,
+      "reservedAmount",40000,"balanceDate",today.toString(),"deadline",today.plusMonths(6).toString(),"monthlyContribution",1000));
+    mvc.perform(get("/api/v1/portfolio/goals")).andExpect(status().isUnauthorized());
+    var response=mvc.perform(post("/api/v1/portfolio/goals").header("Authorization",a)
+      .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk()).andReturn().getResponse();
+    String id=mapper.readTree(response.getContentAsString()).path("id").asText();
+    mvc.perform(get("/api/v1/portfolio/goals").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.goals.length()").value(1))
+      .andExpect(jsonPath("$.goals[0].progress.status").value("FUNDING_SHORTFALL"))
+      .andExpect(jsonPath("$.goals[0].progress.recordedGap").value(60000));
+    mvc.perform(get("/api/v1/portfolio/goals").header("Authorization",b))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.goals.length()").value(0));
+    mvc.perform(put("/api/v1/portfolio/goals/"+id).header("Authorization",b)
+      .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isNotFound());
+    mvc.perform(delete("/api/v1/portfolio/goals/"+id).header("Authorization",b)).andExpect(status().isNotFound());
+    String updated=mapper.writeValueAsString(Map.of("name","Private goal","targetAmount",100000,
+      "reservedAmount",100000,"balanceDate",today.toString(),"deadline",today.plusMonths(6).toString(),"monthlyContribution",0));
+    mvc.perform(put("/api/v1/portfolio/goals/"+id).header("Authorization",a)
+      .contentType(MediaType.APPLICATION_JSON).content(updated)).andExpect(status().isOk());
+    mvc.perform(get("/api/v1/portfolio/goals").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.goals[0].progress.status").value("RECORDED_TARGET_FUNDED"));
+    mvc.perform(delete("/api/v1/portfolio/goals/"+id).header("Authorization",a)).andExpect(status().isOk());
+    mvc.perform(get("/api/v1/portfolio/goals").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.goals.length()").value(0));
+  }
+
 }
