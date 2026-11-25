@@ -164,3 +164,16 @@ it("displays automatic allocation alternatives without manual targets or extra r
  expect(screen.getByText("Before fees, taxes and execution constraints.")).toBeTruthy();
  expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+it("displays independent automatic exposure stress results and withheld scenarios",async()=>{
+ const holding={id:1,symbol:"TEST",asset_type:"EQUITY",exchange:"NSE",status:"MONITOR",weight_percent:100,recorded_return_percent:1,evidence_date:null,history_count:0,change_20_observations_percent:null,recent_peak_change_percent:null,findings:[],missing_evidence:[]};
+ const exposure_stress={status:"PARTIAL_SCENARIO_COVERAGE",recorded_value:1000,scenarios:[{kind:"DIRECT_EQUITY_SELL_OFF",title:"Direct equity sell-off",shocks:[{exposure:"DIRECT_EQUITY",label:"Direct equity",assumedChangePercent:-20,recordedExposure:1000,valueChange:-200}],changeAmount:-200,changePercent:-20,stressedValue:800}],withheld:["SECTOR_SHOCK_REQUIRES_COMPLETE_DIRECT_EQUITY_CLASSIFICATION"],notice:"Not a forecast."};
+ const diversification={status:"PARTIAL_COVERAGE",unpriced_count:0,unresolved_identity_count:0,resolved_identity_count:1,top_three_resolved_weight_percent:100,asset_exposure:[],direct_equity_sector_exposure:[],fund_category_exposure:[],sector_coverage_percent:0,fund_category_coverage_percent:null,review_prompts:[],notice:"Recorded prices.",exposure_stress};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-25T10:00:00Z",holding_count:1,attention_count:0,data_gap_count:0,notice:"Research only",holdings:[holding],diversification})})));
+ render(<PortfolioDoctor revision={0} onSettings={()=>{}}/>);
+ expect(await screen.findByRole("heading",{name:"Automatic portfolio stress research"})).toBeTruthy();
+ expect(screen.getByText("Direct equity sell-off")).toBeTruthy();
+ expect(screen.getByText("₹800")).toBeTruthy();
+ expect(screen.getByText("Largest sector scenario requires complete direct-equity sector classification.")).toBeTruthy();
+ expect(fetch).toHaveBeenCalledTimes(1);
+});
