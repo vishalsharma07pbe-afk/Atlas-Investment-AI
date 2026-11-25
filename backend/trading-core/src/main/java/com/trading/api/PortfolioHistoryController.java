@@ -66,6 +66,7 @@ public class PortfolioHistoryController {
       SELECT COALESCE(sum(quantity*last_price) FILTER(WHERE last_price IS NOT NULL),0) total_value,
       count(*) FILTER(WHERE last_price IS NOT NULL) priced,
       count(*) FILTER(WHERE last_price IS NULL) unpriced,
+      min(price_as_of) oldest_price_at,max(price_as_of) newest_price_at,
       count(*) FILTER(WHERE last_price IS NOT NULL AND
         (price_as_of IS NULL OR price_as_of>now() OR
           (now() AT TIME ZONE 'Asia/Kolkata')::date-(price_as_of AT TIME ZONE 'Asia/Kolkata')::date>
@@ -80,17 +81,19 @@ public class PortfolioHistoryController {
       return result;
     }
     jdbc.update("""
-      INSERT INTO portfolio_valuation_snapshots(user_id,valuation_date,total_value,priced_positions,unpriced_positions)
-      VALUES (?,?,?,?,?) ON CONFLICT(user_id,valuation_date) DO UPDATE SET total_value=EXCLUDED.total_value,
-      priced_positions=EXCLUDED.priced_positions,unpriced_positions=EXCLUDED.unpriced_positions,created_at=now()
-      """,user,date,totals.get("total_value"),totals.get("priced"),totals.get("unpriced"));
+      INSERT INTO portfolio_valuation_snapshots(user_id,valuation_date,total_value,priced_positions,unpriced_positions,
+        capture_source,oldest_price_at,newest_price_at)
+      VALUES (?,?,?,?,?,'MANUAL_RECORDED',?,?) ON CONFLICT(user_id,valuation_date) DO UPDATE SET total_value=EXCLUDED.total_value,
+      priced_positions=EXCLUDED.priced_positions,unpriced_positions=EXCLUDED.unpriced_positions,created_at=now(),
+      capture_source=EXCLUDED.capture_source,oldest_price_at=EXCLUDED.oldest_price_at,newest_price_at=EXCLUDED.newest_price_at
+      """,user,date,totals.get("total_value"),totals.get("priced"),totals.get("unpriced"),totals.get("oldest_price_at"),totals.get("newest_price_at"));
     Map<String,Object> result=new LinkedHashMap<>(totals);result.put("valuation_date",date);result.put("recorded",true);return result;
   }
 
   @GetMapping("/performance")
   public Map<String,Object> performance(){
     UUID user=AuthSecurity.currentUser();
-    List<Map<String,Object>> snapshots=jdbc.queryForList("SELECT valuation_date,total_value,priced_positions,unpriced_positions FROM portfolio_valuation_snapshots WHERE user_id=? ORDER BY valuation_date",user);
+    List<Map<String,Object>> snapshots=jdbc.queryForList("SELECT valuation_date,total_value,priced_positions,unpriced_positions,capture_source,oldest_price_at,newest_price_at FROM portfolio_valuation_snapshots WHERE user_id=? ORDER BY valuation_date",user);
     List<Map<String,Object>> transactions=jdbc.queryForList("SELECT transaction_date,transaction_type,cash_amount FROM portfolio_transactions WHERE user_id=? ORDER BY transaction_date",user);
     LocalDate today=LocalDate.now(MarketCalendarService.IST);
     List<Map<String,Object>> dated=snapshots.stream().filter(row->!day(row.get("valuation_date")).isAfter(today)).toList();
@@ -138,6 +141,10 @@ public class PortfolioHistoryController {
     result.put("external_cash_flow_count",externalCount);result.put("external_flows_after_valuation",afterTerminal);
     result.put("incomplete_snapshot_count",incomplete);result.put("future_snapshot_count",snapshots.size()-dated.size());
     result.put("valuation_through",terminal==null?null:terminal.toString());
+    result.put("automatic_snapshot_count",dated.stream().filter(row->"AUTO_RECORDED".equals(row.get("capture_source"))).count());
+    result.put("latest_capture_source",last==null?null:last.get("capture_source"));
+    result.put("latest_oldest_price_at",last==null||last.get("oldest_price_at")==null?null:((java.sql.Timestamp)last.get("oldest_price_at")).toInstant().toString());
+    result.put("latest_newest_price_at",last==null||last.get("newest_price_at")==null?null:((java.sql.Timestamp)last.get("newest_price_at")).toInstant().toString());
     result.put("xirr_percent",xirr==null?null:round(xirr*100));result.put("xirr_status",xirrStatus);
     result.put("maximum_drawdown_percent",drawdown==null?null:round(drawdown*100));result.put("drawdown_status",drawdownStatus);
     result.put("methodology","Recorded holdings-only valuations and explicitly external cash flows through the latest nonfuture valuation date. BUY and SELL are internal allocation changes. Drawdown is withheld for incomplete history or intervening external flows. Unrecorded cash, fees, dividends or transactions can invalidate results; recorded prices are not verified live values.");

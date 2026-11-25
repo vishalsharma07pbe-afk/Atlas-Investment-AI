@@ -13,6 +13,10 @@ type Performance={
   incomplete_snapshot_count?:number;
   future_snapshot_count?:number;
   valuation_through?:string|null;
+  automatic_snapshot_count?:number;
+  latest_capture_source?:string|null;
+  latest_oldest_price_at?:string|null;
+  latest_newest_price_at?:string|null;
 };
 
 const empty:Performance={transaction_count:0,snapshot_count:0,xirr_percent:null,xirr_status:"UNAVAILABLE",maximum_drawdown_percent:null,drawdown_status:"UNAVAILABLE",methodology:""};
@@ -35,7 +39,7 @@ export default function PortfolioPerformanceHistory({revision=0}:{revision?:numb
       setPerformance(await response.json());setUnavailable(false);
     }catch{setPerformance(empty);setUnavailable(true);}
   },[]);
-  useEffect(()=>{void load();},[load,revision]);
+  useEffect(()=>{void load();const timer=window.setInterval(()=>{if(document.visibilityState==="visible")void load();},60_000);return()=>window.clearInterval(timer);},[load,revision]);
   const snapshot=async()=>{
     setBusy(true);setMessage("");
     try{
@@ -65,6 +69,7 @@ export default function PortfolioPerformanceHistory({revision=0}:{revision?:numb
       <div><small>MAX DRAWDOWN</small><strong>{percent(performance.maximum_drawdown_percent)}</strong><span>{performance.snapshot_count} dated valuations</span>{performance.maximum_drawdown_percent==null&&<span>{statusText(performance.drawdown_status)}</span>}</div>
     </div>
     {performance.valuation_through&&<p className="muted tiny">Performance through {performance.valuation_through} · {performance.external_flows_after_valuation??0} later external flows excluded · {performance.incomplete_snapshot_count??0} incomplete historical valuations · {performance.future_snapshot_count??0} future valuations excluded.</p>}
+    {performance.automatic_snapshot_count!==undefined&&<div className="muted tiny"><p>Automatic evening valuation records: {performance.automatic_snapshot_count}. Automatic capture runs while the local backend is enabled and has sufficient recorded prices; missing days are not reconstructed.</p>{performance.latest_capture_source&&<p>Latest capture: {performance.latest_capture_source==="AUTO_RECORDED"?"Automatic":performance.latest_capture_source==="MANUAL_RECORDED"?"Manual":"Legacy recorded"}{performance.latest_oldest_price_at&&performance.latest_newest_price_at?` · Price observations: ${performance.latest_oldest_price_at} to ${performance.latest_newest_price_at}`:" · Price observation timestamps unavailable"}. Recorded values are not certified market closes.</p>}</div>}
     <form className="portfolio-cashflow-form" onSubmit={event=>void saveFlow(event)}>
       <label>Cash-flow type<select value={type} onChange={event=>setType(event.target.value)}><option value="DEPOSIT">Money added</option><option value="WITHDRAWAL">Money withdrawn</option><option value="DIVIDEND">Dividend paid out to you</option><option value="FEE">Fee paid from outside portfolio</option></select></label>
       <label>Date<input type="date" max={istToday()} value={date} onChange={event=>setDate(event.target.value)} required/></label>
