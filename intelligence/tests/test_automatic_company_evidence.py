@@ -102,3 +102,13 @@ class CompanyEvidenceTests(unittest.TestCase):
         self.assertEqual(evidence["peer_research"]["status"],"SAMPLED_PEER_COMPARISON")
         self.assertEqual(evidence["peer_research"]["cached_same_sector_count"],3)
         self.assertEqual(evidence["sections"]["competitors"]["data"][0]["instrument_key"],"NSE_EQ|"+peers[0])
+
+    def test_public_fund_rotation_reuses_cache_and_isin_only_loader(self):
+        calls=[]
+        def loader(isin,key):
+            calls.append((isin,key))
+            return {"isin":isin,"sections":{"profile":{"status":"AVAILABLE","data":{"sector":"Example"}}}}
+        ids=["INE009A01021",self.isin]
+        for _ in range(3):
+            company.refresh({"enabled":True,"sections":[]},research._connect,loader,self.now,explicit_isins=ids)
+        self.assertEqual(calls,[(ids[0],None),(ids[1],None)])
