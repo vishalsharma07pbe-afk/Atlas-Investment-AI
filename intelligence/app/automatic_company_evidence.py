@@ -155,7 +155,7 @@ def normalize(report, isin, instant):
             "notice":"Provider-reported evidence, not independently reconciled with filings. Ratio observation periods may be unspecified. Sector ratios are comparisons, not fair value."}
 
 
-def refresh(snapshot, connect, loader=company_research, instant=None):
+def refresh(snapshot, connect, loader=company_research, instant=None, *, explicit_isins=None):
     if not snapshot["enabled"] or not permitted():
         return
     instant=instant or datetime.now(timezone.utc)
@@ -165,6 +165,10 @@ def refresh(snapshot, connect, loader=company_research, instant=None):
         # Existing NSE ISIN key convention; BSE competitors require a mapping.
         if isin not in candidates or item["exchange"]=="NSE":
             candidates[isin]="NSE_EQ|"+isin if item["exchange"]=="NSE" else None
+    if explicit_isins is not None:
+        # The documented fundamentals adapter accepts ISIN without an exchange key.
+        # This input is used only for bounded, public, exact as-filed fund equities.
+        candidates={i:None for i in explicit_isins[:200] if isinstance(i,str) and re.fullmatch(r"INE[A-Z0-9]{9}",i)}
     if not candidates:
         return
     with closing(connect()) as db, db:
@@ -173,9 +177,12 @@ def refresh(snapshot, connect, loader=company_research, instant=None):
         # Avoid repeated requests across the universe when the provider rejects access.
         if any(r["status"]=="UNAVAILABLE" and r["attempted_at"]>(instant-timedelta(hours=1)).isoformat() for r in rows.values()):
             return
+        priority={isin:i for i,isin in enumerate(candidates)} if explicit_isins is not None else {}
         due=sorted((isin for isin in candidates if isin not in rows or rows[isin]["next_attempt_at"]<=stamp),
-                   key=lambda isin:(rows[isin]["attempted_at"] if isin in rows else "",isin))
+                   key=lambda isin:(rows[isin]["attempted_at"] if isin in rows else "",priority.get(isin,0),isin))
         if not due:
+            if explicit_isins is not None:
+                return
             # A peer never displaces due primary company research; no additional
             # provider requests per pass, and no recursive peer expansion.
             peers=peer_candidates(rows,candidates,instant)
