@@ -4,6 +4,7 @@ from urllib.request import Request,urlopen
 from urllib.error import HTTPError,URLError
 from fastapi import HTTPException
 from .config import settings
+from .fund_categories import CATEGORIES
 
 def _internal_path(path:str)->str:
     if path.startswith("/api/v1/market-data/discovery-universe?"):
@@ -16,7 +17,7 @@ def _internal_path(path:str)->str:
         return "/api/v1/internal/feed/instruments"+path.removeprefix("/api/v1/instruments")
     if path.startswith("/api/v1/mutual-funds/historical-watch?category="):
         category = path.removeprefix("/api/v1/mutual-funds/historical-watch?category=")
-        if category in ("LARGE_CAP","MID_CAP","SMALL_CAP","FLEXI_CAP","INDEX"):
+        if category in CATEGORIES:
             return "/api/v1/internal/feed/fund-history?category="+category
     if path == "/api/v1/portfolio-research-identities":
         return "/api/v1/internal/feed/portfolio-research-identities"
