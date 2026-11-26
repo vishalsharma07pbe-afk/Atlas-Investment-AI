@@ -111,3 +111,37 @@ class FundUnderlyingResearchTests(unittest.TestCase):
         self.assertIsNone(result["forward_earnings_coverage_percent"])
         self.assertIsNone(result["valuation_attractiveness"])
         self.assertEqual(research.summarize([{"isin":A,"weight_percent":60},{"isin":B,"weight_percent":60}],NOW,{})["status"],"INVALID_HOLDING_IDENTITIES")
+
+    def test_historical_cache_reuses_annual_only_and_preserves_freshness(self):
+        import json,sqlite3,tempfile
+        from pathlib import Path
+        from datetime import timedelta
+        from app import automatic_company_evidence as company
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/"research.sqlite3"
+            db=sqlite3.connect(path)
+            company._table(db)
+            for isin,age in ((A,2),(B,8),(C,0)):
+                raw=report(isin)
+                stamp=NOW-timedelta(days=age)
+                raw["retrieved_at"]=stamp.isoformat()
+                raw["sections"]["income_statement"]["source"]={"provider":"UPSTOX"}
+                raw["sections"]["profile"]["source"]={"provider":"UPSTOX"}
+                db.execute("INSERT INTO automatic_company_evidence VALUES(?,?,?,?,?)",(isin,stamp.isoformat(),stamp.isoformat(),"PARTIAL",json.dumps(raw)))
+            db.commit();db.close()
+            holdings=[{"isin":A,"weight_percent":40},{"isin":B,"weight_percent":25},{"isin":C,"weight_percent":10}]
+            with patch.dict("os.environ",{"ATLAS_RESEARCH_SNAPSHOT_DB":str(path)}),patch.object(company,"permitted",return_value=True):
+                loaded=research.load(holdings,NOW)
+                self.assertEqual(set(loaded),{A,C})
+                self.assertTrue(loaded[A]["historical_cache_only"])
+                self.assertEqual(set(loaded[A]["sections"]),{"income_statement"})
+                result=research.summarize(holdings,NOW,loaded)
+                self.assertEqual(result["cached_report_weight_percent"],10)
+                self.assertEqual(result["annual_statement_weight_percent"],50)
+                self.assertEqual(result["annual_history_cache_weight_percent"],40)
+                self.assertEqual(result["relative_valuation"][0]["coverage"],10)
+                self.assertEqual(result["sector_classified_weight_percent"],10)
+                self.assertIsNone(result["valuation_attractiveness"])
+                self.assertEqual(set(research.exact_sector_evidence(holdings,NOW,loaded)),{C})
+            with patch.object(company,"permitted",return_value=False):
+                self.assertEqual(research.load(holdings,NOW),{})

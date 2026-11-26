@@ -386,6 +386,7 @@ def research_identities(instant=None):
     instant=instant or datetime.now(timezone.utc)
     today=instant.astimezone(IST).date()
     weights={}
+    largest={}
     try:
         with nav_catalog._LOCK,closing(nav_catalog._connect()) as db:
             rows=db.execute("SELECT fund_id,payload,collected_at FROM fund_portfolio_snapshot ORDER BY fund_id LIMIT 100").fetchall()
@@ -395,11 +396,21 @@ def research_identities(instant=None):
                 report=json.loads(row["payload"])
                 if report.get("fund_id")!=row["fund_id"] or not fund_disclosures._day(report["portfolio_date"],today,60):
                     continue
+                local={}
                 for holding in report["equities"]:
                     isin=holding["isin"]
                     weight=Decimal(str(holding["weight_percent"]))
-                    if ISIN.fullmatch(isin) and weight.is_finite() and 0<weight<=100:
-                        weights[isin]=max(weights.get(isin,Decimal(0)),weight)
+                    if not isinstance(isin,str) or not ISIN.fullmatch(isin) or not weight.is_finite() or not 0<weight<=100 or isin in local:
+                        local={}
+                        break
+                    local[isin]=weight
+                if sum(local.values(),Decimal(0))>Decimal("100.5"):
+                    continue
+                for isin,weight in local.items():
+                    weights[isin]=weights.get(isin,Decimal(0))+weight
+                    largest[isin]=max(largest.get(isin,Decimal(0)),weight)
     except (OSError,sqlite3.Error,ValueError,TypeError,KeyError,AttributeError,InvalidOperation):
         return []
-    return sorted(weights,key=lambda isin:(-weights[isin],isin))[:200]
+    # Sum of original public fund weights is a collection priority, not an
+    # aggregate market exposure or investment ranking. Keep the existing cap.
+    return sorted(weights,key=lambda isin:(-weights[isin],-largest[isin],isin))[:200]

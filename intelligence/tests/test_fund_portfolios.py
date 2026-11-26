@@ -161,3 +161,14 @@ class FundPortfoliosTests(unittest.TestCase):
         self.assertIn("DEBT_CREDIT_AND_DURATION_REQUIRED",hybrid["missing_risk_evidence"])
         self.assertIsNone(portfolios.concentration(holdings+[holdings[0]],sectors,"Large Cap Fund",{})["equity_subset_hhi"])
         self.assertIsNone(portfolios.concentration(holdings,{},"Large Cap Fund",{})["largest_classified_sector_weight_percent"])
+
+    def test_company_priority_uses_shared_public_fund_weights(self):
+        a="INE002A01018";b="INE009A01021"
+        rows=[]
+        for i in range(2):
+            fields={"fund_code":str(i),"amfi_ssd_fund_id":"fund:"+str(i)}
+            rows.extend([row(**fields,isin=a,isin_as_filed=a,pct_of_fund="30"),
+                         row(**fields,isin=b,isin_as_filed=b,pct_of_fund="50" if i==0 else "1"),
+                         {**CASH,**fields,"pct_of_fund":"20" if i==0 else "69"}])
+        portfolios.store(payload(*rows),TODAY,INSTANT.isoformat())
+        self.assertEqual(portfolios.research_identities(INSTANT),[a,b])
