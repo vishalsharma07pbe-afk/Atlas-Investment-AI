@@ -53,6 +53,50 @@ public class DataHealthController {
         sum(rows_written) AS rows_written,error_code
       FROM exchange_calendar_attempts GROUP BY status,error_code ORDER BY status,error_code
       """));
+    out.put("registryReconciliation",jdbc.queryForList("""
+      SELECT e.code AS exchange,
+        (SELECT count(*) FROM upstox_instrument_map m WHERE m.exchange_code=e.code) AS raw_mappings,
+        (SELECT count(*) FROM instruments i WHERE i.exchange_id=e.id AND i.active
+          AND i.listing_status='ACTIVE' AND i.series='EQ' AND i.instrument_type IN ('EQ','EQUITY','STOCK')) AS active_cash_equities,
+        (SELECT count(DISTINCT i.id) FROM instruments i JOIN upstox_instrument_map m
+          ON m.exchange_code=e.code AND m.trading_symbol=i.symbol AND m.isin=i.isin
+          WHERE i.exchange_id=e.id AND i.active AND i.listing_status='ACTIVE' AND i.series='EQ'
+          AND i.instrument_type IN ('EQ','EQUITY','STOCK') AND m.instrument_type IN ('EQ','EQUITY')
+          AND m.isin ~ '^IN[A-Z0-9]{10}
+    out.put("instrumentCount",jdbc.queryForObject("SELECT count(*) FROM instruments",Long.class));
+    out.put("candleCount",jdbc.queryForObject("SELECT count(*) FROM market_candles WHERE timeframe='1d'",Long.class));
+    out.put("unresolvedIssueCount",jdbc.queryForObject("SELECT count(*) FROM data_quality_events WHERE resolved_at IS NULL",Long.class));
+    out.put("coverage",jdbc.queryForList("""
+      SELECT e.code AS exchange,count(DISTINCT i.id) AS instruments,count(c.instrument_id) AS candle_count,
+      min((c.candle_time AT TIME ZONE e.timezone)::date) AS first_date,max((c.candle_time AT TIME ZONE e.timezone)::date) AS latest_date
+      FROM exchanges e LEFT JOIN instruments i ON i.exchange_id=e.id LEFT JOIN market_candles c ON c.instrument_id=i.id AND c.timeframe='1d'
+      GROUP BY e.code ORDER BY e.code
+      """));
+    out.put("sources",jdbc.queryForList("""
+      SELECT ds.source_code,ds.display_name,ds.access_mode,ds.license_scope,ds.verified_at,
+        coalesce(i.instruments,0) AS instruments,coalesce(c.instruments_with_candles,0) AS instruments_with_candles,c.latest_candle
+      FROM data_sources ds
+      LEFT JOIN (SELECT source_id,count(*) AS instruments FROM instruments GROUP BY source_id) i ON i.source_id=ds.id
+      LEFT JOIN (SELECT source_id,count(DISTINCT instrument_id) AS instruments_with_candles,max(candle_time) AS latest_candle
+        FROM market_candles WHERE timeframe='1d' AND is_complete
+          AND quality_status IN ('VALIDATED_MANUAL','PROVIDER_VALIDATED') GROUP BY source_id) c ON c.source_id=ds.id
+      WHERE ds.enabled ORDER BY ds.source_code
+      """));
+    out.put("recentRuns",jdbc.queryForList("""
+      SELECT r.id,r.job_name,r.status,r.artifact_name,r.started_at,r.finished_at,r.records_seen,r.records_written,r.failure_count,r.error_message
+      FROM ingestion_runs r ORDER BY r.started_at DESC LIMIT 20
+      """));
+    out.put("issues",jdbc.queryForList("""
+      SELECT q.id,q.severity,q.event_type,q.observed_at,q.event_time,q.details,e.code AS exchange,i.symbol
+      FROM data_quality_events q LEFT JOIN instruments i ON i.id=q.instrument_id LEFT JOIN exchanges e ON e.id=i.exchange_id
+      WHERE q.resolved_at IS NULL ORDER BY q.observed_at DESC LIMIT 50
+      """));
+    return out;
+  }
+}
+ AND m.instrument_key LIKE e.code||'_EQ|%') AS exact_mapped_equities
+      FROM exchanges e WHERE e.code IN ('NSE','BSE') ORDER BY e.code
+      """));
     out.put("upstoxRegistry",registry);out.put("officialAmfiNav",nav);out.put("upstoxDailyHistory",daily);
     out.put("instrumentCount",jdbc.queryForObject("SELECT count(*) FROM instruments",Long.class));
     out.put("candleCount",jdbc.queryForObject("SELECT count(*) FROM market_candles WHERE timeframe='1d'",Long.class));

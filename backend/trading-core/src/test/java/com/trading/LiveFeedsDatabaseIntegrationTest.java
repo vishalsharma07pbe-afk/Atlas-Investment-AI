@@ -420,6 +420,40 @@ class LiveFeedsDatabaseIntegrationTest {
 
  @Test
  @org.springframework.transaction.annotation.Transactional
+ void registryRawMappingsAloneDoNotSatisfyAutomaticRefresh()throws Exception{
+  // Test fixture schema has no pre-existing public registry; other tests may
+  // seed mapping rows, so temporarily make their display names current and
+  // remove BSE join eligibility without deleting potentially referenced keys.
+  db.update("UPDATE upstox_instrument_map SET display_name=coalesce(display_name,'fixture'),updated_at=now()");
+  db.update("UPDATE instruments SET active=false WHERE exchange_id=(SELECT id FROM exchanges WHERE code='BSE')");
+  db.update("""
+    INSERT INTO instruments(exchange_id,symbol,series,source,isin,instrument_type,active,listing_status)
+    VALUES ((SELECT id FROM exchanges WHERE code='NSE'),'REGISTRYNSE','EQ','UPSTOX','INE000A01101','EQ',true,'ACTIVE')
+    ON CONFLICT DO NOTHING
+    """);
+  db.update("""
+    INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,isin,instrument_type,display_name)
+    VALUES ('NSE_EQ|INE000A01101','NSE','REGISTRYNSE','INE000A01101','EQ','NSE fixture'),
+           ('BSE_EQ|INE000A01102','BSE','REGISTRYBSE','INE000A01102','EQ','BSE fixture')
+    """);
+  var scheduler=new FeedRefreshScheduler(db,mock(UpstoxFeedService.class),mock(AmfiFeedService.class),mock(MarketCalendarService.class),
+    new org.springframework.transaction.support.TransactionTemplate(
+      new org.springframework.jdbc.datasource.DataSourceTransactionManager(Objects.requireNonNull(db.getDataSource()))));
+  assertThat((Boolean)org.springframework.test.util.ReflectionTestUtils.invokeMethod(scheduler,"masterNeedsRefresh")).isTrue();
+  var diagnostics=(List<?>)new DataHealthController(db).summary().get("registryReconciliation");
+  assertThat(diagnostics).hasSize(2);
+  var bse=(Map<?,?>)diagnostics.getFirst();
+  assertThat(bse.get("exchange")).isEqualTo("BSE");
+  assertThat(((Number)bse.get("exact_mapped_equities")).longValue()).isZero();
+  db.update("""
+    INSERT INTO instruments(exchange_id,symbol,series,source,isin,instrument_type,active,listing_status)
+    VALUES ((SELECT id FROM exchanges WHERE code='BSE'),'REGISTRYBSE','EQ','UPSTOX','INE000A01102','EQ',true,'ACTIVE')
+    ON CONFLICT DO NOTHING
+    """);
+  assertThat((Boolean)org.springframework.test.util.ReflectionTestUtils.invokeMethod(scheduler,"masterNeedsRefresh")).isFalse();
+ }
+ @Test
+ @org.springframework.transaction.annotation.Transactional
  void publicCatalogJobsDeduplicateRecoverAndIsolateProviders()throws Exception{
   db.update("UPDATE public_feed_schedule SET status='IDLE',attempts=0,claim_id=NULL,lease_until=NULL,next_attempt_at=now(),error_code=NULL");
   var stockMock=mock(UpstoxFeedService.class);
