@@ -17,3 +17,6 @@ intelligence/.pytest_cache/
 
 # Local provider permission declarations (never commit)
 data/entitlements/sources.json
+
+# Private local research notes, including per-account journals and legacy files.
+data/research-journal/
