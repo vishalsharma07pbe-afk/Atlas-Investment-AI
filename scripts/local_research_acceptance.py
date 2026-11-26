@@ -44,6 +44,23 @@ class LocalSession:
         except (OSError,ValueError) as exc:
             raise RuntimeError("LOCAL_RESPONSE_UNAVAILABLE") from None
 
+def _portfolio_context_valid(context):
+    """Validate the owner-local projection, not the upstream public status alone."""
+    status=context.get("status")
+    if status not in ("NO_CURRENT_WATCH_EVIDENCE","WATCH_CONTEXT_AVAILABLE",
+                      "NO_NEW_EXACT_IDENTITY_WATCHES","DISABLED"):
+        return False
+    equities,funds=context.get("equities"),context.get("funds")
+    excluded=context.get("held_excluded_count")
+    if (not isinstance(equities,list) or not isinstance(funds,list)
+        or type(excluded) is not int or excluded<0
+        or any(not isinstance(row,dict) or row.get("evidence_type")!="TECHNICAL_WATCH_ONLY" for row in equities)
+        or any(not isinstance(row,dict) or row.get("evidence_type")!="HISTORICAL_WATCH_ONLY" for row in funds)):
+        return False
+    if status=="WATCH_CONTEXT_AVAILABLE":
+        return bool(equities or funds)
+    return not equities and not funds
+
 def assess(readiness,overview,review):
     """Return only allowlisted status labels, never private rows or raw errors."""
     checks={}
@@ -59,7 +76,7 @@ def assess(readiness,overview,review):
     check("portfolio_review_contract",type(review.get("holding_count")) is int and review["holding_count"]>=0 and
           isinstance(review.get("holdings"),list) and len(review["holdings"])==review["holding_count"] and
           isinstance(review.get("diversification"),dict) and isinstance(review.get("opportunity_context"),dict) and
-          review["opportunity_context"].get("status") in ("NO_CURRENT_WATCH_EVIDENCE","WATCH_EVIDENCE_AVAILABLE","DISABLED"))
+          _portfolio_context_valid(review["opportunity_context"]))
     check("research_only",readiness.get("actionable_recommendations_enabled") is False and
           overview.get("scope")=="PUBLIC_MARKET_RESEARCH_ONLY")
     runtime=all(v=="PASS" for v in checks.values())
