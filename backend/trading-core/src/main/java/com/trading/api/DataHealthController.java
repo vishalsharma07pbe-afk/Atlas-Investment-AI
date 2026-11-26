@@ -53,6 +53,18 @@ public class DataHealthController {
         sum(rows_written) AS rows_written,error_code
       FROM exchange_calendar_attempts GROUP BY status,error_code ORDER BY status,error_code
       """));
+    out.put("registryReconciliation",jdbc.queryForList("""
+      SELECT e.code AS exchange,
+        (SELECT count(*) FROM upstox_instrument_map m WHERE m.exchange_code=e.code) AS raw_mappings,
+        (SELECT count(*) FROM instruments i WHERE i.exchange_id=e.id AND i.active
+          AND i.listing_status='ACTIVE' AND i.series='EQ' AND i.instrument_type IN ('EQ','EQUITY','STOCK')) AS active_cash_equities,
+        (SELECT count(DISTINCT i.id) FROM instruments i JOIN upstox_instrument_map m
+          ON m.exchange_code=e.code AND m.trading_symbol=i.symbol AND m.isin=i.isin
+          WHERE i.exchange_id=e.id AND i.active AND i.listing_status='ACTIVE' AND i.series='EQ'
+          AND i.instrument_type IN ('EQ','EQUITY','STOCK') AND m.instrument_type IN ('EQ','EQUITY')
+          AND m.isin ~ '^IN[A-Z0-9]{10}$' AND m.instrument_key LIKE e.code||'_EQ|%') AS exact_mapped_equities
+      FROM exchanges e WHERE e.code IN ('NSE','BSE') ORDER BY e.code
+      """));
     out.put("upstoxRegistry",registry);out.put("officialAmfiNav",nav);out.put("upstoxDailyHistory",daily);
     out.put("instrumentCount",jdbc.queryForObject("SELECT count(*) FROM instruments",Long.class));
     out.put("candleCount",jdbc.queryForObject("SELECT count(*) FROM market_candles WHERE timeframe='1d'",Long.class));

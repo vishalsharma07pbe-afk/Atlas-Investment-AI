@@ -27,13 +27,22 @@ import org.springframework.transaction.support.TransactionTemplate;
  @Scheduled(initialDelayString="${atlas.market.feeds.master-initial-delay-ms:5000}",fixedDelayString="${atlas.market.feeds.master-check-ms:3600000}")
  public void ensureMaster(){
   if(!enabled)return;
+  if(masterNeedsRefresh())attempt("UPSTOX","MASTER_AUTO",false);
+ }
+ boolean masterNeedsRefresh(){
   Boolean needed=jdbc.queryForObject("""
     SELECT EXISTS(SELECT 1 FROM (VALUES ('NSE'),('BSE')) AS venues(code)
       WHERE NOT EXISTS(SELECT 1 FROM upstox_instrument_map m WHERE m.exchange_code=venues.code)
         OR EXISTS(SELECT 1 FROM upstox_instrument_map m WHERE m.exchange_code=venues.code AND m.display_name IS NULL)
-        OR (SELECT max(m.updated_at) FROM upstox_instrument_map m WHERE m.exchange_code=venues.code)<now()-interval '36 hours')
+        OR (SELECT max(m.updated_at) FROM upstox_instrument_map m WHERE m.exchange_code=venues.code)<now()-interval '36 hours'
+        OR NOT EXISTS(SELECT 1 FROM upstox_instrument_map m
+          JOIN exchanges e ON e.code=m.exchange_code
+          JOIN instruments i ON i.exchange_id=e.id AND i.symbol=m.trading_symbol AND i.isin=m.isin
+          WHERE e.code=venues.code AND i.active AND i.listing_status='ACTIVE' AND i.series='EQ'
+            AND i.instrument_type IN ('EQ','EQUITY','STOCK') AND m.instrument_type IN ('EQ','EQUITY')
+            AND m.isin ~ '^IN[A-Z0-9]{10}$' AND m.instrument_key LIKE e.code||'_EQ|%'))
     """,Boolean.class);
-  if(Boolean.TRUE.equals(needed))attempt("UPSTOX","MASTER_AUTO",false);
+  return Boolean.TRUE.equals(needed);
  }
  @Scheduled(cron="0 0 22 * * MON-FRI",zone="Asia/Kolkata")
  public void amfi(){if(enabled)attempt("AMFI","NAV",false);}
@@ -111,6 +120,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  }
 
  static String failureCode(Exception ex){
+  if(ex instanceof UpstoxFeedService.MasterImportException master)return master.code();
   if(ex instanceof FeedHttp.ProviderHttpException http){
    return switch(http.status()){
     case 429->"PROVIDER_RATE_LIMITED";

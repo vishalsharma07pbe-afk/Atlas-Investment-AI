@@ -14,14 +14,27 @@ import org.springframework.transaction.annotation.Transactional;
  private final ObjectMapper json=new ObjectMapper();
  public UpstoxFeedService(JdbcTemplate jdbc,FeedHttp http,VersionedVaultReader vault){this.jdbc=jdbc;this.http=http;this.vault=vault;}
  private static final String MASTER="https://assets.upstox.com/market-quote/instruments/exchange/";
+ enum MasterFailure { INVALID_JSON, INVALID_ENVELOPE, DUPLICATE_KEY, NO_VALID_EQUITIES, REGISTRY_WRITE_FAILED, MAPPING_WRITE_FAILED, IDENTITY_CONFLICT }
+ static final class MasterImportException extends IllegalStateException{
+  private final String code;
+  MasterImportException(String exchange,MasterFailure failure){
+   super("UPSTOX_"+exchange+"_MASTER_"+failure.name());
+   if(!Set.of("NSE","BSE").contains(exchange))throw new IllegalArgumentException("exchange");
+   code="UPSTOX_"+exchange+"_MASTER_"+failure.name();
+  }
+  String code(){return code;}
+ }
  @Transactional(rollbackFor=Exception.class)
  public int syncMaster()throws Exception{
   int count=0;
   for(String exchange:List.of("NSE","BSE")){
    // NSE's valid decompressed BOD JSON is currently larger than 40 MB. Keep a
    // strict ceiling, then retain only cash-equity identifiers used by holdings.
-   JsonNode root=json.readTree(http.get(MASTER+exchange+".json.gz",null,60_000_000));
-   if(!root.isArray()||root.isEmpty())throw new IllegalStateException("Invalid instrument master");
+   byte[] payload=http.get(MASTER+exchange+".json.gz",null,60_000_000);
+   JsonNode root;
+   try{root=json.readTree(payload);}
+   catch(java.io.IOException ex){throw new MasterImportException(exchange,MasterFailure.INVALID_JSON);}
+   if(root==null||!root.isArray()||root.isEmpty())throw new MasterImportException(exchange,MasterFailure.INVALID_ENVELOPE);
    int accepted=0;
    Set<String> seen=new HashSet<>();
    for(JsonNode item:root){
@@ -36,9 +49,10 @@ import org.springframework.transaction.annotation.Transactional;
     String isin=item.path("isin").asText("");
     if(!validEquityIdentity(exchange,key,isin))continue;
     if(key.matches("BSE_EQ[|][0-9]{1,10}")&&!key.equals("BSE_EQ|"+item.path("exchange_token").asText("")))continue;
-    if(!seen.add(key))throw new IllegalStateException("Duplicate provider instrument identity");
+    if(!seen.add(key))throw new MasterImportException(exchange,MasterFailure.DUPLICATE_KEY);
     // Do not relabel existing historical observations to a different security.
-    int mapped=jdbc.update("""
+    int mapped;
+    try{mapped=jdbc.update("""
       INSERT INTO instruments(exchange_id,symbol,series,isin,security_name,instrument_type,
         listing_status,active,source,source_revision,updated_at)
       VALUES ((SELECT id FROM exchanges WHERE code=?),?,'EQ',?,?,?,'ACTIVE',true,
@@ -49,20 +63,23 @@ import org.springframework.transaction.annotation.Transactional;
         source='UPSTOX',source_revision='UPSTOX_INSTRUMENT_MASTER',updated_at=now()
       WHERE instruments.isin=EXCLUDED.isin OR (instruments.isin IS NULL AND NOT EXISTS(
         SELECT 1 FROM market_candles c WHERE c.instrument_id=instruments.id))
-      """,exchange,symbol,isin,displayName,"EQ");
+      """,exchange,symbol,isin,displayName,"EQ");}
+    catch(org.springframework.dao.DataAccessException ex){throw new MasterImportException(exchange,MasterFailure.REGISTRY_WRITE_FAILED);}
     if(mapped!=1)continue;
-    int written=jdbc.update("""
+    int written;
+    try{written=jdbc.update("""
       INSERT INTO upstox_instrument_map(instrument_key,exchange_code,isin,trading_symbol,instrument_type,display_name)
       VALUES (?,?,?,?,?,?)
       ON CONFLICT(instrument_key) DO UPDATE SET isin=EXCLUDED.isin,trading_symbol=EXCLUDED.trading_symbol,
         instrument_type=EXCLUDED.instrument_type,display_name=EXCLUDED.display_name,updated_at=now()
       WHERE upstox_instrument_map.exchange_code=EXCLUDED.exchange_code
         AND (upstox_instrument_map.isin IS NULL OR upstox_instrument_map.isin=EXCLUDED.isin)
-      """,key,exchange,isin,symbol,"EQ",displayName);
-    if(written!=1)throw new IllegalStateException("Provider instrument identity conflict");
+      """,key,exchange,isin,symbol,"EQ",displayName);}
+    catch(org.springframework.dao.DataAccessException ex){throw new MasterImportException(exchange,MasterFailure.MAPPING_WRITE_FAILED);}
+    if(written!=1)throw new MasterImportException(exchange,MasterFailure.IDENTITY_CONFLICT);
     count++;accepted++;
    }
-   if(accepted==0)throw new IllegalStateException("No verified equity mappings in instrument master");
+   if(accepted==0)throw new MasterImportException(exchange,MasterFailure.NO_VALID_EQUITIES);
   }
   return count;
  }
