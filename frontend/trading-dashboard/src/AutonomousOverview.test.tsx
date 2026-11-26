@@ -164,6 +164,8 @@ it("keeps the briefing first and evidence in expandable sections without duplica
  fireEvent.click(screen.getByText("View 1 selected observations"));
  expect(selected.open).toBe(true);
  expect(screen.getByText(/TEST · NSE/)).toBeTruthy();
+ fireEvent.click(screen.getByRole("button",{name:"Open TEST NSE research report"}));
+ expect(navigate).toHaveBeenCalledWith("SWING",{exchange:"NSE",id:1,isin:"INE009A01021",as_of:"2026-11-23"});
  fireEvent.click(screen.getByRole("button",{name:"Review swing research"}));
  expect(navigate).toHaveBeenCalledWith("SWING");
  expect(fetch).toHaveBeenCalledTimes(1);

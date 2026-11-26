@@ -44,3 +44,5 @@
   .overview-private-review button { width: 100%; }
   .overview-evidence-body { padding: 10px; }
 }
+.overview-horizon-card li { flex-wrap: wrap; align-items: flex-start; }
+.overview-report-link { min-height: 36px; max-width: 100%; white-space: normal; }

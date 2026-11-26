@@ -302,3 +302,35 @@ it("withholds a chart from a mismatched observation date",async()=>{
  expect(screen.queryByRole("img",{name:"Recorded daily close history"})).toBeNull();
  expect(screen.getByText(/Historical chart unavailable/)).toBeTruthy();
 });
+
+
+function reportNavigationSnapshot(status="READY"){
+ const first={...candidate,isin:"INE002A01018"};
+ const second={...candidate,id:2,isin:"INE009A01021",symbol:"SECOND"};
+ const market={...section,status,result:{...section.result,horizons:{...section.result.horizons,SWING:{...section.result.horizons.SWING,candidates:[first,second]}}}};
+ const refs=[first,second].map(({id,exchange,isin})=>({id,exchange,isin}));
+ return {enabled:true,sections:[market],stock_qualification:{horizons:{SWING:{status:"NO_QUALIFIED_IN_REVIEWED_SAMPLE",reviewed_count:2,review_required_count:0,qualified_count:0,recommendations:[],leading_blockers:[],notice:"Bounded sample.",selection:{unique_company_count:2,unidentified_listing_count:0,conflicting_listing_count:0,cross_venue_company_count:0,review_company_count:0,ready_markets:["NSE"],watch_refs:refs,notice:"Distinct shortlist."}}}}};
+}
+it("opens only the exact selected report and labels a refreshed observation",async()=>{
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>reportNavigationSnapshot()})));
+ render(<HorizonResearch horizon="SWING" onSettings={()=>{}} reportTarget={{exchange:"NSE",id:2,isin:"INE009A01021",as_of:"2026-11-22"}}>{null}</HorizonResearch>);
+ expect(await screen.findByText(/The selected stock has a refreshed observation/)).toBeTruthy();
+ const summaries=screen.getAllByText("Open complete stock research report");
+ expect(summaries).toHaveLength(2);
+ expect(summaries[0].closest("details")!.open).toBe(false);
+ expect(summaries[1].closest("details")!.open).toBe(true);
+ expect(document.activeElement).toBe(summaries[1]);
+ expect(fetch).toHaveBeenCalledTimes(1);
+});
+it("withholds a mismatched report reference rather than opening another listing",async()=>{
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>reportNavigationSnapshot()})));
+ render(<HorizonResearch horizon="SWING" onSettings={()=>{}} reportTarget={{exchange:"BSE",id:2,isin:"INE009A01021",as_of:"2026-11-23"}}>{null}</HorizonResearch>);
+ expect(await screen.findByText(/No substitute report was opened/)).toBeTruthy();
+ expect(screen.getAllByText("Open complete stock research report").every(node=>!node.closest("details")!.open)).toBe(true);
+});
+it("does not reopen a report from stale market evidence",async()=>{
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>reportNavigationSnapshot("STALE")})));
+ render(<HorizonResearch horizon="SWING" onSettings={()=>{}} reportTarget={{exchange:"NSE",id:2,isin:"INE009A01021",as_of:"2026-11-23"}}>{null}</HorizonResearch>);
+ expect(await screen.findByText(/No substitute report was opened/)).toBeTruthy();
+ expect(screen.queryByText("Open complete stock research report")).toBeNull();
+});
