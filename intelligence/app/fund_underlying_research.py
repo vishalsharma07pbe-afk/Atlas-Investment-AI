@@ -90,6 +90,7 @@ def _multi_year_exposure(holdings):
     metrics=defaultdict(lambda:{"coverage":0.0,"consistent_increases":0.0,
                                 "repeated_declines":0.0,"nonpositive_observations":0.0})
     cash=defaultdict(lambda:{"coverage":0.0,"below_profit":0.0,"negative_cash_years":0.0})
+    growth=defaultdict(lambda:{"coverage":0.0,"positive":0.0,"negative":0.0,"flat":0.0,"weighted_sum":0.0})
     covered=flagged=cash_covered=0.0
     for weight,quality in holdings:
         assessed=review=False
@@ -103,6 +104,20 @@ def _multi_year_exposure(holdings):
             bucket=metrics[(key,*periods)]
             bucket["coverage"]+=weight
             assessed=True
+            values=[p.get("value") for p in row["observations"]]
+            # All four values must be positive; loss-to-profit transitions
+            # do not have an economically meaningful CAGR.
+            if all(_number(v) and v>0 for v in values):
+                from math import expm1,log
+                try:
+                    cagr=100*expm1((log(values[-1])-log(values[0]))/3)
+                except (ValueError,OverflowError):
+                    cagr=None
+                if _number(cagr) and -100<cagr<=1_000_000:
+                    g=growth[(key,*periods)]
+                    g["coverage"]+=weight
+                    g["weighted_sum"]+=weight*cagr
+                    g["positive" if cagr>0 else "negative" if cagr<0 else "flat"]+=weight
             if row["increasing_years"]==3 and row["nonpositive_years"]==0:
                 bucket["consistent_increases"]+=weight
             if row["decreasing_years"]>=2:
@@ -135,6 +150,13 @@ def _multi_year_exposure(holdings):
         "cash_conversion_coverage_percent":round(cash_covered,4),
         "metrics":[{"metric":k[0],"periods":list(k[1:]),**rounded(v)} for k,v in sorted(metrics.items())],
         "cash_conversion":[{"first_period":k[0],"last_period":k[1],**rounded(v)} for k,v in sorted(cash.items())],
+        "historical_growth":[{"metric":k[0],"periods":list(k[1:]),
+            "coverage_weight_percent":round(v["coverage"],4),
+            "positive_growth_weight_percent":round(v["positive"],4),
+            "negative_growth_weight_percent":round(v["negative"],4),
+            "flat_growth_weight_percent":round(v["flat"],4),
+            "covered_subset_weighted_cagr_percent":round(v["weighted_sum"]/v["coverage"],4)}
+            for k,v in sorted(growth.items()) if v["coverage"]>0],
         "notice":"Original reported fund weights, not normalized equity weights. Review categories can overlap; total review weight counts each holding once. Four-year historical provider reports, not forecasts or independently verified business quality. Cash conversion is not free cash flow and differs by sector."}
 
 
@@ -150,6 +172,7 @@ def summarize(equities,instant,reports=None):
     covered=0.0
     exact_weight=0.0
     multi_year=[]
+    margin_trends=defaultdict(lambda:{"coverage":0.0,"improved":0.0,"deteriorated":0.0,"unchanged":0.0,"weighted_change":0.0})
     for h in equities:
         isin,w=h.get("isin"),h.get("weight_percent")
         if not isinstance(isin,str) or not re.fullmatch(r"INE[A-Z0-9]{9}",isin) or not _number(w) or not 0<w<=100 or isin in seen:
@@ -186,6 +209,22 @@ def summarize(equities,instant,reports=None):
                 quality+=w
                 if any(x["latest_value"]<0 or x["latest_value"]<x["previous_value"] for x in current):
                     flagged+=w
+            # Only the existing matched-unit company margin calculations, with
+            # explicit fiscal month-end periods. Do not combine unlike ratios.
+            for metric in report["fundamental_quality"]["derived_metrics"]:
+                key=metric.get("metric")
+                prior,latest=metric.get("previous_period"),metric.get("latest_period")
+                change=metric.get("change")
+                if (key not in ("NET_MARGIN","OPERATING_MARGIN") or metric.get("unit")!="PERCENT"
+                    or not isinstance(prior,str) or not PERIOD.fullmatch(prior)
+                    or not isinstance(latest,str) or not PERIOD.fullmatch(latest)
+                    or int(latest[:4])-int(prior[:4])!=1 or prior[5:]!=latest[5:]
+                    or not _number(change) or abs(change)>1_000_000):
+                    continue
+                bucket=margin_trends[(key,prior,latest)]
+                bucket["coverage"]+=w
+                bucket["improved" if change>0 else "deteriorated" if change<0 else "unchanged"]+=w
+                bucket["weighted_change"]+=w*change
             for ratio in report["fundamental_quality"]["valuation"]["comparisons"]:
                 key=ratio["metric"]
                 if key not in ("PE","PB","EV_EBITDA"):
@@ -199,6 +238,8 @@ def summarize(equities,instant,reports=None):
         except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
             # A malformed cached report cannot supply an outlook.
             continue
+    if exact_weight>100.5000001:
+        return {"status":"INVALID_HOLDING_IDENTITIES","notice":"No metrics calculated for conflicting holding weights."}
     def rounded(data):
         return {k:round(v,4) for k,v in data.items()}
     multi=_multi_year_exposure(multi_year)
@@ -212,5 +253,10 @@ def summarize(equities,instant,reports=None):
         "annual_statement_weight_percent":round(quality,4),"deterioration_review_weight_percent":round(flagged,4),
         "annual_trends":[{"metric":k[0],"previous_period":k[1],"latest_period":k[2],**rounded(v)} for k,v in sorted(trends.items())],
         "relative_valuation":[{"metric":k,**rounded(v),"period_status":"UNVERIFIED"} for k,v in sorted(valuation.items())],
+        "historical_margin_changes":[{"metric":k[0],"previous_period":k[1],"latest_period":k[2],
+            "coverage_weight_percent":round(v["coverage"],4),"improved_weight_percent":round(v["improved"],4),
+            "deteriorated_weight_percent":round(v["deteriorated"],4),"unchanged_weight_percent":round(v["unchanged"],4),
+            "covered_subset_weighted_change_pp":round(v["weighted_change"]/v["coverage"],4)}
+            for k,v in sorted(margin_trends.items()) if v["coverage"]>0],
         "forward_earnings_coverage_percent":None,"valuation_attractiveness":None,
         "notice":"Historical provider reports weighted by disclosed fund exposure, grouped by exact annual periods. Sector and trend weights are partial, not normalized. Relative valuation ratios have unverified observation dates. No forecast, fair value or qualified Growth Outlook."}

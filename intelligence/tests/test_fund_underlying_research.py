@@ -85,3 +85,29 @@ class FundUnderlyingResearchTests(unittest.TestCase):
         self.assertEqual(result["cash_conversion"][1]["negative_cash_years"],25)
         self.assertEqual(research.summarize(holdings,NOW,{})["multi_year_quality"]["status"],"INSUFFICIENT_MULTI_YEAR_EVIDENCE")
         self.assertEqual(research.summarize(holdings,NOW,{})["multi_year_quality"]["unassessed_exact_equity_weight_percent"],75)
+
+    def test_historical_weighted_growth_and_margins_keep_coverage_and_periods(self):
+        def four(isin,profits,month="Mar"):
+            raw=report(isin)
+            def series(name,values):
+                return {"name":name,"history":[{"period":f"{month} {y}","value":v} for y,v in zip(range(2023,2027),values)]}
+            raw["sections"]["income_statement"]["data"]["rows"]=[series("revenue",[100,100,100,100]),series("net profit",profits)]
+            return raw
+        holdings=[{"isin":A,"weight_percent":40},{"isin":B,"weight_percent":25},{"isin":C,"weight_percent":10}]
+        result=research.summarize(holdings,NOW,{A:four(A,[10,20,30,80]),B:four(B,[80,40,20,10]),C:four(C,[-10,10,20,30],"Jun")})
+        profit=[x for x in result["multi_year_quality"]["historical_growth"] if x["metric"]=="NET_PROFIT"]
+        self.assertEqual(len(profit),1)
+        self.assertEqual(profit[0]["coverage_weight_percent"],65)
+        self.assertEqual(profit[0]["positive_growth_weight_percent"],40)
+        self.assertEqual(profit[0]["negative_growth_weight_percent"],25)
+        self.assertAlmostEqual(profit[0]["covered_subset_weighted_cagr_percent"],(40*100-25*50)/65,places=4)
+        margins=[x for x in result["historical_margin_changes"] if x["metric"]=="NET_MARGIN"]
+        self.assertEqual(len(margins),2)
+        self.assertEqual(margins[0]["coverage_weight_percent"],65)
+        self.assertEqual(margins[0]["improved_weight_percent"],40)
+        self.assertEqual(margins[0]["deteriorated_weight_percent"],25)
+        self.assertAlmostEqual(margins[0]["covered_subset_weighted_change_pp"],(40*50-25*10)/65,places=4)
+        self.assertEqual(margins[1]["coverage_weight_percent"],10)
+        self.assertIsNone(result["forward_earnings_coverage_percent"])
+        self.assertIsNone(result["valuation_attractiveness"])
+        self.assertEqual(research.summarize([{"isin":A,"weight_percent":60},{"isin":B,"weight_percent":60}],NOW,{})["status"],"INVALID_HOLDING_IDENTITIES")
