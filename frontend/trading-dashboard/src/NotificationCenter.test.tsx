@@ -36,3 +36,21 @@ it("includes authenticated personal unread count and loads private history only 
  fireEvent.click(screen.getByRole("button",{name:"Notifications, 1 unread"}));
  expect(await screen.findByText("Portfolio needs review")).toBeTruthy();
 });
+
+
+it("focuses the notification dialog, wraps keyboard focus and restores the bell on Escape",async()=>{
+ vi.stubGlobal("fetch",vi.fn(async(url:string)=>({ok:true,json:async()=>url.endsWith("/summary")?{ids:[],total:0}:{alerts:[]}})));
+ render(<NotificationCenter/>);
+ const bell=screen.getByRole("button",{name:"Notifications, 0 unread"});
+ fireEvent.click(bell);
+ const dialog=await screen.findByRole("dialog",{name:"Notification center"});
+ const close=dialog.querySelector<HTMLButtonElement>('button[aria-label="Close notifications"]')!;
+ expect(document.activeElement).toBe(close);
+ await screen.findByText(/No verified local alerts available/);
+ fireEvent.keyDown(close,{key:"Tab",shiftKey:true});
+ expect(dialog.contains(document.activeElement)).toBe(true);
+ expect(document.activeElement).not.toBe(close);
+ fireEvent.keyDown(document.activeElement!,{key:"Escape"});
+ expect(screen.queryByRole("dialog",{name:"Notification center"})).toBeNull();
+ expect(document.activeElement).toBe(bell);
+});
