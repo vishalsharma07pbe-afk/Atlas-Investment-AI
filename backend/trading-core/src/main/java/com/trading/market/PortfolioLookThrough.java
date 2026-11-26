@@ -168,8 +168,14 @@ final class PortfolioLookThrough {
     for(String sector:directSectors.keySet()){
       BigDecimal d=directSectors.get(sector),i=indirectSectors.get(sector),v=d.add(i);
       classified=classified.add(v);
-      sectorRows.add(new Sector(sector,money(d),money(i),money(v),pct(v,total),
-        v.multiply(HUNDRED).compareTo(total.multiply(BigDecimal.valueOf(40)))>0));
+      BigDecimal reviewBoundary=total.multiply(BigDecimal.valueOf(40));
+      boolean review=v.multiply(HUNDRED).compareTo(reviewBoundary)>0;
+      sectorRows.add(new Sector(sector,money(d),money(i),money(v),pct(v,total),review));
+      // Only a hidden threshold crossing: fund exposure adds to a classified
+      // sector that was not already above the threshold on direct exposure.
+      if(review&&i.signum()>0&&d.multiply(HUNDRED).compareTo(reviewBoundary)<=0)
+        risk.add(new PortfolioLevelRisk.Attention("HIDDEN_SECTOR_CONCENTRATION",sector+" combined sector exposure",
+          pct(v,total).doubleValue(),40,"PERCENT",cohort.toString()));
     }
     sectorRows.sort(Comparator.comparing(Sector::estimatedValue).reversed().thenComparing(Sector::sector));
     out.put("sector_status",classified.signum()>0?"PARTIAL_CLASSIFIED_EXPOSURE":"NO_CURRENT_EXACT_CLASSIFICATION");

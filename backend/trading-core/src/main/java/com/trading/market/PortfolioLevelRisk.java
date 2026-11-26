@@ -66,10 +66,12 @@ final class PortfolioLevelRisk {
     if(lookReady){
       for(JsonNode flag:look.path("risk_observations")){
         String kind=flag.path("kind").asText(),label=flag.path("label").asText();
-        int threshold=switch(kind){case "HIDDEN_EQUITY_CONCENTRATION"->25;case "HIGH_FUND_OVERLAP"->50;default->-1;};
+        int threshold=switch(kind){case "HIDDEN_EQUITY_CONCENTRATION"->25;case "HIGH_FUND_OVERLAP"->50;case "HIDDEN_SECTOR_CONCENTRATION"->40;default->-1;};
         Double value=number(flag,"value");
         if(threshold<0||label.isBlank()||label.length()>200||value==null||value<threshold||value>100||
             !disclosure.toString().equals(flag.path("evidenceThrough").asText())||!"PERCENT".equals(flag.path("unit").asText()))continue;
+        if("HIDDEN_SECTOR_CONCENTRATION".equals(kind)&&
+          !"PARTIAL_CLASSIFIED_EXPOSURE".equals(look.path("sector_status").asText()))continue;
         attention.add(new Attention(kind,label,value,threshold,"PERCENT",disclosure.toString()));
       }
     }

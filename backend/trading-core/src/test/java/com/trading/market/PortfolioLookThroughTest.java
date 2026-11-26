@@ -100,6 +100,23 @@ class PortfolioLookThroughTest {
     assertEquals(59.0,sector.path("portfolioPercent").asDouble());
     assertTrue(sector.path("reviewConcentration").asBoolean());
     assertEquals(1,result.path("sector_review_count").asInt());
+    var hidden=java.util.stream.StreamSupport.stream(result.path("risk_observations").spliterator(),false)
+      .filter(n->"HIDDEN_SECTOR_CONCENTRATION".equals(n.path("kind").asText())).toList();
+    assertEquals(1,hidden.size());
+    assertEquals(59.0,hidden.getFirst().path("value").asDouble());
+    assertEquals("2026-10-31",hidden.getFirst().path("evidenceThrough").asText());
+  }
+  @Test void hiddenSectorDoesNotDuplicateVisibleDirectConcentrationOrExactThreshold(){
+    var visible=json.valueToTree(PortfolioLookThrough.assess(List.of(direct(500),
+      withSector(fund("123456","fund:a",500,"2026-10-31",30,50),A,"Energy",now)),json,now));
+    assertEquals(1,visible.path("sector_review_count").asInt());
+    assertFalse(java.util.stream.StreamSupport.stream(visible.path("risk_observations").spliterator(),false)
+      .anyMatch(n->"HIDDEN_SECTOR_CONCENTRATION".equals(n.path("kind").asText())));
+    var equal=json.valueToTree(PortfolioLookThrough.assess(List.of(direct(200),
+      withSector(fund("123456","fund:a",800,"2026-10-31",25,55),A,"Energy",now)),json,now));
+    assertEquals(0,equal.path("sector_review_count").asInt());
+    assertFalse(java.util.stream.StreamSupport.stream(equal.path("risk_observations").spliterator(),false)
+      .anyMatch(n->"HIDDEN_SECTOR_CONCENTRATION".equals(n.path("kind").asText())));
   }
   @Test void sectorConflictsAndStaleEvidenceRemainUnclassified(){
     var rows=List.of(direct(200),withSector(fund("123456","fund:a",500,"2026-10-31",60,20),A,"Energy",now),
