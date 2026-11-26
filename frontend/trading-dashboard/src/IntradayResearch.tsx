@@ -2,7 +2,7 @@ import {useEffect,useState} from "react";
 type Item={stock_qualification?:{status:string;blockers:string[];review_findings:string[];notice:string};observed_pattern_venues?:string[];opening_range_high?:number;opening_range_low?:number;session_low_so_far?:number;price_structure_notice?:string;id:number;symbol:string;exchange:string;pattern:string;bar_end:string;close:number;vwap_proxy:number;relative_volume:number;session_change_percent:number;mean_bar_range_percent:number;prior_session_high_so_far:number;bar_count:number};
 type Result={qualification?:{status:string;reviewed_count:number;review_required_count:number;qualified_count:number|null;unidentified_listing_count:number;cross_venue_company_count:number;conflicting_company_count:number;leading_blockers:{code:string;count:number}[];notice:string};status:string;generated_at:string;open_exchanges:string[];examined:number;eligible:number;candidates:Item[];warnings:Item[];notice:string};
 const pct=(n:number)=>n.toFixed(2)+"%";
-const words=(s:string)=>s.toLowerCase().replaceAll("_"," ");
+const words=(s:string)=>s.toLowerCase().replace(/_/g," ");
 export default function IntradayResearch(){
  const [data,setData]=useState<Result|null>(null),[error,setError]=useState(false);
  useEffect(()=>{let active=true,pending=false;const controller=new AbortController();
