@@ -120,6 +120,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  }
 
  static String failureCode(Exception ex){
+  if(ex instanceof UpstoxFeedService.MasterImportException master)return master.code();
   if(ex instanceof FeedHttp.ProviderHttpException http){
    return switch(http.status()){
     case 429->"PROVIDER_RATE_LIMITED";
