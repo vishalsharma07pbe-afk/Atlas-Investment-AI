@@ -113,3 +113,15 @@ class StockQualificationTests(unittest.TestCase):
         self.assertIn("ILLUSTRATIVE_GAP_STRESS_RATIO_BELOW_ASSUMPTION",report["review_findings"])
         self.assertIn("LIVE_SPREAD_AND_EXECUTION_LIQUIDITY_REQUIRED",report["blockers"])
         self.assertEqual(snap["stock_qualification"]["horizons"]["SWING"]["recommendations"],[])
+
+    def test_prospective_coverage_and_paired_underperformance_are_not_qualification(self):
+        snap,item,_=fixture()
+        qualification.attach(snap,TODAY)
+        self.assertIn("MATCHED_PROSPECTIVE_BENCHMARK_EVIDENCE_REQUIRED",item["stock_qualification"]["blockers"])
+        self.assertIn("REPRESENTATIVE_PROSPECTIVE_DOWNSIDE_EVIDENCE_REQUIRED",item["stock_qualification"]["blockers"])
+        snap["research_reliability"]={"horizons":{"SWING":{"risk_path_summary":{"coverage_percent":90,"observed_paths":30},
+            "benchmark_summary":{"coverage_percent":90,"matched_outcomes":30,"cost_scenarios":[{"cost_bps_per_side":30,"mean_net_minus_price_index_pp":-1}]}}}}
+        qualification.attach(snap,TODAY)
+        self.assertIn("NONPOSITIVE_PROSPECTIVE_NET_INDEX_DIFFERENCE",item["stock_qualification"]["review_findings"])
+        self.assertIn("INDEPENDENT_PROSPECTIVE_STRATEGY_VALIDATION_REQUIRED",item["stock_qualification"]["blockers"])
+        self.assertEqual(snap["stock_qualification"]["horizons"]["SWING"]["recommendations"],[])

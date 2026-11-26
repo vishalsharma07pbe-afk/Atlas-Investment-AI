@@ -88,7 +88,7 @@ public class IntradayResearchService {
    open.add(exchange);
    // Only scheduler-collected, completed provider bars for this exact session.
    var rows=jdbc.queryForList("""
-     SELECT i.id,i.symbol,e.code AS exchange,c.candle_time,c.open,c.high,c.low,c.close,c.volume
+     SELECT i.id,i.symbol,i.isin,e.code AS exchange,c.candle_time,c.open,c.high,c.low,c.close,c.volume
      FROM intraday_research_attempts a JOIN instruments i ON i.id=a.instrument_id
      JOIN exchanges e ON e.id=i.exchange_id JOIN market_candles c ON c.instrument_id=i.id
      JOIN data_sources ds ON ds.id=c.source_id
@@ -111,11 +111,70 @@ public class IntradayResearchService {
     else if("VOLUME_BREAKOUT_WATCH".equals(finding.get("pattern")))candidates.add(finding);
    }
   }
-  candidates.sort(Comparator.comparingDouble((Map<String,Object> r)->((Number)r.get("relative_volume")).doubleValue()).reversed());
-  return Map.of("status",!permitted()?"NOT_AUTHORIZED":open.isEmpty()?"SESSION_CLOSED_OR_UNVERIFIED":"RESEARCH_ONLY",
-    "generated_at",now.toString(),"open_exchanges",open,"examined",examined,"eligible",eligible,
-    "candidates",candidates.stream().limit(5).toList(),"warnings",warnings.stream().limit(5).toList(),
+  String status=!permitted()?"NOT_AUTHORIZED":open.isEmpty()?"SESSION_CLOSED_OR_UNVERIFIED":"RESEARCH_ONLY";
+  var selection=select(candidates,warnings,status);
+  return Map.of("status",status,"generated_at",now.toString(),"open_exchanges",open,
+    "examined",examined,"eligible",eligible,"candidates",selection.get("candidates"),
+    "warnings",selection.get("warnings"),"qualification",selection.get("qualification"),
     "notice","Completed 15-minute observations in a bounded sample. VWAP and volume comparisons are candle-based proxies, not live order-book liquidity. No validated trading signal, target or stop-loss.");
+ }
+
+ static final List<String> QUALIFICATION_GAPS=List.of("LIVE_SPREAD_AND_EXECUTION_LIQUIDITY_REQUIRED",
+   "VALIDATED_EXECUTION_COSTS_REQUIRED","VERIFIED_MATERIAL_EVENT_AND_RISK_ASSESSMENT_REQUIRED",
+   "INTRADAY_HISTORICAL_AND_PROSPECTIVE_VALIDATION_REQUIRED","FINAL_QUALIFICATION_VALIDATION_REQUIRED");
+
+ /** Consolidate exact public identities without transferring levels between venues.
+  * Preserve the observed failed-breakout warning rather than promote a conflicting watch.
+  */
+ static Map<String,Object> select(List<Map<String,Object>> candidates,List<Map<String,Object>> warnings,String status){
+  Map<String,List<Map<String,Object>>> byCompany=new TreeMap<>();
+  int unidentified=0;
+  List<Map<String,Object>> input=new ArrayList<>(candidates);input.addAll(warnings);
+  for(var row:input){
+   if(!(row.get("isin") instanceof String isin)||!isin.matches("INE[A-Z0-9]{9}")){
+    unidentified++;continue;
+   }
+   byCompany.computeIfAbsent(isin,k->new ArrayList<>()).add(row);
+  }
+  Comparator<Map<String,Object>> order=Comparator
+    .comparingDouble((Map<String,Object> row)->num(row,"relative_volume")).reversed()
+    .thenComparing(row->String.valueOf(row.get("exchange")))
+    .thenComparingLong(row->((Number)row.get("id")).longValue());
+  List<Map<String,Object>> positive=new ArrayList<>(),negative=new ArrayList<>();
+  int crossVenue=0,conflicts=0;
+  for(var entries:byCompany.values()){
+   var venues=entries.stream().map(row->String.valueOf(row.get("exchange"))).distinct().sorted().toList();
+   if(venues.size()>1)crossVenue++;
+   var failed=entries.stream().filter(row->"FAILED_BREAKOUT_WATCH".equals(row.get("pattern"))).sorted(order).toList();
+   var breakout=entries.stream().filter(row->"VOLUME_BREAKOUT_WATCH".equals(row.get("pattern"))).sorted(order).toList();
+   boolean conflict=!failed.isEmpty()&&!breakout.isEmpty();
+   if(conflict)conflicts++;
+   if(failed.isEmpty()&&breakout.isEmpty())continue;
+   var representative=new LinkedHashMap<>(failed.isEmpty()?breakout.getFirst():failed.getFirst());
+   List<String> findings=conflict?List.of("CROSS_VENUE_FAILED_BREAKOUT_REVIEW"):
+      failed.isEmpty()?List.of():List.of("FAILED_BREAKOUT_REVIEW");
+   representative.put("stock_qualification",Map.of(
+      "status",findings.isEmpty()?"WITHHELD_EVIDENCE_GAPS":"WITHHELD_REVIEW_REQUIRED",
+      "horizon","INTRADAY","blockers",QUALIFICATION_GAPS,"review_findings",findings,
+      "notice","Current-session technical evidence only; no execution, event or prospective validation."));
+   representative.put("observed_pattern_venues",venues);
+   (failed.isEmpty()?positive:negative).add(representative);
+  }
+  positive.sort(order);negative.sort(order);
+  Map<String,Object> qualification=new LinkedHashMap<>();
+  qualification.put("status",!"RESEARCH_ONLY".equals(status)?"AWAITING_RESEARCH":
+       byCompany.isEmpty()?"NO_IDENTIFIED_TECHNICAL_WATCHES":"NO_QUALIFIED_IN_REVIEWED_SAMPLE");
+  qualification.put("reviewed_count",byCompany.size());
+  qualification.put("review_required_count",negative.size());
+  qualification.put("qualified_count","RESEARCH_ONLY".equals(status)&&!byCompany.isEmpty()?0:null);
+  qualification.put("recommendations",List.of());
+  qualification.put("unidentified_listing_count",unidentified);
+  qualification.put("cross_venue_company_count",crossVenue);
+  qualification.put("conflicting_company_count",conflicts);
+  qualification.put("leading_blockers",byCompany.isEmpty()?List.of():QUALIFICATION_GAPS.stream()
+    .map(code->Map.of("code",code,"count",byCompany.size())).toList());
+  qualification.put("notice","Distinct exact identities among observed patterns only. Missing identity is excluded; no-pattern observations are not confirmation. No validated targets, stops or recommendations.");
+  return Map.of("candidates",positive.stream().limit(5).toList(),"warnings",negative.stream().limit(5).toList(),"qualification",qualification);
  }
 
  static Map<String,Object> evaluate(List<Map<String,Object>> rows,Instant now){
@@ -147,6 +206,7 @@ public class IntradayResearchService {
   var last=rows.getLast();
   Map<String,Object> result=new LinkedHashMap<>();
   result.put("id",last.get("id"));result.put("symbol",last.get("symbol"));result.put("exchange",last.get("exchange"));
+  if(last.get("isin") instanceof String isin)result.put("isin",isin);
   result.put("pattern",pattern);result.put("bar_end",expected.toString());result.put("close",close);
   result.put("vwap_proxy",round(vwap));result.put("relative_volume",round(rv));result.put("session_change_percent",round(momentum));
   result.put("opening_range_high",openingHigh);result.put("opening_range_low",openingLow);
