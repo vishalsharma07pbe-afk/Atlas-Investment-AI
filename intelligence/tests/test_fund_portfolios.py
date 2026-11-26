@@ -172,3 +172,29 @@ class FundPortfoliosTests(unittest.TestCase):
                          {**CASH,**fields,"pct_of_fund":"20" if i==0 else "69"}])
         portfolios.store(payload(*rows),TODAY,INSTANT.isoformat())
         self.assertEqual(portfolios.research_identities(INSTANT),[a,b])
+
+    def test_ingestion_audit_distinguishes_missing_and_rejected_without_replacing_good_snapshot(self):
+        bad={"fund_code":"BAD","amfi_ssd_fund_id":"fund:bad"}
+        stale={"fund_code":"STALE","amfi_ssd_fund_id":"fund:stale","month_end":"2026-08-31"}
+        portfolios.store(payload(row(),CASH,row(**bad),row(**stale),{**CASH,**stale}),TODAY,INSTANT.isoformat())
+        ids=[{"fund_id":i} for i in ("fund:123","fund:bad","fund:stale","fund:absent",None)]
+        audit=portfolios.ingestion_coverage(ids,INSTANT)
+        self.assertEqual(audit["source_counts"],{"ACCEPTED":1,"WEIGHTS_NOT_RECONCILED":1,"STALE_PORTFOLIO_DATE":1})
+        self.assertEqual(audit["sample_counts"],{"ACCEPTED":1,"WEIGHTS_NOT_RECONCILED":1,"STALE_PORTFOLIO_DATE":1,"NOT_IN_SOURCE_FILE":1,"MISSING_FUND_ID":1})
+        with self.assertRaises(ValueError):
+            portfolios.store(payload(row()),TODAY,INSTANT.isoformat())
+        self.assertEqual(portfolios.ingestion_coverage(ids,INSTANT),audit)
+        self.assertEqual(portfolios.ingestion_coverage(ids,datetime(2026,11,29,tzinfo=timezone.utc))["status"],"STALE_OR_INCONSISTENT_AUDIT")
+        with patch.dict("os.environ",{"MARKET_DATA_USAGE_RIGHTS_CONFIRMED":"false"}):
+            self.assertEqual(portfolios.ingestion_coverage(ids,INSTANT)["status"],"DISABLED_OR_NOT_AUTHORIZED")
+
+    def test_invalid_cached_composition_does_not_discard_valid_fund(self):
+        from contextlib import closing
+        other={"fund_code":"SECOND","amfi_ssd_fund_id":"fund:456"}
+        portfolios.store(payload(row(),CASH,row(**other),{**CASH,**other}),TODAY,INSTANT.isoformat())
+        with closing(nav_catalog._connect()) as db,db:
+            db.execute("UPDATE fund_portfolio_snapshot SET payload='invalid json' WHERE fund_id='fund:123'")
+        identities=[{"fund_id":"fund:123","scheme_code":"123456","scheme_name":"A"},
+                    {"fund_id":"fund:456","scheme_code":"123457","scheme_name":"B"}]
+        self.assertEqual([r["scheme_code"] for r in portfolios.composition_matches(identities,INSTANT)],["123457"])
+        self.assertEqual([r["scheme_code"] for r in portfolios.matched(identities,INSTANT)],["123457"])
