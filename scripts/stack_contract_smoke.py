@@ -40,10 +40,26 @@ class Browser:
             check(value in response_headers.get_all(name,[]),f"{method} {path}: missing expected {name} header")
         return json.loads(raw) if raw and expected==200 and expect_json else None
 
+def legacy_portfolio_routes():
+    root="/intelligence/api/v1/intelligence/portfolio/"
+    return [(root+"research","GET",None),(root+"stress-scenarios","GET",None),
+            (root+"allocation-plan","POST",{"targets":[{"asset_type":"EQUITY","weight_percent":100}]}),
+            (root+"concentration","POST",{})]
+
+def check_legacy_portfolio(browser,symbol,value,headers=None):
+    research,stress,allocation,concentration=[
+        browser.request(path,method,body,headers=headers) for path,method,body in legacy_portfolio_routes()]
+    check([h["symbol"] for h in research["holdings"]]==[symbol],"legacy research owner isolation failed")
+    check([h["symbol"] for h in stress["priced_holdings"]]==[symbol],"legacy stress owner isolation failed")
+    check(allocation["recorded_value"]==value,"legacy allocation owner isolation failed")
+    check([h["symbol"] for h in concentration["holdings"]]==[symbol],"legacy concentration owner isolation failed")
+
 def run(base):
     anonymous=Browser(base)
     anonymous.request("/api/v1/portfolio/review",expected=401)
     anonymous.request("/intelligence/api/v1/internal/portfolio-opportunities",expected=401)
+    for path,method,body in legacy_portfolio_routes():
+        anonymous.request(path,method,body,expected=401)
     users=[Browser(base),Browser(base)]
     tokens=[]
     for browser in users:
@@ -65,6 +81,7 @@ def run(base):
         check("thesis_summary" in review["holdings"][0],"thesis digest missing")
         check("diversification" in review,"diversification missing")
         check(review["opportunity_context"]["status"]!="UNAVAILABLE","Spring-to-Python opportunity read failed")
+        check_legacy_portfolio(browser,symbol,"160.00" if symbol=="SMOKE_A" else "120.00")
     # The autonomous scheduler must complete real internal HTTP registry reads,
     # even on the intentionally empty test database.
     deadline=time.monotonic()+90
@@ -80,6 +97,8 @@ def run(base):
     a.request("/api/v1/auth/logout","POST")
     a.request("/api/v1/auth/me",expected=401)
     anonymous.request("/api/v1/auth/me",expected=401,headers={"Authorization":"Bearer "+tokens[0]})
+    for path,method,body in legacy_portfolio_routes():
+        anonymous.request(path,method,body,expected=401,headers={"Authorization":"Bearer "+tokens[0]})
     b.request("/api/v1/auth/me")
     print("PASS: cookie writes, owner isolation, private portfolio research, real public scheduler HTTP, logout")
 

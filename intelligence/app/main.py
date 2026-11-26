@@ -319,7 +319,8 @@ def evaluate_research(data: ResearchRequest):
 # The backend URL is fixed to the internal Docker service; never accept arbitrary URLs.
 from decimal import Decimal
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request, urlopen, build_opener, ProxyHandler
+from .journal_session import session_authorization, _NoRedirect
 from fastapi import HTTPException, Query
 from pydantic import ValidationError
 
@@ -336,18 +337,26 @@ class PortfolioHolding(BaseModel):
     price_as_of: datetime | None = None
 
 
-def _fetch_portfolio_holdings() -> list[PortfolioHolding]:
-    request = Request(_BACKEND_HOLDINGS_URL, headers={"Accept": "application/json"})
+def _fetch_portfolio_holdings(http: FastAPIRequest) -> list[PortfolioHolding]:
+    # Spring authenticates the caller and selects only that owner's holdings.
+    # Forward neither caller-supplied owner headers nor internal service tokens.
+    authorization = session_authorization(http)
+    request = Request(_BACKEND_HOLDINGS_URL, headers={"Accept": "application/json", "Authorization": authorization})
     try:
-        with urlopen(request, timeout=5) as response:
+        opener = build_opener(ProxyHandler({}), _NoRedirect())
+        with opener.open(request, timeout=5) as response:
             if response.status != 200:
                 raise HTTPException(status_code=502, detail="Portfolio backend returned an unexpected status")
             # Limit data read to 2 MB to avoid uncontrolled memory consumption.
             payload = response.read(2_000_001)
             if len(payload) > 2_000_000:
                 raise HTTPException(status_code=502, detail="Portfolio response exceeds size limit")
-    except (HTTPError, URLError, TimeoutError, OSError) as exc:
-        raise HTTPException(status_code=503, detail="Portfolio backend unavailable") from exc
+    except HTTPError as exc:
+        if exc.code in (401, 403):
+            raise HTTPException(status_code=exc.code, detail="Portfolio authentication required") from None
+        raise HTTPException(status_code=503, detail="Portfolio backend unavailable") from None
+    except (URLError, TimeoutError, OSError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Portfolio backend unavailable") from None
 
     try:
         import json
@@ -361,10 +370,11 @@ def _fetch_portfolio_holdings() -> list[PortfolioHolding]:
 
 @app.get("/api/v1/intelligence/portfolio/research")
 def portfolio_research(
+    http: FastAPIRequest,
     horizon: Literal["INTRADAY", "SWING", "SHORT_TERM", "LONG_TERM"] = Query(default="LONG_TERM"),
 ):
     """Aggregate saved holdings and research-readiness checks; no trade signals."""
-    holdings = _fetch_portfolio_holdings()
+    holdings = _fetch_portfolio_holdings(http)
     total_invested = Decimal("0")
     total_valued = Decimal("0")
     valued_positions = []
@@ -437,10 +447,10 @@ def portfolio_research(
 
 
 @app.get("/api/v1/intelligence/portfolio/stress-scenarios")
-def portfolio_stress_scenarios():
+def portfolio_stress_scenarios(http: FastAPIRequest):
     """Illustrative, uniform portfolio shocks; excludes unpriced holdings."""
     from .portfolio_scenarios import stress_portfolio
-    return stress_portfolio(_fetch_portfolio_holdings())
+    return stress_portfolio(_fetch_portfolio_holdings(http))
 
 
 @app.get("/api/v1/intelligence/screener/daily")
@@ -627,9 +637,9 @@ def ipo_provider_import_history():
 from .portfolio_allocation import PlanRequest,allocation_plan
 
 @app.post("/api/v1/intelligence/portfolio/allocation-plan")
-def portfolio_allocation_plan(request:PlanRequest):
+def portfolio_allocation_plan(request:PlanRequest,http:FastAPIRequest):
     """On-demand, read-only contribution planner using locally recorded holdings."""
-    return allocation_plan(_fetch_portfolio_holdings(),request)
+    return allocation_plan(_fetch_portfolio_holdings(http),request)
 
 from .goal_planning import GoalRequest,goal_projection
 
@@ -686,9 +696,9 @@ def planning_fee_impact(request:FeeRequest):
 from .portfolio_concentration import LimitsRequest,concentration_report
 
 @app.post("/api/v1/intelligence/portfolio/concentration")
-def portfolio_concentration(request:LimitsRequest):
+def portfolio_concentration(request:LimitsRequest,http:FastAPIRequest):
     """Read-only concentration report for locally recorded holdings."""
-    return concentration_report(_fetch_portfolio_holdings(),request)
+    return concentration_report(_fetch_portfolio_holdings(http),request)
 
 from .market_readiness import ReadinessPolicy,evaluate_readiness
 

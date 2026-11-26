@@ -4,7 +4,7 @@ import argparse
 import os
 import time
 import uuid
-from stack_contract_smoke import Browser, check
+from stack_contract_smoke import Browser, check, check_legacy_portfolio, legacy_portfolio_routes
 from local_research_acceptance import collect, SECTIONS
 
 SECURITY_HEADERS={
@@ -81,6 +81,7 @@ def run():
     review=gateway.request("/api/v1/portfolio/review",headers=headers)
     check(review["holding_count"]==1 and review["holdings"][0]["symbol"]=="CI_PROD","production portfolio review failed")
     check(review["opportunity_context"]["status"]!="UNAVAILABLE","production internal intelligence unavailable")
+    check_legacy_portfolio(gateway,"CI_PROD","160.00",headers=headers)
     deadline=time.monotonic()+120
     while True:
         snapshot=gateway.request("/intelligence/api/v1/intelligence/research/overview",headers=headers)
@@ -100,6 +101,8 @@ def run():
     gateway.request("/intelligence/api/v1/intelligence/notifications/summary",expected=401,headers=headers)
     gateway.request("/api/v1/research-workspace/notifications/summary",expected=401,headers=headers)
     gateway.request(journal,expected=401,headers=headers)
+    for path,method,body in legacy_portfolio_routes():
+        gateway.request(path,method,body,expected=401,headers=headers)
     print("PASS: production gateway, authorization, portfolio review, internal research, logout")
 
 if __name__=="__main__":

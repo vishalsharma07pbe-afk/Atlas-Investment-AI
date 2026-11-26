@@ -16,8 +16,8 @@ export default defineConfig({
     host:"0.0.0.0",
     port:5173,
     proxy:{
-      "/api":{target:"http://backend:8080",changeOrigin:false},
-      "/intelligence":{target:"http://intelligence:8000",changeOrigin:true,rewrite:path=>path.replace(/^\/intelligence/,"")}
+      "/api":{target:"http://backend:8080",changeOrigin:false,configure:proxy=>{proxy.on("proxyReq",req=>req.removeHeader("X-Atlas-Service-Token"));}},
+      "/intelligence":{target:"http://intelligence:8000",changeOrigin:true,rewrite:path=>path.replace(/^\/intelligence/,""),configure:proxy=>{proxy.on("proxyReq",req=>req.removeHeader("X-Atlas-Service-Token"));}}
     }
   }
 });

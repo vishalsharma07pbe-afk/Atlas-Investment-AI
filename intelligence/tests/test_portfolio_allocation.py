@@ -38,6 +38,6 @@ class AllocationTests(unittest.TestCase):
             PlanRequest(targets=[{"asset_type":"EQUITY","weight_percent":50},{"asset_type":"EQUITY","weight_percent":50}])
     def test_endpoint_uses_local_portfolio(self):
         with patch.object(main,"_fetch_portfolio_holdings",return_value=[holding(1,"EQUITY","1","100")]):
-            result=main.portfolio_allocation_plan(self.request())
+            result=main.portfolio_allocation_plan(self.request(),None)
         self.assertEqual(result["recorded_value"],"100.00")
 if __name__=="__main__":unittest.main()
