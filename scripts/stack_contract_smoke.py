@@ -17,7 +17,7 @@ class Browser:
         self.base=base
         self.opener=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
-    def request(self,path,method="GET",body=None,expected=200,headers=None):
+    def request(self,path,method="GET",body=None,expected=200,headers=None,required_headers=None,expect_json=True):
         request_headers={"Accept":"application/json","Origin":self.base,"Sec-Fetch-Site":"same-origin"}
         if body is not None:
             request_headers["Content-Type"]="application/json"
@@ -27,13 +27,18 @@ class Browser:
         try:
             with self.opener.open(req,timeout=15) as response:
                 code=response.status
+                response_headers=response.headers
                 raw=response.read(2_000_001)
         except urllib.error.HTTPError as error:
             code=error.code
+            response_headers=error.headers
             raw=b""
         check(code==expected,f"{method} {path}: expected {expected}, got {code}")
         check(len(raw)<=2_000_000,"response exceeds smoke limit")
-        return json.loads(raw) if raw and expected==200 else None
+        for name,value in (required_headers or {}).items():
+            # Never log request headers, tokens or response body.
+            check(value in response_headers.get_all(name,[]),f"{method} {path}: missing expected {name} header")
+        return json.loads(raw) if raw and expected==200 and expect_json else None
 
 def run(base):
     anonymous=Browser(base)

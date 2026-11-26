@@ -35,6 +35,16 @@ class P3SmokeTests(unittest.TestCase):
         self.assertIn("location = /_atlas_auth {", nginx)
         self.assertIn("proxy_pass http://backend:8080/api/v1/auth/me;", nginx)
 
+    def test_production_gateway_preserves_security_headers_and_strips_service_token(self):
+        nginx=(ROOT/"frontend/trading-dashboard/nginx.production.conf").read_text(encoding="utf-8")
+        for location in ("location /api/v1/live/ {","location /assets/ {","location / {"):
+            block=nginx.split(location,1)[1].split("}",1)[0]
+            for header in ("X-Content-Type-Options","X-Frame-Options","Referrer-Policy","Permissions-Policy","Content-Security-Policy"):
+                self.assertIn("add_header "+header+" ",block)
+        for location in ("location /api/v1/live/ {","location /api/ {","location /intelligence/ {","location = /_atlas_auth {"):
+            block=nginx.split(location,1)[1].split("}",1)[0]
+            self.assertIn('proxy_set_header X-Atlas-Service-Token "";',block)
+
     def test_remote_target_requires_explicit_operator_consent(self):
         with self.assertRaisesRegex(ValueError, "REMOTE_TARGET"):
             smoke.validate_base_url("https://example.com")
