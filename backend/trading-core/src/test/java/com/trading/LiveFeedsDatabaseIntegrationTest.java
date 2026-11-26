@@ -483,6 +483,36 @@ class LiveFeedsDatabaseIntegrationTest {
   verify(fundMock,times(1)).refresh();
  }
 
+ @Test
+ @org.springframework.transaction.annotation.Transactional
+ void exhaustedCatalogRetriesRecoverAtPersistedDeadlineWithoutNewBurst()throws Exception{
+  db.update("UPDATE public_feed_schedule SET status='IDLE',attempts=0,claim_id=NULL,lease_until=NULL,next_attempt_at=now(),error_code=NULL");
+  db.update("UPDATE public_feed_schedule SET status='FAILED',attempts=5,next_attempt_at=now()+interval '10 minutes',error_code='FEED_VALIDATION_OR_STORAGE_FAILED' WHERE provider='UPSTOX'");
+  var stockMock=mock(UpstoxFeedService.class);
+  var fundMock=mock(AmfiFeedService.class);
+  var scheduler=new FeedRefreshScheduler(db,stockMock,fundMock,mock(MarketCalendarService.class),
+    new org.springframework.transaction.support.TransactionTemplate(
+      new org.springframework.jdbc.datasource.DataSourceTransactionManager(Objects.requireNonNull(db.getDataSource()))));
+  org.springframework.test.util.ReflectionTestUtils.setField(scheduler,"enabled",true);
+  when(stockMock.syncMaster()).thenThrow(new FeedHttp.ProviderHttpException(429,7200)).thenReturn(3);
+  scheduler.retry();
+  verifyNoInteractions(stockMock,fundMock);
+  db.update("UPDATE public_feed_schedule SET next_attempt_at=now()-interval '1 second' WHERE provider='UPSTOX'");
+  scheduler.retry();
+  assertThat(db.queryForMap("SELECT status,attempts,error_code FROM public_feed_schedule WHERE provider='UPSTOX'"))
+    .containsEntry("status","FAILED").containsEntry("attempts",5).containsEntry("error_code","PROVIDER_RATE_LIMITED");
+  assertThat(db.queryForObject("SELECT next_attempt_at>=now()+interval '7199 seconds' FROM public_feed_schedule WHERE provider='UPSTOX'",Boolean.class)).isTrue();
+  scheduler.retry();
+  verify(stockMock,times(1)).syncMaster();
+  db.update("UPDATE public_feed_schedule SET next_attempt_at=now()-interval '1 second' WHERE provider='UPSTOX'");
+  scheduler.retry();
+  assertThat(db.queryForMap("SELECT status,attempts,error_code FROM public_feed_schedule WHERE provider='UPSTOX'"))
+    .containsEntry("status","SUCCESS").containsEntry("attempts",5).containsEntry("error_code",null);
+  scheduler.retry();
+  verify(stockMock,times(2)).syncMaster();
+  verifyNoInteractions(fundMock);
+ }
+
  @Test void providerHistoryDoesNotOverwriteAdjustedManualCandle()throws Exception{
   db.update("INSERT INTO instruments(exchange_id,symbol,series,source,isin,instrument_type) VALUES ((SELECT id FROM exchanges WHERE code='NSE'),'ADJUSTEDTEST','EQ','MANUAL_CSV','INE000A01003','EQ')");
   db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,instrument_type,isin) VALUES ('NSE_EQ|INE000A01003','NSE','ADJUSTEDTEST','EQ','INE000A01003')");

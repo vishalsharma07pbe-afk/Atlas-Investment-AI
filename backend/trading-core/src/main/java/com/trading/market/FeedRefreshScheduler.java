@@ -55,6 +55,8 @@ import org.springframework.transaction.support.TransactionTemplate;
     """,rs->{if(!rs.next())return null;java.sql.Date value=rs.getDate("latest");return value==null?null:value.toLocalDate();});
   if(latest==null||latest.isBefore(LocalDate.now(MarketCalendarService.IST).minusDays(3)))attempt("AMFI","NAV_AUTO",false);
  }
+ // Recover exhausted attempts at their persisted slower retry deadline too.
+ // Keeping the capped counter prevents a new burst after every failed probe.
  @Scheduled(fixedDelayString="${atlas.market.feeds.retry-poll-ms:60000}")
  public void retry(){
   if(!enabled)return;
@@ -68,13 +70,13 @@ import org.springframework.transaction.support.TransactionTemplate;
   Integer attempts=transactions.execute(tx->{
    var rows=jdbc.queryForList("""
      UPDATE public_feed_schedule SET
-       attempts=CASE WHEN status IN ('RUNNING','RETRY') THEN LEAST(attempts+1,5) ELSE 1 END,
+       attempts=CASE WHEN status IN ('RUNNING','RETRY','FAILED') THEN LEAST(attempts+1,5) ELSE 1 END,
        interruptions=interruptions+CASE WHEN status='RUNNING' THEN 1 ELSE 0 END,
        status='RUNNING',claim_id=?,last_attempt_at=now(),
        lease_until=now()+interval '30 minutes',next_attempt_at=now()+interval '30 minutes'
      WHERE provider=? AND next_attempt_at<=now()
        AND (status<>'RUNNING' OR lease_until<=now())
-       AND (NOT ? OR status IN ('RETRY','RUNNING'))
+       AND (NOT ? OR status IN ('RETRY','RUNNING','FAILED'))
      RETURNING attempts
      """,claim,provider,retryOnly);
    if(rows.isEmpty())return null;
