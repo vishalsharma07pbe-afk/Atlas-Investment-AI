@@ -359,6 +359,7 @@ def job_status():
     result=research_jobs.status(_connect,research_jobs.definitions(SECTIONS),current.timestamp())
     calendar_job=next(j for j in result["jobs"] if j["job"]=="CALENDAR_CONTEXT")
     result["calendar"]=research_calendar.read(_connect,current) if calendar_job["status"]=="PASS_COMPLETED" else {"status":"CALENDAR_UNAVAILABLE_OR_PENDING","sessions":[]}
+    result["company_acquisition"]=automatic_company_evidence.acquisition_status(read_market_snapshot(),_connect,current)
     return result
 
 

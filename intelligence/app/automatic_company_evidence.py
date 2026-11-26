@@ -22,6 +22,8 @@ from .corporate_action_normalization import normalize_reported_actions
 ISIN = re.compile(r"^IN[A-Z0-9]{10}$")
 HORIZONS = ("LONG_TERM", "SHORT_TERM", "SWING")
 SECTIONS = ("profile","ratios","income_statement","balance_sheet","cash_flow","shareholding","corporate_actions","competitors")
+NORMALIZATION_VERSION=2
+REFRESH_OUTCOMES=("NO_CANDIDATES","PROVIDER_COOLDOWN","NO_DUE_CANDIDATES","CLAIM_NOT_ACQUIRED","AVAILABLE","PARTIAL","UNAVAILABLE")
 
 
 def permitted():
@@ -196,15 +198,42 @@ def normalize(report, isin, instant):
                 f"/v2/fundamentals/NSE_EQ%7C{isin}/competitors",f"/v2/fundamentals/BSE_EQ%7C{isin}/competitors"):
                 sections[key]["attempted_endpoint"]=endpoint
     available=sum(s["status"]=="AVAILABLE" for s in sections.values())
-    return {"isin":isin,"retrieved_at":instant.isoformat(),"sections":sections,
+    return {"isin":isin,"retrieved_at":instant.isoformat(),"normalization_version":NORMALIZATION_VERSION,"sections":sections,
             "available_sections":available,"total_sections":len(SECTIONS),
             "notice":"Provider-reported evidence, not independently reconciled with filings. Ratio observation periods may be unspecified. Sector ratios are comparisons, not fair value."}
+
+
+def _legacy(row):
+    if not row or row["status"] not in ("AVAILABLE","PARTIAL") or not row["payload"]:
+        return False
+    try:
+        report=json.loads(row["payload"])
+        return report.get("isin")==row["isin"] and report.get("normalization_version")!=NORMALIZATION_VERSION
+    except (ValueError,TypeError,AttributeError,KeyError):
+        return False
+
+
+def _refresh_table(db):
+    db.execute("""CREATE TABLE IF NOT EXISTS automatic_company_refresh_state(
+        scope TEXT PRIMARY KEY, observed_at TEXT NOT NULL, outcome TEXT NOT NULL)""")
 
 
 def refresh(snapshot, connect, loader=company_research, instant=None, *, explicit_isins=None):
     if not snapshot["enabled"] or not permitted():
         return
     instant=instant or datetime.now(timezone.utc)
+    outcome=_refresh(snapshot,connect,loader,instant,explicit_isins=explicit_isins)
+    scope="FUND" if explicit_isins is not None else "STOCK"
+    with closing(connect()) as db,db:
+        _refresh_table(db)
+        db.execute("""INSERT INTO automatic_company_refresh_state VALUES(?,?,?)
+            ON CONFLICT(scope) DO UPDATE SET observed_at=excluded.observed_at,outcome=excluded.outcome
+            WHERE automatic_company_refresh_state.observed_at<=excluded.observed_at""",
+            (scope,instant.isoformat(),outcome))
+    return outcome
+
+
+def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None):
     stamp=instant.isoformat()
     candidates={}
     for item,isin in identify(snapshot):
@@ -221,19 +250,19 @@ def refresh(snapshot, connect, loader=company_research, instant=None, *, explici
             if isin not in sample or exchange=="NSE":
                 sample[isin]=exchange+"_EQ|"+isin
     if not candidates and not sample:
-        return
+        return "NO_CANDIDATES"
     with closing(connect()) as db, db:
         _table(db)
         rows={r["isin"]:r for r in db.execute("SELECT isin,attempted_at,next_attempt_at,status,payload FROM automatic_company_evidence")}
         # Avoid repeated requests across the universe when the provider rejects access.
         if any(r["status"]=="UNAVAILABLE" and r["attempted_at"]>(instant-timedelta(hours=1)).isoformat() for r in rows.values()):
-            return
+            return "PROVIDER_COOLDOWN"
         priority={isin:i for i,isin in enumerate(candidates)} if explicit_isins is not None else {}
         due=sorted((isin for isin in candidates if isin not in rows or rows[isin]["next_attempt_at"]<=stamp),
                    key=lambda isin:(rows[isin]["attempted_at"] if isin in rows else "",priority.get(isin,0),isin))
         if not due:
             if explicit_isins is not None:
-                return
+                return "NO_DUE_CANDIDATES"
             # A peer never displaces due primary company research; no additional
             # provider requests per pass, and no recursive peer expansion.
             peers=peer_candidates(rows,candidates,instant)
@@ -245,9 +274,10 @@ def refresh(snapshot, connect, loader=company_research, instant=None, *, explici
                 # Expand the existing one-company rotation only after due
                 # watches and their bounded peers. No new jobs or API budget.
                 due=sorted((i for i in sample if i not in rows or rows[i]["next_attempt_at"]<=stamp),
-                           key=lambda i:(rows[i]["attempted_at"] if i in rows else "",i))
+                           key=lambda i:(0 if _legacy(rows.get(i)) else 1,
+                                         rows[i]["attempted_at"] if i in rows else "",i))
                 if not due:
-                    return
+                    return "NO_DUE_CANDIDATES"
                 candidates.update(sample)
         isin=due[0]
         claim=db.execute("""INSERT INTO automatic_company_evidence VALUES(?,?,?,'RUNNING',NULL)
@@ -256,7 +286,7 @@ def refresh(snapshot, connect, loader=company_research, instant=None, *, explici
             WHERE automatic_company_evidence.next_attempt_at<=?""",
             (isin,stamp,(instant+timedelta(hours=6)).isoformat(),stamp))
         if claim.rowcount!=1:
-            return
+            return "CLAIM_NOT_ACQUIRED"
     try:
         report=normalize(loader(isin,candidates[isin]),isin,instant)
         status="AVAILABLE" if report["available_sections"]==len(SECTIONS) else "PARTIAL" if report["available_sections"] else "UNAVAILABLE"
@@ -269,6 +299,74 @@ def refresh(snapshot, connect, loader=company_research, instant=None, *, explici
             (status,json.dumps(report,allow_nan=False) if report and status!="UNAVAILABLE" else None,
              (instant+timedelta(hours=24 if status=="AVAILABLE" else 6)).isoformat(),isin,stamp))
         db.execute("DELETE FROM automatic_company_evidence WHERE attempted_at<?",((instant-timedelta(days=30)).isoformat(),))
+    return status
+
+
+def acquisition_status(snapshot,connect,instant):
+    """Aggregate local-only diagnostics. No requests, payloads or identifiers."""
+    if not snapshot.get("enabled") or not permitted():
+        return {"status":"DISABLED_OR_NOT_AUTHORIZED"}
+    import sqlite3
+    from collections import Counter
+    sample={isin for _,isin in identify_sample(snapshot,instant)}
+    primary={isin for _,isin in identify(snapshot)}
+    stamp=instant.isoformat()
+    try:
+        with closing(connect()) as db:
+            tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('automatic_company_evidence','automatic_company_refresh_state')")}
+            rows={r["isin"]:r for r in db.execute("SELECT * FROM automatic_company_evidence")} if "automatic_company_evidence" in tables else {}
+            outcomes={}
+            if "automatic_company_refresh_state" in tables:
+                for row in db.execute("SELECT * FROM automatic_company_refresh_state"):
+                    if row["scope"] in ("STOCK","FUND") and row["outcome"] in REFRESH_OUTCOMES:
+                        observed=datetime.fromisoformat(row["observed_at"])
+                        if observed.tzinfo is not None and observed<=instant:
+                            outcomes[row["scope"]]={"observed_at":observed.isoformat(),"outcome":row["outcome"]}
+        def due(isin):
+            return isin not in rows or rows[isin]["next_attempt_at"]<=stamp
+        counts=Counter()
+        sections=Counter()
+        detail=Counter()
+        for isin in sample:
+            row=rows.get(isin)
+            if not row:
+                counts["never_attempted"]+=1
+                continue
+            if row["status"] not in ("AVAILABLE","PARTIAL","UNAVAILABLE","RUNNING"):
+                counts["unknown_status"]+=1
+                continue
+            counts[row["status"].lower()]+=1
+            if _legacy(row):
+                counts["legacy_reports"]+=1
+                if due(isin):
+                    counts["due_legacy_reports"]+=1
+            if row["status"] not in ("AVAILABLE","PARTIAL") or not row["payload"]:
+                continue
+            try:
+                report=json.loads(row["payload"])
+                retrieved=datetime.fromisoformat(report["retrieved_at"])
+                if report.get("isin")!=isin or retrieved.tzinfo is None or not instant-timedelta(hours=24)<=retrieved<=instant:
+                    continue
+                counts["fresh_reports"]+=1
+                if report.get("normalization_version")==NORMALIZATION_VERSION:
+                    counts["fresh_current_normalization"]+=1
+                for key in SECTIONS:
+                    block=report["sections"].get(key) or {}
+                    if block.get("status")=="AVAILABLE" and block.get("data"):
+                        sections[key]+=1
+                        if key in ("income_statement","balance_sheet","cash_flow") and isinstance(block["data"],dict) and block["data"].get("detail_rows"):
+                            detail[key]+=1
+            except (ValueError,TypeError,AttributeError,KeyError,OverflowError):
+                continue
+        return {"status":"LOCAL_ACQUISITION_AUDIT","sample_identities":len(sample),
+                "primary_identities":len(primary),"due_sample":sum(due(i) for i in sample),
+                "due_primary":sum(due(i) for i in primary),"counts":dict(counts),
+                "fresh_sections":dict(sections),"fresh_detailed_statements":dict(detail),
+                "global_company_cooldown":any(r["status"]=="UNAVAILABLE" and r["attempted_at"]>(instant-timedelta(hours=1)).isoformat() for r in rows.values()),
+                "last_passes":outcomes,
+                "notice":"Latest bounded pass outcomes and validated sample coverage, not full market coverage. A completed scheduler pass may have made no request."}
+    except (OSError,sqlite3.Error,ValueError,TypeError,KeyError,AttributeError,OverflowError):
+        return {"status":"ACQUISITION_AUDIT_UNAVAILABLE"}
 
 
 def peer_candidates(rows,primary,instant):

@@ -225,3 +225,49 @@ class CompanyEvidenceTests(unittest.TestCase):
         self.assertEqual(sections["competitors"]["diagnostic"],"PROVIDER_REQUEST_REJECTED")
         self.assertIn("NSE_EQ%7C",sections["competitors"]["attempted_endpoint"])
         self.assertEqual(sections["income_statement"]["diagnostic"],"UNAVAILABLE_REASON_UNKNOWN")
+
+
+    def test_due_legacy_sample_refresh_precedes_unattempted_but_not_primary(self):
+        from contextlib import closing
+        import json
+        older="INE009A01021"
+        new="INE242A01010"
+        result=self.snapshot["sections"][0]["result"]
+        result["eligible_count"]=2
+        result["company_research_universe"]=[
+            {"id":1,"exchange":"NSE","isin":older,"as_of":"2026-11-23"},
+            {"id":2,"exchange":"NSE","isin":new,"as_of":"2026-11-23"}]
+        calls=[]
+        def loader(isin,key):
+            calls.append(isin)
+            return {"isin":isin,"sections":{"profile":{"status":"AVAILABLE","data":{"sector":"Example"}}}}
+        previous=self.now-timedelta(hours=7)
+        company.refresh({"enabled":True,"sections":[]},research._connect,loader,previous,explicit_isins=[older])
+        with closing(research._connect()) as db,db:
+            payload=json.loads(db.execute("SELECT payload FROM automatic_company_evidence WHERE isin=?",(older,)).fetchone()[0])
+            payload.pop("normalization_version")
+            db.execute("UPDATE automatic_company_evidence SET payload=? WHERE isin=?",(json.dumps(payload),older))
+        audit=company.acquisition_status(self.snapshot,research._connect,self.now)
+        self.assertEqual(audit["counts"]["due_legacy_reports"],1)
+        self.assertEqual(audit["last_passes"]["FUND"]["outcome"],"PARTIAL")
+        self.assertEqual(company.refresh(self.snapshot,research._connect,loader,self.now),"PARTIAL")
+        self.assertEqual(calls[-1],self.isin)
+        self.assertEqual(company.refresh(self.snapshot,research._connect,loader,self.now),"PARTIAL")
+        self.assertEqual(calls[-1],older)
+        self.assertEqual(company.refresh(self.snapshot,research._connect,loader,self.now),"PARTIAL")
+        self.assertEqual(calls[-1],new)
+        self.assertEqual(company.refresh(self.snapshot,research._connect,loader,self.now),"NO_DUE_CANDIDATES")
+        audit=company.acquisition_status(self.snapshot,research._connect,self.now)
+        self.assertEqual(audit["counts"]["fresh_current_normalization"],2)
+        self.assertEqual(audit["last_passes"]["STOCK"]["outcome"],"NO_DUE_CANDIDATES")
+        self.assertEqual(audit["due_sample"],0)
+        self.assertNotIn(older,str(audit))
+
+    def test_empty_and_cooldown_pass_outcomes_without_extra_provider_calls(self):
+        empty={"enabled":True,"sections":[]}
+        self.assertEqual(company.refresh(empty,research._connect,lambda *a:self.fail("unexpected call"),self.now),"NO_CANDIDATES")
+        self.assertEqual(company.refresh(self.snapshot,research._connect,lambda *a:{"isin":self.isin,"sections":{}},self.now),"UNAVAILABLE")
+        self.assertEqual(company.refresh(self.snapshot,research._connect,lambda *a:self.fail("cooldown bypass"),self.now+timedelta(minutes=1)),"PROVIDER_COOLDOWN")
+        audit=company.acquisition_status(self.snapshot,research._connect,self.now+timedelta(minutes=1))
+        self.assertTrue(audit["global_company_cooldown"])
+        self.assertEqual(audit["last_passes"]["STOCK"]["outcome"],"PROVIDER_COOLDOWN")
