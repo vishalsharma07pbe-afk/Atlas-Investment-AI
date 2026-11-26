@@ -3,8 +3,8 @@ import {useOverlayFocus} from "./useOverlayFocus";
 import NotificationSourceHealth from "./NotificationSourceHealth";
 import PersonalNotificationInbox from "./PersonalNotificationInbox";
 import {indiaDateToday,upcomingIpoEvents} from "./ipoCalendar";
-type Alert={id:string;revision_key?:string;freshness?:"STALE"|"RECENT"|"NOT_APPLICABLE";category:string;title:string;description:string;event_date:string|null;published_at:string;source_name:string;source_url:string|null;publication_basis?:string;subscription_total_x:string|null;subscription_as_of:string|null};
-type Summary={ids:string[];revision_keys?:string[];total:number;live_feed_connected:boolean};
+type Alert={id:string;revision_key?:string;freshness?:"STALE"|"RECENT"|"NOT_APPLICABLE";category:string;title:string;description:string;event_date:string|null;published_at:string;source_name:string;source_url:string|null;publication_basis?:string;research_state?:string|null;subscription_total_x:string|null;subscription_as_of:string|null};
+type Summary={ids:string[];revision_keys?:string[];total:number;live_feed_connected:boolean;research_history_status?:string};
 const BASE="/intelligence/api/v1/intelligence/notifications";
 const KEY="atlas:read-alert-ids";
 function savedIds():string[]{try{const v=JSON.parse(localStorage.getItem(KEY)||"[]");return Array.isArray(v)?v.filter(x=>typeof x==="string"):[];}catch{return [];}}
@@ -19,6 +19,7 @@ export default function NotificationCenter({includePersonal=false}:{includePerso
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState("");
   const [summaryError,setSummaryError]=useState(false);
+  const [historyUnavailable,setHistoryUnavailable]=useState(false);
   const [personalCount,setPersonalCount]=useState(0);
   const [personalError,setPersonalError]=useState(false);
   const [readRevision,setReadRevision]=useState(0);
@@ -33,7 +34,7 @@ export default function NotificationCenter({includePersonal=false}:{includePerso
         const response=await fetch(BASE+"/summary",{signal:controller.signal,cache:"no-store"});
         if(!response.ok)throw Error("Notification summary unavailable");
         const value=await response.json() as Summary;
-        if(!cancelled){setIds(value.revision_keys??value.ids);setSummaryError(false);}
+        if(!cancelled){setIds(value.revision_keys??value.ids);setSummaryError(false);setHistoryUnavailable(value.research_history_status==="UNAVAILABLE");}
       }catch{
         if(!cancelled)setSummaryError(true);
       }finally{inFlight=false;}
@@ -71,18 +72,20 @@ export default function NotificationCenter({includePersonal=false}:{includePerso
     try{
       const response=await fetch(BASE,{cache:"no-store"});
       if(!response.ok)throw Error("Notification details unavailable.");
-      const value:{alerts:Alert[]}=await response.json();
+      const value:{alerts:Alert[];research_history_status?:string}=await response.json();
+      setHistoryUnavailable(value.research_history_status==="UNAVAILABLE");
       setAlerts(value.alerts);
       const updated=[...new Set([...seen,...value.alerts.map(a=>a.revision_key??a.id)])].slice(-500);
-      setSeen(updated);localStorage.setItem(KEY,JSON.stringify(updated));
+      setSeen(updated);
       setIds(value.alerts.map(a=>a.revision_key??a.id));
+      try{localStorage.setItem(KEY,JSON.stringify(updated));}catch{/* Read state remains usable in memory when browser storage is blocked. */}
     }catch(e){setError(String(e));}finally{setLoading(false);}
   }
   return <div className="atlas-notifications">
     <button ref={triggerRef} className="atlas-bell" type="button" aria-haspopup="dialog" aria-label={`Notifications, ${count} unread`} aria-expanded={open} onClick={toggle}>
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
       {count>0&&<span className="atlas-notification-count">{count>99?"99+":count}</span>}
-      {(summaryError||personalError)&&<span className="atlas-notification-warning" title="Alert count unavailable">!</span>}
+      {(summaryError||personalError||historyUnavailable)&&<span className="atlas-notification-warning" title="Alert count unavailable">!</span>}
     </button>
     {open&&<><button type="button" tabIndex={-1} className="atlas-notification-backdrop" aria-label="Close notifications" onClick={()=>setOpen(false)}/>
       <section ref={panelRef} tabIndex={-1} className="atlas-notification-panel glass" role="dialog" aria-modal="true" aria-label="Notification center">
@@ -92,11 +95,14 @@ export default function NotificationCenter({includePersonal=false}:{includePerso
         {!loading&&!error&&alerts&&view==="ALL"&&<div className="atlas-notification-filters"><label htmlFor="notification-filter">Filter</label><select id="notification-filter" value={category} onChange={e=>setCategory(e.target.value)}><option value="ALL">All notifications</option><option value="IPO_UPCOMING">Upcoming IPOs</option><option value="IPO_SUBSCRIPTION">IPO subscriptions</option><option value="IPO_ALLOTMENT">IPO allotments</option><option value="MARKET_EVENT">Market events</option><option value="CORPORATE_ACTION">Corporate actions</option><option value="RESEARCH_UPDATE">Research updates</option><option value="RISK_WARNING">Risk warnings</option></select></div>}
         {loading&&<p role="status">Loading notifications…</p>}
         {error&&<p role="alert">{error}</p>}
+        {historyUnavailable&&<p role="status">Saved research alert history unavailable. Other available alerts are shown.</p>}
         {!loading&&!error&&alerts?.length===0&&<p className="muted tiny">No verified local alerts available. Live IPO and subscription feeds are not connected yet.</p>}
         {!loading&&!error&&view==="IPO_CALENDAR"&&upcoming.length===0&&<p className="muted tiny">No dated IPO events supplied for the next 30 days. This does not mean no IPOs are scheduled.</p>}
         {!loading&&!error&&(view==="IPO_CALENDAR"?upcoming:alerts?.filter(a=>category==="ALL"||a.category===category))?.map(a=><article className="atlas-notification-item" key={a.id}>
           <div className="atlas-notification-category">{a.category.replace(/_/g," ")}</div>
-          <strong>{a.title}</strong><p>{a.description}</p>
+          <strong>{a.title}</strong>
+          {a.research_state==="HISTORICAL_OBSERVATION"&&<small className="atlas-stale-label">Historical observation — not a current signal</small>}
+          <p>{a.description}</p>
           {a.event_date&&<small>Event: {a.event_date}</small>}
           {a.subscription_total_x!==null&&<p>Subscription: {a.subscription_total_x}× · As of {a.subscription_as_of??"unknown"} {a.freshness==="STALE"&&<strong className="atlas-stale-label">STALE SNAPSHOT — do not treat as live</strong>}</p>}
           <small>{a.publication_basis==="RESEARCH_SNAPSHOT"?"Research snapshot":"Published"} {new Date(a.published_at).toLocaleString("en-IN")} · {a.source_name}</small>

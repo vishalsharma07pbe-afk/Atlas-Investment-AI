@@ -67,3 +67,14 @@ it("shows local dated research alerts without inventing an external source link"
  expect(screen.getByText(/Local saved research/)).toBeTruthy();
  expect(screen.queryByRole("link",{name:"Source"})).toBeNull();
 });
+
+
+it("distinguishes retained historical research from current observations",async()=>{
+ const alert={id:"research-old",revision_key:"research-old",category:"RISK_WARNING",title:"Earlier market review",description:"Recorded risk observation.",event_date:"2026-11-25",published_at:"2026-11-26T03:00:00Z",publication_basis:"RESEARCH_SNAPSHOT",research_state:"HISTORICAL_OBSERVATION",source_name:"ATLAS local research",source_url:null,subscription_total_x:null,subscription_as_of:null};
+ vi.stubGlobal("fetch",vi.fn(async(url:string)=>({ok:true,json:async()=>url.endsWith("/summary")?{ids:[alert.id],total:1}:{alerts:[alert]}})));
+ render(<NotificationCenter/>);
+ await waitFor(()=>expect(screen.getByRole("button",{name:"Notifications, 1 unread"})).toBeTruthy());
+ fireEvent.click(screen.getByRole("button",{name:"Notifications, 1 unread"}));
+ expect(await screen.findByText("Earlier market review")).toBeTruthy();
+ expect(screen.getByText("Historical observation — not a current signal")).toBeTruthy();
+});

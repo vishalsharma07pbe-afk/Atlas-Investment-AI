@@ -300,6 +300,13 @@ def job_status():
 
 def _execute_job(job):
     """Dispatch existing bounded engines, with explicit evidence/config gates."""
+    if job=="PUBLIC_RESEARCH_ALERTS":
+        from . import public_alert_history
+        snapshot=read_snapshot(False)
+        if not snapshot["enabled"]:
+            return "DISABLED_OR_NOT_AUTHORIZED"
+        public_alert_history.refresh(_connect,snapshot,now())
+        return "PASS_COMPLETED"
     if job=="MARKET_REGIME":
         return "PASS_COMPLETED" if market_regime.refresh(_connect) else "WAITING_EVIDENCE"
     if job=="ECONOMIC_CALENDAR":
