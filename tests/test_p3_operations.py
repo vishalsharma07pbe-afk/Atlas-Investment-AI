@@ -77,6 +77,61 @@ class LocalAcceptanceTests(unittest.TestCase):
         self.assertEqual(acceptance.assess(r, o, p)["runtime"], "BLOCKED")
         self.assertEqual(acceptance.assess(r, o, p)["stored_provider_evidence"], "BLOCKED")
 
+    def workflow_fixture(self):
+        r,o,p=self.fixture()
+        r["research_jobs"]={"status":"PERSISTED_LOCAL_JOB_LEDGER","jobs":[{"job":"PUBLIC_RESEARCH_ALERTS","status":"PENDING"}]}
+        for row in o["sections"]:
+            if row["section"] in ("NSE","BSE"):
+                row["result"]["horizons"]={h:{"candidates":[]} for h in acceptance.DAILY_HORIZONS}
+            else:
+                row["result"].update(top_performers=[],growth_outlook=[])
+        reports={h:{"selection":{"watch_refs":[]},"qualified_count":0,"recommendations":[]} for h in acceptance.DAILY_HORIZONS}
+        reports["INTRADAY"]={"status":"SEPARATE_INTRADAY_WORKFLOW"}
+        o["stock_qualification"]={"horizons":reports}
+        o["daily_briefing"]={"status":"CURRENT_SECTIONS","ready_sections":len(acceptance.SECTIONS),"total_sections":len(acceptance.SECTIONS),
+            "pending_sections":[],"funds":{"ready_categories":len(acceptance.SECTIONS)-2},
+            "decision_context":{"review_company_count":0,"review_companies":[],
+                "horizons":{h:{"selected_watches":[],"qualified_count":0} for h in acceptance.DAILY_HORIZONS}}}
+        p["portfolio_level_risk"]={"attention":[]}
+        n={"ids":[],"revision_keys":[],"total":0,"research_history_status":"AVAILABLE","live_feed_connected":False}
+        return r,o,p,n
+
+    def test_current_workflow_contract_does_not_certify_investments(self):
+        r,o,p,n=self.workflow_fixture()
+        result=acceptance.assess_workflows(r,o,p,n)
+        self.assertEqual(result["workflow_runtime"],"PASS")
+        self.assertEqual(result["investment_qualification"],"NOT_CERTIFIED")
+        self.assertNotIn("PRIVATE_MARKER",str(result))
+        n["research_history_status"]="UNAVAILABLE"
+        self.assertEqual(acceptance.assess_workflows(r,o,p,n)["workflow_runtime"],"BLOCKED")
+
+    def test_canonical_report_identity_mismatch_and_duplicate_revisions_block(self):
+        r,o,p,n=self.workflow_fixture()
+        ref={"exchange":"NSE","id":1,"isin":"INE009A01021"}
+        selected=o["stock_qualification"]["horizons"]["SWING"]["selection"]["watch_refs"]
+        selected.append(ref)
+        row={**ref,"as_of":"2026-11-25","stock_qualification":{"status":"WITHHELD_EVIDENCE_GAPS","blockers":["SOURCE_REQUIRED"]}}
+        next(x for x in o["sections"] if x["section"]=="NSE")["result"]["horizons"]["SWING"]["candidates"].append(row)
+        displayed=o["daily_briefing"]["decision_context"]["horizons"]["SWING"]["selected_watches"]
+        displayed.append({**ref,"as_of":row["as_of"]})
+        self.assertEqual(acceptance.assess_workflows(r,o,p,n)["workflow_runtime"],"PASS")
+        displayed[0]["exchange"]="BSE"
+        self.assertEqual(acceptance.assess_workflows(r,o,p,n)["checks"]["canonical_stock_report_contract"],"BLOCKED")
+        n.update(ids=["a","b"],revision_keys=["same","same"],total=2)
+        self.assertEqual(acceptance.assess_workflows(r,o,p,n)["checks"]["notification_summary_contract"],"BLOCKED")
+
+    def test_collection_uses_existing_read_routes_and_fails_closed(self):
+        r,o,p,n=self.workflow_fixture()
+        values={"/intelligence/api/v1/intelligence/data-readiness":r,
+                "/intelligence/api/v1/intelligence/research/overview":o,
+                "/api/v1/portfolio/review":p,
+                "/intelligence/api/v1/intelligence/notifications/summary":n}
+        result=acceptance.collect(values.__getitem__)
+        self.assertEqual(result["runtime"],"PASS")
+        self.assertEqual(result["investment_qualification"],"NOT_CERTIFIED")
+        del o["daily_briefing"]
+        self.assertEqual(acceptance.collect(values.__getitem__)["runtime"],"BLOCKED")
+
     def test_remote_gateway_rejected_before_network_request(self):
         with self.assertRaisesRegex(ValueError, "LOOPBACK"):
             acceptance.LocalSession("https://example.com")

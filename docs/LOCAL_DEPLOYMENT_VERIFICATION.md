@@ -22,11 +22,13 @@ python3 scripts/local_research_acceptance.py
 
 For the production loopback gateway, use `--base-url http://127.0.0.1:8088`. Provide your local ATLAS login when prompted; this is not your Upstox password or token. The password is not echoed, no credential is saved, and the separate acceptance session is revoked on completion. The tool uses only fixed loopback URLs, disables environment proxies and redirects, and prints status labels without account information or portfolio values.
 
-- **runtime:** all seven automatic research sections processed, portfolio review contract, scheduler enabled, and research-only mode.
+- **runtime:** all twelve automatic research sections processed, portfolio review contract, scheduler enabled, research-only mode and current workflow checks.
+- **workflow_runtime:** current daily briefing coverage, exact canonical stock report linkage (up to five per daily horizon), strict fund result contract, portfolio-level risk, public notification revision metadata and registered durable alert job. An empty but valid research result can pass the contract; unavailable history or mismatched report identity blocks it.
+- **investment_qualification:** NOT_CERTIFIED for this release. A successful contract check does not certify investment picks or validate execution, strategy, valuation or suitability.
 - **stored_provider_evidence:** recent Upstox registry, validated daily history, official AMFI NAV, operator rights declarations, eligible equity history and historical fund evidence. Empty or stale data cannot pass.
 - **live_feed:** OBSERVED only when the readiness endpoint reports a fresh authorized tick. A closed market can legitimately report NOT_OBSERVED. Add `--require-live` during a known live trading session if this is an acceptance requirement.
 
-Exit code zero requires runtime and stored-provider checks to pass; `--require-live` additionally requires a fresh tick. A blocked result is diagnostic, not permission to enable provider rights without approval. A zero exit code does not establish data coverage for every instrument, provider SLA, legal authorization, verified model accuracy or suitability for trading. CI tests the same evaluator on deliberately empty provider evidence; actual provider access must be checked on the operator's device. No provider request, forced refresh, portfolio mutation or order is initiated by this command.
+Exit code zero requires runtime and stored-provider checks to pass; `--require-live` additionally requires a fresh tick. A blocked result is diagnostic, not permission to enable provider rights without approval. A zero exit code does not establish data coverage for every instrument, provider SLA, legal authorization, verified model accuracy or suitability for trading. CI tests the same evaluator and current read contracts on deliberately empty provider evidence; actual provider access must be checked on the operator's device. No provider request, forced refresh, portfolio mutation or order is initiated by this command.
 
 ## Independent tests
 
