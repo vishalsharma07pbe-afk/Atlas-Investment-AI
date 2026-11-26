@@ -188,13 +188,16 @@ def _published_evidence_current(section, result, today):
     return True
 
 
-def read_snapshot(include_ai=True):
-    enabled, interval = config()
-    current = now()
+def _read_sections(section_names,enabled,interval,current):
+    # All callers use the identical observation-date and section-state gates.
+    # Filter in SQLite before materializing payloads, not after JSON decoding.
+    placeholders=",".join("?" for _ in section_names)
     with closing(_connect()) as db:
-        records = {row["section"]: row for row in db.execute("SELECT * FROM research_sections")}
+        records = {row["section"]: row for row in db.execute(
+            "SELECT * FROM research_sections WHERE section IN ("+placeholders+")",section_names)}
     sections = []
-    for section in SECTIONS:
+    today=current.astimezone(ZoneInfo("Asia/Kolkata")).date()
+    for section in section_names:
         row = records.get(section)
         if row is None:
             sections.append({"section": section, "status": "PENDING" if enabled else "DISABLED",
@@ -211,7 +214,7 @@ def read_snapshot(include_ai=True):
             if status == "READY":
                 if result is None:
                     raise ValueError("MISSING_SNAPSHOT")
-                if not _published_evidence_current(section, result, current.astimezone(ZoneInfo("Asia/Kolkata")).date()):
+                if not _published_evidence_current(section, result, today):
                     status = "STALE"
                     error_code = "UNDERLYING_OBSERVATION_STALE"
         except (ValueError, TypeError, KeyError, AttributeError, OverflowError):
@@ -221,10 +224,22 @@ def read_snapshot(include_ai=True):
         sections.append({"section": section, "status": status,
                          "generated_at": row["generated_at"], "attempted_at": row["attempted_at"],
                          "result": result, "error_code": error_code})
-    snapshot = {"enabled": enabled, "interval_seconds": interval, "sections": sections,
+    return {"enabled": enabled, "interval_seconds": interval, "sections": sections,
             "scope": "PUBLIC_MARKET_RESEARCH_ONLY",
-            "research_date":current.astimezone(ZoneInfo("Asia/Kolkata")).date().isoformat(),
+            "research_date":today.isoformat(),
             "notice": "Snapshot time is not the underlying observation time. Missing evidence never becomes a recommendation."}
+
+
+def read_market_snapshot():
+    """Internal lightweight read for equity-only consumers; no fund payloads or enrichment."""
+    enabled,interval=config()
+    return _read_sections(("NSE","BSE"),enabled,interval,now())
+
+
+def read_snapshot(include_ai=True):
+    enabled,interval=config()
+    current=now()
+    snapshot=_read_sections(SECTIONS,enabled,interval,current)
     if include_ai:
         try:
             snapshot["strategy_validation"] = automatic_strategy_validation.read(_connect,current,snapshot=snapshot) if enabled else {"status":"DISABLED"}
@@ -302,7 +317,7 @@ def _execute_job(job):
     """Dispatch existing bounded engines, with explicit evidence/config gates."""
     if job=="PUBLIC_RESEARCH_ALERTS":
         from . import public_alert_history
-        snapshot=read_snapshot(False)
+        snapshot=read_market_snapshot()
         if not snapshot["enabled"]:
             return "DISABLED_OR_NOT_AUTHORIZED"
         public_alert_history.refresh(_connect,snapshot,now())
@@ -389,7 +404,9 @@ def _execute_job(job):
         return "DISABLED_OR_NOT_AUTHORIZED"
     if job=="AI_REVIEW" and (not automatic_ai_review.enabled() or not automatic_ai_review.providers()):
         return "DISABLED_OR_NOT_AUTHORIZED"
-    snapshot=read_snapshot(job=="AI_REVIEW")
+    # AI review intentionally uses the complete enriched snapshot. All other
+    # consumers below operate exclusively on NSE/BSE sections.
+    snapshot=read_snapshot() if job=="AI_REVIEW" else read_market_snapshot()
     if not snapshot["enabled"]:
         return "DISABLED_OR_NOT_AUTHORIZED"
     # Previously published mature watches still need outcome evaluation even
