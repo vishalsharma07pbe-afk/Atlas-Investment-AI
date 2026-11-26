@@ -220,7 +220,9 @@ def matched(disclosures,instant=None,*,include_exact_weights=False):
     result=[]
     try:
         with nav_catalog._LOCK,closing(nav_catalog._connect()) as db:
-            for item in disclosures[:5]:
+            for item in disclosures[:40]:
+                if len(result)>=5:
+                    break
                 fund=item.get("fund_id")
                 if not fund:
                     continue

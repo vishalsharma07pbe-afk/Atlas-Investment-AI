@@ -166,14 +166,18 @@ def refresh():
     return store(bytes(payload),stamp.astimezone(IST).date(),stamp.isoformat())
 
 
-def matched(rows,today):
+def matched(rows,today,*,limit=5):
+    # Preserve the existing display cap by default; internal research may
+    # explicitly request the entire bounded category sample.
+    if type(limit) is not int or not 1<=limit<=40:
+        raise ValueError("INVALID_DISCLOSURE_MATCH_LIMIT")
     if not permitted() or not rows:
         return []
     output=[]
     try:
         with nav_catalog._LOCK,closing(nav_catalog._connect()) as db:
             for row in rows[:40]:
-                if len(output)>=5:break
+                if len(output)>=limit:break
                 code=row.get("scheme_code")
                 if type(code) is not int:
                     continue

@@ -101,6 +101,8 @@ class RecommendationEngineTests(unittest.TestCase):
         self.assertEqual(report["historical"]["returns_3y"],16)
         self.assertEqual(report["historical"]["sources"],["AMFI","MFAPI"])
         self.assertTrue(report["secondary_disclosure_available"])
+        self.assertEqual(report["secondary_disclosure"]["ter_percent"],0.1)
+        self.assertEqual(report["secondary_disclosure"]["status"],"SECONDARY_REPORTED_NOT_INDEPENDENTLY_VERIFIED")
         self.assertFalse(report["secondary_portfolio_available"])
         self.assertEqual(report["top_performer"]["status"],"WITHHELD")
         self.assertIn("EXPENSE_RATIO",report["top_performer"]["missing"])
@@ -171,6 +173,19 @@ class RecommendationEngineTests(unittest.TestCase):
             self.assertEqual(json.loads(stored[0][0])["research_reports"],first["research_reports"])
         finally:
             db.close()
+
+    def test_reports_include_secondary_context_beyond_display_five(self):
+        funds=[strong(identifier=str(123450+i),expense_ratio=None,riskometer=None,riskometer_date=None)
+               for i in range(8)]
+        ranked=rank_candidates(funds,"LARGE_CAP",84,"HIGH")
+        disclosed=[{"scheme_code":fund.identifier,"ter_percent":0.7,"riskometer":"HIGH"} for fund in funds]
+        reports=_research_reports(funds,ranked,[],disclosed,[])
+        self.assertEqual(len(reports),8)
+        self.assertTrue(all(r["secondary_disclosure_available"] for r in reports))
+        self.assertTrue(all(r["secondary_disclosure"]["ter_percent"]==0.7 for r in reports))
+        self.assertTrue(all("EXPENSE_RATIO" in r["top_performer"]["missing"] for r in reports))
+        self.assertTrue(all(r["top_performer"]["status"]=="WITHHELD" for r in reports))
+        self.assertEqual(ranked["top_performers"],[])
 
     def test_ties_are_reproducible_by_stable_identifier(self):
         result=rank_candidates([strong(identifier="B"),strong(identifier="A")],"LARGE_CAP",84,"HIGH")

@@ -78,6 +78,19 @@ class FundDisclosuresTests(unittest.TestCase):
             self.assertEqual(disclosures.matched([{**identity,**changed}],TODAY),[])
         self.assertEqual(disclosures.matched([identity],date(2026,11,29)),[])
 
+    def test_full_sample_matching_preserves_default_cap_and_identity(self):
+        fixtures=[row(scheme_code=str(118955+i)) for i in range(8)]
+        self.assertEqual(disclosures.store(payload(*fixtures),TODAY,STAMP),8)
+        identities=[{"scheme_code":118955+i,"scheme_name":"Example Fund",
+                     "isin_growth":"INF179K01BB2","amfi_plan":"DIRECT","amfi_option":"GROWTH",
+                     "category":"Open Ended Schemes(Equity Scheme - Large Cap Fund)"} for i in range(8)]
+        self.assertEqual(len(disclosures.matched(identities,TODAY)),5)
+        self.assertEqual(len(disclosures.matched(identities,TODAY,limit=40)),8)
+        identities[-1]["isin_growth"]="INF179K01BB3"
+        self.assertEqual(len(disclosures.matched(identities,TODAY,limit=40)),7)
+        with self.assertRaisesRegex(ValueError,"INVALID_DISCLOSURE_MATCH_LIMIT"):
+            disclosures.matched(identities,TODAY,limit=41)
+
     def test_requires_explicit_permission(self):
         with patch.dict("os.environ",{"MARKET_DATA_USAGE_RIGHTS_CONFIRMED":"false"}), \
              patch.object(disclosures.httpx,"Client") as client:
