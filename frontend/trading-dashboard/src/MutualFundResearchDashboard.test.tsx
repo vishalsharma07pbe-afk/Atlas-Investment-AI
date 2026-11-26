@@ -121,3 +121,25 @@ it("opens an individual scheme report and preserves missing-evidence decisions",
  expect(screen.getByText("No current matched secondary disclosure in this bounded snapshot.")).toBeTruthy();
  expect(screen.getAllByText("No fund currently qualifies")).toHaveLength(2);
 });
+
+
+it("uses the exact per-report disclosure beyond the five-item display and preserves withheld decisions",async()=>{
+ const common={status:"SECONDARY_REPORTED_NOT_INDEPENDENTLY_VERIFIED",source:"TIGZIG_AMFI_DERIVED",source_url:"https://api.tigzig.com/mf/v1/download/scheme_details_latest.csv.gz",collected_at:"2026-11-25T04:00:00Z",aum_date:"2026-11-24",aum_cr_all_plans:3500,benchmark:"Nifty 100 TRI",riskometer:"VERY_HIGH",ter_date:"2026-11-24",ter_percent:0.7,document_date:"2026-10-01",fund_managers:"Exact Sixth Fund Manager",exit_load:"1% within one year",conflicts:[]};
+ const base={category:"LARGE_CAP",plan:"DIRECT",option:"GROWTH",nav:"100",nav_date:"2026-11-24",nav_age_days:1,historical:{sources:["AMFI","MFAPI"],returns_1y:12,returns_3y:14,sample_peer_percentile:80,worst_rolling_return:-8,max_drawdown:-17,volatility:13},secondary_disclosure_available:true,secondary_portfolio_available:false,top_performer:{status:"WITHHELD",missing:["EXPENSE_RATIO"],published_rank:null},growth_outlook:{status:"WITHHELD",missing:["OFFICIAL_RISKOMETER"],published_rank:null},suitability:{status:"POTENTIALLY_SUITABLE",flags:[]},conclusion:"Neither list qualifies.",reassessment:"Await official evidence."};
+ const displayed=Array.from({length:5},(_,i)=>({...common,scheme_code:String(123450+i),scheme_name:"Displayed Fund "+i,plan:"DIRECT",base_expense_percent:0.5,fund_managers:"Other Manager "+i}));
+ const reports=[{...base,identifier:"123455",name:"Sixth Fund",secondary_disclosure:common},{...base,identifier:"123450",name:"Legacy Fund"},{...base,identifier:"123451",name:"Explicitly Missing Fund",secondary_disclosure:null}];
+ const result={...response,coverage:{...response.coverage,secondary_disclosure_matches:6,secondary_disclosure_displayed:5},disclosure_evidence:{status:"SECONDARY_REPORTED",notice:"Not independently verified.",items:displayed},research_reports:reports};
+ vi.stubGlobal("fetch",vi.fn(async(url:string)=>({ok:true,json:async()=>url.includes("historical-watch")?{category:"LARGE_CAP",items:[],universe_count:12,sample_count:10,eligible_count:6,automatic_collection_enabled:true,notice:"Historical only"}:result})));
+ render(<MutualFundResearchDashboard onExplore={()=>{}}/>);
+ await screen.findByText("Individual fund research reports (3)");
+ expect(screen.getByText(/6 exact secondary matches in the evaluated sample/)).toBeTruthy();
+ fireEvent.change(screen.getByLabelText("Research report"),{target:{value:"123455"}});
+ expect(screen.getByText("Exact Sixth Fund Manager · 2026-10-01")).toBeTruthy();
+ expect(screen.getByText("0.70% · 2026-11-24")).toBeTruthy();
+ expect(screen.getByText("Top Performer: Withheld")).toBeTruthy();
+ expect(screen.getAllByText("No fund currently qualifies")).toHaveLength(2);
+ fireEvent.change(screen.getByLabelText("Research report"),{target:{value:"123450"}});
+ expect(screen.getAllByText("Other Manager 0 · 2026-10-01",{selector:"dd"})).toHaveLength(2);
+ fireEvent.change(screen.getByLabelText("Research report"),{target:{value:"123451"}});
+ expect(screen.getByText("No current matched secondary disclosure in this bounded snapshot.")).toBeTruthy();
+});
