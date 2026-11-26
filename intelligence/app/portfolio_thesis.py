@@ -8,14 +8,15 @@ from datetime import datetime,timedelta,timezone
 from hashlib import sha256
 from pathlib import Path
 import json
+from math import isfinite
 import os
 import sqlite3
 
-from . import automatic_company_evidence as company, automatic_news as news, ai_failover
-from .automatic_ai_review import UNSAFE
+from . import automatic_company_evidence as company, automatic_news as news, ai_failover, ai_claims
 from .market_client import backend_json
 
-NOTICE="Unverified local-model commentary on public evidence, not an investment verdict."
+NOTICE="Local model assertions checked against supplied public observations only; not independent source verification or an investment verdict."
+REVIEW_VERSION="PRIVATE-SCALAR-2"
 RATIOS={"p/e":"PE","pe":"PE","price to earnings":"PE","p/b":"PB","price to book":"PB",
         "roe":"ROE","return on equity":"ROE","roce":"ROCE","return on capital employed":"ROCE",
         "debt to equity":"DEBT_EQUITY","debt/equity":"DEBT_EQUITY"}
@@ -66,29 +67,53 @@ def _local_enabled():
 
 
 def _pack(item):
+    """Typed, bounded evidence only; no identity or arbitrary provider prose."""
     report=item.get("company_evidence")
-    if not report:
+    if not isinstance(report,dict) or report.get("isin")!=item.get("isin"):
         return None
-    ratios={}
-    for row in report["sections"]["ratios"]["data"] or []:
+    block=(report.get("sections") or {}).get("ratios") or {}
+    rows=block.get("data")
+    if block.get("status")!="AVAILABLE" or not isinstance(rows,list):
+        return None
+    grouped={}
+    for row in rows[:50]:
+        if not isinstance(row,dict) or not isinstance(row.get("name"),str):
+            continue
         key=RATIOS.get(row["name"].strip().lower())
         if key:
-            ratios[key]={"company":row["company_value"],"sector":row["sector_value"],"unit":row["unit"]}
+            grouped.setdefault(key,[]).append(row)
+    ratios={}
+    for key,entries in sorted(grouped.items()):
+        if len(entries)!=1:
+            continue
+        row=entries[0]
+        unit="PERCENT" if key in ("ROE","ROCE") else "RATIO"
+        a,b=row.get("company_value"),row.get("sector_value")
+        if row.get("unit")!=unit or row.get("sector_unit")!=unit:
+            continue
+        if not all(type(v) in (int,float) and isfinite(v) and abs(v)<=1e9 for v in (a,b)):
+            continue
+        if unit=="RATIO" and min(a,b)<=0:
+            continue
+        ratios[key]={"company":a,"sector":b,"unit":unit}
     if not ratios:
         return None
     topics={}
-    for article in (item.get("news_evidence") or {}).get("articles",[]):
-        for topic in article["topics"]:
-            if topic in news.TOPICS:
+    articles=(item.get("news_evidence") or {}).get("articles",[])
+    for article in articles[:10] if isinstance(articles,list) else []:
+        if not isinstance(article,dict) or not isinstance(article.get("topics"),list):
+            continue
+        for topic in news.TOPICS:
+            if topic in article["topics"]:
                 topics[topic]=topics.get(topic,0)+1
-    return {"RATIOS":ratios,"NEWS_TOPICS":topics,
+    return {"RATIOS":ratios,"NEWS":topics,
         "LIMITS":["Provider report periods may be unspecified","News topics are not confirmed events or sentiment",
                   "No independent filing, intrinsic value, execution, or strategy validation"]}
 
 
 def _identity(pack):
     # Changing the model or supplied numeric evidence requires a new review.
-    return sha256(json.dumps({"pack":pack,"model":os.getenv("ATLAS_OLLAMA_MODEL","llama3.2")},sort_keys=True,allow_nan=False).encode()).hexdigest()
+    return sha256(json.dumps({"version":REVIEW_VERSION,"pack":pack,"model":os.getenv("ATLAS_OLLAMA_MODEL","llama3.2")},sort_keys=True,allow_nan=False).encode()).hexdigest()
 
 
 def _review(items,db_connect,runner,instant):
@@ -108,21 +133,19 @@ def _review(items,db_connect,runner,instant):
                 continue
         clean=[]
         try:
-            prompt=("Review ONLY public numeric ratios and unverified news-topic counts. "
-                    "Describe risks and missing evidence. Do not infer holdings, give trade actions, "
-                    "price targets, predictions or probabilities. Cite RATIOS, NEWS_TOPICS or LIMITS. "
-                    "Return required JSON.\n"+json.dumps(pack,allow_nan=False))
+            prompt=("Review ONLY supplied public numeric ratios, news-topic counts and evidence limitations. "
+                    "Return 1 to 8 findings with statement containing a JSON object encoded as a string "
+                    'with exactly path and value, e.g. {"path":"/RATIOS/PE/company","value":20}. '
+                    "Use an exact scalar at an existing path; evidence_ids must contain exactly the top-level domain. "
+                    "No prose, private inference, predictions, new calculations or trade actions. "
+                    "News topics are not confirmed events; ratio periods may be unspecified.\n"
+                    +json.dumps(pack,allow_nan=False,ensure_ascii=True))
             result=runner(prompt,list(pack),providers=["OLLAMA"])
             if result.get("status")=="MODEL_GROUNDED" and result.get("provider")=="OLLAMA":
                 findings=result["response"]["findings"]
                 if isinstance(findings,list) and 1<=len(findings)<=8:
-                    for f in findings:
-                        statement,citations=f["statement"],f["evidence_ids"]
-                        if (not isinstance(statement,str) or not 1<=len(statement)<=500 or UNSAFE.search(statement)
-                                or ai_failover.BLOCKED.search(statement) or not isinstance(citations,list)
-                                or not 1<=len(citations)<=5 or any(c not in pack for c in citations)):
-                            raise ValueError("INVALID_FINDING")
-                        clean.append({"statement":statement,"evidence_ids":citations})
+                    audit=ai_claims.audit(pack,findings)
+                    clean=audit["findings"]
         except Exception:
             clean=[]
         with closing(db_connect()) as db,db:
@@ -155,6 +178,14 @@ def refresh(db_connect=connect,loader=backend_json,runner=ai_failover.grounded_r
         for row in records.values():
             if row["isin"] not in retained:
                 db.execute("DELETE FROM automatic_company_evidence WHERE isin=?",(row["isin"],))
+        for row in db.execute("SELECT isin FROM automatic_company_annual_archive").fetchall():
+            if row["isin"] not in retained:
+                db.execute("DELETE FROM automatic_company_annual_archive WHERE isin=?",(row["isin"],))
+        _table(db)
+        # Always expire old model records, even when no pack can be reviewed.
+        db.execute("DELETE FROM portfolio_local_ai WHERE attempted_at<?",((instant-timedelta(days=7)).isoformat(),))
+        if not active_isins:
+            db.execute("DELETE FROM portfolio_local_ai")
         for row in db.execute("SELECT instrument_key FROM automatic_news_state").fetchall():
             if row["instrument_key"] not in active_keys:
                 db.execute("DELETE FROM automatic_news_state WHERE instrument_key=?",(row["instrument_key"],))
