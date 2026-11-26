@@ -4,7 +4,8 @@ A diagnostic read model, not a certified adjusted series. No storage mutation,
 dividend reinvestment, point-in-time replay, or recommendation eligibility.
 """
 import json
-from datetime import date
+from datetime import date,datetime,timedelta
+from zoneinfo import ZoneInfo
 from decimal import Decimal, InvalidOperation, localcontext
 import re
 from math import isfinite
@@ -80,3 +81,74 @@ def preview(candles,instrument):
                     "notice":"Known split/bonus records only. Price change, not total return. Completeness, source rights and point-in-time history are not verified. Excluded from rankings and strategy validation."}
     except (ValueError,TypeError,KeyError,AttributeError,InvalidOperation,OverflowError,ZeroDivisionError):
         return blocked
+
+
+# Provider-reported corporate actions are a separate source of review evidence,
+# never proof that a historical candle is adjusted or that the ledger is complete.
+_ACTION_TYPES={"dividend":"DIVIDEND","bonus":"BONUS","split":"SPLIT","rights":"RIGHTS"}
+
+def _reported_day(value):
+    if not isinstance(value,str) or len(value)>20:
+        return None
+    try:
+        if re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}",value):
+            return date.fromisoformat(value).isoformat()
+        match=re.fullmatch(r"([0-9]{1,2}) ([A-Za-z]{3}) ([0-9]{4})",value)
+        if match:
+            months="jan feb mar apr may jun jul aug sep oct nov dec".split()
+            return date(int(match[3]),months.index(match[2].lower())+1,int(match[1])).isoformat()
+    except ValueError:
+        pass
+    return None
+
+
+def normalize_reported_actions(raw):
+    rows=[]
+    for row in raw[:100]:
+        if not isinstance(row,dict) or not isinstance(row.get("name"),str):
+            continue
+        name=row["name"].strip()[:180]
+        day=_reported_day(row.get("expiry_date"))
+        if not name or not day:
+            continue
+        kind=_ACTION_TYPES.get(name.casefold(),"OTHER")
+        ratio=row.get("ratio")
+        ratio=ratio if isinstance(ratio,str) and re.fullmatch(r"[0-9]{1,9}:[0-9]{1,9}",ratio) else None
+        amount=row.get("amount")
+        amount=amount if type(amount) in (int,float) and isfinite(amount) and 0<=amount<=1_000_000 else None
+        details=[]
+        for detail in row.get("event_details",[])[:20] if isinstance(row.get("event_details"),list) else []:
+            if isinstance(detail,dict) and isinstance(detail.get("name"),str) and isinstance(detail.get("value"),str):
+                details.append({"name":detail["name"][:180],"value":detail["value"][:300]})
+        rows.append({"name":name,"date":day,"expiry_date":day,"action_type":kind,
+                     "amount":amount,"reported_ratio":ratio,"ratio_basis":"UNVERIFIED",
+                     "event_details":details,"adjustment_eligible":False})
+    return rows
+
+
+def reported_crossings(report,isin,first,last,instant):
+    """Only positive reported crossing evidence; absence is not completeness."""
+    if not isinstance(report,dict) or report.get("isin")!=isin or not isinstance(isin,str) or not re.fullmatch(r"INE[A-Z0-9]{9}",isin):
+        return []
+    try:
+        block=report["sections"]["corporate_actions"]
+        source=block["source"]
+        stamp=datetime.fromisoformat(source["retrieved_at"])
+        if (block["status"]!="AVAILABLE" or source["provider"]!="UPSTOX"
+            or stamp.tzinfo is None or not instant-timedelta(hours=24)<=stamp<=instant
+            or source.get("endpoint")!="/v2/fundamentals/"+isin+"/corporate-actions"):
+            return []
+        data=block["data"]
+        if not isinstance(data,list) or len(data)>100:
+            return []
+        found=set()
+        for event in data:
+            if not isinstance(event,dict) or event.get("adjustment_eligible") is not False:
+                continue
+            day=_reported_day(event.get("date"))
+            kind=event.get("action_type")
+            if day and first<date.fromisoformat(day)<=last and kind in (*_ACTION_TYPES.values(),"OTHER"):
+                found.add((day,kind))
+        return [{"date":d,"action_type":k} for d,k in sorted(found)]
+    except (ValueError,TypeError,KeyError,AttributeError):
+        return []

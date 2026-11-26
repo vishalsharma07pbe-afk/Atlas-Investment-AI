@@ -108,8 +108,11 @@ def market_snapshot(exchange):
                 histories[row["instrument_id"]].append(row)
         if any(len(histories[i])>250 for i in batch):
             raise ValueError("DISCOVERY_HISTORY_LIMIT_EXCEEDED")
+    instant=now()
+    action_reports=automatic_company_evidence.cached_action_reports(_connect,[r.get("isin") for r in instruments],instant)
     result = screen(instruments, lambda identifier:{"candles":histories[identifier]}, as_of=today,
-                    universe_limit=200, max_age_days=4, include_horizons=True, batch_loaded=True, expected_session=expected_session)
+                    universe_limit=200, max_age_days=4, include_horizons=True, batch_loaded=True, expected_session=expected_session,
+                    action_reports=action_reports,instant=instant)
     result["discovery_coverage"]={"recent_registry_count":recent_count,"selected_count":len(ids),
         "selection_limit":200,"selection_method":"EXPECTED_SESSION_THEN_DAILY_TRADED_VALUE",
         "expected_session_count":matching if expected_session else None,

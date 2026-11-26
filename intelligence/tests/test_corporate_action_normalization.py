@@ -61,3 +61,24 @@ class CorporateActionNormalizationTests(unittest.TestCase):
         self.assertEqual(result["corporate_action_review"]["normalized_preview_count"],1)
         self.assertEqual(result["corporate_action_review"]["previews"][0]["change_1d_percent"],2)
         self.assertEqual(result["top_gainers"],[])
+
+    def test_fresh_provider_crossing_blocks_raw_history_even_without_local_action(self):
+        from datetime import datetime,timezone
+        from app.corporate_action_normalization import normalize_reported_actions
+        rows=series()
+        instant=datetime(2026,11,14,10,tzinfo=timezone.utc)
+        raw={"isin":ISIN,"sections":{"corporate_actions":{"status":"AVAILABLE",
+              "source":{"provider":"UPSTOX","endpoint":"/v2/fundamentals/"+ISIN+"/corporate-actions","retrieved_at":instant.isoformat()},
+              "data":normalize_reported_actions([{"name":"Split","expiry_date":rows[-1].date,"ratio":"1:2"}])}}}
+        identity={"id":1,"exchange":"NSE","symbol":"TEST","isin":ISIN,"latest_action_date":None,"corporate_action_context":"[]"}
+        def load(_):
+            return {"candles":[{"trade_date":c.date,"open":c.open,"high":c.high,"low":c.low,"close":c.close,
+                "volume":c.volume,"adjustment_status":c.adjustment_status} for c in rows]}
+        result=screen([identity],load,as_of=instant.date(),batch_loaded=True,include_horizons=True,action_reports={ISIN:raw},instant=instant)
+        self.assertEqual(result["eligible_count"],0)
+        self.assertEqual(result["skipped"]["RAW_CORPORATE_ACTION"],1)
+        self.assertEqual(result["corporate_action_review"]["provider_crossing_count"],1)
+        self.assertEqual(result["corporate_action_review"]["normalized_preview_count"],0)
+        self.assertEqual(result["top_gainers"],[])
+        result=screen([identity],load,as_of=instant.date(),batch_loaded=True,action_reports={ISIN:raw},instant=instant+timedelta(hours=25))
+        self.assertEqual(result["corporate_action_review"]["provider_crossing_count"],0)

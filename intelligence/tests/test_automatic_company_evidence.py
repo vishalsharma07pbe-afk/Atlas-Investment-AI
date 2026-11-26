@@ -127,3 +127,21 @@ class CompanyEvidenceTests(unittest.TestCase):
         for _ in range(3):
             company.refresh({"enabled":True,"sections":[]},research._connect,loader,self.now,explicit_isins=ids)
         self.assertEqual(calls,[(ids[0],None),(ids[1],None)])
+
+    def test_documented_actions_are_preserved_and_never_promoted(self):
+        def loader(isin,key):
+            return {"isin":isin,"sections":{"corporate_actions":{"status":"AVAILABLE","source":{"endpoint":"/v2/fundamentals/"+isin+"/corporate-actions"},
+                "data":[{"name":"Dividend","expiry_date":"14 Aug 2025","amount":5.5,"ratio":None,
+                    "event_details":[{"name":"Announcement date","value":"25 Apr 2025"}]},
+                    {"name":"Bonus","expiry_date":"20 Nov 2026","ratio":"1:1"},
+                    {"name":"Split","expiry_date":"31 Feb 2026"}]}}}
+        company.refresh(self.snapshot,research._connect,loader,self.now)
+        reports=company.cached_action_reports(research._connect,[self.isin],self.now)
+        actions=reports[self.isin]["sections"]["corporate_actions"]["data"]
+        self.assertEqual(len(actions),2)
+        self.assertEqual(actions[0]["date"],"2025-08-14")
+        self.assertEqual(actions[0]["amount"],5.5)
+        self.assertEqual(actions[1]["reported_ratio"],"1:1")
+        self.assertEqual(actions[1]["ratio_basis"],"UNVERIFIED")
+        self.assertFalse(actions[1]["adjustment_eligible"])
+        self.assertEqual(company.cached_action_reports(research._connect,[self.isin],self.now+timedelta(hours=25)),{})
