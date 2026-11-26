@@ -58,3 +58,13 @@ it("shows reported quarterly ownership changes without treating them as trades",
  expect(screen.getByText(/Review reported declines/)).toBeTruthy();
  expect(screen.getByText(/not proof of buying or selling/)).toBeTruthy();
 });
+
+it("shows annual cash and liquidity evidence without imputing free cash flow",()=>{
+ const missing={status:"UNAVAILABLE",data:null,source:null};
+ const evidence:CompanyEvidence={isin:"INE002A01018",retrieved_at:"2026-11-24T10:00:00Z",available_sections:1,total_sections:8,notice:"Provider reported.",sections:{profile:missing,ratios:missing,income_statement:missing,cash_flow:missing,balance_sheet:missing,shareholding:missing,corporate_actions:missing,competitors:missing},
+ financial_strength:{status:"REPORTED_ANNUAL_FINANCIAL_STRENGTH",unit:"INR_CRORE",liquidity:[{period:"2026-03",current_assets:120,current_liabilities:100,current_ratio:1.2,working_capital:20,reported_net_current_asset:null,net_current_asset_difference:null}],cash_flows:[{period:"2026-03",operating:60,investing:-50,financing:-8,combined_cash_flows:2,reported_total_cash_flow:null,total_cash_flow_difference:null,opening_cash:null,closing_cash:null,cash_balance_movement:null,balance_movement_difference:null}],notice:"Investing cash flow is not capital expenditure."}};
+ render(<CompanyEvidenceCard evidence={evidence}/>);
+ expect(screen.getByText("1.2x")).toBeTruthy();
+ expect(screen.getByText("Liquidity and cash flow reconciliation")).toBeTruthy();
+ expect(screen.getByText("Investing cash flow is not capital expenditure.")).toBeTruthy();
+});

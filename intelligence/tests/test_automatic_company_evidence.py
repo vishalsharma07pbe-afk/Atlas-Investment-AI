@@ -175,3 +175,23 @@ class CompanyEvidenceTests(unittest.TestCase):
         self.assertEqual(list(company.identify_sample(self.snapshot,self.now)),[("NSE",third)])
         result["company_research_universe"][1]["id"]=1
         self.assertEqual(list(company.identify_sample(self.snapshot,self.now)),[])
+
+    def test_detailed_balance_and_cash_fields_are_preserved(self):
+        def loader(isin,key):
+            def row(particular,a,b):
+                return {"particular":particular,"history":[{"period":"Mar 2025","value":a},{"period":"Mar 2026","value":b}]}
+            def section(name,data):
+                return {"status":"AVAILABLE","source":{"endpoint":"/v2/fundamentals/"+isin+"/"+name.replace("_","-")},
+                    "data":{"type":"consolidated","time_period":"yearly","units_in":"crore",**data}}
+            return {"isin":isin,"sections":{
+                "balance_sheet":section("balance_sheet",{"history":[{"period":"Mar 2025","total_asset":200},{"period":"Mar 2026","total_asset":250}],
+                    "full_statement":[row("Current Assets",100,120),row("Current Liabilities",80,100),row("Other unrelated item",1,2)]}),
+                "cash_flow":section("cash_flow",{"cash_flow":[{"category":k,"history":row(k,a,b)["history"]} for k,a,b in
+                    [("operating",50,60),("investing",-40,-50),("financing",-5,-8)]],
+                    "full_statement":[row("Total Cash Flow",5,2)]})}}
+        company.refresh(self.snapshot,research._connect,loader,self.now)
+        company.attach(self.snapshot,research._connect,self.now)
+        report=self.item["company_evidence"]
+        self.assertEqual(len(report["sections"]["balance_sheet"]["data"]["detail_rows"]),2)
+        self.assertEqual(report["financial_strength"]["liquidity"][-1]["current_ratio"],1.2)
+        self.assertEqual(report["financial_strength"]["cash_flows"][-1]["total_cash_flow_difference"],0)
