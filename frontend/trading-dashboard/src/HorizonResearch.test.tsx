@@ -97,6 +97,7 @@ it("shows historical price geometry with explicit costs and no trade verdict",as
  const market={...section,result:{...section.result,horizons:{...section.result.horizons,SWING:{...section.result.horizons.SWING,candidates:[enriched]}}}};
  vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[market]})})));
  render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+ fireEvent.click(await screen.findByText("Open complete stock research report"));
  fireEvent.click(await screen.findByText("Price structure & risk scenarios"));
  expect(screen.getByText("1.84×")).toBeTruthy();
  expect(screen.getByText("Assumed cost: 30 bps each side.")).toBeTruthy();
@@ -217,6 +218,7 @@ it("shows independent committee roles and incomplete citation coverage",async()=
  const market={...section,result:{...section.result,horizons:{...section.result.horizons,SWING:{...section.result.horizons.SWING,candidates:[item]}}}};
  vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[market]})})));
  render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+ fireEvent.click(await screen.findByText("Open complete stock research report"));
  fireEvent.click(await screen.findByText("Automatic AI evidence review (1 provider)"));
  expect(screen.getByRole("region",{name:"AI committee coverage"})).toBeTruthy();
  expect(screen.getByText(/1\/2 configured reviews returned/)).toBeTruthy();
@@ -257,6 +259,7 @@ it("displays historical cost and gap stress without calling it a trade target",a
  const market={...section,result:{...section.result,horizons:{...section.result.horizons,SWING:{...section.result.horizons.SWING,candidates:[item]}}}};
  vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[market]})})));
  render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+ fireEvent.click(await screen.findByText("Open complete stock research report"));
  fireEvent.click(await screen.findByText("Price structure & risk scenarios"));
  expect(screen.getByRole("region",{name:"Historical cost and gap stress"})).toBeTruthy();
  expect(screen.getByText(/largest adverse gap 5%/)).toBeTruthy();
@@ -273,4 +276,29 @@ it("shows failed breakout follow-through without inventing a trading signal",asy
  expect(screen.getByText(/upside · reentry observed/)).toBeTruthy();
  expect(screen.getByText(/re-entry 2026-11-23/)).toBeTruthy();
  expect(screen.getByText("Observed re-entry, not a confirmed trap or trading signal.")).toBeTruthy();
+});
+
+
+it("opens a unified dated stock report with bounded recorded close chart and source gaps",async()=>{
+ const item={...candidate,isin:"INE000A01000",report_close_history:{as_of:candidate.as_of,adjustment_status:"ADJUSTED",points:[{date:"2026-11-20",close:95},{date:candidate.as_of,close:100}]}};
+ const market={...section,result:{...section.result,horizons:{...section.result.horizons,SWING:{...section.result.horizons.SWING,candidates:[item]}}}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[market]})})));
+ render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+ fireEvent.click(await screen.findByText("Open complete stock research report"));
+ expect(screen.getByText(/Technical rule score: 5/)).toBeTruthy();
+ expect(screen.getByRole("img",{name:"Recorded daily close history"})).toBeTruthy();
+ expect(screen.getByText(/Sector: Unavailable/)).toBeTruthy();
+ fireEvent.click(screen.getByText("Source references and retrieval dates"));
+ expect(screen.getByText("Matched company source references unavailable.")).toBeTruthy();
+ expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it("withholds a chart from a mismatched observation date",async()=>{
+ const item={...candidate,report_close_history:{as_of:"2026-11-22",adjustment_status:"ADJUSTED",points:[{date:"2026-11-20",close:95},{date:"2026-11-22",close:100}]}};
+ const market={...section,result:{...section.result,horizons:{...section.result.horizons,SWING:{...section.result.horizons.SWING,candidates:[item]}}}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[market]})})));
+ render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+ fireEvent.click(await screen.findByText("Open complete stock research report"));
+ expect(screen.queryByRole("img",{name:"Recorded daily close history"})).toBeNull();
+ expect(screen.getByText(/Historical chart unavailable/)).toBeTruthy();
 });

@@ -13,6 +13,13 @@ MIN_HISTORY = 21
 MAX_INSTRUMENTS = 20
 MAX_CANDLES = 250
 
+def report_close_history(candles):
+    """Bounded observed closes from the already validated screener history."""
+    return {"adjustment_status": candles[-1].adjustment_status,
+            "as_of": candles[-1].date,
+            "points": [{"date": c.date, "close": round(c.close, 4)} for c in candles[-30:]]}
+
+
 def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit=MAX_INSTRUMENTS, include_horizons=False, *, batch_loaded=False, expected_session=None):
     limit = max(1, min(200 if batch_loaded else 60, universe_limit))
     today = as_of or date.today()
@@ -120,6 +127,8 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                     if candidate is not None:
                         candidate["price_structure"]=price_structure(candles,ind,horizon,
                             calendar_verified=batch_loaded and expected_session is not None)
+                        if batch_loaded:
+                            candidate["report_close_history"]=report_close_history(candles)
                 horizon_evaluations.append(evaluation)
                 for horizon,minimum in HORIZON_MIN_HISTORY.items():
                     if len(candles)>=minimum:

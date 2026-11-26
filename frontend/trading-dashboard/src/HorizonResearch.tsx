@@ -40,7 +40,8 @@ type WatchReference={exchange:string;id:number;isin:string};
 type CompanySelection={unique_company_count:number;unidentified_listing_count:number;conflicting_listing_count:number;cross_venue_company_count:number;review_company_count:number;ready_markets:string[];watch_refs:WatchReference[];notice:string};
 type CompanyContext={listing_count:number;venues:string[];blockers:string[];review_findings:string[];status:string};
 type QualificationSummary={selection?:CompanySelection;status:string;reviewed_count:number;review_required_count:number;qualified_count:number|null;recommendations:unknown[];leading_blockers:{code:string;count:number}[];notice:string};
-type Candidate={isin?:string;selection_company_context?:CompanyContext;stock_qualification?:StockQualification;current_regime_replay?:CurrentRegimeReplay;global_exposure?:GlobalExposure;price_volume_pressure?:Pressure;deal_evidence?:DealEvidence;price_structure?:PriceStructure;research_conclusion?:ResearchConclusion;matched_strategy_replay?:MatchedReplay;research_reliability?:CandidateReliability;news_evidence?:NewsEvidence;company_evidence?:CompanyEvidence;ai_review?:AiReview;id:number;symbol:string;exchange:string;as_of:string;close:number;rank_score:number;review_horizon:string;history_count:number;atr_percent:number;median_daily_traded_value:number;reasons:string[];warnings:string[]};
+type ReportCloseHistory={adjustment_status:string;as_of:string;points:{date:string;close:number}[]};
+type Candidate={report_close_history?:ReportCloseHistory;isin?:string;selection_company_context?:CompanyContext;stock_qualification?:StockQualification;current_regime_replay?:CurrentRegimeReplay;global_exposure?:GlobalExposure;price_volume_pressure?:Pressure;deal_evidence?:DealEvidence;price_structure?:PriceStructure;research_conclusion?:ResearchConclusion;matched_strategy_replay?:MatchedReplay;research_reliability?:CandidateReliability;news_evidence?:NewsEvidence;company_evidence?:CompanyEvidence;ai_review?:AiReview;id:number;symbol:string;exchange:string;as_of:string;close:number;rank_score:number;review_horizon:string;history_count:number;atr_percent:number;median_daily_traded_value:number;reasons:string[];warnings:string[]};
 type HorizonResult={status:string;candidates:Candidate[];matched_count:number;evaluated_count:number;blockers:string[];exclusions:Record<string,number>};
 type ActionPreview={symbol:string;exchange:string;first_date:string;as_of:string;observations:number;actions:{ex_date:string;action_type:string;post_shares_per_pre_share:string}[];change_1d_percent:number|null;change_20_observation_percent:number|null;window_price_change_percent:number;notice:string};
 type ActionReview={normalized_preview_count:number;withheld_count:number;previews:ActionPreview[];notice:string};
@@ -195,6 +196,10 @@ export default function HorizonResearch({horizon,children,onSettings}:{horizon:H
     <header><div><small>#{index+1} · {candidate.exchange}</small><h3>{candidate.symbol}</h3></div><strong>{money(candidate.close)}</strong></header>
     <p className="muted tiny">Daily close · {candidate.as_of}</p><p>{candidate.review_horizon}</p>
     <dl><div><dt>ATR / price</dt><dd>{candidate.atr_percent.toFixed(2)}%</dd></div><div><dt>History</dt><dd>{candidate.history_count} sessions</dd></div></dl>
+    <p className="muted tiny">Technical rule score: {candidate.rank_score} · not a probability.</p>
+    {candidate.stock_qualification&&<p><strong>{words(candidate.stock_qualification.status)}</strong> · {candidate.stock_qualification.blockers.length} unresolved requirements · {candidate.stock_qualification.review_findings.length} review findings</p>}
+    <details key={horizon+":"+candidate.exchange+":"+candidate.id+":"+(candidate.isin||"")} className="notice"><summary>Open complete stock research report</summary>
+    <StockReportContext candidate={candidate}/>
     <details><summary>Why this appears &amp; risks</summary><ul>{candidate.reasons.map(reason=><li key={reason}>{reason}</li>)}</ul><p>{candidate.warnings.join(" ")}</p><p className="muted tiny">Median historical daily traded value: {money(candidate.median_daily_traded_value)}</p></details>
     {candidate.selection_company_context&&<CompanyContextView report={candidate.selection_company_context}/>}
     {candidate.stock_qualification&&<StockQualificationView report={candidate.stock_qualification}/>}
@@ -213,6 +218,7 @@ export default function HorizonResearch({horizon,children,onSettings}:{horizon:H
     <CompanyEvidenceCard evidence={candidate.company_evidence} status={data?.automatic_company_status}/>
     <AutomaticCompanyNews evidence={candidate.news_evidence} status={data?.automatic_news_status}/>
     {candidate.ai_review?.reviews.length?<details><summary>Automatic AI evidence review ({candidate.ai_review.reviews.length} provider{candidate.ai_review.reviews.length===1?"":"s"})</summary>{candidate.ai_review.reviews.map(review=><div key={review.provider}><strong>{review.provider}{review.role?" · "+words(review.role):""}</strong><ul>{review.findings.map((finding,i)=><li key={i}>{finding.statement} <small>[{finding.evidence_ids.join(", ")}]</small></li>)}</ul></div>)}{candidate.ai_review.committee&&<CommitteeCoverageView report={candidate.ai_review.committee}/>}<p className="muted tiny">OBS = dated technical observations; FUND = reported annual financial trends; REPLAY = same-stock historical simulation; OWN = quarterly ownership; VAL = undated peer multiples; NEWS = headline topic observations; GLOBAL = separately dated macro changes; REGIME = observed benchmark trend/volatility; FLOWS = market-level reported flow directions; LIMITS = missing verification. {candidate.ai_review.notice}</p></details>:<p className="muted tiny">{data?.automatic_ai_status==="ENABLED"?"AI review pending or unavailable.":data?.automatic_ai_status==="NO_CONFIGURED_PROVIDER"?"No permitted AI provider configured.":"Automatic AI review unavailable or disabled."}</p>}
+    </details>
    </article>)}</div>:<div className="research-empty"><strong>{ready.length?"No technical candidates meet the current rules":"Waiting for current research"}</strong><p>The background engine will reassess available evidence automatically. No manual scan is required.</p></div>}
    {blockers.length>0&&<p className="notice warning-notice">Still required before a complete investment verdict: {blockers.map(words).join(" · ")}.</p>}
    <button type="button" className="secondary" onClick={onSettings}>Check data connections</button>
@@ -224,6 +230,46 @@ export default function HorizonResearch({horizon,children,onSettings}:{horizon:H
   <details className="advanced-tools glass" key={horizon}><summary><span><strong>Advanced research tools</strong><small>Optional detailed analysis and evidence review</small></span><b>Open tools</b></summary>{/* Closed tools stay available without loading their workflows. */}<DeferredTools>{children}</DeferredTools></details>
  </section>;
 }
+function StockReportContext({candidate}:{candidate:Candidate}){
+ const company=candidate.isin&&candidate.company_evidence?.isin===candidate.isin?candidate.company_evidence:undefined;
+ const profile=company?.sections?.profile?.data;
+ const history=candidate.report_close_history;
+ const points=history?.points;
+ const usable=history&&Array.isArray(points)&&points.length>=2&&points.length<=30&&
+  ["ADJUSTED","RAW_UNADJUSTED"].includes(history.adjustment_status)&&history.as_of===candidate.as_of&&
+  points.every((p,i)=>/^\d{4}-\d{2}-\d{2}$/.test(p.date)&&Number.isFinite(p.close)&&p.close>0&&(i===0||p.date>points[i-1].date))&&
+  points[points.length-1].date===candidate.as_of&&points[points.length-1].close===candidate.close;
+ const availableSources=Object.entries(company?.sections||{}).filter(([,section])=>section.status==="AVAILABLE"&&section.source?.provider==="UPSTOX");
+ return <section aria-label="Stock report identity and source evidence">
+  <h4>Stock identity and evidence dates</h4>
+  <p>{candidate.symbol} · {candidate.exchange} · ISIN {candidate.isin||"unavailable"}</p>
+  <p>Reported company: {profile?.company_name||"Unavailable"} · Sector: {profile?.sector||"Unavailable"} · Industry: {profile?.industry||"Unavailable"}</p>
+  <p>Price observation: {candidate.as_of} · daily close, not a live quote.</p>
+  {usable&&points&&history?<ObservedCloseChart points={points} adjustment={history.adjustment_status}/>:<p className="muted tiny">Historical chart unavailable for this observation; no prices inferred.</p>}
+  <details><summary>Source references and retrieval dates</summary>
+   <p>Technical observations: local stored daily candle history through {candidate.as_of}. Provider and independent session continuity are not certified by this chart.</p>
+   {availableSources.length?<ul>{availableSources.map(([name,section])=><li key={name}>{words(name)} · {section.source?.provider} · retrieved {section.source?.retrieved_at||"unknown"} · {section.source?.endpoint||"provider endpoint not recorded"}</li>)}</ul>:<p>Matched company source references unavailable.</p>}
+   <p>Company news: {candidate.news_evidence?words(candidate.news_evidence.status)+" · retrieved "+candidate.news_evidence.retrieved_at:"Unavailable"}. Original article links are in Recent company news when present.</p>
+   <p>Historical replay: {candidate.matched_strategy_replay?.as_of===candidate.as_of?"Same-observation simulated history through "+candidate.as_of:"Matched replay unavailable"}.</p>
+   <p>AI review: {candidate.ai_review?.reviewed_at||"Unavailable"} · supplementary; cited assertions are not independent source verification.</p>
+   <p className="muted tiny">Retrieval dates are not financial reporting periods. Missing evidence stays unavailable; this report does not certify an investment recommendation.</p>
+  </details>
+ </section>;
+}
+function ObservedCloseChart({points,adjustment}:{points:ReportCloseHistory["points"];adjustment:string}){
+ const lo=Math.min(...points.map(p=>p.close)),hi=Math.max(...points.map(p=>p.close));
+ const xy=points.map((p,i)=>({x:12+276*i/(points.length-1),y:hi===lo?55:98-86*(p.close-lo)/(hi-lo)}));
+ return <figure style={{margin:"12px 0"}}>
+  <figcaption>Recorded daily closes · {points.length} observations · {words(adjustment)}</figcaption>
+  <svg viewBox="0 0 300 110" role="img" aria-label="Recorded daily close history" style={{width:"100%",maxHeight:180}}>
+   <line x1="12" x2="288" y1="98" y2="98" stroke="currentColor" opacity=".25"/>
+   {xy.map((p,i)=><circle key={points[i].date} cx={p.x} cy={p.y} r="2.4" fill="currentColor"><title>{points[i].date}: {money(points[i].close)}</title></circle>)}
+  </svg>
+  <p>{points[0].date}: {money(points[0].close)} · {points[points.length-1].date}: {money(points[points.length-1].close)}</p>
+  <p className="muted tiny">Observed range {money(lo)} – {money(hi)}. Points are spaced by observation order, not calendar time; gaps are not filled. Raw prices may be affected by corporate actions.</p>
+ </figure>;
+}
+
 function DeferredTools({children}:{children:ReactNode}){
  // Existing tools are preserved. Explicitly mount only after user request.
  const [open,setOpen]=useState(false);
