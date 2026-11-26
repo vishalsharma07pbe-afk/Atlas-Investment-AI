@@ -1,6 +1,8 @@
 import hashlib
 import importlib.util
 import io
+import json
+import sqlite3
 from pathlib import Path
 import tarfile
 import tempfile
@@ -22,6 +24,7 @@ smoke = load("p3_smoke", "scripts/p3_smoke.py")
 acceptance = load("local_research_acceptance", "scripts/local_research_acceptance.py")
 verify_backup = load("verify_backup", "scripts/verify-production-backup.py")
 ops_snapshot = load("ops_snapshot", "intelligence/app/ops_snapshot.py")
+recovery = load("ci_recovery_drill", "scripts/ci_recovery_drill.py")
 
 
 class P3SmokeTests(unittest.TestCase):
@@ -139,6 +142,33 @@ class LocalAcceptanceTests(unittest.TestCase):
 
 
 class BackupVerificationTests(unittest.TestCase):
+    def test_recovery_checks_exact_alert_and_scheduler_registration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/"research.sqlite3"
+            payload=json.dumps({"id":"research-test","category":"RISK_WARNING",
+                "source_url":None,"event_date":"2026-11-25"})
+            expected={"id":"research-test","first_recorded":1.0,"payload":payload}
+            with sqlite3.connect(path) as db:
+                db.execute("CREATE TABLE public_market_alert_history(id TEXT PRIMARY KEY, first_recorded REAL, payload TEXT)")
+                db.execute("INSERT INTO public_market_alert_history VALUES(?,?,?)",tuple(expected.values()))
+                db.execute("CREATE TABLE research_job_state(job TEXT PRIMARY KEY,status TEXT)")
+                db.execute("INSERT INTO research_job_state VALUES('PUBLIC_RESEARCH_ALERTS','PASS_COMPLETED')")
+            recovery.verify_research_state(path,expected)
+            with self.assertRaisesRegex(AssertionError,"timestamp or payload differs"):
+                recovery.verify_research_state(path,{**expected,"first_recorded":2.0})
+            with sqlite3.connect(path) as db:
+                db.execute("DELETE FROM research_job_state")
+            with self.assertRaisesRegex(AssertionError,"scheduler state missing"):
+                recovery.verify_research_state(path,expected)
+
+    def test_recovery_drill_refuses_non_ci_before_docker(self):
+        with patch.dict("os.environ",{"GITHUB_ACTIONS":"false","COMPOSE_PROJECT_NAME":"atlas-ci-production"}), \
+             patch.object(recovery,"output") as command:
+            with self.assertRaisesRegex(RuntimeError,"DISPOSABLE_CI_ONLY"):
+                recovery.run()
+            command.assert_not_called()
+
+
     def test_verifies_checksums_and_safe_archive_members(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
