@@ -14,6 +14,7 @@ import re
 from .p1_research import company_research
 from .financial_trends import summarize as financial_trends, earnings_evidence
 from .fundamental_quality import summarize as fundamental_quality
+from .financial_strength import summarize as financial_strength, DETAIL_NAMES
 from . import peer_research, shareholding_research
 from .corporate_action_normalization import normalize_reported_actions
 
@@ -134,6 +135,9 @@ def normalize(report, isin, instant):
             if rows:
                 data={"units":text(raw.get("units_in")),"rows":rows,
                       "statement_type":text(raw.get("type")),"time_period":text(raw.get("time_period"))}
+                if key=="cash_flow" and data["statement_type"]=="consolidated" and data["time_period"]=="yearly":
+                    data["detail_rows"]=[r for r in history(raw.get("full_statement"),category="particular")
+                                         if r["name"].strip().casefold() in DETAIL_NAMES["cash_flow"]]
                 if key=="income_statement" and data["statement_type"]=="consolidated" and data["time_period"]=="yearly":
                     # Full statement EPS lines have a different dimensional meaning
                     # from the aggregate monetary statement. Do not apply crore units.
@@ -150,6 +154,9 @@ def normalize(report, isin, instant):
             if rows:
                 data={"units":text(raw.get("units_in")),"rows":rows,
                       "statement_type":text(raw.get("type")),"time_period":text(raw.get("time_period"))}
+                if data["statement_type"]=="consolidated" and data["time_period"]=="yearly":
+                    data["detail_rows"]=[r for r in history(raw.get("full_statement"),category="particular")
+                                         if r["name"].strip().casefold() in DETAIL_NAMES["balance_sheet"]]
         elif key=="shareholding":
             data=history(raw)
         elif key=="competitors" and isinstance(raw,list):
@@ -303,6 +310,7 @@ def _enrich(report,today):
     report["financial_trends"]=financial_trends(report,today.year,as_of=today)
     report["reported_earnings"]=earnings_evidence(report,today)
     report["fundamental_quality"]=fundamental_quality(report,today.year)
+    report["financial_strength"]=financial_strength(report,today)
     report["ownership_research"]=shareholding_research.summarize(report,today)
     return report
 
