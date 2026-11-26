@@ -118,11 +118,24 @@ public class FundHistoryResearchService {
       """,pattern,today,today,today,today);
     List<Map<String,Object>> observations=new ArrayList<>();
     Map<Long,List<Map<String,Object>>> histories=sampledHistories(sample,today);
+    Map<String,Integer> gateCounts=new LinkedHashMap<>();
+    for(String gate:List.of("OFFICIAL_ANCHOR_UNAVAILABLE","COMPARISON_DATE_MISMATCH","HISTORY_QUALITY_OR_LENGTH","ELIGIBLE"))gateCounts.put(gate,0);
     for(var fund:sample){
-      var rows=histories.getOrDefault(((Number)fund.get("scheme_code")).longValue(),List.of());
-      var metrics=metrics(rows,today);
-      if(metrics==null||commonEnd==null||!commonEnd.toString().equals(metrics.get("nav_date")))continue;
-      metrics.putAll(fund);observations.add(metrics);
+      long code=((Number)fund.get("scheme_code")).longValue();
+      var rows=officialWindow(histories.getOrDefault(code,List.of()),today);
+      String gate;
+      if(rows.isEmpty())gate="OFFICIAL_ANCHOR_UNAVAILABLE";
+      else if(commonEnd==null||!commonEnd.equals(date(rows.getLast().get("nav_date"))))gate="COMPARISON_DATE_MISMATCH";
+      else{
+        var metrics=metrics(rows,today);
+        if(metrics==null)gate="HISTORY_QUALITY_OR_LENGTH";
+        else{
+          // Use the identical anchored window for category metrics and peer comparisons.
+          histories.put(code,rows);
+          metrics.putAll(fund);observations.add(metrics);gate="ELIGIBLE";
+        }
+      }
+      gateCounts.merge(gate,1,Integer::sum);
     }
     observations.sort(Comparator.comparingDouble((Map<String,Object> row)->((Number)row.get("cagr_3y_percent")).doubleValue()).reversed()
       .thenComparingLong(row->((Number)row.get("scheme_code")).longValue()));
@@ -151,6 +164,7 @@ public class FundHistoryResearchService {
     Map<String,Object> result=new LinkedHashMap<>();
     result.put("category",category);result.put("status",observations.isEmpty()?"COLLECTING_HISTORY":"HISTORICAL_WATCH_ONLY");
     result.put("universe_count",universe);result.put("sample_count",sample.size());result.put("eligible_count",observations.size());
+    result.put("history_gate_counts",gateCounts);
     result.put("comparison_date",commonEnd==null?null:commonEnd.toString());
     result.put("items",observations.stream().limit(5).toList());result.put("risk_adjusted_items",riskRank);
     result.put("research_candidates",observations);
@@ -211,7 +225,28 @@ public class FundHistoryResearchService {
     return result;
   }
 
+  /** Latest current official AMFI observation is the endpoint, not a newer
+   * secondary NAV. Validate chronological identity before truncating; retain
+   * all earlier observations and never synthesize or promote an MFAPI date.
+   */
+  static List<Map<String,Object>> officialWindow(List<Map<String,Object>> rows,LocalDate today){
+    int anchor=-1;
+    LocalDate prior=null;
+    for(int i=0;i<rows.size();i++){
+      var row=rows.get(i);
+      LocalDate day=date(row.get("nav_date"));
+      Object source=row.get("source_code");
+      if(day==null||day.isAfter(today)||prior!=null&&!day.isAfter(prior)
+          ||!("AMFI".equals(source)||"MFAPI".equals(source)))return List.of();
+      if("AMFI".equals(source))anchor=i;
+      prior=day;
+    }
+    if(anchor<0||date(rows.get(anchor).get("nav_date")).isBefore(today.minusDays(7)))return List.of();
+    return List.copyOf(rows.subList(0,anchor+1));
+  }
+
   static Map<String,Object> metrics(List<Map<String,Object>> rows,LocalDate today){
+    rows=officialWindow(rows,today);
     if(rows.size()<650)return null;
     var last=rows.getLast();
     LocalDate end=date(last.get("nav_date"));

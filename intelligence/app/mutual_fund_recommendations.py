@@ -417,6 +417,18 @@ def _research_reports(candidates, ranked, source_rows, disclosed, portfolios):
     return reports
 
 
+def _history_gate_counts(historical):
+    counts=historical.get("history_gate_counts")
+    keys=("OFFICIAL_ANCHOR_UNAVAILABLE","COMPARISON_DATE_MISMATCH","HISTORY_QUALITY_OR_LENGTH","ELIGIBLE")
+    sample=historical.get("sample_count")
+    if (not isinstance(counts,dict) or set(counts)!=set(keys)
+        or type(sample) is not int or not 0<=sample<=40
+        or any(type(counts[k]) is not int or counts[k]<0 for k in keys)
+        or sum(counts.values())!=sample or counts["ELIGIBLE"]!=historical.get("eligible_count")):
+        return None
+    return {k:counts[k] for k in keys}
+
+
 def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str="MODERATE"):
     if category not in CATEGORIES:raise ValueError("UNSUPPORTED_CATEGORY")
     if horizon_months<12 or horizon_months>360:raise ValueError("INVALID_HORIZON")
@@ -474,7 +486,9 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
           "items":disclosed,"notice":"AMFI-derived disclosures from TigZig, not independently verified. AUM covers all plans; dates differ by field. Reported benchmark names are not benchmark return histories. No holdings or rating verification."},
       "historical_coverage":{"status":"UNAVAILABLE"} if historical is None else {
           "status":historical.get("status"),"comparison_date":historical.get("comparison_date"),
-          "sample_count":historical.get("sample_count"),"weekly_risk_eligible_count":historical.get("weekly_risk_eligible_count"),
+          "universe_count":historical["universe_count"],"eligible_count":historical["eligible_count"],
+          "sample_count":historical.get("sample_count"),"history_gate_counts":_history_gate_counts(historical),
+          "weekly_risk_eligible_count":historical.get("weekly_risk_eligible_count"),
           "items":historical["items"][:5]},
       "suitability":ranked["suitability"],"blockers":blockers,
       "qualification_summary":{"evaluated_count":len(official),"top_eligible_count":ranked["top_eligible_count"],

@@ -69,6 +69,26 @@ class FundHistoryResearchServiceTest {
   assertNull(FundHistoryResearchService.metrics(rows.subList(0,100),end));
  }
 
+ @Test void newerSecondaryNavNeverDisplacesRecentOfficialAnchor(){
+  LocalDate end=LocalDate.of(2026,11,23),today=end.plusDays(2);
+  List<Map<String,Object>> rows=new ArrayList<>();
+  for(int i=0;i<=1100;i++)rows.add(Map.of("nav_date",end.minusDays(1100-i),"nav",BigDecimal.valueOf(100+i*.01),"source_code",i==1100?"AMFI":"MFAPI"));
+  var expected=FundHistoryResearchService.metrics(rows,today);
+  assertNotNull(expected);
+  rows.add(Map.of("nav_date",end.plusDays(1),"nav",BigDecimal.valueOf(900),"source_code","MFAPI"));
+  rows.add(Map.of("nav_date",today,"nav",BigDecimal.ONE,"source_code","MFAPI"));
+  assertEquals(expected,FundHistoryResearchService.metrics(rows,today));
+  assertEquals(end.toString(),expected.get("nav_date"));
+  assertEquals(111.0,expected.get("nav"));
+  assertNull(FundHistoryResearchService.metrics(rows,end.plusDays(8)));
+  var noOfficial=rows.stream().map(row->Map.<String,Object>of("nav_date",row.get("nav_date"),"nav",row.get("nav"),"source_code","MFAPI")).toList();
+  assertNull(FundHistoryResearchService.metrics(noOfficial,today));
+  var gap=new ArrayList<>(rows);
+  gap.subList(700,730).clear();
+  assertNull(FundHistoryResearchService.metrics(gap,today));
+  rows.add(Map.of("nav_date",today,"nav",BigDecimal.TEN,"source_code","MFAPI"));
+  assertNull(FundHistoryResearchService.metrics(rows,today));
+ }
  @Test void downsideRiskAndRollingRangeUseObservedWeeklyAnchors(){
   LocalDate end=LocalDate.of(2026,11,24);
   List<Map<String,Object>> rows=new ArrayList<>();

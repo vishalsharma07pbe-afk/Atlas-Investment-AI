@@ -126,6 +126,16 @@ class RecommendationEngineTests(unittest.TestCase):
         self.assertIsNone(report["historical"]["returns_3y"])
         self.assertIsNone(report["historical"]["sample_peer_percentile"])
 
+    def test_history_gate_counts_reconcile_with_sample(self):
+        gates={"OFFICIAL_ANCHOR_UNAVAILABLE":1,"COMPARISON_DATE_MISMATCH":2,
+               "HISTORY_QUALITY_OR_LENGTH":3,"ELIGIBLE":4}
+        history={"sample_count":10,"eligible_count":4,"history_gate_counts":gates}
+        self.assertEqual(recommendations._history_gate_counts(history),gates)
+        for invalid in ({**history,"sample_count":9},{**history,"eligible_count":3},
+                        {**history,"history_gate_counts":{**gates,"EXTRA":0}},
+                        {**history,"history_gate_counts":{**gates,"ELIGIBLE":True}}):
+            self.assertIsNone(recommendations._history_gate_counts(invalid))
+
     def test_dashboard_persists_the_same_reports_without_secondary_promotion(self):
         today=datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
         row={"scheme_code":123456,"scheme_name":"Integrated Fund",
@@ -134,7 +144,9 @@ class RecommendationEngineTests(unittest.TestCase):
              "amfi_metadata_date":today,"nav_date":today,"nav":100.5,
              "observations":700,"sources":["AMFI","MFAPI"],"cagr_3y_percent":14}
         history={"category":"LARGE_CAP","comparison_date":today,"items":[row],
-                 "research_candidates":[row],"universe_count":1,"eligible_count":1}
+                 "research_candidates":[row],"universe_count":1,"eligible_count":1,
+                 "sample_count":1,"history_gate_counts":{"OFFICIAL_ANCHOR_UNAVAILABLE":0,
+                    "COMPARISON_DATE_MISMATCH":0,"HISTORY_QUALITY_OR_LENGTH":0,"ELIGIBLE":1}}
         db=sqlite3.connect(":memory:")
         try:
             with patch.object(recommendations,"_catalog_candidates",return_value=([],{"official_category_verified":0,"dated_nav_history_eligible":0})), \
@@ -146,6 +158,9 @@ class RecommendationEngineTests(unittest.TestCase):
                 first=recommendations.dashboard("LARGE_CAP",84,"HIGH")
                 second=recommendations.dashboard("LARGE_CAP",84,"HIGH")
             self.assertEqual(first["snapshot_hash"],second["snapshot_hash"])
+            self.assertEqual(first["historical_coverage"]["eligible_count"],1)
+            self.assertEqual(first["historical_coverage"]["universe_count"],1)
+            self.assertEqual(first["historical_coverage"]["history_gate_counts"]["ELIGIBLE"],1)
             self.assertEqual(first["top_performers"],[])
             self.assertEqual(first["growth_outlook"],[])
             report=first["research_reports"][0]

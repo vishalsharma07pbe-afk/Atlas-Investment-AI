@@ -500,26 +500,32 @@ class LiveFeedsDatabaseIntegrationTest {
   assertThat(db.queryForObject("SELECT count(*) FROM mutual_fund_nav WHERE scheme_code=?",Long.class,code)).isEqualTo(1L);
  }
 
- @Test void fundHistoryWatchUsesOfficialCategoryAndPreservesAmfiNav()throws Exception{
+ @Test
+ @org.springframework.transaction.annotation.Transactional
+ void fundHistoryWatchUsesOfficialCategoryAndPreservesAmfiNav()throws Exception{
   long code=987650123L;
-  LocalDate today=LocalDate.now(MarketCalendarService.IST);
+  LocalDate today=LocalDate.now(MarketCalendarService.IST),official=today.minusDays(1);
   db.update("INSERT INTO mutual_fund_schemes(scheme_code,scheme_name,category) VALUES (?,'Example Direct Plan Growth','Open Ended Schemes(Equity Scheme - Large Cap Fund)')",code);
   db.update("""
     INSERT INTO mutual_fund_nav(scheme_code,nav_date,nav,source_code)
     SELECT ?,?::date-g,120-g*0.01,CASE WHEN g=0 THEN 'AMFI' ELSE 'MFAPI' END
     FROM generate_series(0,1100) g
-    """,code,today);
+    """,code,official);
+  db.update("INSERT INTO mutual_fund_nav(scheme_code,nav_date,nav,source_code) VALUES (?,?,999,'MFAPI')",code,today);
   var watch=fundResearch.watch("LARGE_CAP");
-  assertThat(watch).containsEntry("status","HISTORICAL_WATCH_ONLY");
+  assertThat(watch).containsEntry("status","HISTORICAL_WATCH_ONLY").containsEntry("comparison_date",official.toString());
+  assertThat(((Map<?,?>)watch.get("history_gate_counts")).get("ELIGIBLE")).isEqualTo(1);
+  assertThat(fundResearch.holdingEvidence(code)).containsEntry("nav_date",official.toString()).containsEntry("nav",120.0);
   assertThat((List<?>)watch.get("items")).hasSize(1);
   assertThat(((List<?>)watch.get("items")).getFirst()).isInstanceOf(Map.class);
   assertThat(((Map<?,?>)((List<?>)watch.get("items")).getFirst()).get("scheme_code")).isEqualTo(code);
   assertThat((List<?>)fundResearch.watch("SMALL_CAP").get("items")).isEmpty();
-  String day=today.format(java.time.format.DateTimeFormatter.ofPattern("dd-MM-yyyy"));
+  String day=official.format(java.time.format.DateTimeFormatter.ofPattern("dd-MM-yyyy"));
   when(http.text(contains("api.mfapi.in/mf/"+code),isNull(),anyInt()))
     .thenReturn("{\"meta\":{\"scheme_code\":"+code+"},\"data\":[{\"date\":\""+day+"\",\"nav\":\"999\"}]}");
   funds.history(code);
-  assertThat(db.queryForObject("SELECT nav FROM mutual_fund_nav WHERE scheme_code=? AND nav_date=?",BigDecimal.class,code,today)).isEqualByComparingTo("120");
+  assertThat(db.queryForObject("SELECT nav FROM mutual_fund_nav WHERE scheme_code=? AND nav_date=?",BigDecimal.class,code,official)).isEqualByComparingTo("120");
+  assertThat(db.queryForObject("SELECT nav FROM mutual_fund_nav WHERE scheme_code=? AND nav_date=?",BigDecimal.class,code,today)).isEqualByComparingTo("999");
  }
 
 
