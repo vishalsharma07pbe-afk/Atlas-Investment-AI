@@ -212,6 +212,77 @@ def concentration(equities,sector_evidence,category,allocations):
     return result
 
 
+def composition_matches(disclosures,instant=None):
+    """Cheap full-sample secondary composition; no company cache or network calls.
+    Distinguish a known composition outside the detailed report budget from no
+    dated exact match. The existing expensive enrichment cap stays unchanged.
+    """
+    if not permitted() or not disclosures:
+        return []
+    instant=instant or datetime.now(timezone.utc)
+    today=instant.astimezone(IST).date()
+    items=disclosures[:40]
+    from collections import Counter
+    counts=Counter(item.get("scheme_code") for item in items if isinstance(item,dict)
+                   and isinstance(item.get("scheme_code"),str))
+    result=[]
+    try:
+        with nav_catalog._LOCK,closing(nav_catalog._connect()) as db:
+            for item in items:
+                if not isinstance(item,dict):
+                    continue
+                code,fund=item.get("scheme_code"),item.get("fund_id")
+                if (not isinstance(code,str) or not re.fullmatch(r"[0-9]{1,9}",code)
+                    or counts[code]!=1 or not isinstance(fund,str) or not 0<len(fund)<=80):
+                    continue
+                found=db.execute("SELECT payload,collected_at FROM fund_portfolio_snapshot WHERE fund_id=?",(fund,)).fetchone()
+                if not found or not fund_disclosures._day(found["collected_at"],today,2):
+                    continue
+                try:
+                    report=json.loads(found["payload"])
+                    if report.get("fund_id")!=fund or not fund_disclosures._day(report["portfolio_date"],today,60):
+                        continue
+                    allocations=report["asset_allocation_percent"]
+                    equities=report["equities"]
+                    def weight(v,lower=0,upper=100.5):
+                        return type(v) in (int,float) and lower<=v<=upper
+                    if (not isinstance(allocations,dict) or not allocations or not set(allocations)<=GROUPS
+                        or any(not weight(v,-100 if k=="Others" else 0,100.5) for k,v in allocations.items())
+                        or not weight(report["reported_weight_total_percent"],99.5,100.5)
+                        or abs(sum(allocations.values())-report["reported_weight_total_percent"])>.0001
+                        or not isinstance(equities,list) or len(equities)>1000
+                        or type(report["exact_equity_count"]) is not int or report["exact_equity_count"]!=len(equities)):
+                        continue
+                    seen=set()
+                    for holding in equities:
+                        isin=holding["isin"]
+                        if (not isinstance(isin,str) or not ISIN.fullmatch(isin) or isin in seen
+                            or not weight(holding["weight_percent"],0,100) or holding["weight_percent"]<=0
+                            or not isinstance(holding["name"],str) or len(holding["name"])>200):
+                            raise ValueError("INVALID_COMPOSITION_HOLDING")
+                        seen.add(isin)
+                    ordered=sorted(equities,key=lambda h:(-h["weight_percent"],h["isin"]))
+                    exact=report["exact_listed_equity_weight_percent"]
+                    top=report["top_10_exact_equity_weight_percent"]
+                    if (not weight(exact) or not weight(top) or top>exact+.0001
+                        or abs(sum(h["weight_percent"] for h in ordered)-exact)>.0001
+                        or abs(sum(h["weight_percent"] for h in ordered[:10])-top)>.0001
+                        or exact>allocations.get("Equity",0)+.0001):
+                        continue
+                    result.append({"scheme_code":code,"status":"SECONDARY_COMPOSITION_ONLY",
+                        "source":"TIGZIG_AMC_DERIVED","source_url":URL,"collected_at":found["collected_at"],
+                        **{k:report[k] for k in ("portfolio_date","reported_weight_total_percent",
+                            "asset_allocation_percent","exact_listed_equity_weight_percent",
+                            "top_10_exact_equity_weight_percent","exact_equity_count")},
+                        "top_holdings":[{k:h[k] for k in ("isin","name","weight_percent")} for h in ordered[:10]],
+                        "notice":"Secondary reported composition; not independently verified. Exact listed equity is a subset, not full asset or derivative coverage."})
+                except (ValueError,TypeError,KeyError,AttributeError):
+                    continue
+    except (OSError,sqlite3.Error,ValueError,TypeError,KeyError,AttributeError):
+        return []
+    return result
+
+
 def matched(disclosures,instant=None,*,include_exact_weights=False):
     if not permitted() or not disclosures:
         return []
