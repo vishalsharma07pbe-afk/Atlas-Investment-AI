@@ -113,9 +113,9 @@ class LocalAcceptanceTests(unittest.TestCase):
                   {"domain":"VALUATION","status":"PRIVATE_MARKER"}]}}
         nse["horizons"]["SWING"]["candidates"]=[item,item]
         fund=next(x for x in o["sections"] if x["section"]=="LARGE_CAP")["result"]
-        fund["qualification_summary"]={"evaluated_count":1,"top_eligible_count":0,"growth_eligible_count":0,
-            "excluded":[{"identifier":"PRIVATE_MARKER","top_performer_missing":["EXPENSE_RATIO","EXPENSE_RATIO","PRIVATE_MARKER"],
-                         "growth_outlook_missing":["OFFICIAL_RISKOMETER"]}]}
+        fund["qualification_counts"]={"evaluated_count":1,"top_eligible_count":0,"growth_eligible_count":0,
+            "top_missing_gate_counts":{"EXPENSE_RATIO":1,"UNKNOWN_GATE":1},
+            "growth_missing_gate_counts":{"OFFICIAL_RISKOMETER":1}}
         result=acceptance.qualification_audit(o)
         swing=result["stocks"]["SWING"]
         self.assertEqual(swing["domain_counts"]["FUNDAMENTALS"]["PARTIAL_CONTEXT"],1)
@@ -126,7 +126,7 @@ class LocalAcceptanceTests(unittest.TestCase):
         self.assertIsNone(result["funds"]["SMALL_CAP"]["evaluated_count"])
         self.assertNotIn("PRIVATE_MARKER",str(result))
         self.assertNotIn("INE009A01021",str(result))
-        fund["qualification_summary"]["excluded"]*=2
+        fund["qualification_counts"]["top_missing_gate_counts"]["PRIVATE_MARKER"]=1
         self.assertIsNone(acceptance.qualification_audit(o)["funds"]["LARGE_CAP"]["top_missing_gate_counts"])
 
     def test_empty_and_stale_sources_cannot_pass(self):

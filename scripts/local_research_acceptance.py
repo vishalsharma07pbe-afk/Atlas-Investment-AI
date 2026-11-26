@@ -280,6 +280,7 @@ def qualification_audit(overview):
             group=_obj(_obj(result.get("horizons")).get(horizon))
             candidates=group.get("candidates")
             coverage[venue]={"eligible_history_count":_bounded_count(result.get("eligible_count")),
+                             "horizon_eligible_histories":_bounded_count(_obj(_obj(result.get("history_coverage")).get(horizon)).get("eligible_histories")),
                              "watch_rows":len(candidates) if isinstance(candidates,list) and len(candidates)<=100 else None}
             if coverage[venue]["watch_rows"] is None:
                 continue
@@ -305,30 +306,27 @@ def qualification_audit(overview):
     for category in sorted(SECTIONS-{"NSE","BSE"}):
         result=section(category)
         historical=_obj(result.get("historical_coverage"))
-        summary=_obj(result.get("qualification_summary"))
+        summary=_obj(result.get("qualification_counts"))
         evaluated=_bounded_count(summary.get("evaluated_count"),40)
-        excluded=summary.get("excluded")
-        def gap_counts(field):
-            if evaluated is None or not isinstance(excluded,list) or len(excluded)>evaluated:
+        top=_bounded_count(summary.get("top_eligible_count"),40)
+        growth=_bounded_count(summary.get("growth_eligible_count"),40)
+        valid=evaluated is not None and top is not None and growth is not None and max(top,growth)<=evaluated
+        def gap_counts(field,eligible):
+            values=summary.get(field)
+            if not valid or not isinstance(values,dict):
                 return None
-            counts={}
-            seen=set()
-            for row in excluded:
-                if not isinstance(row,dict) or not isinstance(row.get("identifier"),str) or row["identifier"] in seen:
-                    return None
-                seen.add(row["identifier"])
-                values=row.get(field)
-                if not isinstance(values,list) or any(not isinstance(v,str) for v in values):
-                    return None
-                for gate in {v if v in FUND_GATES else "UNKNOWN_GATE" for v in values}:
-                    counts[gate]=counts.get(gate,0)+1
-            return counts
+            withheld=evaluated-eligible
+            if any(k not in FUND_GATES|{"UNKNOWN_GATE"} or type(v) is not int or not 1<=v<=withheld for k,v in values.items()):
+                return None
+            if (not withheld and values) or (withheld and sum(values.values())<withheld):
+                return None
+            return dict(values)
         funds[category]={"history_sample_count":_bounded_count(historical.get("sample_count"),40),
             "history_eligible_count":_bounded_count(historical.get("eligible_count"),40),
-            "evaluated_count":evaluated,"top_eligible_count":_bounded_count(summary.get("top_eligible_count"),40),
-            "growth_eligible_count":_bounded_count(summary.get("growth_eligible_count"),40),
-            "top_missing_gate_counts":gap_counts("top_performer_missing"),
-            "growth_missing_gate_counts":gap_counts("growth_outlook_missing")}
+            "evaluated_count":evaluated if valid else None,"top_eligible_count":top if valid else None,
+            "growth_eligible_count":growth if valid else None,
+            "top_missing_gate_counts":gap_counts("top_missing_gate_counts",top),
+            "growth_missing_gate_counts":gap_counts("growth_missing_gate_counts",growth)}
     return {"status":"EVIDENCE_AUDIT_ONLY","stocks":stocks,"funds":funds,
             "notice":"Counts describe bounded existing snapshots; null means unavailable, not zero. No new data acquisition, investment recommendation or certification."}
 
