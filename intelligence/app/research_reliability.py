@@ -6,7 +6,7 @@ from statistics import mean, median
 from zoneinfo import ZoneInfo
 import json
 
-from .watch_outcomes import HORIZONS, _table, OUTCOME_EVIDENCE_VERSION
+from .watch_outcomes import HORIZONS, _table, OUTCOME_EVIDENCE_VERSION, RISK_PATH_VERSION
 from .replay_evidence import exact_isin
 import re
 from .horizon_research import VERSION
@@ -50,6 +50,27 @@ def _outcome(row, published, maturity, today):
     result=b/a-1
     return result if isfinite(result) else None
 
+def _path_metrics(row,change):
+    """Require a versioned, internally consistent path from a valid outcome."""
+    if change is None:
+        return None
+    try:
+        outcome=json.loads(row["outcome"])
+        path=outcome["risk_path"]
+        if path["version"]!=RISK_PATH_VERSION or type(path["observations"]) is not int or path["observations"]!=outcome["observations"]:
+            return None
+        low,high,dd=(path[k] for k in ("worst_close_from_entry_percent","best_close_from_entry_percent","peak_to_trough_close_drawdown_percent"))
+        if not all(_finite(v) for v in (low,high,dd)):
+            return None
+        # Entry is a closing mark; exit must lie within extrema, and the
+        # path drawdown cannot be smaller in magnitude than entry downside.
+        if not (-100<=dd<=low+.0001 and -100<=low<=0<=high<=1e6 and low-.0001<=100*change<=high+.0001):
+            return None
+        return low,high,dd
+    except (ValueError,TypeError,KeyError,OverflowError):
+        return None
+
+
 def cohort(rows, horizon, today, truncated=False):
     # Select by publication and predeclared review dates, not by realized results.
     selected = []
@@ -86,7 +107,7 @@ def cohort(rows, horizon, today, truncated=False):
                 change=None
             if row["status"]=="OBSERVED" and change is None:
                 legacy_or_unverified+=1
-            selected.append((identity,change,published))
+            selected.append((identity,change,published,_path_metrics(row,change)))
         except (KeyError,ValueError,TypeError,OverflowError):
             invalid+=1
     outcomes=[x[1] for x in selected if x[1] is not None]
@@ -99,6 +120,15 @@ def cohort(rows, horizon, today, truncated=False):
             metrics.append({"cost_bps_per_side":cost,"mean_net_change_percent":round(mean(net)*100,4),
                 "median_net_change_percent":round(median(net)*100,4),"positive_count":sum(r>0 for r in net),
                 "negative_count":sum(r<0 for r in net),"flat_count":sum(r==0 for r in net)})
+    paths=[x[3] for x in selected if x[3] is not None]
+    risk={"status":"OBSERVED_CLOSE_PATH_SAMPLE" if paths else "NO_VERIFIED_CLOSE_PATHS",
+          "observed_paths":len(paths),"outcomes_without_path":len(outcomes)-len(paths),
+          "coverage_percent":round(100*len(paths)/len(selected),2) if selected else 0,
+          "worst_entry_downside_percent":min(p[0] for p in paths) if paths else None,
+          "median_entry_downside_percent":round(median(p[0] for p in paths),4) if paths else None,
+          "worst_close_drawdown_percent":min(p[2] for p in paths) if paths else None,
+          "median_close_drawdown_percent":round(median(p[2] for p in paths),4) if paths else None,
+          "notice":"Non-overlapping selected watch outcomes with verified close-path metadata only. Not portfolio drawdown, risk-adjusted performance certification, intraday risk or predictive probability."}
     blockers=[]
     if truncated:blockers.append("COHORT_LIMIT_REACHED")
     if len(outcomes)<MIN_OUTCOMES:blockers.append("INSUFFICIENT_MATURE_OUTCOMES")
@@ -112,7 +142,7 @@ def cohort(rows, horizon, today, truncated=False):
         "coverage_percent":round(100*coverage,2),"overlap_excluded":overlap,
         "immature_excluded":immature,"incompatible_excluded":incompatible,"invalid_excluded":invalid,
         "legacy_or_unverified_observed":legacy_or_unverified,
-        "cost_scenarios":metrics,"blockers":blockers,
+        "cost_scenarios":metrics,"risk_path_summary":risk,"blockers":blockers,
         "notice":NOTICE}
 
 def read(connect, instant=None):

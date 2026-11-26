@@ -43,6 +43,10 @@ class WatchOutcomeTests(unittest.TestCase):
         self.assertEqual(result["exit_date"],"2026-12-08")
         self.assertEqual(result["evidence_version"],watch.OUTCOME_EVIDENCE_VERSION)
         self.assertEqual(result["observations"],14)
+        self.assertEqual(result["risk_path"]["worst_close_from_entry_percent"],0)
+        self.assertEqual(result["risk_path"]["peak_to_trough_close_drawdown_percent"],0)
+        report={"isin":self.item["isin"],"sections":{"corporate_actions":{"status":"AVAILABLE","source":{"provider":"UPSTOX","endpoint":"/v2/fundamentals/"+self.item["isin"]+"/corporate-actions","retrieved_at":"2026-12-10T10:00:00+00:00"},"data":[{"date":"2026-12-03","action_type":"SPLIT","adjustment_eligible":False}]}}}
+        self.assertEqual(watch.evaluate(row,payload,today,calendar,action_report=report,instant=datetime(2026,12,10,10,tzinfo=timezone.utc)),("REPORTED_ACTION_RECONCILIATION_REQUIRED",None))
         self.assertEqual(watch.evaluate(row,{**payload,"candles":points[:1]+points[2:]},today,calendar),("EVIDENCE_GAP",None))
         self.assertEqual(watch.evaluate(row,{**payload,"candles":points[:14]+points[15:]},today,calendar),("EVIDENCE_GAP",None))
         self.assertEqual(watch.evaluate(row,payload,today,None),("CALENDAR_EVIDENCE_GAP",None))
@@ -81,3 +85,9 @@ class WatchOutcomeTests(unittest.TestCase):
                 db.execute("UPDATE watch_outcomes SET status='PENDING'")
             with self.assertRaises(sqlite3.IntegrityError):
                 db.execute("UPDATE watch_outcomes SET outcome=NULL")
+
+    def test_close_path_drawdown_is_not_just_final_return(self):
+        result=watch._risk_path([100,120,90,110])
+        self.assertEqual(result["worst_close_from_entry_percent"],-10)
+        self.assertEqual(result["best_close_from_entry_percent"],20)
+        self.assertEqual(result["peak_to_trough_close_drawdown_percent"],-25)
