@@ -3,7 +3,7 @@ import {useOverlayFocus} from "./useOverlayFocus";
 import NotificationSourceHealth from "./NotificationSourceHealth";
 import PersonalNotificationInbox from "./PersonalNotificationInbox";
 import {indiaDateToday,upcomingIpoEvents} from "./ipoCalendar";
-type Alert={id:string;revision_key?:string;freshness?:"STALE"|"RECENT"|"NOT_APPLICABLE";category:string;title:string;description:string;event_date:string|null;published_at:string;source_name:string;source_url:string;subscription_total_x:string|null;subscription_as_of:string|null};
+type Alert={id:string;revision_key?:string;freshness?:"STALE"|"RECENT"|"NOT_APPLICABLE";category:string;title:string;description:string;event_date:string|null;published_at:string;source_name:string;source_url:string|null;publication_basis?:string;subscription_total_x:string|null;subscription_as_of:string|null};
 type Summary={ids:string[];revision_keys?:string[];total:number;live_feed_connected:boolean};
 const BASE="/intelligence/api/v1/intelligence/notifications";
 const KEY="atlas:read-alert-ids";
@@ -99,8 +99,8 @@ export default function NotificationCenter({includePersonal=false}:{includePerso
           <strong>{a.title}</strong><p>{a.description}</p>
           {a.event_date&&<small>Event: {a.event_date}</small>}
           {a.subscription_total_x!==null&&<p>Subscription: {a.subscription_total_x}× · As of {a.subscription_as_of??"unknown"} {a.freshness==="STALE"&&<strong className="atlas-stale-label">STALE SNAPSHOT — do not treat as live</strong>}</p>}
-          <small>Published {new Date(a.published_at).toLocaleString("en-IN")} · {a.source_name}</small>
-          <a href={a.source_url} target="_blank" rel="noopener noreferrer">Source</a>
+          <small>{a.publication_basis==="RESEARCH_SNAPSHOT"?"Research snapshot":"Published"} {new Date(a.published_at).toLocaleString("en-IN")} · {a.source_name}</small>
+          {a.source_url?<a href={a.source_url} target="_blank" rel="noopener noreferrer">Source</a>:<small>Local saved research · see Market Intelligence for evidence.</small>}
         </article>)}
         {!loading&&!error&&view==="ALL"&&alerts&&alerts.length>0&&alerts.every(a=>category!=="ALL"&&a.category!==category)&&<p className="muted tiny">No alerts in this category.</p>}
         <NotificationSourceHealth/>

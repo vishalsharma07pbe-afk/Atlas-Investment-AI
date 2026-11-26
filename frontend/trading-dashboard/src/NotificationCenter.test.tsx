@@ -54,3 +54,16 @@ it("focuses the notification dialog, wraps keyboard focus and restores the bell 
  expect(screen.queryByRole("dialog",{name:"Notification center"})).toBeNull();
  expect(document.activeElement).toBe(bell);
 });
+
+
+it("shows local dated research alerts without inventing an external source link",async()=>{
+ const alert={id:"research-test",revision_key:"research-test",category:"RISK_WARNING",title:"TEST · breakout review",description:"Observed re-entry, not a trade signal.",event_date:"2026-11-25",published_at:"2026-11-26T03:00:00Z",publication_basis:"RESEARCH_SNAPSHOT",source_name:"ATLAS local research",source_url:null,subscription_total_x:null,subscription_as_of:null};
+ vi.stubGlobal("fetch",vi.fn(async(url:string)=>({ok:true,json:async()=>url.endsWith("/summary")?{ids:[alert.id],revision_keys:[alert.id],total:1}:{alerts:[alert]}})));
+ render(<NotificationCenter/>);
+ await waitFor(()=>expect(screen.getByRole("button",{name:"Notifications, 1 unread"})).toBeTruthy());
+ fireEvent.click(screen.getByRole("button",{name:"Notifications, 1 unread"}));
+ expect(await screen.findByText(alert.title)).toBeTruthy();
+ expect(screen.getByText(/Research snapshot.*ATLAS local research/)).toBeTruthy();
+ expect(screen.getByText(/Local saved research/)).toBeTruthy();
+ expect(screen.queryByRole("link",{name:"Source"})).toBeNull();
+});
