@@ -9,7 +9,7 @@ import sqlite3
 import time
 from uuid import uuid4
 
-PROVIDERS=("UPSTOX","POLYGON")
+PROVIDERS=("UPSTOX","POLYGON","DHAN")
 LEASE=30
 CODES={"PROVIDER_ACCESS_REJECTED":900,"PROVIDER_RATE_LIMITED":60,
        "PROVIDER_REQUEST_FAILED":60,"PROVIDER_HTTP_FAILURE":60}
@@ -55,7 +55,7 @@ def finish(provider,token,reason=None,retry_after=None,now=None):
         if not row:
             return False
         failures=row["failures"]+1 if reason in CODES else 0
-        delay=0
+        delay=1 if provider=="DHAN" else 0
         if reason in CODES:
             delay=min(3600,CODES[reason]*2**min(failures-1,5))
             if reason=="PROVIDER_RATE_LIMITED" and type(retry_after) is int:

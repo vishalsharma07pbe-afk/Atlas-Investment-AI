@@ -84,7 +84,7 @@ class ReadOnlyRouter:
             except Exception as exc:
                 # Only fixed internal codes may leave this boundary.
                 code = str(exc) if isinstance(exc, ProviderFailure) else ""
-                reason = code if code in {"PROVIDER_ACCESS_REJECTED","PROVIDER_RATE_LIMITED","PROVIDER_REQUEST_FAILED","PROVIDER_HTTP_FAILURE","STALE_OR_FUTURE","INSTRUMENT_MISMATCH","UPSTOX_INSTRUMENT_MISMATCH","POLYGON_SYMBOL_MISMATCH","PROVIDER_RECOVERY_COOLDOWN","RECOVERY_STORAGE_UNAVAILABLE"} else "FAILED_OR_INVALID"
+                reason = code if code in {"PROVIDER_ACCESS_REJECTED","PROVIDER_RATE_LIMITED","PROVIDER_REQUEST_FAILED","PROVIDER_HTTP_FAILURE","STALE_OR_FUTURE","INSTRUMENT_MISMATCH","UPSTOX_INSTRUMENT_MISMATCH","POLYGON_SYMBOL_MISMATCH","DHAN_INSTRUMENT_MISMATCH","DHAN_TIMESTAMP_UNVERIFIED","PROVIDER_RECOVERY_COOLDOWN","RECOVERY_STORAGE_UNAVAILABLE"} else "FAILED_OR_INVALID"
                 cooldown = 900 if reason=="PROVIDER_ACCESS_REJECTED" else 60 if reason=="PROVIDER_RATE_LIMITED" else None
                 # Stale or mismatched observations concern this instrument,
                 # not the health of every instrument from the same provider.
