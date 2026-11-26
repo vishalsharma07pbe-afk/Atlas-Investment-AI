@@ -646,29 +646,34 @@ def planning_goal_comparison(request:ComparisonRequest):
 
 from fastapi import HTTPException
 from .research_journal import JournalEntryInput,list_entries,create_entry,update_entry,delete_entry
+from .journal_session import owner_for as journal_owner
 
 @app.get("/api/v1/intelligence/journal")
-def journal_list():
-    try:return {"entries":list_entries()}
+def journal_list(request:FastAPIRequest):
+    owner=journal_owner(request,settings.backend_url)
+    try:return {"entries":list_entries(owner)}
     except (ValueError,OSError) as exc:raise HTTPException(status_code=503,detail="Local journal unavailable") from exc
 
 @app.post("/api/v1/intelligence/journal",status_code=201)
-def journal_create(entry:JournalEntryInput):
-    try:return create_entry(entry)
+def journal_create(entry:JournalEntryInput,request:FastAPIRequest):
+    owner=journal_owner(request,settings.backend_url)
+    try:return create_entry(entry,owner)
     except ValueError as exc:raise HTTPException(status_code=409,detail=str(exc)) from exc
     except OSError as exc:raise HTTPException(status_code=503,detail="Local journal unavailable") from exc
 
 @app.put("/api/v1/intelligence/journal/{entry_id}")
-def journal_update(entry_id:str,entry:JournalEntryInput):
-    try:result=update_entry(entry_id,entry)
+def journal_update(entry_id:str,entry:JournalEntryInput,request:FastAPIRequest):
+    owner=journal_owner(request,settings.backend_url)
+    try:result=update_entry(entry_id,entry,owner)
     except ValueError as exc:raise HTTPException(status_code=409,detail=str(exc)) from exc
     except OSError as exc:raise HTTPException(status_code=503,detail="Local journal unavailable") from exc
     if result is None:raise HTTPException(status_code=404,detail="Journal entry not found")
     return result
 
 @app.delete("/api/v1/intelligence/journal/{entry_id}",status_code=204)
-def journal_delete(entry_id:str):
-    try:found=delete_entry(entry_id)
+def journal_delete(entry_id:str,request:FastAPIRequest):
+    owner=journal_owner(request,settings.backend_url)
+    try:found=delete_entry(entry_id,owner)
     except (ValueError,OSError) as exc:raise HTTPException(status_code=503,detail="Local journal unavailable") from exc
     if not found:raise HTTPException(status_code=404,detail="Journal entry not found")
 
