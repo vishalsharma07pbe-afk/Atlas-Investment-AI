@@ -128,6 +128,27 @@ class RecommendationEngineTests(unittest.TestCase):
         self.assertIsNone(report["historical"]["returns_3y"])
         self.assertIsNone(report["historical"]["sample_peer_percentile"])
 
+    def test_weekly_hurdle_context_is_descriptive_and_validated(self):
+        from math import expm1,log1p
+        excess=round(26-5200*expm1(log1p(.06)/52),4)
+        block={"status":"HYPOTHETICAL_HURDLE_ONLY","weekly_intervals":156,
+               "annualized_arithmetic_return_percent":26,"annualized_volatility_percent":11,
+               "scenarios":[{"annual_effective_hurdle_percent":0,"annualized_arithmetic_excess_percent":26,
+                    "annualized_downside_percent":5,"sharpe_proxy":round(26/11,4),"sortino_proxy":5.2},
+                   {"annual_effective_hurdle_percent":6,"annualized_arithmetic_excess_percent":excess,
+                    "annualized_downside_percent":6,"sharpe_proxy":round(excess/11,4),"sortino_proxy":round(excess/6,4)}]}
+        fund=strong(identifier="123456",expense_ratio=None,benchmark_hit_rate=None)
+        ranked=rank_candidates([fund],"LARGE_CAP",84,"HIGH")
+        report=_research_reports([fund],ranked,[{"scheme_code":123456,"weekly_hurdle_sensitivity":block}],[],[])[0]
+        self.assertEqual(report["historical"]["weekly_hurdle_sensitivity"],block)
+        self.assertEqual(report["top_performer"]["status"],"WITHHELD")
+        self.assertIn("BENCHMARK_HIT_RATE",report["top_performer"]["missing"])
+        for invalid in ({**block,"weekly_intervals":155},{**block,"status":"VERIFIED_RISK_FREE"},
+                        {**block,"scenarios":[{**block["scenarios"][0],"sharpe_proxy":999},block["scenarios"][1]]},
+                        {**block,"scenarios":[{**block["scenarios"][0],"sortino_proxy":None},block["scenarios"][1]]}):
+            self.assertIsNone(recommendations._weekly_hurdle_context({"weekly_hurdle_sensitivity":invalid}))
+        self.assertIsNone(recommendations._weekly_hurdle_context({}))
+
     def test_history_gate_counts_reconcile_with_sample(self):
         gates={"OFFICIAL_ANCHOR_UNAVAILABLE":1,"COMPARISON_DATE_MISMATCH":2,
                "HISTORY_QUALITY_OR_LENGTH":3,"ELIGIBLE":4}

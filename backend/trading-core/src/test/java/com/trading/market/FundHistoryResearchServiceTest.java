@@ -99,6 +99,32 @@ class FundHistoryResearchServiceTest {
   assertEquals(0.0,risk.get("median_rolling_52w_annualized_percent"));
   assertEquals(0.0,risk.get("best_rolling_52w_annualized_percent"));
  }
+ @Test void hurdleSensitivityUsesArithmeticExcessSampleVarianceAndAllDownsideIntervals(){
+  var returns=new ArrayList<Double>();
+  for(int i=0;i<156;i++)returns.add(i%2==0?-.01:.02);
+  var block=FundHistoryResearchService.weeklyHurdleSensitivity(returns);
+  assertEquals("HYPOTHETICAL_HURDLE_ONLY",block.get("status"));
+  assertEquals(26.0,block.get("annualized_arithmetic_return_percent"));
+  double vol=100*Math.sqrt(52*156*.015*.015/155);
+  assertEquals(vol,(Double)block.get("annualized_volatility_percent"),.0001);
+  var scenarios=(List<?>)block.get("scenarios");
+  var zero=(Map<?,?>)scenarios.getFirst();var six=(Map<?,?>)scenarios.getLast();
+  assertEquals(26/vol,(Double)zero.get("sharpe_proxy"),.0001);
+  assertEquals(26/(100*Math.sqrt(52*.0001/2)),(Double)zero.get("sortino_proxy"),.0001);
+  double hurdle=Math.expm1(Math.log1p(.06)/52);
+  double excess=100*52*(.005-hurdle);
+  assertEquals(excess,(Double)six.get("annualized_arithmetic_excess_percent"),.0001);
+  assertEquals(excess/(100*Math.sqrt(52*Math.pow(-.01-hurdle,2)/2)),(Double)six.get("sortino_proxy"),.0001);
+ }
+ @Test void hurdleSensitivityRejectsIncompleteInvalidAndNearZeroDenominators(){
+  assertTrue(FundHistoryResearchService.weeklyHurdleSensitivity(Collections.nCopies(155,.01)).isEmpty());
+  assertTrue(FundHistoryResearchService.weeklyHurdleSensitivity(Collections.nCopies(156,Double.NaN)).isEmpty());
+  var flat=FundHistoryResearchService.weeklyHurdleSensitivity(Collections.nCopies(156,0.0));
+  var zero=(Map<?,?>)((List<?>)flat.get("scenarios")).getFirst();
+  var six=(Map<?,?>)((List<?>)flat.get("scenarios")).getLast();
+  assertNull(zero.get("sharpe_proxy"));assertNull(zero.get("sortino_proxy"));
+  assertNull(six.get("sharpe_proxy"));assertEquals(-Math.sqrt(52),(Double)six.get("sortino_proxy"),.0001);
+ }
  @Test void underwaterDurationIncludesUnrecoveredObservedDecline(){
   LocalDate end=LocalDate.of(2026,11,24);
   List<Map<String,Object>> rows=new ArrayList<>();
@@ -144,6 +170,7 @@ class FundHistoryResearchServiceTest {
   for(int i=156;i>=0;i--)rows.add(Map.of("nav_date",end.minusWeeks(i),"nav",BigDecimal.valueOf(100+(156-i)*.2)));
   var risk=FundHistoryResearchService.weeklyRisk(rows,end);
   assertEquals(156,risk.get("weekly_intervals"));
+  assertNotNull(risk.get("weekly_hurdle_sensitivity"));
   assertEquals(105,risk.get("rolling_windows"));
   assertEquals(100.0,risk.get("positive_rolling_52w_percent"));
   assertTrue((Double)risk.get("weekly_volatility_percent")>=0);

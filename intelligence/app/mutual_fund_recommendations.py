@@ -291,6 +291,46 @@ def _rolling_peer_context(row):
             "notice":"Overlapping matched NAV windows versus the other sampled funds, not official benchmark TRI or independent observations."}
 
 
+def _weekly_hurdle_context(row):
+    block=row.get("weekly_hurdle_sensitivity")
+    if (not isinstance(block,dict) or block.get("status")!="HYPOTHETICAL_HURDLE_ONLY"
+        or type(block.get("weekly_intervals")) is not int or block["weekly_intervals"]!=156):
+        return None
+    mean=block.get("annualized_arithmetic_return_percent")
+    volatility=block.get("annualized_volatility_percent")
+    if not _bounded(mean,-5200,1_000_000) or not _bounded(volatility,0,1_000_000):
+        return None
+    scenarios=block.get("scenarios")
+    if not isinstance(scenarios,list) or len(scenarios)!=2:
+        return None
+    import math
+    clean=[]
+    for hurdle,scenario in zip((0,6),scenarios):
+        if not isinstance(scenario,dict) or not _bounded(scenario.get("annual_effective_hurdle_percent"),hurdle,hurdle):
+            return None
+        excess=scenario.get("annualized_arithmetic_excess_percent")
+        downside=scenario.get("annualized_downside_percent")
+        if (not _bounded(excess,-5206,1_000_000) or not _bounded(downside,0,1_000_000)
+            or abs(excess-(mean-5200*math.expm1(math.log1p(hurdle/100)/52)))>.0002):
+            return None
+        result={"annual_effective_hurdle_percent":hurdle,"annualized_arithmetic_excess_percent":excess,
+                "annualized_downside_percent":downside}
+        for key,denominator in (("sharpe_proxy",volatility),("sortino_proxy",downside)):
+            if key not in scenario:
+                return None
+            ratio=scenario[key]
+            if ratio is None:
+                if denominator>.01005:return None
+            elif (not _bounded(ratio,-100_000_000,100_000_000) or denominator<.00995
+                  or abs(ratio*denominator-excess)>.00011+abs(ratio)*.000051+denominator*.000051):
+                return None
+            result[key]=ratio
+        clean.append(result)
+    return {"status":"HYPOTHETICAL_HURDLE_ONLY","weekly_intervals":156,
+            "annualized_arithmetic_return_percent":mean,"annualized_volatility_percent":volatility,
+            "scenarios":clean}
+
+
 def _unique_match(rows,identifier):
     matches=[r for r in rows if isinstance(r,dict) and r.get("scheme_code")==identifier]
     return matches[0] if len(matches)==1 else {}
@@ -413,7 +453,8 @@ def _research_reports(candidates, ranked, source_rows, disclosed, portfolios):
                 "returns_1y":fund.returns_1y,"returns_3y":fund.returns_3y,
                 "sample_peer_percentile":fund.peer_percentile,"worst_rolling_return":fund.worst_rolling_return,
                 "max_drawdown":fund.max_drawdown,"volatility":fund.volatility,
-                "rolling_peer_consistency":_rolling_peer_context(source_by_id.get(fund.identifier,{})) if fund.category in COMPARABLE else None},
+                "rolling_peer_consistency":_rolling_peer_context(source_by_id.get(fund.identifier,{})) if fund.category in COMPARABLE else None,
+                "weekly_hurdle_sensitivity":_weekly_hurdle_context(source_by_id.get(fund.identifier,{}))},
             "research_assessment":_fund_assessment(fund,source_by_id.get(fund.identifier,{}),
                 _unique_match(disclosed,fund.identifier),_unique_match(portfolios,fund.identifier),top,growth,ranked["suitability"]),
             "secondary_disclosure_available":fund.identifier in disclosure_ids,
