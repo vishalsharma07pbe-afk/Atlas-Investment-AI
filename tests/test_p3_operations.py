@@ -3,6 +3,8 @@ import importlib.util
 import io
 import json
 import sqlite3
+import os
+import subprocess
 from pathlib import Path
 import tarfile
 import tempfile
@@ -152,6 +154,71 @@ class LocalAcceptanceTests(unittest.TestCase):
 
 
 class BackupVerificationTests(unittest.TestCase):
+    def test_local_backup_argument_guard_and_journal_gitignore(self):
+        script=ROOT/"scripts/backup-production.sh"
+        subprocess.run(["bash","-n",str(script)],check=True)
+        result=subprocess.run(["bash",str(script),"--unknown"],cwd=ROOT,capture_output=True,text=True)
+        self.assertEqual(result.returncode,2)
+        self.assertIn("Usage:",result.stderr)
+        self.assertIn("data/research-journal/",(ROOT/".gitignore").read_text(encoding="utf-8"))
+
+    def test_backup_refuses_stopped_source_before_mutating(self):
+        # Fake only docker; no actual services or credentials are used.
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            docker=root/"docker"
+            log=root/"calls"
+            docker.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$ATLAS_FAKE_LOG"\ncase "$*" in *"config --quiet"*) exit 0;; *"ps --status running -q"*) exit 0;; *) exit 99;; esac\n')
+            docker.chmod(0o700)
+            env=dict(os.environ,PATH=str(root)+os.pathsep+os.environ["PATH"],ATLAS_FAKE_LOG=str(log),
+                     ATLAS_BACKUP_DIR=str(root/"backups"),ATLAS_PRODUCTION_ENV_FILE="",
+                     ATLAS_PRODUCTION_COMPOSE_FILE=str(ROOT/"docker-compose.production.yml"))
+            result=subprocess.run(["bash",str(ROOT/"scripts/backup-production.sh")],cwd=ROOT,env=env,capture_output=True,text=True)
+            self.assertEqual(result.returncode,1)
+            self.assertIn("is not running",result.stderr)
+            self.assertFalse((root/"backups").exists())
+            self.assertNotIn(" stop ",log.read_text())
+            self.assertNotIn(" run ",log.read_text())
+
+
+    def test_backup_archives_exact_installed_image_and_read_only_mounts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            docker=root/"docker"
+            log=root/"calls"
+            image="sha256:"+"a"*64
+            container="b"*64
+            archive=root/"fixture.tar.gz"
+            with tarfile.open(archive,"w:gz") as tar:
+                info=tarfile.TarInfo("journal/owners/test.json")
+                payload=b"[]"
+                info.size=len(payload)
+                tar.addfile(info,io.BytesIO(payload))
+            docker.write_text("""#!/bin/sh
+printf '%s\\n' "$*" >> "$ATLAS_FAKE_LOG"
+case "$*" in
+  *"config --quiet"*) exit 0;;
+  *"ps --status running -q"*) printf '%s\\n' "$ATLAS_FAKE_CONTAINER";;
+  "inspect --format "*) printf '%s\\n' "$ATLAS_FAKE_IMAGE";;
+  *"exec -T postgres "*) printf 'synthetic dump';;
+  *"stop intelligence"*|*"start intelligence"*) exit 0;;
+  "run --rm --pull never --network none --volumes-from "*) cat "$ATLAS_FAKE_ARCHIVE";;
+  *) exit 99;;
+esac
+""")
+            docker.chmod(0o700)
+            env=dict(os.environ,PATH=str(root)+os.pathsep+os.environ["PATH"],ATLAS_FAKE_LOG=str(log),
+                     ATLAS_FAKE_IMAGE=image,ATLAS_FAKE_CONTAINER=container,ATLAS_FAKE_ARCHIVE=str(archive),
+                     ATLAS_BACKUP_DIR=str(root/"backups"),ATLAS_PRODUCTION_ENV_FILE="",
+                     ATLAS_PRODUCTION_COMPOSE_FILE=str(ROOT/"docker-compose.production.yml"))
+            result=subprocess.run(["bash",str(ROOT/"scripts/backup-production.sh")],cwd=ROOT,env=env,capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertIn("run --rm --pull never --network none --volumes-from "+container+":ro --entrypoint python "+image+" -m app.ops_snapshot",log.read_text())
+            self.assertNotIn("--no-build",log.read_text())
+            backups=list((root/"backups").iterdir())
+            self.assertEqual(len(backups),1)
+            self.assertEqual(verify_backup.verify(backups[0])["status"],"VERIFIED")
+
     def test_recovery_checks_exact_alert_and_scheduler_registration(self):
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/"research.sqlite3"
