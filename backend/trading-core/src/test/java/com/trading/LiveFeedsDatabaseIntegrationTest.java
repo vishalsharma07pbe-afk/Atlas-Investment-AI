@@ -517,6 +517,38 @@ class LiveFeedsDatabaseIntegrationTest {
   verifyNoInteractions(fundMock);
  }
 
+ @Test
+ @org.springframework.transaction.annotation.Transactional
+ void masterRenamesSameIsinWithoutLosingHistoryAndSkipsAmbiguousIdentities()throws Exception{
+  db.update("""
+    INSERT INTO instruments(exchange_id,symbol,series,source,isin,instrument_type)
+    VALUES ((SELECT id FROM exchanges WHERE code='NSE'),'UMIYA-MRO','EQ','MANUAL_CSV','INE398B01018','EQ'),
+           ((SELECT id FROM exchanges WHERE code='NSE'),'RENAMEOLD','EQ','MANUAL_CSV','INE000A01901','EQ'),
+           ((SELECT id FROM exchanges WHERE code='NSE'),'RENAMEOCCUPIED','EQ','MANUAL_CSV','INE000A01902','EQ'),
+           ((SELECT id FROM exchanges WHERE code='NSE'),'RENAMEOTHEROLD','BE','MANUAL_CSV','INE000A01903','EQ')
+    """);
+  long id=db.queryForObject("SELECT id FROM instruments WHERE symbol='UMIYA-MRO'",Long.class);
+  db.update("""
+    INSERT INTO market_candles(instrument_id,timeframe,candle_time,source_id,open,high,low,close,volume,is_complete,quality_status,adjustment_status)
+    VALUES (?,'1d','2025-01-06T10:00:00Z',(SELECT id FROM data_sources WHERE source_code='MANUAL_CSV'),100,110,95,105,200,true,'VALIDATED_MANUAL','ADJUSTED')
+    """,id);
+  db.update("""
+    INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,isin,instrument_type)
+    VALUES ('NSE_EQ|INE398B01018','NSE','UMIYA-MRO','INE398B01018','EQ')
+    """);
+  when(http.get(contains("NSE.json.gz"),isNull(),anyInt())).thenReturn("[{\"instrument_key\":\"NSE_EQ|INE398B01018\",\"exchange\":\"NSE\",\"instrument_type\":\"EQ\",\"trading_symbol\":\"MROTEK\",\"isin\":\"INE398B01018\",\"name\":\"MROTEK\"},{\"instrument_key\":\"NSE_EQ|INE000A01901\",\"exchange\":\"NSE\",\"instrument_type\":\"EQ\",\"trading_symbol\":\"RENAMEOCCUPIED\",\"isin\":\"INE000A01901\",\"name\":\"RENAMEOCCUPIED\"},{\"instrument_key\":\"NSE_EQ|INE000A01903\",\"exchange\":\"NSE\",\"instrument_type\":\"EQ\",\"trading_symbol\":\"RENAMEOTHER\",\"isin\":\"INE000A01903\",\"name\":\"RENAMEOTHER\"},{\"instrument_key\":\"NSE_EQ|INE000A0190X\",\"exchange\":\"NSE\",\"instrument_type\":\"EQ\",\"trading_symbol\":\"BADISIN\",\"isin\":\"INE000A0190X\",\"name\":\"BADISIN\"}]".getBytes());
+  when(http.get(contains("BSE.json.gz"),isNull(),anyInt())).thenReturn("[{\"instrument_key\":\"BSE_EQ|INE000A01904\",\"exchange\":\"BSE\",\"instrument_type\":\"EQ\",\"trading_symbol\":\"REGRECONBSE\",\"isin\":\"INE000A01904\",\"name\":\"REGRECONBSE\"}]".getBytes());
+  assertThat(stocks.syncMaster()).isEqualTo(2);
+  assertThat(stocks.syncMaster()).isEqualTo(2);
+  assertThat(db.queryForObject("SELECT id FROM instruments WHERE symbol='MROTEK'",Long.class)).isEqualTo(id);
+  assertThat(db.queryForObject("SELECT close FROM market_candles WHERE instrument_id=?",BigDecimal.class,id)).isEqualByComparingTo("105");
+  assertThat(db.queryForObject("SELECT trading_symbol FROM upstox_instrument_map WHERE instrument_key='NSE_EQ|INE398B01018'",String.class)).isEqualTo("MROTEK");
+  assertThat(db.queryForObject("SELECT isin FROM instruments WHERE symbol='RENAMEOCCUPIED'",String.class)).isEqualTo("INE000A01902");
+  assertThat(db.queryForObject("SELECT count(*) FROM instruments WHERE symbol IN ('RENAMEOLD','RENAMEOTHEROLD','REGRECONBSE')",Integer.class)).isEqualTo(3);
+  assertThat(db.queryForObject("SELECT count(*) FROM instruments WHERE symbol IN ('UMIYA-MRO','RENAMEOTHER','BADISIN')",Integer.class)).isZero();
+  assertThat(db.queryForObject("SELECT count(*) FROM upstox_instrument_map WHERE trading_symbol IN ('RENAMEOCCUPIED','RENAMEOTHER','BADISIN')",Integer.class)).isZero();
+ }
+
  @Test void providerHistoryDoesNotOverwriteAdjustedManualCandle()throws Exception{
   db.update("INSERT INTO instruments(exchange_id,symbol,series,source,isin,instrument_type) VALUES ((SELECT id FROM exchanges WHERE code='NSE'),'ADJUSTEDTEST','EQ','MANUAL_CSV','INE000A01003','EQ')");
   db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,instrument_type,isin) VALUES ('NSE_EQ|INE000A01003','NSE','ADJUSTEDTEST','EQ','INE000A01003')");
