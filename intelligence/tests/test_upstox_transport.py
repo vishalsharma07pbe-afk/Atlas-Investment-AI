@@ -19,6 +19,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         urls=[]
         def connect(url,**kwargs):
             urls.append(url)
+            self.assertEqual(kwargs["user_agent_header"],"ATLAS/2.0")
             return ws
         frames=[]
         async def callback(frame):frames.append(frame)

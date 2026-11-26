@@ -7,6 +7,7 @@ import re
 import sqlite3
 from urllib.parse import urlsplit
 from . import quote_recovery
+from .upstox_http_identity import USER_AGENT
 import httpx
 from urllib.parse import quote, urlencode
 from .provider_router import Quote, ProviderFailure, ReadOnlyRouter, CircuitBreaker
@@ -30,7 +31,7 @@ def _request(url, headers):
     reason="PROVIDER_REQUEST_FAILED"
     retry_after=None
     try:
-        safe_headers = {**headers, "User-Agent": "ATLAS-Research/1.0"}
+        safe_headers = {**headers, "User-Agent": USER_AGENT if provider=="UPSTOX" else "ATLAS-Research/1.0"}
         response = httpx.get(url, headers=safe_headers, timeout=DEFAULT_TIMEOUT,
                              follow_redirects=False)
         if response.status_code in (401, 403):

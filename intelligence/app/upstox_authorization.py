@@ -3,6 +3,7 @@ import json
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 from urllib.error import HTTPError, URLError
 from .upstox_stream import validate_redirect
+from .upstox_http_identity import USER_AGENT
 
 AUTHORIZE_URL="https://api.upstox.com/v3/feed/market-data-feed/authorize"
 
@@ -22,6 +23,7 @@ def authorize_feed(token: str, opener=None) -> str:
         raise AuthorizationError("Provider credential missing or invalid")
     request=Request(AUTHORIZE_URL,headers={
         "Accept":"application/json",
+        "User-Agent":USER_AGENT,
         "Authorization":"Bearer "+token,
     },method="GET")
     try:

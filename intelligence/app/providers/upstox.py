@@ -8,6 +8,7 @@ import json, time
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
+from ..upstox_http_identity import USER_AGENT
 
 class ProviderError(RuntimeError): pass
 
@@ -31,7 +32,7 @@ class UpstoxHistoricalProvider:
         for attempt in range(self.retries+1):
             wait=self.interval-(time.monotonic()-self.last)
             if wait>0: time.sleep(wait)
-            request=Request(self.base_url+path,headers={"Accept":"application/json","Authorization":"Bearer "+self.token})
+            request=Request(self.base_url+path,headers={"Accept":"application/json","User-Agent":USER_AGENT,"Authorization":"Bearer "+self.token})
             try:
                 self.last=time.monotonic()
                 with urlopen(request,timeout=15) as response:
