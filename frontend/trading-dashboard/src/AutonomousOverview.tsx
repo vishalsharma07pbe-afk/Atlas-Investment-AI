@@ -8,7 +8,9 @@ type FundPick={fund:{identifier:string;name:string};score:number};
 type HistoricalFund={scheme_code:number;scheme_name:string;cagr_3y_percent:number;nav_date:string};
 type Horizon="SWING"|"SHORT_TERM"|"LONG_TERM";
 type Result={horizons?:Partial<Record<Horizon,{status:string;candidates:{id:number;symbol:string;exchange:string;as_of:string}[]}>>;historical_coverage?:{items?:HistoricalFund[]};eligible_count?:number;universe_size?:number;top_gainers?:Candidate[];momentum_leaders?:Candidate[];top_performers?:FundPick[];growth_outlook?:FundPick[];coverage?:{name_matched_schemes:number};blockers?:string[];notice?:string};
-type Briefing={status:string;ready_sections:number;total_sections:number;market:{eligible_histories:number;sampled_instruments:number;outlook_status:string};horizons:Partial<Record<Horizon,{displayed_watch_count:number;ai_reviewed_count:number;conflicting_evidence_count:number;qualified_count:number|null}>>;funds:{growth_pick_count:number|null;historical_watch_count:number;ready_categories:number;total_categories:number};institutional:{status:string;latest_date?:string;fii_direction?:string;dii_direction?:string};leading_evidence_gaps:{code:string;watch_count:number}[];notice:string};
+type DecisionWatch={isin:string;exchange:string;id:number;symbol:string;as_of:string;horizon:Horizon;review_findings:string[];unresolved_requirement_count:number};
+type DecisionContext={horizons:Partial<Record<Horizon,{selected_watches:DecisionWatch[];qualified_count:number|null;status:string}>>;review_company_count:number;review_companies:{isin:string;symbol:string;horizons:Horizon[];findings:string[];observations:{exchange:string;as_of:string}[]}[];regime:{status:string;as_of?:string;trend?:string;volatility_regime?:string;agreement?:string};global_coverage:{available_count:number;total_count:number}|null;notice:string};
+type Briefing={decision_context?:DecisionContext;news_headline_count?:number;status:string;ready_sections:number;total_sections:number;market:{eligible_histories:number;sampled_instruments:number;outlook_status:string};horizons:Partial<Record<Horizon,{displayed_watch_count:number;ai_reviewed_count:number;conflicting_evidence_count:number;qualified_count:number|null}>>;funds:{growth_pick_count:number|null;historical_watch_count:number;ready_categories:number;total_categories:number};institutional:{status:string;latest_date?:string;fii_direction?:string;dii_direction?:string};leading_evidence_gaps:{code:string;watch_count:number}[];notice:string};
 type FxItem={pair:string;status:string;as_of?:string;rate?:number;basis?:string;changes?:{observations:number;start_date:string;end_date:string;percent:number}[]};
 type FxContext={status:string;retrieved_at?:string;items:FxItem[];notice:string};
 type MacroSource={source:string;status:string;retrieved_at?:string;items:{series:string;label:string;unit:string;status:string;as_of:string|null;value:number|null;changes:{observations:number;start_date:string;end_date:string;value:number;unit:string}[]}[]};
@@ -45,7 +47,7 @@ export default function AutonomousOverview({children,onPortfolio,onFunds,onSetti
    {error&&<p role="alert" className="notice warning-notice">Research service unavailable. Previously displayed observations may be outdated. <button type="button" className="secondary" onClick={onSettings}>Check connections</button></p>}
    {!data&&!error&&<p role="status">Loading the latest saved research…</p>}
    {data?.enabled===false&&<p className="notice warning-notice">Background research is disabled. Check the local configuration in Settings.</p>}
-   {current&&data?.daily_briefing&&<DailyBriefing report={data.daily_briefing} onFunds={onFunds} onSettings={onSettings}/>}
+   {current&&data?.daily_briefing&&<DailyBriefing report={data.daily_briefing} onFunds={onFunds} onSettings={onSettings} onPortfolio={onPortfolio} onHorizon={onHorizon}/>}
    {onHorizon&&<div className="research-shortcuts" aria-label="Automatic equity research shortcuts">{horizonLinks.map(({id,title})=>{const groups=readyMarkets.flatMap(row=>row.result?.horizons?.[id]?[row.result.horizons[id]!]:[]);const count=groups.reduce((n,group)=>n+(group.status==="TECHNICAL_WATCH_ONLY"?group.candidates.length:0),0);return <button key={id} type="button" className="research-shortcut" onClick={()=>onHorizon(id)}><strong>{title}</strong><span>{groups.length?`${count} technical watches`:"Current research pending"}</span><small>Open research →</small></button>;})}</div>}
    {current&&data?.economic_calendar&&<EconomicCalendarPanel report={data.economic_calendar}/>}
    {current&&data?.global_releases&&<GlobalReleasePanel report={data.global_releases}/>}
@@ -70,7 +72,7 @@ export default function AutonomousOverview({children,onPortfolio,onFunds,onSetti
  </section>;
 }
 
-function DailyBriefing({report,onFunds,onSettings}:{report:Briefing;onFunds:()=>void;onSettings:()=>void}){
+function DailyBriefing({report,onFunds,onSettings,onPortfolio,onHorizon}:{report:Briefing;onFunds:()=>void;onSettings:()=>void;onPortfolio:()=>void;onHorizon?:(horizon:Horizon)=>void}){
  const watches=Object.values(report.horizons).reduce((n,h)=>n+(h?.displayed_watch_count??0),0);
  const reviewed=Object.values(report.horizons).reduce((n,h)=>n+(h?.ai_reviewed_count??0),0);
  const conflicts=Object.values(report.horizons).reduce((n,h)=>n+(h?.conflicting_evidence_count??0),0);
@@ -82,7 +84,25 @@ function DailyBriefing({report,onFunds,onSettings}:{report:Briefing;onFunds:()=>
   <p><strong>Funds:</strong> {report.funds.growth_pick_count===null?"Research pending":report.funds.growth_pick_count+" growth picks in current categories"} · {report.funds.historical_watch_count} historical watch observations. <button className="secondary" type="button" onClick={onFunds}>Review funds</button></p>
   {report.institutional.status==="RECENT_PAIRED_OBSERVATIONS"?<p><strong>Institutional:</strong> FII {words(report.institutional.fii_direction||"UNKNOWN")}; DII {words(report.institutional.dii_direction||"UNKNOWN")} over five reported dates through {report.institutional.latest_date}. Not a directional forecast.</p>:<p>Comparable recent institutional flows unavailable.</p>}
   {report.leading_evidence_gaps.length>0&&<details><summary>Why research remains watch-only</summary><ul>{report.leading_evidence_gaps.map(g=><li key={g.code}>{words(g.code)} · {g.watch_count} watch observations</li>)}</ul><button type="button" className="secondary" onClick={onSettings}>Review data coverage</button></details>}
+  {report.decision_context&&<DecisionBriefing context={report.decision_context} newsCount={report.news_headline_count} onPortfolio={onPortfolio} onHorizon={onHorizon}/>}
   <small>{report.notice}</small>
+ </section>;
+}
+
+function DecisionBriefing({context,newsCount,onPortfolio,onHorizon}:{context:DecisionContext;newsCount?:number;onPortfolio:()=>void;onHorizon?:(horizon:Horizon)=>void}){
+ const words=(v:string)=>v.toLowerCase().replace(/_/g," ");
+ const order:Horizon[]=["SWING","SHORT_TERM","LONG_TERM"];
+ return <section aria-label="Today's evidence review">
+  <h3>Today's evidence review</h3>
+  <p>{context.regime.status==="OBSERVED_BENCHMARK_REGIME"?"Observed Nifty 50 trend: "+words(context.regime.trend||"UNAVAILABLE")+" · "+(context.regime.as_of||"date unavailable"):"Observed benchmark trend unavailable."} {context.regime.agreement==="OPPOSING_DAILY_BREADTH_REVIEW"&&"Daily sample breadth opposes the longer trend; review the differing horizons."} Not a forecast.</p>
+  <p>{context.global_coverage?context.global_coverage.available_count+"/"+context.global_coverage.total_count+" dated global indicators":"Global indicator coverage unavailable"} · {newsCount===undefined?"Company headline coverage unavailable":newsCount+" returned company headlines"}; no absence-of-risk inference.</p>
+  <h4>Selected technical watches by horizon</h4>
+  {order.map(h=>{const result=context.horizons[h];return <div key={h}><strong>{words(h)}</strong><p>{result?result.selected_watches.length+" selected watches · "+(result.qualified_count===null?"Qualification unavailable":result.qualified_count+" qualified in the reviewed sample"):"Current selection unavailable"}</p>{result?.selected_watches.length?<ul>{result.selected_watches.map(w=><li key={w.isin}><span>{w.symbol} · {w.exchange} · {w.as_of} · {w.unresolved_requirement_count} unresolved requirements</span></li>)}</ul>:null}{onHorizon&&<button className="secondary" type="button" onClick={()=>onHorizon(h)}>Review {words(h)} research</button>}</div>;})}
+  <h4>Companies requiring evidence review</h4>
+  <p>{context.review_company_count} distinct companies among selected watches have review findings. This is not a severity ranking.</p>
+  {context.review_companies.map(item=><details key={item.isin}><summary>{item.symbol} · {item.findings.length} findings · {item.horizons.map(words).join(", ")}</summary><p>{item.observations.map(o=>o.exchange+" "+o.as_of).join(" · ")}</p><ul>{item.findings.map(f=><li key={f}>{words(f)}</li>)}</ul></details>)}
+  <p><strong>Private portfolio:</strong> open the owner-scoped Portfolio Doctor for holding-specific risks and changes. <button className="secondary" type="button" onClick={onPortfolio}>Open private portfolio review</button></p>
+  <small>{context.notice}</small>
  </section>;
 }
 
