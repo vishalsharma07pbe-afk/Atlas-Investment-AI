@@ -1,5 +1,5 @@
 import {visiblePolling} from "./visiblePolling";
-import {useEffect,useState,type ReactNode} from "react";
+import {useEffect,useRef,useState,type ReactNode} from "react";
 import WatchOutcomeHistory from "./WatchOutcomeHistory";
 import IntradayResearch from "./IntradayResearch";
 import AdvancedSection from "./AdvancedSection";
@@ -7,6 +7,7 @@ import CompanyEvidenceCard,{type CompanyEvidence} from "./CompanyEvidenceCard";
 import AutomaticCompanyNews,{type NewsEvidence} from "./AutomaticCompanyNews";
 
 export type Horizon="INTRADAY"|"SWING"|"SHORT_TERM"|"LONG_TERM";
+export type WatchReportTarget={exchange:string;id:number;isin:string;as_of:string};
 type ClaimComparison={status:string;matched_count:number;contradicted_count:number;rejected_count:number;duplicate_count:number;shared_matches:{path:string;providers:string[]}[];conflicts:{path:string;matching_providers:string[];contradicting_providers:string[]}[];notice:string};
 type CommitteeCoverage={claim_comparison?:ClaimComparison;status:string;configured_count:number;reviewed_count:number;members:{provider:string;role:string;status:string;cited_domains:string[]}[];available_domains:string[];cited_domains:string[];uncited_domains:string[];agreement_status:string;notice:string};
 type AiReview={committee?:CommitteeCoverage;reviews:{provider:string;role?:string;findings:{statement:string;evidence_ids:string[]}[]}[];reviewed_at:string;notice:string};
@@ -155,9 +156,10 @@ function StrategyValidation({data,horizon}:{data:Validation;horizon:Horizon}){
  </section>;
 }
 
-export default function HorizonResearch({horizon,children,onSettings}:{horizon:Horizon;children:ReactNode;onSettings:()=>void}){
+export default function HorizonResearch({horizon,children,onSettings,reportTarget}:{horizon:Horizon;children:ReactNode;onSettings:()=>void;reportTarget?:WatchReportTarget}){
  const [data,setData]=useState<Snapshot|null>(null);
  const [error,setError]=useState(false);
+ const requestedDetails=useRef<HTMLDetailsElement|null>(null);
  useEffect(()=>{
   if(horizon==="INTRADAY")return;
   return visiblePolling(async signal=>{
@@ -175,6 +177,19 @@ export default function HorizonResearch({horizon,children,onSettings}:{horizon:H
  const selection=data?.stock_qualification?.horizons[horizon]?.selection;
  const ranked=selection?selection.watch_refs.flatMap(ref=>{const matches=available.filter(c=>c.exchange===ref.exchange&&c.id===ref.id&&c.isin===ref.isin);return matches.length===1?matches:[];}).slice(0,5):available.sort((a,b)=>b.rank_score-a.rank_score||a.exchange.localeCompare(b.exchange)||a.symbol.localeCompare(b.symbol)).slice(0,5);
  const blockers=[...new Set(ready.flatMap(s=>s.result!.horizons![horizon]!.blockers))];
+ // A briefing reference is never resolved by ticker or by a different venue.
+ // Require exactly one current server-selected candidate; older snapshots
+ // without canonical selection cannot confirm the requested report.
+ const requestedMatches=reportTarget&&selection?ranked.filter(c=>c.exchange===reportTarget.exchange&&c.id===reportTarget.id&&c.isin===reportTarget.isin):[];
+ const requested=requestedMatches.length===1?requestedMatches[0]:undefined;
+ const requestedKey=requested?requested.exchange+":"+requested.id+":"+requested.isin:null;
+ useEffect(()=>{
+  if(!reportTarget||!requestedKey||!requestedDetails.current)return;
+  const details=requestedDetails.current;
+  details.open=true;
+  details.querySelector("summary")?.focus({preventScroll:true});
+  details.scrollIntoView?.({block:"start",behavior:"auto"});
+ },[reportTarget,requestedKey]);
  return <section className="horizon-workspace" aria-label={titles[horizon]}>
   <section className="panel glass horizon-hero">
    <div className="sectionhead"><div><small className="section-kicker">AUTOMATIC RESEARCH</small><h2>{titles[horizon]}</h2><p>{descriptions[horizon]}</p></div><span className="tag">{horizon!=="INTRADAY"&&error?"UNAVAILABLE":horizon!=="INTRADAY"&&data?.enabled===false?"AUTOMATION OFF":"RESEARCH ONLY"}</span></div>
@@ -192,13 +207,14 @@ export default function HorizonResearch({horizon,children,onSettings}:{horizon:H
   {horizon==="INTRADAY"?<IntradayResearch/>:<section className="panel glass horizon-results">
    {data?.enabled&&!error&&data.stock_qualification?.horizons[horizon]&&<QualificationSummaryView report={data.stock_qualification.horizons[horizon]!}/>}
    <div className="sectionhead"><div><h3>Technical watch candidates</h3><p className="muted tiny">{selection?"Up to five distinct ISINs from the available NSE/BSE shortlists; research watches, not recommendations.":"Up to five observations across the available NSE/BSE samples."}</p></div></div>
+   {reportTarget&&<div className="notice" role="status">{!data&&!error?"Resolving the selected report…":requested?(requested.as_of===reportTarget.as_of?"Opened the selected stock report from the briefing.":"The selected stock has a refreshed observation: "+requested.as_of+" (briefing: "+reportTarget.as_of+"). The report below uses current evidence."):"The requested stock report is not available in the current canonical shortlist. No substitute report was opened. You can review the current watches below."}</div>}
    {ranked.length?<div className="horizon-cards">{ranked.map((candidate,index)=><article className="horizon-card" key={candidate.exchange+":"+candidate.id}>
     <header><div><small>#{index+1} · {candidate.exchange}</small><h3>{candidate.symbol}</h3></div><strong>{money(candidate.close)}</strong></header>
     <p className="muted tiny">Daily close · {candidate.as_of}</p><p>{candidate.review_horizon}</p>
     <dl><div><dt>ATR / price</dt><dd>{candidate.atr_percent.toFixed(2)}%</dd></div><div><dt>History</dt><dd>{candidate.history_count} sessions</dd></div></dl>
     <p className="muted tiny">Technical rule score: {candidate.rank_score} · not a probability.</p>
     {candidate.stock_qualification&&<p><strong>{words(candidate.stock_qualification.status)}</strong> · {candidate.stock_qualification.blockers.length} unresolved requirements · {candidate.stock_qualification.review_findings.length} review findings</p>}
-    <details key={horizon+":"+candidate.exchange+":"+candidate.id+":"+(candidate.isin||"")} className="notice"><summary>Open complete stock research report</summary>
+    <details key={horizon+":"+candidate.exchange+":"+candidate.id+":"+(candidate.isin||"")} ref={candidate===requested?requestedDetails:undefined} className="notice"><summary>Open complete stock research report</summary>
     <StockReportContext candidate={candidate}/>
     <details><summary>Why this appears &amp; risks</summary><ul>{candidate.reasons.map(reason=><li key={reason}>{reason}</li>)}</ul><p>{candidate.warnings.join(" ")}</p><p className="muted tiny">Median historical daily traded value: {money(candidate.median_daily_traded_value)}</p></details>
     {candidate.selection_company_context&&<CompanyContextView report={candidate.selection_company_context}/>}

@@ -1,5 +1,6 @@
 import {visiblePolling} from "./visiblePolling";
 import "./overview.css";
+import type {WatchReportTarget} from "./HorizonResearch";
 import {useEffect,useState,type ReactNode} from "react";
 import AutomaticInstitutionalActivity,{type InstitutionalActivity} from "./AutomaticInstitutionalActivity";
 import {RecentCompanyNews,type Article} from "./AutomaticCompanyNews";
@@ -26,7 +27,7 @@ type Snapshot={market_regime?:RegimeReport;economic_calendar?:EconomicCalendar;g
 const labels:Record<string,string>={NSE:"NSE",BSE:"BSE",LARGE_CAP:"Large cap",MID_CAP:"Mid cap",SMALL_CAP:"Small cap",FLEXI_CAP:"Flexi cap",INDEX:"Index funds",LARGE_MID_CAP:"Large & mid cap",MULTI_CAP:"Multi cap",AGGRESSIVE_HYBRID:"Aggressive hybrid",CORPORATE_BOND:"Corporate bond",SHORT_DURATION:"Short duration"};
 const percent=(value:number|null)=>value==null?"—":(value>0?"+":"")+value.toFixed(2)+"%";
 const stamp=(value:string|null)=>value?new Date(value).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",dateStyle:"medium",timeStyle:"short"})+" IST":"Not yet refreshed";
-export default function AutonomousOverview({children,onPortfolio,onFunds,onSettings,onHorizon}:{children:ReactNode;onPortfolio:()=>void;onFunds:()=>void;onSettings:()=>void;onHorizon?:(horizon:Horizon)=>void}){
+export default function AutonomousOverview({children,onPortfolio,onFunds,onSettings,onHorizon}:{children:ReactNode;onPortfolio:()=>void;onFunds:()=>void;onSettings:()=>void;onHorizon?:(horizon:Horizon,target?:WatchReportTarget)=>void}){
  const [data,setData]=useState<Snapshot|null>(null);
  const [error,setError]=useState(false);
  const [manual,setManual]=useState(false);
@@ -90,7 +91,7 @@ function OverviewGroup({compact,title,description,children}:{compact:boolean;tit
  return <details className="overview-evidence-group"><summary><span><strong>{title}</strong><small>{description}</small></span><span className="overview-disclosure-label" aria-hidden="true"/></summary><div className="overview-evidence-body">{children}</div></details>;
 }
 
-function DailyBriefing({report,onFunds,onSettings,onPortfolio,onHorizon}:{report:Briefing;onFunds:()=>void;onSettings:()=>void;onPortfolio:()=>void;onHorizon?:(horizon:Horizon)=>void}){
+function DailyBriefing({report,onFunds,onSettings,onPortfolio,onHorizon}:{report:Briefing;onFunds:()=>void;onSettings:()=>void;onPortfolio:()=>void;onHorizon?:(horizon:Horizon,target?:WatchReportTarget)=>void}){
  const watches=Object.values(report.horizons).reduce((n,h)=>n+(h?.displayed_watch_count??0),0);
  const reviewed=Object.values(report.horizons).reduce((n,h)=>n+(h?.ai_reviewed_count??0),0);
  const conflicts=Object.values(report.horizons).reduce((n,h)=>n+(h?.conflicting_evidence_count??0),0);
@@ -107,7 +108,7 @@ function DailyBriefing({report,onFunds,onSettings,onPortfolio,onHorizon}:{report
  </section>;
 }
 
-function DecisionBriefing({context,newsCount,onPortfolio,onHorizon}:{context:DecisionContext;newsCount?:number;onPortfolio:()=>void;onHorizon?:(horizon:Horizon)=>void}){
+function DecisionBriefing({context,newsCount,onPortfolio,onHorizon}:{context:DecisionContext;newsCount?:number;onPortfolio:()=>void;onHorizon?:(horizon:Horizon,target?:WatchReportTarget)=>void}){
  const words=(v:string)=>v.toLowerCase().replace(/_/g," ");
  const order:Horizon[]=["SWING","SHORT_TERM","LONG_TERM"];
  return <section aria-label="Today's evidence review">
@@ -118,7 +119,7 @@ function DecisionBriefing({context,newsCount,onPortfolio,onHorizon}:{context:Dec
   <p>Among selected watches only; not a severity ranking.</p>
   {context.review_companies.map(item=><details className="overview-company-review" key={item.isin}><summary>{item.symbol} · {item.findings.length} findings · {item.horizons.map(words).join(", ")}</summary><p>{item.observations.map(o=>o.exchange+" "+o.as_of).join(" · ")}</p><ul>{item.findings.map(f=><li key={f}>{words(f)}</li>)}</ul></details>)}
   <h4>Selected technical watches by horizon</h4>
-  <div className="overview-horizon-grid">{order.map(h=>{const result=context.horizons[h];return <article className="overview-horizon-card" key={h}><strong className="overview-horizon-title">{words(h)}</strong><p>{result?result.selected_watches.length+" selected watches · "+(result.qualified_count===null?"Qualification unavailable":result.qualified_count+" qualified in the reviewed sample"):"Current selection unavailable"}</p>{result?.selected_watches.length?<details><summary>View {result.selected_watches.length} selected observations</summary><ul>{result.selected_watches.map(w=><li key={w.isin}><div><strong>{w.symbol} · {w.exchange}</strong><small>{w.as_of} · {w.unresolved_requirement_count} unresolved requirements</small></div></li>)}</ul></details>:null}{onHorizon&&<button className="secondary" type="button" onClick={()=>onHorizon(h)}>Review {words(h)} research</button>}</article>;})}</div>
+  <div className="overview-horizon-grid">{order.map(h=>{const result=context.horizons[h];return <article className="overview-horizon-card" key={h}><strong className="overview-horizon-title">{words(h)}</strong><p>{result?result.selected_watches.length+" selected watches · "+(result.qualified_count===null?"Qualification unavailable":result.qualified_count+" qualified in the reviewed sample"):"Current selection unavailable"}</p>{result?.selected_watches.length?<details><summary>View {result.selected_watches.length} selected observations</summary><ul>{result.selected_watches.map(w=><li key={w.isin}><div><strong>{w.symbol} · {w.exchange}</strong><small>{w.as_of} · {w.unresolved_requirement_count} unresolved requirements</small></div>{onHorizon&&<button type="button" className="secondary overview-report-link" aria-label={"Open "+w.symbol+" "+w.exchange+" research report"} onClick={()=>onHorizon(h,{exchange:w.exchange,id:w.id,isin:w.isin,as_of:w.as_of})}>Open report</button>}</li>)}</ul></details>:null}{onHorizon&&<button className="secondary" type="button" onClick={()=>onHorizon(h)}>Review {words(h)} research</button>}</article>;})}</div>
   <div className="overview-private-review"><p><strong>Private portfolio:</strong> open the owner-scoped Portfolio Doctor for holding-specific risks and changes.</p><button className="secondary" type="button" onClick={onPortfolio}>Open private portfolio review</button></div>
   <small>{context.notice}</small>
  </section>;

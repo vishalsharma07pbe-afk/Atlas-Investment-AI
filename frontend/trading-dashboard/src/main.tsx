@@ -20,7 +20,7 @@ import PortfolioPerformanceHistory from "./PortfolioPerformanceHistory";
 import PersonalAlerts from "./PersonalAlerts";
 import MutualFundHoldings from "./MutualFundHoldings";
 import MarketIntelligence from "./MarketIntelligence";
-import HorizonResearch from "./HorizonResearch";
+import HorizonResearch,{type Horizon,type WatchReportTarget} from "./HorizonResearch";
 import BrokerResearch from "./BrokerResearch";
 import ResearchOutcomes from "./ResearchOutcomes";
 import ResearchSourceAudit from "./ResearchSourceAudit";
@@ -102,6 +102,7 @@ export function AppearanceControls({value, onChange, open, onOpenChange}:{value:
 
 export function App({identity={id:"preview",email:"Local preview",role:"USER"},onLogout=async()=>{}}:{identity?:AuthIdentity;onLogout?:()=>Promise<void>}) {
   const [tab, setTab] = useState(getSavedTab);
+  const [reportTarget,setReportTarget]=useState<WatchReportTarget|undefined>(undefined);
   const [appearance, setAppearance] = useState(getSavedAppearance);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [holdings, setHoldings] = useState<Holding[]>([]);
@@ -235,7 +236,11 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
 
   const style = {"--panel-alpha":(appearance.opacity / 100).toFixed(2), "--panel-blur":`${appearance.opacity === 0 ? 0 : appearance.blur}px`, "--panel-border-color":appearance.border ? "var(--glass-border)" : "transparent"} as React.CSSProperties;
   const activePage = pages[tab] || pages[0];
-  function navigate(id:number){setTab(validPage(id));window.scrollTo({top:0,behavior:"auto"});}
+  function navigate(id:number){setReportTarget(undefined);setTab(validPage(id));window.scrollTo({top:0,behavior:"auto"});}
+  function navigateHorizon(horizon:Exclude<Horizon,"INTRADAY">,target?:WatchReportTarget){
+    navigate(horizon==="SWING"?3:horizon==="SHORT_TERM"?4:5);
+    setReportTarget(target);
+  }
 
   return <div className="dashboard" data-theme={appearance.theme} data-panel-clear={appearance.opacity === 0 ? "true" : undefined} data-blur-zero={appearance.opacity === 0 || appearance.blur === 0 ? "true" : undefined} data-appearance-open={appearanceOpen ? "true" : undefined} style={style}>
     <a className="skip-link" href="#main-content">Skip to main content</a>
@@ -254,7 +259,7 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
         {tab === 0 ? <>
           <PortfolioSummary analysis={analysis} onOpen={()=>navigate(9)}/>
           <PortfolioDoctor compact revision={portfolioRevision} onOpenPortfolio={()=>navigate(9)} onSettings={()=>navigate(6)}/>
-          <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)} onHorizon={horizon=>navigate(horizon==="SWING"?3:horizon==="SHORT_TERM"?4:5)}><ResearchHome holdings={holdings} revision={portfolioRevision} onReviewHoldings={()=>navigate(9)} onOpenExplorer={()=>navigate(7)} onOpenDataHealth={()=>navigate(6)}/></AutonomousOverview>
+          <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)} onHorizon={navigateHorizon}><ResearchHome holdings={holdings} revision={portfolioRevision} onReviewHoldings={()=>navigate(9)} onOpenExplorer={()=>navigate(7)} onOpenDataHealth={()=>navigate(6)}/></AutonomousOverview>
         </> : tab === 9 ? <>
           <PortfolioDoctor revision={portfolioRevision} onSettings={()=>navigate(6)}/>
           <PortfolioIntelligence holdings={holdings} analysis={analysis}/>
@@ -276,8 +281,8 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
             {!holdings.length && <tr><td colSpan={9} className="empty">No active holdings yet. Open Add or update an investment above.</td></tr>}
           </tbody></table></div></section>
           <AdvancedSection title="Past investments" description="Review closed holdings and realized performance"><HistoricalInvestments activeHoldings={holdings}/></AdvancedSection>
-        </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : (tab === 2 || tab === 3 || tab === 4 || tab === 5) ? <HorizonResearch key={tab} horizon={tab===2?"INTRADAY":tab===3?"SWING":tab===4?"SHORT_TERM":"LONG_TERM"} onSettings={()=>setTab(6)}>{tab===5?<EquityResearchDashboard/>:<><MarketIntelligence/><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/></>}</HorizonResearch> : tab === 8 ? <P2ResearchWorkspace/> : tab === 7 ? <StockExplorer/> : tab === 10 ? <>
-          <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)} onHorizon={horizon=>navigate(horizon==="SWING"?3:horizon==="SHORT_TERM"?4:5)}><MarketIntelligence/></AutonomousOverview>
+        </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : (tab === 2 || tab === 3 || tab === 4 || tab === 5) ? <HorizonResearch key={tab} horizon={tab===2?"INTRADAY":tab===3?"SWING":tab===4?"SHORT_TERM":"LONG_TERM"} reportTarget={tab===2?undefined:reportTarget} onSettings={()=>navigate(6)}>{tab===5?<EquityResearchDashboard/>:<><MarketIntelligence/><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/></>}</HorizonResearch> : tab === 8 ? <P2ResearchWorkspace/> : tab === 7 ? <StockExplorer/> : tab === 10 ? <>
+          <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)} onHorizon={navigateHorizon}><MarketIntelligence/></AutonomousOverview>
           <AdvancedSection title="Company and institutional research" description="Company reports, news and institutional activity"><EquityResearchDashboard/><InstitutionalFlows/></AdvancedSection>
           <AdvancedSection title="Research evidence and history" description="Broker research, source audit, outcome review and evidence ledgers"><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/><FlowLedger/><NewsEvidence/><NewsLedger/></AdvancedSection>
         </> : tab === 6 ? <>
