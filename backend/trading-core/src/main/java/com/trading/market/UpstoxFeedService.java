@@ -52,7 +52,25 @@ import org.springframework.transaction.annotation.Transactional;
     if(!seen.add(key))throw new MasterImportException(exchange,MasterFailure.DUPLICATE_KEY);
     // Do not relabel existing historical observations to a different security.
     int mapped;
-    try{mapped=jdbc.update("""
+    try{
+     // An exchange can rename a security without changing its ISIN. The
+     // existing exchange/ISIN identity owns the instrument ID and history.
+     var identities=jdbc.queryForList("""
+       SELECT i.id,i.series FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
+       WHERE e.code=? AND i.isin=? AND (i.symbol<>? OR i.series IS DISTINCT FROM 'EQ')
+       FOR UPDATE OF i
+       """,exchange,isin,symbol);
+     if(!identities.isEmpty()){
+      if(identities.size()!=1||!"EQ".equals(identities.getFirst().get("series")))continue;
+      mapped=jdbc.update("""
+        UPDATE instruments i SET symbol=?,security_name=COALESCE(?,i.security_name),
+          instrument_type='EQ',listing_status='ACTIVE',active=true,
+          source='UPSTOX',source_revision='UPSTOX_INSTRUMENT_MASTER',updated_at=now()
+        WHERE i.id=? AND i.isin=? AND i.series='EQ'
+          AND NOT EXISTS(SELECT 1 FROM instruments other WHERE other.exchange_id=i.exchange_id
+            AND other.symbol=? AND other.series='EQ' AND other.id<>i.id)
+        """,symbol,displayName,identities.getFirst().get("id"),isin,symbol);
+     }else mapped=jdbc.update("""
       INSERT INTO instruments(exchange_id,symbol,series,isin,security_name,instrument_type,
         listing_status,active,source,source_revision,updated_at)
       VALUES ((SELECT id FROM exchanges WHERE code=?),?,'EQ',?,?,?,'ACTIVE',true,
@@ -84,7 +102,7 @@ import org.springframework.transaction.annotation.Transactional;
   return count;
  }
  static boolean validEquityIdentity(String exchange,String key,String isin){
-  return isin.matches("IN[A-Z0-9]{10}") && (
+  return isin.matches("IN[A-Z0-9]{9}[0-9]") && (
     ("NSE".equals(exchange)&&key.equals("NSE_EQ|"+isin))||
     ("BSE".equals(exchange)&&(key.equals("BSE_EQ|"+isin)||key.matches("BSE_EQ\\|[0-9]{1,10}"))));
  }
