@@ -331,6 +331,36 @@ def _weekly_hurdle_context(row):
             "scenarios":clean}
 
 
+def _short_horizon_nav_context(row):
+    block=row.get("short_horizon_nav_risk")
+    if (not isinstance(block,dict) or block.get("status")!="HISTORICAL_NAV_WINDOWS_ONLY"
+        or type(block.get("weekly_anchors")) is not int or block["weekly_anchors"]!=157):
+        return None
+    windows=block.get("windows")
+    if not isinstance(windows,list) or len(windows)!=3:
+        return None
+    clean=[]
+    for weeks,window in zip((4,13,26),windows):
+        n=157-weeks
+        if (not isinstance(window,dict) or type(window.get("weeks")) is not int or window["weeks"]!=weeks
+            or type(window.get("window_count")) is not int or window["window_count"]!=n):
+            return None
+        counts=("loss_windows","flat_windows","gain_windows")
+        if any(type(window.get(k)) is not int or not 0<=window[k]<=n for k in counts) or sum(window[k] for k in counts)!=n:
+            return None
+        loss=window.get("loss_window_percent")
+        keys=("worst_return_percent","fifth_percentile_return_percent","median_return_percent","best_return_percent")
+        values=[window.get(k) for k in keys]
+        if (not _bounded(loss,0,100) or abs(loss-100*window["loss_windows"]/n)>.000051
+            or any(not _bounded(v,-100,1_000_000) for v in values) or values!=sorted(values)):
+            return None
+        if (window["loss_windows"]>0)!=(values[0]<0) or (window["gain_windows"]>0)!=(values[-1]>0):
+            return None
+        clean.append({"weeks":weeks,"window_count":n,"loss_window_percent":loss,
+                      **{k:window[k] for k in (*counts,*keys)}})
+    return {"status":"HISTORICAL_NAV_WINDOWS_ONLY","weekly_anchors":157,"windows":clean}
+
+
 def _unique_match(rows,identifier):
     matches=[r for r in rows if isinstance(r,dict) and r.get("scheme_code")==identifier]
     return matches[0] if len(matches)==1 else {}
@@ -454,7 +484,8 @@ def _research_reports(candidates, ranked, source_rows, disclosed, portfolios, co
                 "sample_peer_percentile":fund.peer_percentile,"worst_rolling_return":fund.worst_rolling_return,
                 "max_drawdown":fund.max_drawdown,"volatility":fund.volatility,
                 "rolling_peer_consistency":_rolling_peer_context(source_by_id.get(fund.identifier,{})) if fund.category in COMPARABLE else None,
-                "weekly_hurdle_sensitivity":_weekly_hurdle_context(source_by_id.get(fund.identifier,{}))},
+                "weekly_hurdle_sensitivity":_weekly_hurdle_context(source_by_id.get(fund.identifier,{})),
+                "short_horizon_nav_risk":_short_horizon_nav_context(source_by_id.get(fund.identifier,{})) if fund.category in SPECIALIZED else None},
             "research_assessment":_fund_assessment(fund,source_by_id.get(fund.identifier,{}),
                 _unique_match(disclosed,fund.identifier),_unique_match(portfolios,fund.identifier),top,growth,ranked["suitability"]),
             "secondary_disclosure_available":fund.identifier in disclosure_ids,
