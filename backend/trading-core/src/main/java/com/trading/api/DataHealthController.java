@@ -41,6 +41,18 @@ public class DataHealthController {
         attempts,interruptions,error_code,last_attempt_at,last_success_at,next_attempt_at
       FROM public_feed_schedule ORDER BY provider
       """));
+    out.put("exchangeCalendar",jdbc.queryForList("""
+      SELECT e.code AS exchange,count(s.session_date) AS recorded_sessions,
+        max(s.session_date) FILTER (WHERE s.is_trading_day AND s.session_type='REGULAR'
+          AND s.session_date<(now() AT TIME ZONE 'Asia/Kolkata')::date) AS latest_regular_session
+      FROM exchanges e LEFT JOIN market_sessions s ON s.exchange_id=e.id
+      WHERE e.code IN ('NSE','BSE') GROUP BY e.code ORDER BY e.code
+      """));
+    out.put("exchangeCalendarAttempts",jdbc.queryForList("""
+      SELECT status,count(*) AS dates,max(attempted_at) AS latest_attempt,
+        sum(rows_written) AS rows_written,error_code
+      FROM exchange_calendar_attempts GROUP BY status,error_code ORDER BY status,error_code
+      """));
     out.put("upstoxRegistry",registry);out.put("officialAmfiNav",nav);out.put("upstoxDailyHistory",daily);
     out.put("instrumentCount",jdbc.queryForObject("SELECT count(*) FROM instruments",Long.class));
     out.put("candleCount",jdbc.queryForObject("SELECT count(*) FROM market_candles WHERE timeframe='1d'",Long.class));

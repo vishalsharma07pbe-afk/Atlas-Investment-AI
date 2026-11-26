@@ -40,6 +40,7 @@ class LiveFeedsDatabaseIntegrationTest {
  @Autowired AmfiFeedService funds;
  @Autowired FundHistoryResearchService fundResearch;
  @Autowired DiscoveryHistoryScheduler discovery;
+ @Autowired ExchangeCalendarSync exchangeCalendar;
  @Autowired MockMvc mvc;
  @MockitoBean FeedHttp http;
  @MockitoBean VersionedVaultReader vault;
@@ -51,6 +52,37 @@ class LiveFeedsDatabaseIntegrationTest {
   db.update("INSERT INTO instruments(exchange_id,symbol,series,source,isin,instrument_type) VALUES ((SELECT id FROM exchanges WHERE code='NSE'),'FEEDTEST','EQ','MANUAL_CSV','INE000A01001','EQ') ON CONFLICT DO NOTHING");
   db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,isin,instrument_type) VALUES ('NSE_EQ|INE000A01001','NSE','FEEDTEST','INE000A01001','EQ') ON CONFLICT DO NOTHING");
   return db.queryForObject("SELECT id FROM instruments WHERE symbol='FEEDTEST'",Long.class);
+ }
+ @Test
+ @org.springframework.transaction.annotation.Transactional
+ void dateSpecificCalendarPersistsWithoutOverwritingExistingSessions()throws Exception{
+  LocalDate day=LocalDate.of(2024,7,17);
+  db.update("DELETE FROM market_sessions WHERE session_date=?",day);
+  db.update("DELETE FROM exchange_holidays WHERE holiday_date=?",day);
+  long open=day.atTime(9,15).atZone(MarketCalendarService.IST).toInstant().toEpochMilli();
+  long close=day.atTime(15,30).atZone(MarketCalendarService.IST).toInstant().toEpochMilli();
+  db.update("UPDATE data_sources SET enabled=true WHERE source_code='UPSTOX'");
+  when(http.text(contains("/market/timings/"+day),eq("test-operator"),anyInt()))
+   .thenReturn("{\"status\":\"success\",\"data\":[{\"exchange\":\"NSE\",\"start_time\":"+open+",\"end_time\":"+close+"},{\"exchange\":\"BSE\",\"start_time\":"+open+",\"end_time\":"+close+"}]}");
+  when(http.text(contains("/market/holidays/"+day),eq("test-operator"),anyInt()))
+   .thenReturn("{\"status\":\"success\",\"data\":[]}");
+  db.update("""
+    INSERT INTO market_sessions(exchange_id,session_date,session_type,is_trading_day)
+    VALUES ((SELECT id FROM exchanges WHERE code='BSE'),?,'REGULAR',false)
+    """,day);
+  var rows=exchangeCalendar.fetch(day,"test-operator");
+  assertThat(exchangeCalendar.store(rows)).isEqualTo(1);
+  assertThat(exchangeCalendar.store(rows)).isZero();
+  assertThat(db.queryForObject("""
+    SELECT count(*) FROM market_sessions s JOIN exchanges e ON e.id=s.exchange_id
+    JOIN data_sources ds ON ds.id=s.source_id WHERE s.session_date=? AND e.code='NSE'
+      AND s.is_trading_day AND ds.source_code='UPSTOX'
+    """,Integer.class,day)).isEqualTo(1);
+  assertThat(db.queryForObject("""
+    SELECT s.is_trading_day FROM market_sessions s JOIN exchanges e ON e.id=s.exchange_id
+    WHERE s.session_date=? AND e.code='BSE'
+    """,Boolean.class,day)).isFalse();
+  assertThat(new MarketCalendarService(db).isTradingDay("NSE",day)).isTrue();
  }
  @Test void benchmarkHistoryUsesStoredSessionClosesAndNeverReplacesManualSource()throws Exception{
   var service=new BenchmarkHistoryService(db,http,new org.springframework.transaction.support.TransactionTemplate(
