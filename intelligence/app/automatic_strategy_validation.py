@@ -18,6 +18,9 @@ def _table(db):
         exchange TEXT NOT NULL, instrument_id INTEGER NOT NULL, symbol TEXT NOT NULL,
         methodology TEXT NOT NULL, attempted_at TEXT NOT NULL,status TEXT NOT NULL,payload TEXT,
         PRIMARY KEY(exchange,instrument_id))""")
+    # Persist the actual selection order independently of attempt timestamps.
+    db.execute("""CREATE TABLE IF NOT EXISTS strategy_replay_rotation(
+        exchange TEXT PRIMARY KEY, selection_basis TEXT NOT NULL)""")
 
 def _ready_ids(snapshot,exchange,registry,today):
     """Exact eligible public identities, independent of watch scores."""
@@ -87,8 +90,8 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
             ready=_ready_ids(snapshot,exchange,registry,today)
             eligible=[r for r in due if r["id"] in ready]
             general=[r for r in due if r["id"] not in ready]
-            latest=max(existing.values(),key=lambda r:(r["attempted_at"],r["instrument_id"]),default=None)
-            last_basis=_payload(latest).get("selection_basis") if latest is not None else None
+            rotation=db.execute("SELECT selection_basis FROM strategy_replay_rotation WHERE exchange=?",(exchange,)).fetchone()
+            last_basis=rotation["selection_basis"] if rotation else None
             # Alternate when both queues are due; never eliminate registry rotation.
             prefer_ready=bool(eligible) and (not general or last_basis!="VALIDATED_RECENT_HISTORY_HINT")
             pool=eligible if prefer_ready else general
@@ -100,6 +103,8 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
             db.execute("""INSERT INTO strategy_validation VALUES(?,?,?,?,?,'RUNNING',NULL)
                 ON CONFLICT(exchange,instrument_id) DO UPDATE SET symbol=excluded.symbol,methodology=excluded.methodology,
                 attempted_at=excluded.attempted_at,status='RUNNING',payload=NULL""",(exchange,i,selected["symbol"],CACHE_VERSION,stamp))
+            db.execute("""INSERT INTO strategy_replay_rotation(exchange,selection_basis) VALUES(?,?)
+                ON CONFLICT(exchange) DO UPDATE SET selection_basis=excluded.selection_basis""",(exchange,basis))
         manifest=None
         try:
             payload=loader(f"/api/v1/market-data/instruments/{i}/candles?limit=500")
@@ -114,7 +119,7 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
                 if manifest is None:
                     result={"status":"FULL_HISTORY_EVIDENCE_GAP","horizons":{}}
                 else:
-                    discovered_action=corporate_action_status(selected,manifest)
+                    discovered_action=corporate_action_status(selected,manifest,today=today)
                     action=corporate_action_status(identity,manifest,require_scope=True,today=today)
                     if discovered_action=="RECORDED_ACTION_RECONCILIATION_REQUIRED":
                         action=discovered_action

@@ -176,7 +176,11 @@ class AutomaticValidationTests(unittest.TestCase):
             with patch("app.automatic_strategy_validation.replay",return_value={"status":"INSUFFICIENT_HISTORY","horizons":{}}):
                 for _ in range(5):
                     refresh(snapshot,connect,loader,instant)
+            # Equal timestamps and independently opened connections must not
+            # break persisted alternation.
             self.assertEqual(calls,[3,1,4,2])
+            with connect() as db:
+                self.assertEqual(db.execute("SELECT selection_basis FROM strategy_replay_rotation WHERE exchange=?",("NSE",)).fetchone()[0],"GENERAL_REGISTRY_ROTATION")
             self.assertEqual(read(connect,instant)["selection_counts"],{
                 "VALIDATED_RECENT_HISTORY_HINT":2,"GENERAL_REGISTRY_ROTATION":2})
 
@@ -213,3 +217,10 @@ class AutomaticValidationTests(unittest.TestCase):
             summary=read(connect,instant)
             self.assertEqual(summary["horizons"]["SWING"]["counts"],{"REPORTED_ACTION_RECONCILIATION_REQUIRED":1})
             self.assertEqual(summary["horizons"]["SWING"]["items"],[])
+            # A stale explicit scope must still withhold even without positive
+            # provider crossing evidence. Do not relax the validation gate.
+            later=instant+timedelta(hours=25)
+            with patch("app.automatic_strategy_validation.cached_action_reports",return_value={}), patch(
+                "app.automatic_strategy_validation.replay",return_value={"status":"HISTORICAL_REPLAY_ONLY","horizons":{}}):
+                refresh(snapshot,connect,loader,later)
+            self.assertEqual(read(connect,later)["horizons"]["SWING"]["counts"],{"ACTION_CONTEXT_UNAVAILABLE":1})
