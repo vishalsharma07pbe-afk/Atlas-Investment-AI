@@ -190,10 +190,10 @@ def matched(rows,today,*,limit=5):
                     or not isinstance(row.get("category"),str)
                     or not row["category"].lower().strip().endswith(" - "+item["category"].lower()+")")):
                     continue
-                for field,limit,values in (("aum_date",14,("aum_cr_all_plans","benchmark","riskometer")),
+                for field,age_limit,values in (("aum_date",14,("aum_cr_all_plans","benchmark","riskometer")),
                                            ("ter_date",90,("ter_percent","base_expense_percent")),
                                            ("document_date",365,("fund_managers","exit_load"))):
-                    if not _day(item[field],today,limit):
+                    if not _day(item[field],today,age_limit):
                         for value in values:
                             item[value]=None
                         item[field]=None
