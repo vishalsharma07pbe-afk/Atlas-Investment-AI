@@ -31,6 +31,14 @@ class Alert(BaseModel):
                 raise ValueError("Subscription snapshot cannot postdate publication")
         return self
 
+class ResearchAlert(Alert):
+    """Only internal adapters construct this type; imports retain mandatory HTTPS attribution."""
+    source_url:str|None=Field(default=None,pattern=r"^https://[^\\s]+$",max_length=1000)
+
+def _revision(alert):
+    # Generated research identities encode the event/observation, not a refresh time.
+    return alert.id if isinstance(alert,ResearchAlert) else alert.id+"@"+alert.published_at.isoformat()
+
 def _load():
     path=Path(os.getenv("ATLAS_ALERTS_FILE","/app/data/alerts.json"))
     try:
@@ -47,8 +55,8 @@ def _load():
 
 def _combined():
     local = _load()
-    from . import automatic_news, global_releases
-    from .autonomous_research import config, _connect
+    from . import automatic_news, global_releases, public_research_alerts, economic_calendar
+    from .autonomous_research import config, _connect, read_snapshot
     if not config()[0]:
         return local, False
     news=[]
@@ -59,25 +67,36 @@ def _combined():
         except (OSError, ValueError, RuntimeError, TypeError, sqlite3.Error):
             # Failure of one source does not suppress the others.
             continue
+    has_news=bool(news)
+    instant=datetime.now(timezone.utc)
+    for producer in (
+        lambda: public_research_alerts.market_alerts(read_snapshot(False),instant),
+        lambda: public_research_alerts.calendar_alerts(economic_calendar.read(_connect,instant),instant),
+    ):
+        try:
+            news.extend(ResearchAlert.model_validate(item) for item in producer())
+        except (OSError,ValueError,RuntimeError,TypeError,KeyError,AttributeError,sqlite3.Error):
+            continue
     known={a.id for a in local}
     combined=list(local)
     for a in news:
         if a.id not in known:
             combined.append(a)
             known.add(a.id)
-    return sorted(combined,key=lambda a:a.published_at,reverse=True), bool(news)
+    return sorted(combined,key=lambda a:a.published_at,reverse=True), has_news
 
 def summary():
     alerts,has_news=_combined()
     return {"status":"LOCAL_AND_PROVIDER_NEWS" if has_news else "LOCAL_SOURCE_ONLY","ids":[a.id for a in alerts],
-            "revision_keys":[a.id+"@"+a.published_at.isoformat() for a in alerts],
+            "revision_keys":[_revision(a) for a in alerts],
             "total":len(alerts),"live_feed_connected":False}
 
 def details():
     alerts,has_news=_combined()
     return {"status":"LOCAL_AND_PROVIDER_NEWS" if has_news else "LOCAL_SOURCE_ONLY","alerts":[{**a.model_dump(mode="json"),
-        "revision_key":a.id+"@"+a.published_at.isoformat(),
+        "revision_key":_revision(a),
+        "publication_basis":"RESEARCH_SNAPSHOT" if isinstance(a,ResearchAlert) else "SOURCE_PUBLICATION",
         "freshness":("STALE" if (datetime.now(timezone.utc)-a.subscription_as_of).total_seconds()>3600*24 else "RECENT") if a.category=="IPO_SUBSCRIPTION" and a.subscription_as_of else "NOT_APPLICABLE",
         "subscription_total_x":str(a.subscription_total_x) if a.subscription_total_x is not None else None}
         for a in alerts],"total":len(alerts),"live_feed_connected":False,
-        "notice":"Local and authorized provider-news alerts where available. Headline topics are not confirmed events. IPO dates and subscription rates are not independently verified or automatically refreshed."}
+        "notice":"Local research reminders and authorized provider-news alerts where available. Headline topics are not confirmed events; research reminders are not recommendations. IPO dates and subscription rates are not independently verified or automatically refreshed."}

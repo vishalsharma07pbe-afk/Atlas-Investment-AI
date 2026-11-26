@@ -110,6 +110,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                     trap_eligible+=1
                     if follow.get("events"):
                         trap_rows.append({"id":row["id"],"symbol":row["symbol"],"exchange":row["exchange"],
+                            "isin":instrument.get("isin") if exact_isin(instrument.get("isin")) else None,
                             "as_of":row["as_of"],"followthrough":follow})
                 if pressure["status"]=="OBSERVED_PRICE_VOLUME_ONLY":
                     pressure_eligible+=1
