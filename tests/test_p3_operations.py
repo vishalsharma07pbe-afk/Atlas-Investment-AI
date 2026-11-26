@@ -269,6 +269,7 @@ case "$*" in
   *"config --quiet"*) exit 0;;
   *"ps --status running -q"*) printf '%s\\n' "$ATLAS_FAKE_CONTAINER";;
   "inspect --format "*) printf '%s\\n' "$ATLAS_FAKE_IMAGE";;
+  "image inspect "*) exit 0;;
   *"exec -T postgres "*) printf 'synthetic dump';;
   *"stop intelligence"*|*"start intelligence"*) exit 0;;
   "run --rm --pull never --network none --volumes-from "*) cat "$ATLAS_FAKE_ARCHIVE";;
@@ -287,6 +288,67 @@ esac
             backups=list((root/"backups").iterdir())
             self.assertEqual(len(backups),1)
             self.assertEqual(verify_backup.verify(backups[0])["status"],"VERIFIED")
+
+    def test_missing_installed_image_rebuilds_only_local_helper_before_stopping(self):
+        import shutil
+        for local in (False, True):
+            with self.subTest(local=local), tempfile.TemporaryDirectory() as directory:
+                root=Path(directory)
+                scripts=root/"scripts"
+                scripts.mkdir()
+                for name in ("backup-production.sh","verify-production-backup.py"):
+                    shutil.copyfile(ROOT/"scripts"/name,scripts/name)
+                (root/".env").touch()
+                (root/"docker-compose.yml").touch()
+                docker=root/"docker"
+                log=root/"calls"
+                old="sha256:"+"a"*64
+                new="sha256:"+"c"*64
+                container="b"*64
+                archive=root/"fixture.tar.gz"
+                with tarfile.open(archive,"w:gz") as tar:
+                    info=tarfile.TarInfo("journal/owners/test.json")
+                    info.size=2
+                    tar.addfile(info,io.BytesIO(b"[]"))
+                docker.write_text("""#!/bin/sh
+printf '%s\\n' "$*" >> "$ATLAS_FAKE_LOG"
+case "$*" in
+  *"config --quiet"*) exit 0;;
+  *"ps --status running -q"*) printf '%s\\n' "$ATLAS_FAKE_CONTAINER";;
+  "inspect --format "*com.docker.compose.project*) printf 'atlas-local\\n';;
+  "inspect --format "*) printf '%s\\n' "$ATLAS_FAKE_OLD";;
+  "image inspect $ATLAS_FAKE_OLD") exit 1;;
+  "image inspect --format "*atlas-local-intelligence:latest) printf '%s\\n' "$ATLAS_FAKE_NEW";;
+  "image inspect $ATLAS_FAKE_NEW") exit 0;;
+  *"build intelligence") exit 0;;
+  *"exec -T postgres "*) printf 'synthetic dump';;
+  *"stop intelligence"*|*"start intelligence"*) exit 0;;
+  "run --rm --pull never --network none --volumes-from "*) cat "$ATLAS_FAKE_ARCHIVE";;
+  *) exit 99;;
+esac
+""")
+                docker.chmod(0o700)
+                env=dict(os.environ,PATH=str(root)+os.pathsep+os.environ["PATH"],ATLAS_FAKE_LOG=str(log),
+                    ATLAS_FAKE_OLD=old,ATLAS_FAKE_NEW=new,ATLAS_FAKE_CONTAINER=container,
+                    ATLAS_FAKE_ARCHIVE=str(archive),ATLAS_BACKUP_DIR=str(root/"backups"),
+                    ATLAS_PRODUCTION_ENV_FILE="",ATLAS_PRODUCTION_COMPOSE_FILE=str(root/"docker-compose.yml"))
+                args=["bash",str(scripts/"backup-production.sh")]+(["--local"] if local else [])
+                result=subprocess.run(args,cwd=root,env=env,capture_output=True,text=True)
+                calls=log.read_text()
+                if local:
+                    self.assertEqual(result.returncode,0,result.stderr)
+                    self.assertLess(calls.index("build intelligence"),calls.index("stop intelligence"))
+                    self.assertIn("--volumes-from "+container+":ro --entrypoint python "+new,calls)
+                    self.assertNotIn(" up ",calls)
+                    backup=next((root/"backups").iterdir())
+                    self.assertEqual(verify_backup.verify(backup)["status"],"VERIFIED")
+                    self.assertIn("intelligence_snapshot_helper=local_rebuilt",(backup/"MANIFEST.txt").read_text())
+                else:
+                    self.assertEqual(result.returncode,1,result.stderr)
+                    self.assertIn("installed production intelligence image unavailable",result.stderr)
+                    self.assertNotIn("build intelligence",calls)
+                    self.assertNotIn("stop intelligence",calls)
+                    self.assertNotIn("exec -T postgres",calls)
 
     def test_recovery_checks_exact_alert_and_scheduler_registration(self):
         with tempfile.TemporaryDirectory() as directory:

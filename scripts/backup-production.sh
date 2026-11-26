@@ -51,11 +51,36 @@ for service in postgres intelligence; do
     intelligence_id="$container_id"
   fi
 done
-# Inspect the actual installed image, not a mutable tag or a Compose build.
+# Prefer the actual installed image. A Docker Desktop container may still
+# run after its image is removed from the local image store. Detect this
+# before dumping PostgreSQL or stopping intelligence.
 intelligence_image="$(docker inspect --format '{{.Image}}' "$intelligence_id")"
 if [[ ! "$intelligence_image" =~ ^sha256:[a-f0-9]{64}$ ]]; then
   printf 'Backup blocked: installed intelligence image not identified\n' >&2
   exit 1
+fi
+snapshot_helper=installed
+if ! docker image inspect "$intelligence_image" >/dev/null 2>&1; then
+  if [[ "$mode" != "local" ]]; then
+    printf 'Backup blocked: installed production intelligence image unavailable\n' >&2
+    exit 1
+  fi
+  # Local Compose defines intelligence with build only and no image override.
+  # Derive its default build tag from the selected container's project label.
+  project="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$intelligence_id")"
+  if [[ ! "$project" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+    printf 'Backup blocked: local Compose project not identified\n' >&2
+    exit 1
+  fi
+  printf 'Installed local intelligence image missing; building backup helper without recreating services.\n' >&2
+  docker compose "${compose_args[@]}" build intelligence </dev/null
+  intelligence_image="$(docker image inspect --format '{{.Id}}' "${project}-intelligence:latest")"
+  if [[ ! "$intelligence_image" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+    printf 'Backup blocked: rebuilt local helper image not identified\n' >&2
+    exit 1
+  fi
+  docker image inspect "$intelligence_image" >/dev/null
+  snapshot_helper=local_rebuilt
 fi
 mkdir -p "$backup_root"
 if [[ -e "$final_dir" || -L "$final_dir" ]]; then
@@ -86,10 +111,10 @@ docker compose "${compose_args[@]}" exec -T postgres sh -c 'pg_dump -U "$POSTGRE
 # Quiesce SQLite and JSON state before streaming its named volumes.
 intelligence_stopped=true
 docker compose "${compose_args[@]}" stop intelligence >/dev/null
-# Compose run has no portable --no-build option. Use the installed image ID
-# and exact stopped source mounts, read-only, without network or env secrets.
+# Use the resolved immutable helper image ID and exact stopped source
+# mounts, read-only, without network or service environment secrets.
 docker run --rm --pull never --network none --volumes-from "$intelligence_id:ro" \
-  --entrypoint python "$intelligence_image" -m app.ops_snapshot > "$work_dir/intelligence-state.tar.gz"
+  --entrypoint python "$intelligence_image" -m app.ops_snapshot </dev/null > "$work_dir/intelligence-state.tar.gz"
 docker compose "${compose_args[@]}" start intelligence >/dev/null
 intelligence_stopped=false
 
@@ -103,6 +128,7 @@ cat > "$work_dir/MANIFEST.txt" <<EOF
 ATLAS $mode backup
 created_at=$timestamp
 contents=PostgreSQL custom dump plus quiesced intelligence state
+intelligence_snapshot_helper=$snapshot_helper
 classification=PRIVATE FINANCIAL RESEARCH DATA
 restore_test_required=true
 EOF
