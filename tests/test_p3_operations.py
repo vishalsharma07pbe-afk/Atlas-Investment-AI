@@ -180,7 +180,7 @@ class LocalAcceptanceTests(unittest.TestCase):
         self.assertEqual(acceptance.assess_workflows(r,o,p,n)["checks"]["notification_summary_contract"],"BLOCKED")
 
     def test_final_contracts_separate_observation_from_product_acceptance(self):
-        intraday={"status":"NOT_AUTHORIZED","examined":0,"eligible":0,"open_exchanges":[],"candidates":[],"warnings":[]}
+        intraday={"status":"NOT_AUTHORIZED","examined":0,"eligible":0,"open_exchanges":[],"candidates":[],"warnings":[],"qualification":{"status":"AWAITING_RESEARCH","reviewed_count":0,"review_required_count":0,"qualified_count":None,"unidentified_listing_count":0,"cross_venue_company_count":0,"conflicting_company_count":0,"recommendations":[]}}
         review={"holding_count":1,"holdings":[{"symbol":"PRIVATE_MARKER"}]}
         journal={"entries":[{"id":"PRIVATE_ID","status":"IDEA","thesis":"PRIVATE_THESIS"}]}
         result=acceptance.assess_final_contracts(intraday,{"unread_count":0},journal,review)
@@ -190,8 +190,14 @@ class LocalAcceptanceTests(unittest.TestCase):
         self.assertEqual(result["product_acceptance"],"NOT_CERTIFIED")
         self.assertNotIn("PRIVATE_",str(result))
         intraday.update(status="RESEARCH_ONLY",examined=1,eligible=1,open_exchanges=["NSE"],
-            candidates=[{"id":1,"exchange":"NSE","pattern":"VOLUME_BREAKOUT_WATCH","bar_end":"2026-11-26T05:00:00Z"}])
+            candidates=[{"id":1,"exchange":"NSE","isin":"INE002A01018","pattern":"VOLUME_BREAKOUT_WATCH","bar_end":"2026-11-26T05:00:00Z",
+                         "observed_pattern_venues":["NSE"],"stock_qualification":{"horizon":"INTRADAY","status":"WITHHELD_EVIDENCE_GAPS",
+                             "blockers":["FINAL_QUALIFICATION_VALIDATION_REQUIRED"],"review_findings":[]}}])
+        intraday["qualification"].update(status="NO_QUALIFIED_IN_REVIEWED_SAMPLE",reviewed_count=1,qualified_count=0)
         self.assertEqual(acceptance.assess_final_contracts(intraday,{"unread_count":0},journal,review)["intraday_evidence"],"OBSERVED")
+        intraday["qualification"]["qualified_count"]=1
+        self.assertEqual(acceptance.assess_final_contracts(intraday,{"unread_count":0},journal,review)["final_runtime"],"BLOCKED")
+        intraday["qualification"]["qualified_count"]=0
         intraday["candidates"][0]["target"]=100
         self.assertEqual(acceptance.assess_final_contracts(intraday,{"unread_count":0},journal,review)["final_runtime"],"BLOCKED")
         journal["entries"].append(dict(journal["entries"][0]))
@@ -203,7 +209,7 @@ class LocalAcceptanceTests(unittest.TestCase):
                 "/intelligence/api/v1/intelligence/research/overview":o,
                 "/api/v1/portfolio/review":p,
                 "/intelligence/api/v1/intelligence/notifications/summary":n,
-                "/api/v1/market-data/intraday-research":{"status":"NOT_AUTHORIZED","examined":0,"eligible":0,"open_exchanges":[],"candidates":[],"warnings":[]},
+                "/api/v1/market-data/intraday-research":{"status":"NOT_AUTHORIZED","examined":0,"eligible":0,"open_exchanges":[],"candidates":[],"warnings":[],"qualification":{"status":"AWAITING_RESEARCH","reviewed_count":0,"review_required_count":0,"qualified_count":None,"unidentified_listing_count":0,"cross_venue_company_count":0,"conflicting_company_count":0,"recommendations":[]}},
                 "/api/v1/research-workspace/notifications/summary":{"unread_count":0},
                 "/intelligence/api/v1/intelligence/journal":{"entries":[]}}
         result=acceptance.collect(values.__getitem__)
@@ -215,6 +221,20 @@ class LocalAcceptanceTests(unittest.TestCase):
         self.assertEqual(acceptance.collect(values.__getitem__)["runtime"],"BLOCKED")
         del o["daily_briefing"]
         self.assertEqual(acceptance.collect(values.__getitem__)["runtime"],"BLOCKED")
+
+    def test_final_coverage_audit_is_redacted_and_distinguishes_unknown_from_zero(self):
+        readiness={"research_jobs":{"company_acquisition":{"sample_identities":200,"due_sample":180,
+          "annual_archive_companies":12,"counts":{"fresh_reports":20,"never_attempted":180,"PRIVATE_MARKER":100},
+          "fresh_sections":{"profile":20,"ratios":19,"PRIVATE_MARKER":100}}}}
+        overview={"research_reliability":{"horizons":{"SWING":{"benchmark_summary":{"matched_outcomes":2},
+          "risk_path_summary":{"observed_paths":3}}}},"strategy_validation":{"horizons":{"SWING":{"observed_instruments":5}}}}
+        result=acceptance.qualification_audit(overview,readiness,{"qualification":{"reviewed_count":0,"qualified_count":None}})
+        self.assertEqual(result["company_acquisition"]["counts"]["fresh_reports"],20)
+        self.assertIsNone(result["company_acquisition"]["fresh_sections"]["competitors"])
+        self.assertEqual(result["stocks"]["SWING"]["prospective_matched_benchmark_outcomes"],2)
+        self.assertEqual(result["stocks"]["SWING"]["historical_replay_observed_instruments"],5)
+        self.assertIsNone(result["stocks"]["INTRADAY"]["qualified_count"])
+        self.assertNotIn("PRIVATE_MARKER",str(result))
 
     def test_remote_gateway_rejected_before_network_request(self):
         with self.assertRaisesRegex(ValueError, "LOOPBACK"):

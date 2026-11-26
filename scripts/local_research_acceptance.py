@@ -8,6 +8,7 @@ No registration, holdings mutation, forced refresh, provider call or trade.
 import argparse
 import getpass
 import json
+import re
 import urllib.error
 import urllib.request
 
@@ -220,6 +221,39 @@ def assess_final_contracts(intraday,personal,journal,review):
                 key=(row["exchange"],row["id"])
                 if key in identities:intraday_ok=False
                 identities.add(key)
+    # #297 adds exact company-level qualification to the existing endpoint.
+    # Unknown qualification is not zero; a closed session cannot certify picks.
+    q=_obj(intraday.get("qualification"))
+    reviewed,required,qualified=q.get("reviewed_count"),q.get("review_required_count"),q.get("qualified_count")
+    identified=q.get("unidentified_listing_count")
+    cross=q.get("cross_venue_company_count")
+    conflicts=q.get("conflicting_company_count")
+    q_ok=(intraday_ok and all(_count(v) for v in (reviewed,required,identified,cross,conflicts))
+        and required<=reviewed and conflicts<=required and cross<=reviewed
+        and reviewed+identified<=eligible and q.get("recommendations")==[]
+        and ((reviewed>0 and status=="RESEARCH_ONLY" and type(qualified) is int and qualified==0
+              and q.get("status")=="NO_QUALIFIED_IN_REVIEWED_SAMPLE")
+             or (reviewed==0 and qualified is None and q.get("status")==(
+                 "NO_IDENTIFIED_TECHNICAL_WATCHES" if status=="RESEARCH_ONLY" else "AWAITING_RESEARCH")))
+        and len(candidates)<=reviewed-required and len(warnings)<=required)
+    if q_ok:
+        seen=set()
+        for row in candidates+warnings:
+            isin=row.get("isin")
+            decision=_obj(row.get("stock_qualification"))
+            blocked=decision.get("blockers")
+            findings=decision.get("review_findings")
+            venues=row.get("observed_pattern_venues")
+            if (not isinstance(isin,str) or not re.fullmatch(r"INE[A-Z0-9]{9}",isin) or isin in seen
+                or decision.get("horizon")!="INTRADAY"
+                or decision.get("status") not in ("WITHHELD_EVIDENCE_GAPS","WITHHELD_REVIEW_REQUIRED")
+                or not isinstance(blocked,list) or "FINAL_QUALIFICATION_VALIDATION_REQUIRED" not in blocked
+                or not isinstance(findings,list) or bool(findings)!=(row["pattern"]=="FAILED_BREAKOUT_WATCH")
+                or not isinstance(venues,list) or row["exchange"] not in venues
+                or any(v not in exchanges for v in venues) or len(set(venues))!=len(venues)):
+                q_ok=False
+                break
+            seen.add(isin)
     entries=journal.get("entries")
     journal_ok=isinstance(entries,list) and len(entries)<=200 and all(
         isinstance(e,dict) and isinstance(e.get("id"),str) and bool(e["id"])
@@ -227,14 +261,14 @@ def assess_final_contracts(intraday,personal,journal,review):
     if journal_ok:
         journal_ok=len({e["id"] for e in entries})==len(entries)
     checks={
-        "intraday_watch_contract":"PASS" if intraday_ok else "BLOCKED",
+        "intraday_watch_contract":"PASS" if intraday_ok and q_ok else "BLOCKED",
         "private_notification_summary":"PASS" if _count(personal.get("unread_count")) else "BLOCKED",
         "private_research_journal_contract":"PASS" if journal_ok else "BLOCKED",
     }
     populated=_count(review.get("holding_count")) and review["holding_count"]>0 and isinstance(review.get("holdings"),list) and len(review["holdings"])==review["holding_count"]
     return {"checks":checks,"final_runtime":"PASS" if all(v=="PASS" for v in checks.values()) else "BLOCKED",
         "populated_portfolio":"OBSERVED" if populated else "NOT_OBSERVED",
-        "intraday_evidence":"OBSERVED" if intraday_ok and status=="RESEARCH_ONLY" and eligible>0 else "NOT_OBSERVED",
+        "intraday_evidence":"OBSERVED" if intraday_ok and q_ok and status=="RESEARCH_ONLY" and eligible>0 else "NOT_OBSERVED",
         "product_acceptance":"NOT_CERTIFIED",
         "remaining_acceptance":["AUTHORIZED_SOURCE_COVERAGE","QUALIFIED_INVESTMENT_RESEARCH",
             "POPULATED_PORTFOLIO_ACCURACY","ACTUAL_LOCAL_UPGRADE_AND_RECOVERY",
@@ -259,7 +293,7 @@ STOCK_GATE_STATES=("PARTIAL_CONTEXT","MISSING_EVIDENCE","OBSERVATION_CHECKS_MET"
 def _bounded_count(value,maximum=1000000):
     return value if _count(value) and value<=maximum else None
 
-def qualification_audit(overview):
+def qualification_audit(overview,readiness=None,intraday=None):
     """Aggregate existing public evidence; never echo identifiers or unknown strings.
 
     A missing gate is not a passed gate. Audit coverage is separate from certification.
@@ -301,7 +335,10 @@ def qualification_audit(overview):
             "qualified_count":_bounded_count(report.get("qualified_count")),"domain_counts":domains,
             "prospective_mature_watches":_bounded_count(prospective.get("selected_mature_watches")),
             "prospective_observed_outcomes":_bounded_count(prospective.get("observed_outcomes")),
-            "prospective_distinct_isins":_bounded_count(prospective.get("distinct_observed_isins"))}
+            "prospective_distinct_isins":_bounded_count(prospective.get("distinct_observed_isins")),
+            "prospective_matched_benchmark_outcomes":_bounded_count(_obj(prospective.get("benchmark_summary")).get("matched_outcomes")),
+            "prospective_close_paths":_bounded_count(_obj(prospective.get("risk_path_summary")).get("observed_paths")),
+            "historical_replay_observed_instruments":_bounded_count(_obj(_obj(_obj(overview.get("strategy_validation")).get("horizons")).get(horizon)).get("observed_instruments"))}
     funds={}
     for category in sorted(SECTIONS-{"NSE","BSE"}):
         result=section(category)
@@ -327,7 +364,20 @@ def qualification_audit(overview):
             "growth_eligible_count":growth if valid else None,
             "top_missing_gate_counts":gap_counts("top_missing_gate_counts",top),
             "growth_missing_gate_counts":gap_counts("growth_missing_gate_counts",growth)}
-    return {"status":"EVIDENCE_AUDIT_ONLY","stocks":stocks,"funds":funds,
+    acquisition=_obj(_obj(_obj(readiness).get("research_jobs")).get("company_acquisition"))
+    count_keys=("never_attempted","available","partial","unavailable","running","fresh_reports",
+                "fresh_current_normalization","legacy_reports","due_legacy_reports")
+    sample=_bounded_count(acquisition.get("sample_identities"),400)
+    company_counts={k:_bounded_count(_obj(acquisition.get("counts")).get(k),sample or 0)
+                    for k in count_keys} if sample is not None else {k:None for k in count_keys}
+    sections=("profile","ratios","income_statement","balance_sheet","cash_flow","shareholding","corporate_actions","competitors")
+    company_audit={"sample_identities":sample,"due_sample":_bounded_count(acquisition.get("due_sample"),sample or 0) if sample is not None else None,
+        "annual_archive_companies":_bounded_count(acquisition.get("annual_archive_companies"),sample or 0) if sample is not None else None,
+        "counts":company_counts,
+        "fresh_sections":{k:_bounded_count(_obj(acquisition.get("fresh_sections")).get(k),sample or 0) if sample is not None else None for k in sections}}
+    q=_obj(_obj(intraday).get("qualification"))
+    stocks["INTRADAY"]={k:_bounded_count(q.get(k)) for k in ("reviewed_count","review_required_count","qualified_count","unidentified_listing_count","cross_venue_company_count","conflicting_company_count")}
+    return {"status":"EVIDENCE_AUDIT_ONLY","stocks":stocks,"funds":funds,"company_acquisition":company_audit,
             "notice":"Counts describe bounded existing snapshots; null means unavailable, not zero. No new data acquisition, investment recommendation or certification."}
 
 def collect(request,include_qualification_audit=False):
@@ -347,7 +397,7 @@ def collect(request,include_qualification_audit=False):
     result["checks"].update(final.pop("checks"))
     result.update(final)
     if include_qualification_audit:
-        result["qualification_audit"]=qualification_audit(overview)
+        result["qualification_audit"]=qualification_audit(overview,readiness,intraday)
     if workflows["workflow_runtime"]!="PASS" or final["final_runtime"]!="PASS":
         result["runtime"]="BLOCKED"
     return result
