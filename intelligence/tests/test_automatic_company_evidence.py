@@ -195,3 +195,20 @@ class CompanyEvidenceTests(unittest.TestCase):
         self.assertEqual(len(report["sections"]["balance_sheet"]["data"]["detail_rows"]),2)
         self.assertEqual(report["financial_strength"]["liquidity"][-1]["current_ratio"],1.2)
         self.assertEqual(report["financial_strength"]["cash_flows"][-1]["total_cash_flow_difference"],0)
+
+    def test_earnings_detail_preserved_without_new_request_or_eps_unit_inference(self):
+        def loader(isin,key):
+            def row(name,a,b):
+                return {"particular":name,"history":[{"period":"Mar 2025","value":a},{"period":"Mar 2026","value":b}]}
+            return {"isin":isin,"sections":{"income_statement":{"status":"AVAILABLE",
+                "source":{"endpoint":"/v2/fundamentals/"+isin+"/income-statement"},
+                "data":{"type":"consolidated","time_period":"yearly","units_in":"crore",
+                    "income_statement":[{"category":"revenue","history":[{"period":"Mar 2025","value":100},{"period":"Mar 2026","value":120}]}],
+                    "full_statement":[row("Profit Before Tax",20,30),row("Tax",5,8),row("Profit After Tax",15,22),row("EPS - Basic",10,11)]}}}}
+        company.refresh(self.snapshot,research._connect,loader,self.now)
+        company.attach(self.snapshot,research._connect,self.now)
+        evidence=self.item["company_evidence"]
+        self.assertEqual(len(evidence["sections"]["income_statement"]["data"]["detail_rows"]),3)
+        self.assertEqual(len(evidence["sections"]["income_statement"]["data"]["eps_rows"]),1)
+        self.assertEqual(evidence["earnings_quality"]["tax_bridge"][-1]["reconciliation_difference"],0)
+        self.assertFalse(evidence["earnings_quality"]["valuation_eligible"])

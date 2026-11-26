@@ -15,6 +15,7 @@ from .p1_research import company_research
 from .financial_trends import summarize as financial_trends, earnings_evidence
 from .fundamental_quality import summarize as fundamental_quality
 from .financial_strength import summarize as financial_strength, DETAIL_NAMES
+from .earnings_quality import summarize as earnings_quality, INCOME_NAMES
 from . import peer_research, shareholding_research
 from .corporate_action_normalization import normalize_reported_actions
 
@@ -141,8 +142,9 @@ def normalize(report, isin, instant):
                 if key=="income_statement" and data["statement_type"]=="consolidated" and data["time_period"]=="yearly":
                     # Full statement EPS lines have a different dimensional meaning
                     # from the aggregate monetary statement. Do not apply crore units.
-                    data["eps_rows"]=[r for r in history(raw.get("full_statement"),category="particular")
-                                      if r["name"].strip().casefold() in ("eps - basic","eps - diluted")]
+                    detailed=history(raw.get("full_statement"),category="particular")
+                    data["eps_rows"]=[r for r in detailed if r["name"].strip().casefold() in ("eps - basic","eps - diluted")]
+                    data["detail_rows"]=[r for r in detailed if r["name"].strip().casefold() in INCOME_NAMES]
         elif key=="balance_sheet" and isinstance(raw,dict):
             rows=[]
             for point in raw.get("history",[])[:5] if isinstance(raw.get("history"),list) else []:
@@ -311,6 +313,7 @@ def _enrich(report,today):
     report["reported_earnings"]=earnings_evidence(report,today)
     report["fundamental_quality"]=fundamental_quality(report,today.year)
     report["financial_strength"]=financial_strength(report,today)
+    report["earnings_quality"]=earnings_quality(report,today)
     report["ownership_research"]=shareholding_research.summarize(report,today)
     return report
 
