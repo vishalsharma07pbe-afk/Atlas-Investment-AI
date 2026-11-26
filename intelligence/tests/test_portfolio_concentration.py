@@ -28,6 +28,6 @@ class ConcentrationTests(unittest.TestCase):
         self.assertEqual(concentration_report([],LimitsRequest())["status"],"NO_PRICED_VALUE")
     def test_endpoint_uses_recorded_holdings(self):
         with patch.object(main,"_fetch_portfolio_holdings",return_value=[holding(1,"AAA","EQUITY","1","100")]):
-            result=main.portfolio_concentration(LimitsRequest())
+            result=main.portfolio_concentration(LimitsRequest(),None)
         self.assertEqual(result["recorded_value"],"100.00")
 if __name__=="__main__":unittest.main()

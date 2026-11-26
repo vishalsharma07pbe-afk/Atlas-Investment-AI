@@ -10,7 +10,7 @@ class _NoRedirect(HTTPRedirectHandler):
     def redirect_request(self,*args,**kwargs):
         return None
 
-def owner_for(request,backend_url):
+def session_authorization(request):
     authorization=request.headers.get("authorization","")
     cookie=request.cookies.get("ATLAS_SESSION")
     if not authorization.startswith("Bearer ") and cookie:
@@ -26,6 +26,10 @@ def owner_for(request,backend_url):
             raise HTTPException(403,"Cross-origin cookie request rejected")
         if site is None and (not origin or urlsplit(origin).netloc.lower()!=request.headers.get("host","").lower()):
             raise HTTPException(403,"Cross-origin cookie request rejected")
+    return authorization
+
+def owner_for(request,backend_url):
+    authorization=session_authorization(request)
     try:
         opener=build_opener(ProxyHandler({}),_NoRedirect())
         req=Request(backend_url.rstrip("/")+"/api/v1/auth/me",headers={"Accept":"application/json","Authorization":authorization})

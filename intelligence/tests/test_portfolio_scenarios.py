@@ -37,7 +37,7 @@ class StressTests(unittest.TestCase):
 
     def test_endpoint_uses_existing_portfolio_transport(self):
         with patch.object(main, "_fetch_portfolio_holdings", return_value=[holding(3, "TEST", "1", "10", "11")]):
-            result = main.portfolio_stress_scenarios()
+            result = main.portfolio_stress_scenarios(None)
         self.assertEqual(result["status"], "COMPLETE_PRICED_SUBSET")
         self.assertEqual(result["scenarios"][2]["stressed_value_of_priced_holdings"], "11.00")
 
