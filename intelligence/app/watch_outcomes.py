@@ -14,9 +14,11 @@ from .market_client import backend_json
 from .replay_evidence import exact_isin, full_manifest, corporate_action_status
 from .automatic_company_evidence import cached_action_reports
 from .corporate_action_normalization import reported_crossings
+from .strategy_validation import price_index_history
 
 OUTCOME_EVIDENCE_VERSION = "WATCH-SESSION-EVIDENCE-2"
 RISK_PATH_VERSION = "WATCH-CLOSE-PATH-1"
+BENCHMARK_VERSION = "WATCH-PRICE-INDEX-1"
 
 HORIZONS = {"SWING": 14, "SHORT_TERM": 60, "LONG_TERM": 180}
 IST = ZoneInfo("Asia/Kolkata")
@@ -123,7 +125,26 @@ def _risk_path(values):
             "notice":"Gross observed close marks only; not intraday excursion, portfolio drawdown, executable stop or capital guarantee."}
 
 
-def evaluate(row, payload, today, calendar=None, *, action_report=None, instant=None):
+def _benchmark_path(benchmark,expected,today):
+    """Same completed dates and closing marks, not TRI or executable returns."""
+    try:
+        index=price_index_history(benchmark,today)
+        dates=[d.isoformat() for d in expected]
+        if len(dates)<2 or sorted(d for d in index if dates[0]<=d<=dates[-1])!=dates:
+            return None
+        first,last=index[dates[0]][1],index[dates[-1]][1]
+        change=100*(last/first-1)
+        if not isfinite(change) or not -100<change<=1e6:
+            return None
+        return {"version":BENCHMARK_VERSION,"benchmark_key":"NSE_INDEX|Nifty 50",
+                "kind":"PRICE_INDEX","source_code":"UPSTOX","entry_date":dates[0],"exit_date":dates[-1],
+                "observations":len(dates),"entry_close":first,"exit_close":last,
+                "gross_return_percent":round(change,4)}
+    except (ValueError,TypeError,KeyError,AttributeError,OverflowError,IndexError):
+        return None
+
+
+def evaluate(row, payload, today, calendar=None, *, action_report=None, instant=None, benchmark=None):
     evidence=json.loads(row["evidence"])
     instrument=payload["instrument"]
     if (type(instrument["id"]) is not int or instrument["id"]!=row["instrument_id"]
@@ -172,9 +193,10 @@ def evaluate(row, payload, today, calendar=None, *, action_report=None, instant=
         "entry_close":values[0],"exit_close":values[-1],"observed_price_return_pct":round(change,4),
         "source_code":interval[0]["source_code"],"evidence_version":OUTCOME_EVIDENCE_VERSION,
         "observations":len(interval),"history_fingerprint":manifest["digest"],"risk_path":_risk_path(values),
+        "price_index_comparison":_benchmark_path(benchmark,expected,today),
         "calendar_status":"STORED_SESSIONS_MATCHED","corporate_action_status":action,
         "action_context_through":instrument["action_context_through"],
-        "notice":"Observed adjusted close-to-close change on matching stored sessions; not executed, benchmarked or net of fees. Corporate-action completeness and point-in-time history are not certified."}
+        "notice":"Observed adjusted close-to-close change on matching stored sessions; not executed or net of fees. Optional matched Nifty 50 price-index comparison excludes dividends. Corporate-action completeness and point-in-time history are not certified."}
 
 
 def refresh(snapshot, connect, loader=backend_json, instant=None):
@@ -191,6 +213,8 @@ def refresh(snapshot, connect, loader=backend_json, instant=None):
             ORDER BY attempted_at ASC NULLS FIRST,maturity_date LIMIT 5""",
             (today.isoformat(),(instant-timedelta(days=1)).isoformat())).fetchall()
     calendars={}
+    benchmark=None
+    benchmark_loaded=False
     for row in due:
         key=(row["instrument_id"],row["horizon"],row["observed_date"])
         try:
@@ -205,8 +229,22 @@ def refresh(snapshot, connect, loader=backend_json, instant=None):
             evidence=json.loads(row["evidence"])
             isin=evidence.get("isin")
             cached=cached_action_reports(connect,[isin],instant)
-            status,outcome=evaluate(row,loader(f"/api/v1/market-data/instruments/{key[0]}/candles?limit=500"),today,calendars[exchange],
+            payload=loader(f"/api/v1/market-data/instruments/{key[0]}/candles?limit=500")
+            status,outcome=evaluate(row,payload,today,calendars[exchange],
                                     action_report=cached.get(isin),instant=instant)
+            if status=="OBSERVED":
+                # One existing internal stored-index read per bounded pass,
+                # only when an actual stock observation can be recorded.
+                if not benchmark_loaded:
+                    benchmark_loaded=True
+                    try:
+                        benchmark=loader("/api/v1/market-data/strategy-benchmark")
+                    except Exception:
+                        benchmark=None
+                expected=_expected_dates(calendars[exchange],exchange,
+                    datetime.fromisoformat(row["published_at"]).astimezone(IST).date(),
+                    date.fromisoformat(row["maturity_date"]),today)
+                outcome["price_index_comparison"]=_benchmark_path(benchmark,expected,today)
         except Exception:
             status,outcome="UNAVAILABLE",None
         with closing(connect()) as db, db:

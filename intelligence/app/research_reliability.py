@@ -6,7 +6,7 @@ from statistics import mean, median
 from zoneinfo import ZoneInfo
 import json
 
-from .watch_outcomes import HORIZONS, _table, OUTCOME_EVIDENCE_VERSION, RISK_PATH_VERSION
+from .watch_outcomes import HORIZONS, _table, OUTCOME_EVIDENCE_VERSION, RISK_PATH_VERSION, BENCHMARK_VERSION
 from .replay_evidence import exact_isin
 import re
 from .horizon_research import VERSION
@@ -19,7 +19,7 @@ COHORT_DAYS = 365
 MAX_ROWS = 5000
 COSTS = (15, 30, 60)
 NOTICE = ("Descriptive prospective watch outcomes, not independent trades or calibrated probabilities. "
-          "Only current session-evidence outcomes enter metrics; legacy observations remain in the denominator. No index benchmark, point-in-time universe or verified execution. No recommendation gate is lifted.")
+          "Only current session-evidence outcomes enter metrics; legacy observations remain in the denominator. Optional matched price-index comparison excludes dividends. No point-in-time universe or verified execution. No recommendation gate is lifted.")
 
 def _stamp(value):
     dt = datetime.fromisoformat(value)
@@ -71,6 +71,28 @@ def _path_metrics(row,change):
         return None
 
 
+def _index_change(row,change):
+    if change is None:
+        return None
+    try:
+        outcome=json.loads(row["outcome"])
+        b=outcome["price_index_comparison"]
+        if (b["version"]!=BENCHMARK_VERSION or b["benchmark_key"]!="NSE_INDEX|Nifty 50"
+            or b["kind"]!="PRICE_INDEX" or b["source_code"]!="UPSTOX"
+            or b["entry_date"]!=outcome["entry_date"] or b["exit_date"]!=outcome["exit_date"]
+            or type(b["observations"]) is not int or b["observations"]!=outcome["observations"]):
+            return None
+        a,z=b["entry_close"],b["exit_close"]
+        if not (_finite(a) and _finite(z) and a>0 and z>0):
+            return None
+        value=z/a-1
+        if not (-1<value<=10000 and _finite(b["gross_return_percent"]) and abs(100*value-b["gross_return_percent"])<=.0001):
+            return None
+        return value
+    except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
+        return None
+
+
 def cohort(rows, horizon, today, truncated=False):
     # Select by publication and predeclared review dates, not by realized results.
     selected = []
@@ -107,7 +129,7 @@ def cohort(rows, horizon, today, truncated=False):
                 change=None
             if row["status"]=="OBSERVED" and change is None:
                 legacy_or_unverified+=1
-            selected.append((identity,change,published,_path_metrics(row,change)))
+            selected.append((identity,change,published,_path_metrics(row,change),_index_change(row,change)))
         except (KeyError,ValueError,TypeError,OverflowError):
             invalid+=1
     outcomes=[x[1] for x in selected if x[1] is not None]
@@ -129,6 +151,21 @@ def cohort(rows, horizon, today, truncated=False):
           "worst_close_drawdown_percent":min(p[2] for p in paths) if paths else None,
           "median_close_drawdown_percent":round(median(p[2] for p in paths),4) if paths else None,
           "notice":"Non-overlapping selected watch outcomes with verified close-path metadata only. Not portfolio drawdown, risk-adjusted performance certification, intraday risk or predictive probability."}
+    paired=[(x[1],x[4]) for x in selected if x[1] is not None and x[4] is not None]
+    comparison=[]
+    for cost in COSTS:
+        if paired:
+            differences=[100*((1+r)*(1-cost/10000)**2-1-b) for r,b in paired]
+            comparison.append({"cost_bps_per_side":cost,"mean_net_minus_price_index_pp":round(mean(differences),4),
+                "median_net_minus_price_index_pp":round(median(differences),4),
+                "outperformed_count":sum(v>0 for v in differences),"underperformed_count":sum(v<0 for v in differences),
+                "equal_count":sum(v==0 for v in differences)})
+    benchmark={"status":"MATCHED_PRICE_INDEX_SAMPLE" if paired else "NO_MATCHED_PRICE_INDEX_SAMPLE",
+        "matched_outcomes":len(paired),"outcomes_without_benchmark":len(outcomes)-len(paired),
+        "coverage_percent":round(100*len(paired)/len(selected),2) if selected else 0,
+        "mean_gross_price_index_percent":round(mean(b for _,b in paired)*100,4) if paired else None,
+        "cost_scenarios":comparison,
+        "notice":"Paired observed close-to-close stock changes after illustrative friction versus gross Nifty 50 price index. Excludes dividends; not TRI, portfolio alpha or calibrated performance."}
     blockers=[]
     if truncated:blockers.append("COHORT_LIMIT_REACHED")
     if len(outcomes)<MIN_OUTCOMES:blockers.append("INSUFFICIENT_MATURE_OUTCOMES")
@@ -142,7 +179,7 @@ def cohort(rows, horizon, today, truncated=False):
         "coverage_percent":round(100*coverage,2),"overlap_excluded":overlap,
         "immature_excluded":immature,"incompatible_excluded":incompatible,"invalid_excluded":invalid,
         "legacy_or_unverified_observed":legacy_or_unverified,
-        "cost_scenarios":metrics,"risk_path_summary":risk,"blockers":blockers,
+        "cost_scenarios":metrics,"risk_path_summary":risk,"benchmark_summary":benchmark,"blockers":blockers,
         "notice":NOTICE}
 
 def read(connect, instant=None):

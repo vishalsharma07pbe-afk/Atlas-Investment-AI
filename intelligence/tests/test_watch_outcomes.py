@@ -91,3 +91,17 @@ class WatchOutcomeTests(unittest.TestCase):
         self.assertEqual(result["worst_close_from_entry_percent"],-10)
         self.assertEqual(result["best_close_from_entry_percent"],20)
         self.assertEqual(result["peak_to_trough_close_drawdown_percent"],-25)
+
+    def test_benchmark_matches_all_sessions_and_uses_closing_prices(self):
+        days=[date(2026,12,1)+timedelta(days=i) for i in range(3)]
+        today=date(2026,12,5)
+        rows=[{"trade_date":d.isoformat(),"open":90,"close":100+5*i,"source_code":"UPSTOX","revision":1}
+              for i,d in enumerate(days)]
+        benchmark={"benchmark_key":"NSE_INDEX|Nifty 50","kind":"PRICE_INDEX","candles":rows}
+        result=watch._benchmark_path(benchmark,days,today)
+        self.assertEqual(result["gross_return_percent"],10)
+        self.assertEqual(result["observations"],3)
+        for invalid in (None,{**benchmark,"kind":"TRI"},{**benchmark,"candles":rows[::2]},
+                        {**benchmark,"candles":rows+[rows[0]]},
+                        {**benchmark,"candles":[{**r,"source_code":"OTHER"} for r in rows]}):
+            self.assertIsNone(watch._benchmark_path(invalid,days,today))
