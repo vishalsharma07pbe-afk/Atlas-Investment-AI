@@ -19,6 +19,8 @@ from . import automatic_company_evidence as company
 IST=ZoneInfo("Asia/Kolkata")
 METRICS=("REVENUE","NET_PROFIT","OPERATING_CASH_FLOW")
 PERIOD=re.compile(r"20[0-9]{2}-(?:0[1-9]|1[0-2])")
+ANNUAL_HISTORY_CACHE_DAYS=7
+ANNUAL_SECTIONS=("income_statement","balance_sheet","cash_flow")
 
 
 def _number(value):
@@ -41,14 +43,32 @@ def load(equities,instant):
                 marks=",".join("?" for _ in chunk)
                 rows=db.execute(f"""SELECT isin,payload FROM automatic_company_evidence WHERE isin IN ({marks})
                     AND status IN ('AVAILABLE','PARTIAL') AND attempted_at BETWEEN ? AND ?""",
-                    (*chunk,(instant-timedelta(hours=24)).isoformat(),instant.isoformat()))
+                    (*chunk,(instant-timedelta(days=ANNUAL_HISTORY_CACHE_DAYS)).isoformat(),instant.isoformat()))
                 for isin,payload in rows:
                     try:
                         report=json.loads(payload)
                         stamp=datetime.fromisoformat(report["retrieved_at"])
-                        if (report.get("isin")==isin and stamp.tzinfo is not None
-                            and instant-timedelta(hours=24)<=stamp<=instant):
-                            result[isin]=report
+                        if (report.get("isin")!=isin or stamp.tzinfo is None
+                            or not instant-timedelta(days=ANNUAL_HISTORY_CACHE_DAYS)<=stamp<=instant):
+                            continue
+                        if stamp<instant-timedelta(hours=24):
+                            # Retrieval age is not a financial period. Reuse only
+                            # explicitly annual consolidated statements, not stale
+                            # ratios, profiles, ownership or corporate actions.
+                            sections={}
+                            for key in ANNUAL_SECTIONS:
+                                block=report["sections"].get(key,{})
+                                data=block.get("data")
+                                if (block.get("status")=="AVAILABLE" and isinstance(data,dict)
+                                    and data.get("statement_type")=="consolidated"
+                                    and data.get("time_period")=="yearly"
+                                    and (block.get("source") or {}).get("provider")=="UPSTOX"):
+                                    sections[key]=block
+                            if not sections:
+                                continue
+                            report={**report,"sections":sections,"available_sections":len(sections),
+                                    "historical_cache_only":True}
+                        result[isin]=report
                     except (ValueError,TypeError,AttributeError,KeyError):
                         continue
     except (OSError,sqlite3.Error):
@@ -172,6 +192,7 @@ def summarize(equities,instant,reports=None):
     covered=0.0
     exact_weight=0.0
     multi_year=[]
+    historical_cache_weight=0.0
     margin_trends=defaultdict(lambda:{"coverage":0.0,"improved":0.0,"deteriorated":0.0,"unchanged":0.0,"weighted_change":0.0})
     for h in equities:
         isin,w=h.get("isin"),h.get("weight_percent")
@@ -233,7 +254,11 @@ def summarize(equities,instant,reports=None):
                 bucket["coverage"]+=w
                 bucket[{"ABOVE_SECTOR":"above","BELOW_SECTOR":"below","AT_SECTOR":"equal"}[ratio["position"]]]+=w
             if raw.get("available_sections",0)>0:
-                covered+=w
+                if raw.get("historical_cache_only") is True:
+                    if current:
+                        historical_cache_weight+=w
+                else:
+                    covered+=w
                 multi_year.append((w,report["fundamental_quality"]["multi_year_quality"]))
         except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
             # A malformed cached report cannot supply an outlook.
@@ -245,9 +270,11 @@ def summarize(equities,instant,reports=None):
     multi=_multi_year_exposure(multi_year)
     multi["exact_equity_weight_percent"]=round(exact_weight,4)
     multi["unassessed_exact_equity_weight_percent"]=round(max(0.0,exact_weight-multi["assessed_weight_percent"]),4)
-    return {"status":"REPORTED_HISTORICAL_DRIVERS_ONLY" if covered else "COLLECTING_COMPANY_EVIDENCE",
+    return {"status":"REPORTED_HISTORICAL_DRIVERS_ONLY" if covered or historical_cache_weight else "COLLECTING_COMPANY_EVIDENCE",
         "multi_year_quality":multi,
         "cached_report_weight_percent":round(covered,4),
+        "annual_history_cache_weight_percent":round(historical_cache_weight,4),
+        "annual_history_cache_max_age_days":ANNUAL_HISTORY_CACHE_DAYS,
         "sector_classified_weight_percent":round(sum(sectors.values()),4),
         "sector_weights":[{"sector":k,"weight_percent":round(v,4)} for k,v in sorted(sectors.items(),key=lambda kv:(-kv[1],kv[0]))],
         "annual_statement_weight_percent":round(quality,4),"deterioration_review_weight_percent":round(flagged,4),
@@ -259,4 +286,4 @@ def summarize(equities,instant,reports=None):
             "covered_subset_weighted_change_pp":round(v["weighted_change"]/v["coverage"],4)}
             for k,v in sorted(margin_trends.items()) if v["coverage"]>0],
         "forward_earnings_coverage_percent":None,"valuation_attractiveness":None,
-        "notice":"Historical provider reports weighted by disclosed fund exposure, grouped by exact annual periods. Sector and trend weights are partial, not normalized. Relative valuation ratios have unverified observation dates. No forecast, fair value or qualified Growth Outlook."}
+        "notice":"Historical provider reports weighted by disclosed fund exposure, grouped by exact annual periods. Sector and trend weights are partial, not normalized. Annual statements may be reused for seven days with existing fiscal-period checks; older cached statements are historical-only and excluded from fresh company coverage. Ratios and profiles still require retrieval within 24 hours. Relative valuation ratios have unverified observation dates. No forecast, fair value or qualified Growth Outlook."}
