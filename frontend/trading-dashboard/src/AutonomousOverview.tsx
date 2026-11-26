@@ -1,4 +1,5 @@
 import {visiblePolling} from "./visiblePolling";
+import "./overview.css";
 import {useEffect,useState,type ReactNode} from "react";
 import AutomaticInstitutionalActivity,{type InstitutionalActivity} from "./AutomaticInstitutionalActivity";
 import {RecentCompanyNews,type Article} from "./AutomaticCompanyNews";
@@ -41,21 +42,19 @@ export default function AutonomousOverview({children,onPortfolio,onFunds,onSetti
  const funds=data?.sections.filter(row=>row.section!=="NSE"&&row.section!=="BSE")||[];
  const current=!!data?.enabled&&!error;
  const readyMarkets=current?market.filter(row=>row.status==="READY"):[];
+ const briefing=current?data?.daily_briefing:undefined;
+ const compact=!!briefing;
+ const hasEvents=!!(data?.economic_calendar||data?.global_releases);
+ const hasGlobal=!!(data?.market_regime||data?.global_context||data?.global_fx||data?.global_macro||data?.global_markets);
  const horizonLinks:{id:Horizon;title:string}[]=[{id:"SWING",title:"Swing"},{id:"SHORT_TERM",title:"Short term"},{id:"LONG_TERM",title:"Long term"}];
  return <section className="autonomous-overview glass" aria-label="Automatic research overview">
    <header className="autonomous-header"><div><small className="section-kicker">YOUR DAILY INTELLIGENCE</small><h2>Research overview</h2><p>ATLAS checks available market history and fund evidence automatically. Review the results, not the data-entry tools.</p></div><span className="tag">{error?"SERVICE UNAVAILABLE":data?.enabled===false?"AUTOMATION OFF":data?"BACKGROUND RESEARCH":"LOADING"}</span></header>
    {error&&<p role="alert" className="notice warning-notice">Research service unavailable. Previously displayed observations may be outdated. <button type="button" className="secondary" onClick={onSettings}>Check connections</button></p>}
    {!data&&!error&&<p role="status">Loading the latest saved research…</p>}
    {data?.enabled===false&&<p className="notice warning-notice">Background research is disabled. Check the local configuration in Settings.</p>}
-   {current&&data?.daily_briefing&&<DailyBriefing report={data.daily_briefing} onFunds={onFunds} onSettings={onSettings} onPortfolio={onPortfolio} onHorizon={onHorizon}/>}
-   {onHorizon&&<div className="research-shortcuts" aria-label="Automatic equity research shortcuts">{horizonLinks.map(({id,title})=>{const groups=readyMarkets.flatMap(row=>row.result?.horizons?.[id]?[row.result.horizons[id]!]:[]);const count=groups.reduce((n,group)=>n+(group.status==="TECHNICAL_WATCH_ONLY"?group.candidates.length:0),0);return <button key={id} type="button" className="research-shortcut" onClick={()=>onHorizon(id)}><strong>{title}</strong><span>{groups.length?`${count} technical watches`:"Current research pending"}</span><small>Open research →</small></button>;})}</div>}
-   {current&&data?.economic_calendar&&<EconomicCalendarPanel report={data.economic_calendar}/>}
-   {current&&data?.global_releases&&<GlobalReleasePanel report={data.global_releases}/>}
-   {current&&data?.market_regime&&<MarketRegimePanel report={data.market_regime}/>}
-   {current&&data?.global_context&&<GlobalResearchSummary report={data.global_context}/>}
-   {current&&data?.global_fx&&<GlobalFxContext report={data.global_fx}/>}
-   {current&&data?.global_macro&&<GlobalMacroContext report={data.global_macro}/>}
-   {current&&data?.global_markets&&<GlobalMarketsContext report={data.global_markets}/>}
+   {briefing&&<DailyBriefing report={briefing} onFunds={onFunds} onSettings={onSettings} onPortfolio={onPortfolio} onHorizon={onHorizon}/>}
+   {onHorizon&&!briefing?.decision_context&&<div className="research-shortcuts" aria-label="Automatic equity research shortcuts">{horizonLinks.map(({id,title})=>{const groups=readyMarkets.flatMap(row=>row.result?.horizons?.[id]?[row.result.horizons[id]!]:[]);const count=groups.reduce((n,group)=>n+(group.status==="TECHNICAL_WATCH_ONLY"?group.candidates.length:0),0);return <button key={id} type="button" className="research-shortcut" onClick={()=>onHorizon(id)}><strong>{title}</strong><span>{groups.length?`${count} technical watches`:"Current research pending"}</span><small>Open research →</small></button>;})}</div>}
+   <OverviewGroup compact={compact} title="Market and fund observation details" description="Momentum samples, all fund categories and their current evidence status">
    <div className="autonomous-grid">
     <div className="autonomous-section"><h3>Market watch</h3><p className="muted">Daily-history observations, not trade signals.</p>
       {market.map(row=>{const ready=row.status==="READY"&&!error&&data?.enabled===true;const picks=(row.result?.momentum_leaders||[]).slice(0,3);return <article key={row.section} className="autonomous-result"><header><strong>{labels[row.section]}</strong><span>{ready?(row.result?.eligible_count||0)+" / "+(row.result?.universe_size||0)+" eligible":!current?"UNAVAILABLE":row.status.replace(/_/g," ")}</span></header><small>{stamp(row.generated_at)}</small>{ready&&picks.length?<ul>{picks.map(item=><li key={item.id}><div><strong>{item.symbol}</strong><small>{item.as_of} · 20-day momentum</small></div><b>{percent(item.momentum_20d_percent)}</b></li>)}</ul>:<p>{ready?"No qualifying momentum observations in the current sample.":row.status==="FAILED"?"Refresh failed; awaiting the next attempt.":"Awaiting a current research snapshot."}</p>}</article>})}
@@ -65,11 +64,30 @@ export default function AutonomousOverview({children,onPortfolio,onFunds,onSetti
       <button type="button" className="secondary" onClick={onFunds}>View fund research</button>
     </div>
    </div>
+   </OverviewGroup>
+   {current&&hasEvents&&<OverviewGroup compact={compact} title="Economic events and announcements" description="Scheduled releases and separately published source-linked announcements">
+    {data?.economic_calendar&&<EconomicCalendarPanel report={data.economic_calendar}/>}
+    {data?.global_releases&&<GlobalReleasePanel report={data.global_releases}/>}
+   </OverviewGroup>}
+   {current&&hasGlobal&&<OverviewGroup compact={compact} title="Detailed market regime and global evidence" description="Benchmark trend, sample breadth, currencies, oil, yields, indices and metals">
+    {data?.market_regime&&<MarketRegimePanel report={data.market_regime}/>}
+    {data?.global_context&&<GlobalResearchSummary report={data.global_context}/>}
+    {data?.global_fx&&<GlobalFxContext report={data.global_fx}/>}
+    {data?.global_macro&&<GlobalMacroContext report={data.global_macro}/>}
+    {data?.global_markets&&<GlobalMarketsContext report={data.global_markets}/>}
+   </OverviewGroup>}
    {current&&(data?.institutional_activity||!!data?.recent_company_news?.length)&&<details className="overview-market-context"><summary>Institutional activity &amp; company news</summary>{data?.institutional_activity&&<AutomaticInstitutionalActivity data={data.institutional_activity}/>}
     {!!data?.recent_company_news?.length&&<RecentCompanyNews articles={data.recent_company_news}/>}</details>}
    <div className="autonomous-footer"><button type="button" className="primary" onClick={onPortfolio}>Review my portfolio</button><button type="button" className="secondary" onClick={onSettings}>Data and connections</button><button type="button" className="secondary" aria-expanded={manual} onClick={()=>setManual(!manual)}>{manual?"Hide research tools":"Open research tools"}</button></div>
    {manual&&children}
  </section>;
+}
+
+function OverviewGroup({compact,title,description,children}:{compact:boolean;title:string;description:string;children:ReactNode}){
+ // Older snapshots without the briefing keep their existing expanded evidence.
+ // Native disclosure state remains intact across ordinary polling updates.
+ if(!compact)return <>{children}</>;
+ return <details className="overview-evidence-group"><summary><span><strong>{title}</strong><small>{description}</small></span><span className="overview-disclosure-label" aria-hidden="true"/></summary><div className="overview-evidence-body">{children}</div></details>;
 }
 
 function DailyBriefing({report,onFunds,onSettings,onPortfolio,onHorizon}:{report:Briefing;onFunds:()=>void;onSettings:()=>void;onPortfolio:()=>void;onHorizon?:(horizon:Horizon)=>void}){
@@ -79,7 +97,7 @@ function DailyBriefing({report,onFunds,onSettings,onPortfolio,onHorizon}:{report
  const words=(value:string)=>value.toLowerCase().replace(/_/g," ");
  return <section className="autonomous-result" aria-label="Daily research briefing">
   <header><strong>Daily research briefing</strong><span>{report.ready_sections}/{report.total_sections} sections current</span></header>
-  <p>{report.ready_sections===0?"Research is pending. No current decision evidence yet.":report.market.eligible_histories+" / "+report.market.sampled_instruments+" sampled daily histories eligible. Market regime not yet validated."}</p>
+  <p>{report.ready_sections===0?"Research is pending. No current decision evidence yet.":report.market.eligible_histories+" / "+report.market.sampled_instruments+" sampled daily histories eligible. Market regime not yet validated for strategy suitability."}</p>
   <p><strong>Equity:</strong> {watches} displayed horizon watches · {reviewed} with AI commentary · {conflicts} with conflicting evidence. Full investment qualification is not available yet.</p>
   <p><strong>Funds:</strong> {report.funds.growth_pick_count===null?"Research pending":report.funds.growth_pick_count+" growth picks in current categories"} · {report.funds.historical_watch_count} historical watch observations. <button className="secondary" type="button" onClick={onFunds}>Review funds</button></p>
   {report.institutional.status==="RECENT_PAIRED_OBSERVATIONS"?<p><strong>Institutional:</strong> FII {words(report.institutional.fii_direction||"UNKNOWN")}; DII {words(report.institutional.dii_direction||"UNKNOWN")} over five reported dates through {report.institutional.latest_date}. Not a directional forecast.</p>:<p>Comparable recent institutional flows unavailable.</p>}
@@ -96,12 +114,12 @@ function DecisionBriefing({context,newsCount,onPortfolio,onHorizon}:{context:Dec
   <h3>Today's evidence review</h3>
   <p>{context.regime.status==="OBSERVED_BENCHMARK_REGIME"?"Observed Nifty 50 trend: "+words(context.regime.trend||"UNAVAILABLE")+" · "+(context.regime.as_of||"date unavailable"):"Observed benchmark trend unavailable."} {context.regime.agreement==="OPPOSING_DAILY_BREADTH_REVIEW"&&"Daily sample breadth opposes the longer trend; review the differing horizons."} Not a forecast.</p>
   <p>{context.global_coverage?context.global_coverage.available_count+"/"+context.global_coverage.total_count+" dated global indicators":"Global indicator coverage unavailable"} · {newsCount===undefined?"Company headline coverage unavailable":newsCount+" returned company headlines"}; no absence-of-risk inference.</p>
+  <div className="overview-review-heading"><h4>Companies requiring evidence review</h4><span>{context.review_company_count} distinct companies</span></div>
+  <p>Among selected watches only; not a severity ranking.</p>
+  {context.review_companies.map(item=><details className="overview-company-review" key={item.isin}><summary>{item.symbol} · {item.findings.length} findings · {item.horizons.map(words).join(", ")}</summary><p>{item.observations.map(o=>o.exchange+" "+o.as_of).join(" · ")}</p><ul>{item.findings.map(f=><li key={f}>{words(f)}</li>)}</ul></details>)}
   <h4>Selected technical watches by horizon</h4>
-  {order.map(h=>{const result=context.horizons[h];return <div key={h}><strong>{words(h)}</strong><p>{result?result.selected_watches.length+" selected watches · "+(result.qualified_count===null?"Qualification unavailable":result.qualified_count+" qualified in the reviewed sample"):"Current selection unavailable"}</p>{result?.selected_watches.length?<ul>{result.selected_watches.map(w=><li key={w.isin}><span>{w.symbol} · {w.exchange} · {w.as_of} · {w.unresolved_requirement_count} unresolved requirements</span></li>)}</ul>:null}{onHorizon&&<button className="secondary" type="button" onClick={()=>onHorizon(h)}>Review {words(h)} research</button>}</div>;})}
-  <h4>Companies requiring evidence review</h4>
-  <p>{context.review_company_count} distinct companies among selected watches have review findings. This is not a severity ranking.</p>
-  {context.review_companies.map(item=><details key={item.isin}><summary>{item.symbol} · {item.findings.length} findings · {item.horizons.map(words).join(", ")}</summary><p>{item.observations.map(o=>o.exchange+" "+o.as_of).join(" · ")}</p><ul>{item.findings.map(f=><li key={f}>{words(f)}</li>)}</ul></details>)}
-  <p><strong>Private portfolio:</strong> open the owner-scoped Portfolio Doctor for holding-specific risks and changes. <button className="secondary" type="button" onClick={onPortfolio}>Open private portfolio review</button></p>
+  <div className="overview-horizon-grid">{order.map(h=>{const result=context.horizons[h];return <article className="overview-horizon-card" key={h}><strong className="overview-horizon-title">{words(h)}</strong><p>{result?result.selected_watches.length+" selected watches · "+(result.qualified_count===null?"Qualification unavailable":result.qualified_count+" qualified in the reviewed sample"):"Current selection unavailable"}</p>{result?.selected_watches.length?<details><summary>View {result.selected_watches.length} selected observations</summary><ul>{result.selected_watches.map(w=><li key={w.isin}><div><strong>{w.symbol} · {w.exchange}</strong><small>{w.as_of} · {w.unresolved_requirement_count} unresolved requirements</small></div></li>)}</ul></details>:null}{onHorizon&&<button className="secondary" type="button" onClick={()=>onHorizon(h)}>Review {words(h)} research</button>}</article>;})}</div>
+  <div className="overview-private-review"><p><strong>Private portfolio:</strong> open the owner-scoped Portfolio Doctor for holding-specific risks and changes.</p><button className="secondary" type="button" onClick={onPortfolio}>Open private portfolio review</button></div>
   <small>{context.notice}</small>
  </section>;
 }

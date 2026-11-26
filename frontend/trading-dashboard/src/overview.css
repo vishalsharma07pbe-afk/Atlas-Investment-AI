@@ -1,0 +1,46 @@
+/* Result-first overview: keep layout scoped to this existing workspace. */
+.overview-evidence-group {
+  min-width: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+}
+.overview-evidence-group > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+  list-style: none;
+  min-width: 0;
+}
+.overview-evidence-group > summary::-webkit-details-marker { display: none; }
+.overview-evidence-group > summary > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.overview-evidence-group > summary strong { display: block; font-size: 14px; }
+.overview-evidence-group > summary small { display: block; margin-top: 4px; color: var(--ink-muted); font-size: 12px; line-height: 1.4; }
+.overview-disclosure-label { flex: 0 0 auto; color: var(--accent); font-size: 12px; font-weight: 750; }
+.overview-disclosure-label::before { content: "Open +"; }
+.overview-evidence-group[open] > summary .overview-disclosure-label::before { content: "Close −"; }
+.overview-evidence-group[open] > summary { border-bottom: 1px solid var(--row-line); }
+.overview-evidence-body { display: grid; gap: 12px; padding: 14px; min-width: 0; }
+.overview-horizon-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; margin-top: 10px; }
+.overview-horizon-card { min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 9px; padding: 12px; border: 1px solid var(--row-line); border-radius: 12px; overflow-wrap: anywhere; }
+.overview-horizon-title { text-transform: capitalize; }
+.overview-horizon-card > p { margin: 0; }
+.overview-horizon-card > button { margin-top: auto; white-space: normal; min-height: 40px; }
+.overview-horizon-card summary, .overview-company-review summary { cursor: pointer; overflow-wrap: anywhere; }
+.overview-company-review { padding: 9px 0; border-bottom: 1px solid var(--row-line); }
+.overview-review-heading, .overview-private-review { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; justify-content: space-between; margin-top: 14px; }
+.overview-review-heading h4, .overview-private-review p { margin: 0; }
+.overview-review-heading span { color: var(--ink-muted); font-size: 12px; }
+.overview-private-review p { flex: 1 1 220px; }
+.overview-private-review button { white-space: normal; min-height: 40px; }
+.overview-evidence-group > summary:focus-visible, .overview-horizon-card summary:focus-visible, .overview-company-review summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+@media (max-width: 900px) {
+  .overview-horizon-grid { grid-template-columns: repeat(auto-fit,minmax(min(100%,190px),1fr)); }
+}
+@media (max-width: 540px) {
+  .overview-horizon-grid { grid-template-columns: minmax(0,1fr); }
+  .overview-private-review button { width: 100%; }
+  .overview-evidence-body { padding: 10px; }
+}
