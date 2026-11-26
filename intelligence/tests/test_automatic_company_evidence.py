@@ -271,3 +271,49 @@ class CompanyEvidenceTests(unittest.TestCase):
         audit=company.acquisition_status(self.snapshot,research._connect,self.now+timedelta(minutes=1))
         self.assertTrue(audit["global_company_cooldown"])
         self.assertEqual(audit["last_passes"]["STOCK"]["outcome"],"PROVIDER_COOLDOWN")
+
+
+    def test_rotation_reserves_broad_pass_without_extra_calls(self):
+        identities=["INE009A01021","INE242A01010","INE467B01029","INE123A01016"]
+        self.snapshot["sections"][0]["result"]["horizons"]["LONG_TERM"]["candidates"]=[
+            {"isin":i,"exchange":"NSE","symbol":"WATCH"} for i in [self.isin,*identities[:3]]]
+        self.snapshot["sections"][0]["result"]["eligible_count"]=1
+        self.snapshot["sections"][0]["result"]["company_research_universe"]=[
+            {"id":1,"isin":identities[3],"exchange":"NSE","as_of":"2026-11-23"}]
+        calls=[]
+        def load(isin,key):
+            calls.append(isin)
+            return {"isin":isin,"sections":{"profile":{"status":"AVAILABLE","data":{"sector":"Example"}}}}
+        for _ in range(5):
+            company.refresh(self.snapshot,research._connect,load,self.now)
+        self.assertEqual(len(calls),5)
+        self.assertEqual(calls[3],identities[3])
+        self.assertEqual(set(calls[:3]+calls[4:]),{self.isin,*identities[:3]})
+
+    def test_unavailable_diagnostics_and_annual_archive_do_not_promote_failed_report(self):
+        import json
+        from app import fund_underlying_research as fund
+        def valid(isin,key):
+            return {"isin":isin,"sections":{"income_statement":{"status":"AVAILABLE",
+                "source":{"endpoint":"/v2/fundamentals/"+isin+"/income-statement"},
+                "data":{"units_in":"crore","type":"consolidated","time_period":"yearly",
+                    "income_statement":[{"category":"net profit","history":[{"period":"Mar 2025","value":100},{"period":"Mar 2026","value":120}]}]}}}}
+        company.refresh(self.snapshot,research._connect,valid,self.now)
+        later=self.now+timedelta(hours=7)
+        def failed(isin,key):
+            return {"isin":isin,"sections":{"income_statement":{"status":"UNAVAILABLE","error":"PROVIDER_RATE_LIMITED"},
+                                            "profile":{"status":"UNAVAILABLE","error":"secret private body"}}}
+        self.assertEqual(company.refresh(self.snapshot,research._connect,failed,later),"UNAVAILABLE")
+        self.assertEqual(company.cached_action_reports(research._connect,[self.isin],later),{})
+        self.snapshot["sections"][0]["result"]["eligible_count"]=1
+        self.snapshot["sections"][0]["result"]["company_research_universe"]=[
+            {"id":1,"isin":self.isin,"exchange":"NSE","as_of":"2026-11-23"}]
+        audit=company.acquisition_status(self.snapshot,research._connect,later)
+        self.assertEqual(audit["annual_archive_companies"],1)
+        self.assertEqual(audit["recent_section_diagnostics"]["income_statement"],{"PROVIDER_RATE_LIMITED":1})
+        self.assertNotIn("secret private body",json.dumps(audit))
+        loaded=fund.load([{"isin":self.isin}],later)
+        self.assertTrue(loaded[self.isin]["historical_cache_only"])
+        self.assertEqual(set(loaded[self.isin]["sections"]),{"income_statement"})
+        self.assertEqual(loaded[self.isin]["retrieved_at"],self.now.isoformat())
+        self.assertEqual(fund.load([{"isin":self.isin}],self.now+timedelta(days=8)),{})
