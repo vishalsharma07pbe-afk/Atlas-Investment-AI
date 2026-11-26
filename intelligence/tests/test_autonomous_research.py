@@ -26,6 +26,30 @@ class AutonomousResearchTests(unittest.TestCase):
         self.assertTrue(all(row["status"] == "READY" for row in snapshot["sections"]))
         self.assertEqual(snapshot["sections"][0]["result"]["exchange"], "NSE")
 
+    def test_fund_snapshot_persists_only_aggregate_qualification_counts(self):
+        summary={"evaluated_count":2,"top_eligible_count":1,"growth_eligible_count":0,
+                 "excluded":[{"identifier":"DO_NOT_PERSIST","top_performer_missing":["EXPENSE_RATIO","EXPENSE_RATIO"],
+                              "growth_outlook_missing":["OFFICIAL_RISKOMETER","PRIVATE_MARKER"]},
+                             {"identifier":"SECOND_PRIVATE_ID","top_performer_missing":[],
+                              "growth_outlook_missing":["OFFICIAL_RISKOMETER"]}]}
+        payload={key:None for key in ("category","coverage","top_performers","growth_outlook",
+            "recommendation_status","blockers","notice","filters","historical_coverage")}
+        payload["qualification_summary"]=summary
+        with patch.object(research,"dashboard",return_value=payload):
+            snapshot=research.fund_snapshot("LARGE_CAP")
+        counts=snapshot["qualification_counts"]
+        self.assertEqual(counts["evaluated_count"],2)
+        self.assertEqual(counts["top_missing_gate_counts"],{"EXPENSE_RATIO":1})
+        self.assertEqual(counts["growth_missing_gate_counts"],{"OFFICIAL_RISKOMETER":2,"UNKNOWN_GATE":1})
+        self.assertNotIn("DO_NOT_PERSIST",str(snapshot))
+        self.assertNotIn("PRIVATE_MARKER",str(snapshot))
+        self.assertNotIn("qualification_summary",snapshot)
+        summary["growth_eligible_count"]=1
+        self.assertIsNone(research._fund_qualification_counts(summary))
+        self.assertIsNone(research._fund_qualification_counts(None))
+        self.assertEqual(research._fund_qualification_counts({"evaluated_count":0,"top_eligible_count":0,
+            "growth_eligible_count":0,"excluded":[]})["top_missing_gate_counts"],{})
+
     def test_failure_retains_last_good_but_marks_failed(self):
         research.refresh_once(lambda exchange: {"exchange": exchange}, lambda category: {"category": category})
         def failed(exchange):

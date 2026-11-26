@@ -128,13 +128,59 @@ def market_snapshot(exchange):
     return result
 
 
+FUND_GATES=frozenset(("OFFICIAL_CATEGORY","EXACT_DIRECT_GROWTH_PLAN",
+    "CATEGORY_SPECIFIC_RISK_MODEL_REQUIRED","CATEGORY_STRATEGY_MISMATCH","FRESH_DATED_NAV",
+    "OFFICIAL_RISKOMETER","THREE_YEAR_NAV_HISTORY","EXPENSE_RATIO","UNDERLYING_INDEX",
+    "TRACKING_DIFFERENCE","TRACKING_ERROR","ONE_YEAR_RETURN","THREE_YEAR_RETURN",
+    "PEER_PERCENTILE","BENCHMARK_HIT_RATE","WORST_ROLLING_RETURN","MAX_DRAWDOWN",
+    "VOLATILITY","RECENT_PORTFOLIO_DISCLOSURE","PORTFOLIO_COVERAGE_80_PERCENT",
+    "INDEX_OUTLOOK_COVERAGE_70_PERCENT","EARNINGS_COVERAGE_70_PERCENT",
+    "VALUATION_COVERAGE_60_PERCENT","FORWARD_EARNINGS_GROWTH","VALUATION_EVIDENCE",
+    "SECTOR_DRIVERS","CONCENTRATION","LIQUIDITY","DUPLICATE_SCHEME_IDENTITY",
+    "SELECTED_HORIZON_OR_RISK_REVIEW_REQUIRED"))
+
+def _fund_qualification_counts(summary):
+    """Project bounded counts, never individual exclusions or unknown labels."""
+    if not isinstance(summary,dict):
+        return None
+    keys=("evaluated_count","top_eligible_count","growth_eligible_count")
+    if any(type(summary.get(k)) is not int or not 0<=summary[k]<=40 for k in keys):
+        return None
+    evaluated,top,growth=(summary[k] for k in keys)
+    excluded=summary.get("excluded")
+    if max(top,growth)>evaluated or not isinstance(excluded,list) or len(excluded)>evaluated:
+        return None
+    seen=set()
+    counts=[{},{}]
+    withheld=[0,0]
+    for row in excluded:
+        if not isinstance(row,dict) or not isinstance(row.get("identifier"),str) or not row["identifier"] or row["identifier"] in seen:
+            return None
+        seen.add(row["identifier"])
+        for i,key in enumerate(("top_performer_missing","growth_outlook_missing")):
+            values=row.get(key)
+            if not isinstance(values,list) or any(not isinstance(v,str) for v in values):
+                return None
+            if values:
+                withheld[i]+=1
+            for gate in {v if v in FUND_GATES else "UNKNOWN_GATE" for v in values}:
+                counts[i][gate]=counts[i].get(gate,0)+1
+        if not row["top_performer_missing"] and not row["growth_outlook_missing"]:
+            return None
+    if withheld!=[evaluated-top,evaluated-growth]:
+        return None
+    return {**{k:summary[k] for k in keys},"top_missing_gate_counts":counts[0],
+            "growth_missing_gate_counts":counts[1]}
+
+
 def fund_snapshot(category):
     result = dashboard(category, 60, "MODERATE")
-    # Keep the existing strict ranking methodology; store only the result fields
-    # needed by the overview, not the catalog or individual excluded records.
-    return {key: result[key] for key in (
+    # Keep strict rankings and compact counts, not the individual exclusions.
+    snapshot={key: result[key] for key in (
         "category", "coverage", "top_performers", "growth_outlook",
         "recommendation_status", "blockers", "notice", "filters", "historical_coverage")}
+    snapshot["qualification_counts"]=_fund_qualification_counts(result.get("qualification_summary"))
+    return snapshot
 
 
 def refresh_once(market_loader=market_snapshot, fund_loader=fund_snapshot):
