@@ -73,7 +73,8 @@ class LocalAcceptanceTests(unittest.TestCase):
              else {"historical_coverage": {"status": "HISTORICAL_WATCH_ONLY", "items": [{"private": "never-printed"}]}}}
             for key in sorted(acceptance.SECTIONS)]}
         review = {"holding_count": 1, "holdings": [{"symbol": "PRIVATE_MARKER"}],
-                  "diversification": {}, "opportunity_context": {"status": "WATCH_EVIDENCE_AVAILABLE"}}
+                  "diversification": {}, "opportunity_context": {"status": "NO_CURRENT_WATCH_EVIDENCE",
+                  "equities": [], "funds": [], "held_excluded_count": 0}}
         return readiness, overview, review
 
     def test_stored_data_and_live_status_are_independent(self):
@@ -84,6 +85,25 @@ class LocalAcceptanceTests(unittest.TestCase):
         self.assertEqual(result["live_feed"], "NOT_OBSERVED")
         self.assertNotIn("PRIVATE_MARKER", str(result))
         self.assertNotIn("never-printed", str(result))
+
+    def test_portfolio_acceptance_validates_owner_local_watch_projection(self):
+        r,o,p=self.fixture()
+        ctx=p["opportunity_context"]
+        ctx.update(status="WATCH_CONTEXT_AVAILABLE",funds=[{"evidence_type":"HISTORICAL_WATCH_ONLY","name":"PRIVATE_MARKER"}])
+        result=acceptance.assess(r,o,p)
+        self.assertEqual(result["checks"]["portfolio_review_contract"],"PASS")
+        self.assertNotIn("PRIVATE_MARKER",str(result))
+        ctx["funds"][0]["evidence_type"]="RECOMMENDATION"
+        self.assertEqual(acceptance.assess(r,o,p)["checks"]["portfolio_review_contract"],"BLOCKED")
+        ctx.update(funds=[],status="WATCH_CONTEXT_AVAILABLE")
+        self.assertEqual(acceptance.assess(r,o,p)["checks"]["portfolio_review_contract"],"BLOCKED")
+        ctx.update(status="NO_NEW_EXACT_IDENTITY_WATCHES",held_excluded_count=1)
+        self.assertEqual(acceptance.assess(r,o,p)["checks"]["portfolio_review_contract"],"PASS")
+        for invalid in ("WATCH_EVIDENCE_AVAILABLE","UNAVAILABLE","UNKNOWN"):
+            ctx["status"]=invalid
+            self.assertEqual(acceptance.assess(r,o,p)["checks"]["portfolio_review_contract"],"BLOCKED")
+        ctx.update(status="DISABLED",held_excluded_count=-1)
+        self.assertEqual(acceptance.assess(r,o,p)["checks"]["portfolio_review_contract"],"BLOCKED")
 
     def test_empty_and_stale_sources_cannot_pass(self):
         r, o, p = self.fixture()
