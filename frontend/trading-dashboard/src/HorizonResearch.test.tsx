@@ -64,12 +64,16 @@ it("displays automated historical replay without removing strategy research bloc
 it("shows prospective evidence gaps and candidate conflicts without implying calibrated odds",async()=>{
  const enriched={...candidate,research_reliability:{status:"REVIEW_CONFLICTING_EVIDENCE",warnings:["NET_PROFIT_DETERIORATION_REVIEW"],blockers:["STRATEGY_BACKTEST_NOT_VERIFIED"],prospective_status:"INSUFFICIENT_EVIDENCE",notice:"Watch only."}};
  const market={...section,result:{...section.result,horizons:{...section.result.horizons,SWING:{...section.result.horizons.SWING,candidates:[enriched]}}}};
- const research_reliability={horizons:{SWING:{status:"INSUFFICIENT_EVIDENCE",selected_mature_watches:2,observed_outcomes:1,distinct_observed_isins:1,coverage_percent:50,overlap_excluded:1,immature_excluded:0,incompatible_excluded:0,invalid_excluded:0,blockers:["INCOMPLETE_OUTCOME_COVERAGE"],cost_scenarios:[],notice:"No recommendation gate is lifted."}}};
+ const research_reliability={horizons:{SWING:{status:"INSUFFICIENT_EVIDENCE",selected_mature_watches:2,observed_outcomes:1,distinct_observed_isins:1,coverage_percent:50,overlap_excluded:1,immature_excluded:0,incompatible_excluded:0,invalid_excluded:0,risk_path_summary:{observed_paths:1,outcomes_without_path:0,coverage_percent:50,worst_entry_downside_percent:-10,worst_close_drawdown_percent:-25,notice:"Close marks only."},benchmark_summary:{matched_outcomes:1,outcomes_without_benchmark:0,coverage_percent:50,mean_gross_price_index_percent:5,cost_scenarios:[{cost_bps_per_side:30,mean_net_minus_price_index_pp:4.34,median_net_minus_price_index_pp:4.34,outperformed_count:1,underperformed_count:0,equal_count:0}],notice:"Price index, not total return."},blockers:["INCOMPLETE_OUTCOME_COVERAGE"],cost_scenarios:[],notice:"No recommendation gate is lifted."}}};
  vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[market],research_reliability})})));
  render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
  expect(await screen.findByRole("heading",{name:"Prospective watch reliability"})).toBeTruthy();
  expect(screen.getByText("NOT CALIBRATED")).toBeTruthy();
  expect(screen.getByText(/50% coverage/)).toBeTruthy();
+ fireEvent.click(screen.getByText("Observed closing downside · 1 matched paths"));
+ expect(screen.getByText(/Worst closing drawdown: -25%/)).toBeTruthy();
+ fireEvent.click(screen.getByText("Matched Nifty 50 price-index comparison · 1 observations"));
+ expect(screen.getByText(/Mean net difference 4.34 pp/)).toBeTruthy();
  fireEvent.click(screen.getByText("Conflicting evidence · review needed"));
  expect(screen.getByText("net profit deterioration review")).toBeTruthy();
  expect(screen.getByText(/strategy backtest not verified/)).toBeTruthy();

@@ -154,3 +154,23 @@ class ResearchReliabilityTests(unittest.TestCase):
         result=cohort([a,b],"SWING",TODAY)
         self.assertEqual(result["observed_outcomes"],2)
         self.assertEqual(result["risk_path_summary"]["observed_paths"],0)
+
+    def test_paired_benchmark_metrics_keep_missing_outcomes_in_denominator(self):
+        from app.watch_outcomes import BENCHMARK_VERSION
+        first=row()
+        outcome=json.loads(first["outcome"])
+        outcome["price_index_comparison"]={"version":BENCHMARK_VERSION,"benchmark_key":"NSE_INDEX|Nifty 50",
+            "kind":"PRICE_INDEX","source_code":"UPSTOX","entry_date":outcome["entry_date"],"exit_date":outcome["exit_date"],
+            "observations":outcome["observations"],"entry_close":100,"exit_close":105,"gross_return_percent":5}
+        first["outcome"]=json.dumps(outcome)
+        other=row(day=date(2026,9,1))
+        report=cohort([first,other],"SWING",TODAY)
+        b=report["benchmark_summary"]
+        self.assertEqual(report["observed_outcomes"],2)
+        self.assertEqual(b["matched_outcomes"],1)
+        self.assertEqual(b["outcomes_without_benchmark"],1)
+        self.assertEqual(b["coverage_percent"],50)
+        self.assertAlmostEqual(b["cost_scenarios"][1]["mean_net_minus_price_index_pp"],4.341,places=3)
+        outcome["price_index_comparison"]["exit_date"]="2026-09-01"
+        first["outcome"]=json.dumps(outcome)
+        self.assertEqual(cohort([first,other],"SWING",TODAY)["benchmark_summary"]["matched_outcomes"],0)

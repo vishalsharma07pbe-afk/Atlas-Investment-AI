@@ -132,6 +132,29 @@ def _attach_index_interval(interval,equity,index):
     interval["market_benchmark_end"]=dates[-1]
     interval["market_benchmark_observations"]=len(dates)
 
+def price_index_history(benchmark,today):
+    """Shared exact-source completed Nifty 50 price-index observation parser."""
+    if not isinstance(benchmark,dict) or benchmark.get("benchmark_key")!="NSE_INDEX|Nifty 50" or benchmark.get("kind")!="PRICE_INDEX":
+        raise ValueError("INDEX_IDENTITY")
+    rows=benchmark["candles"]
+    if not isinstance(rows,list) or len(rows)>400:
+        raise ValueError("INDEX_HISTORY")
+    index={}
+    for row in rows:
+        if not isinstance(row,dict):
+            raise ValueError("INDEX_ROW")
+        day=date.fromisoformat(row["trade_date"])
+        if day>=today or day.isoformat() in index or row.get("source_code")!="UPSTOX":
+            raise ValueError("INDEX_DATE_OR_SOURCE")
+        if type(row.get("revision")) is not int or row["revision"]<1:
+            raise ValueError("INDEX_REVISION")
+        o,c=float(row["open"]),float(row["close"])
+        if not all(isfinite(x) and x>0 for x in (o,c)):
+            raise ValueError("INDEX_PRICE")
+        index[day.isoformat()]=(o,c)
+    return index
+
+
 def attach_market_benchmark(result,payload,benchmark,today,*,positions=None):
     """Compare net simulation with the non-tradable Nifty 50 price index.
 
@@ -140,24 +163,7 @@ def attach_market_benchmark(result,payload,benchmark,today,*,positions=None):
     """
     try:
         equity=_history(payload,today)
-        if not isinstance(benchmark,dict) or benchmark.get("benchmark_key")!="NSE_INDEX|Nifty 50" or benchmark.get("kind")!="PRICE_INDEX":
-            raise ValueError("INDEX_IDENTITY")
-        rows=benchmark["candles"]
-        if not isinstance(rows,list) or len(rows)>400:
-            raise ValueError("INDEX_HISTORY")
-        index={}
-        for row in rows:
-            if not isinstance(row,dict):
-                raise ValueError("INDEX_ROW")
-            day=date.fromisoformat(row["trade_date"])
-            if day>=today or day.isoformat() in index or row.get("source_code")!="UPSTOX":
-                raise ValueError("INDEX_DATE_OR_SOURCE")
-            if type(row.get("revision")) is not int or row["revision"]<1:
-                raise ValueError("INDEX_REVISION")
-            o,c=float(row["open"]),float(row["close"])
-            if not all(isfinite(x) and x>0 for x in (o,c)):
-                raise ValueError("INDEX_PRICE")
-            index[day.isoformat()]=(o,c)
+        index=price_index_history(benchmark,today)
     except (ValueError,TypeError,KeyError,OverflowError):
         equity=[]
         index={}
