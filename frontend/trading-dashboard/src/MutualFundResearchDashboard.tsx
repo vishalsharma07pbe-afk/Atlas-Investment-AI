@@ -28,7 +28,7 @@ function SectorFinancialQuality({research}:{research?:UnderlyingResearch}){
 }
 function AnnualCacheCoverage({research}:{research?:UnderlyingResearch}){
  if(research?.annual_history_cache_weight_percent==null)return null;
- return <p className="muted tiny">Historical-only annual evidence from older cached reports: {percent(research.annual_history_cache_weight_percent)} of original fund weight (retrieved over 24 hours ago, within {research.annual_history_cache_max_age_days??7} days). Not included in fresh company coverage or current valuation evidence.</p>;
+ return <p className="muted tiny">Retained historical annual evidence: {percent(research.annual_history_cache_weight_percent)} of original fund weight (up to {research.annual_history_cache_max_age_days??7} days old). This is not fresh annual or current valuation evidence; the same holdings may have independently fresh profile or ratio evidence.</p>;
 }
 function HistoricalMargins({rows}:{rows?:HistoricalMargin[]}){
  if(!rows?.length)return null;
