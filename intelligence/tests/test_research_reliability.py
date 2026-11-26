@@ -133,3 +133,24 @@ class ResearchReliabilityTests(unittest.TestCase):
         self.assertEqual(item["research_conclusion"]["supporting_evidence"],[])
         self.assertNotIn("REPORTED_FII_OWNERSHIP_DECLINE_REVIEW",item["research_conclusion"]["warnings"])
         self.assertIn("EXACT_COMPANY_IDENTITY_EVIDENCE_REQUIRED",item["research_conclusion"]["next_evidence_checks"])
+
+    def test_path_metrics_are_separate_from_legacy_return_metrics(self):
+        from app.watch_outcomes import RISK_PATH_VERSION
+        a=row()
+        value=json.loads(a["outcome"])
+        value["risk_path"]={"version":RISK_PATH_VERSION,"observations":10,
+                            "worst_close_from_entry_percent":-10,"best_close_from_entry_percent":20,
+                            "peak_to_trough_close_drawdown_percent":-25}
+        a["outcome"]=json.dumps(value)
+        b=row(day=date(2026,9,1))
+        result=cohort([a,b],"SWING",TODAY)
+        self.assertEqual(result["observed_outcomes"],2)
+        self.assertEqual(result["risk_path_summary"]["observed_paths"],1)
+        self.assertEqual(result["risk_path_summary"]["outcomes_without_path"],1)
+        self.assertEqual(result["risk_path_summary"]["coverage_percent"],50)
+        self.assertEqual(result["risk_path_summary"]["worst_close_drawdown_percent"],-25)
+        value["risk_path"]["peak_to_trough_close_drawdown_percent"]=-5
+        a["outcome"]=json.dumps(value)
+        result=cohort([a,b],"SWING",TODAY)
+        self.assertEqual(result["observed_outcomes"],2)
+        self.assertEqual(result["risk_path_summary"]["observed_paths"],0)

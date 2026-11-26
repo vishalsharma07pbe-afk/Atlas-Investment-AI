@@ -12,8 +12,11 @@ import re
 
 from .market_client import backend_json
 from .replay_evidence import exact_isin, full_manifest, corporate_action_status
+from .automatic_company_evidence import cached_action_reports
+from .corporate_action_normalization import reported_crossings
 
 OUTCOME_EVIDENCE_VERSION = "WATCH-SESSION-EVIDENCE-2"
+RISK_PATH_VERSION = "WATCH-CLOSE-PATH-1"
 
 HORIZONS = {"SWING": 14, "SHORT_TERM": 60, "LONG_TERM": 180}
 IST = ZoneInfo("Asia/Kolkata")
@@ -103,7 +106,24 @@ def _expected_dates(calendar,exchange,start,maturity,today):
     return None
 
 
-def evaluate(row, payload, today, calendar=None):
+def _risk_path(values):
+    """Observed closing marks only; no intraday excursion or executed equity."""
+    peak=values[0]
+    drawdown=0.0
+    for value in values:
+        peak=max(peak,value)
+        drawdown=min(drawdown,100*(value/peak-1))
+    low=100*(min(values)/values[0]-1)
+    high=100*(max(values)/values[0]-1)
+    if not all(isfinite(v) and -100<=v<=1e6 for v in (drawdown,low,high)):
+        return None
+    return {"version":RISK_PATH_VERSION,"observations":len(values),
+            "worst_close_from_entry_percent":round(low,4),"best_close_from_entry_percent":round(high,4),
+            "peak_to_trough_close_drawdown_percent":round(drawdown,4),
+            "notice":"Gross observed close marks only; not intraday excursion, portfolio drawdown, executable stop or capital guarantee."}
+
+
+def evaluate(row, payload, today, calendar=None, *, action_report=None, instant=None):
     evidence=json.loads(row["evidence"])
     instrument=payload["instrument"]
     if (type(instrument["id"]) is not int or instrument["id"]!=row["instrument_id"]
@@ -140,6 +160,8 @@ def evaluate(row, payload, today, calendar=None):
     action=corporate_action_status(instrument,manifest,require_scope=True,today=today)
     if action!="NO_RECORDED_CROSSING_ACTION":
         return action,None
+    if instant is not None and reported_crossings(action_report,evidence["isin"],expected[0],expected[-1],instant):
+        return "REPORTED_ACTION_RECONCILIATION_REQUIRED",None
     values=[float(x["close"]) for x in interval]
     if any(not isfinite(v) or v<=0 for v in values):
         return "EVIDENCE_GAP",None
@@ -149,7 +171,7 @@ def evaluate(row, payload, today, calendar=None):
     return "OBSERVED", {"entry_date":expected[0].isoformat(),"exit_date":expected[-1].isoformat(),
         "entry_close":values[0],"exit_close":values[-1],"observed_price_return_pct":round(change,4),
         "source_code":interval[0]["source_code"],"evidence_version":OUTCOME_EVIDENCE_VERSION,
-        "observations":len(interval),"history_fingerprint":manifest["digest"],
+        "observations":len(interval),"history_fingerprint":manifest["digest"],"risk_path":_risk_path(values),
         "calendar_status":"STORED_SESSIONS_MATCHED","corporate_action_status":action,
         "action_context_through":instrument["action_context_through"],
         "notice":"Observed adjusted close-to-close change on matching stored sessions; not executed, benchmarked or net of fees. Corporate-action completeness and point-in-time history are not certified."}
@@ -164,7 +186,7 @@ def refresh(snapshot, connect, loader=backend_json, instant=None):
     with closing(connect()) as db, db:
         _table(db)
         due=db.execute("""SELECT * FROM watch_outcomes WHERE maturity_date<?
-            AND status IN ('PENDING','EVIDENCE_GAP','CALENDAR_EVIDENCE_GAP','ACTION_CONTEXT_UNAVAILABLE','RECORDED_ACTION_RECONCILIATION_REQUIRED','UNAVAILABLE')
+            AND status IN ('PENDING','EVIDENCE_GAP','CALENDAR_EVIDENCE_GAP','ACTION_CONTEXT_UNAVAILABLE','RECORDED_ACTION_RECONCILIATION_REQUIRED','REPORTED_ACTION_RECONCILIATION_REQUIRED','UNAVAILABLE')
             AND (attempted_at IS NULL OR attempted_at<?)
             ORDER BY attempted_at ASC NULLS FIRST,maturity_date LIMIT 5""",
             (today.isoformat(),(instant-timedelta(days=1)).isoformat())).fetchall()
@@ -180,7 +202,11 @@ def refresh(snapshot, connect, loader=backend_json, instant=None):
                     calendars[exchange]=loader(f"/api/v1/market-data/strategy-calendar?exchange={exchange}")
                 except Exception:
                     calendars[exchange]=None
-            status,outcome=evaluate(row,loader(f"/api/v1/market-data/instruments/{key[0]}/candles?limit=500"),today,calendars[exchange])
+            evidence=json.loads(row["evidence"])
+            isin=evidence.get("isin")
+            cached=cached_action_reports(connect,[isin],instant)
+            status,outcome=evaluate(row,loader(f"/api/v1/market-data/instruments/{key[0]}/candles?limit=500"),today,calendars[exchange],
+                                    action_report=cached.get(isin),instant=instant)
         except Exception:
             status,outcome="UNAVAILABLE",None
         with closing(connect()) as db, db:
