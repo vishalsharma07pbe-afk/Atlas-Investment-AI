@@ -55,3 +55,17 @@ Run `python3 scripts/verify-production-backup.py backups/<timestamp>` against th
 
 ### Investment qualification evidence audit
 Use `python3 scripts/local_research_acceptance.py --qualification-audit` to add a redacted breakdown of current stock domain states by horizon, per-exchange history/watch counts, prospective mature outcome counts and fund top/growth missing-gate counts by category. It uses the same already-fetched overview with no extra provider requests. Unknown or missing evidence remains unknown; no raw identifiers, symbols, scheme names, private rows or unrecognized gate labels are output. Default acceptance, exit semantics and recommendation gates remain unchanged. The optional output is diagnostic, not a certification or substitute for source verification.
+
+
+## Consolidated final local acceptance checkpoint
+Use the same local account and existing Compose project. Back up before rebuilding backend, intelligence and frontend together; retain .env and keys separately and never reset volumes. Run:
+```bash
+git pull --ff-only origin main
+bash scripts/backup-production.sh --local
+python3 scripts/check_p0_local_config.py
+docker compose config --quiet
+docker compose up -d --build --no-deps --force-recreate backend intelligence frontend
+docker compose ps
+python3 scripts/local_research_acceptance.py --qualification-audit
+```
+Stop on any failure; commands may be joined with &&. The updated audit verifies current exact intraday company identities, review/qualification count and withheld decision contract. Redacted coverage now includes aggregate company acquisition, annual archive, per-section coverage, prospective matched index and close paths, and replay counts. Null is unknown; no raw source rows or account data are printed. Green contract checks do not certify investment quality. The six original acceptance categories remain open until actual evidence verifies them: authorized source coverage, qualified investment research, populated portfolio accuracy, actual local upgrade/recovery, representative resources/UX, and actual privacy. Use the existing disaster recovery runbook for an isolated real-data drill, never the guarded synthetic CI script on operator data. During a regular session rerun with --require-live. Compare actual holdings, transactions and reports privately, verify scheduler recovery and source coverage, inspect populated Safari/mobile layouts and notifications, and observe CPU/memory over a representative session. No additional feature packages are planned; address only evidenced defects or original acceptance gaps. Do not report product complete until those checks are independently met.

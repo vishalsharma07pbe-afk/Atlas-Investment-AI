@@ -223,3 +223,21 @@ Use the existing owner-scoped review, deterministic thesis, exact fund evidence 
 
 ## Open-panel delivery integration
 After the user opens the panel, public details and owner-local inbox reuse foreground-only single-flight polling at 60 seconds, with visibility-triggered refresh and abort on close. Closed panels retain metadata-only checks. An older badge response cannot replace a newer detail snapshot; late closed-panel responses cannot mark alerts read. Successful server read acknowledgements survive an older inbox poll. Failed detail refreshes are shown as unavailable, not as an empty/current feed. No provider calls, external push, or new backend endpoints. Actual browser/device verification remains required.
+
+
+### Final consolidated engineering checkpoint
+#299 head 5aa137543235aefd9df89e793c180c4b919ea7c8 passed 8 application and 4 applicable security checks; merged 3915206f6120d19e5bc428c15614a7dae6820eb7. Full OSV skipped. Consolidated packages #295–299 integrated; this final package updates actual local audit and deployment instructions. Exact-head CI and real operator validation remain required.
+
+
+## Consolidated final local acceptance checkpoint
+Use the same local account and existing Compose project. Back up before rebuilding backend, intelligence and frontend together; retain .env and keys separately and never reset volumes. Run:
+```bash
+git pull --ff-only origin main
+bash scripts/backup-production.sh --local
+python3 scripts/check_p0_local_config.py
+docker compose config --quiet
+docker compose up -d --build --no-deps --force-recreate backend intelligence frontend
+docker compose ps
+python3 scripts/local_research_acceptance.py --qualification-audit
+```
+Stop on any failure; commands may be joined with &&. The updated audit verifies current exact intraday company identities, review/qualification count and withheld decision contract. Redacted coverage now includes aggregate company acquisition, annual archive, per-section coverage, prospective matched index and close paths, and replay counts. Null is unknown; no raw source rows or account data are printed. Green contract checks do not certify investment quality. The six original acceptance categories remain open until actual evidence verifies them: authorized source coverage, qualified investment research, populated portfolio accuracy, actual local upgrade/recovery, representative resources/UX, and actual privacy. Use the existing disaster recovery runbook for an isolated real-data drill, never the guarded synthetic CI script on operator data. During a regular session rerun with --require-live. Compare actual holdings, transactions and reports privately, verify scheduler recovery and source coverage, inspect populated Safari/mobile layouts and notifications, and observe CPU/memory over a representative session. No additional feature packages are planned; address only evidenced defects or original acceptance gaps. Do not report product complete until those checks are independently met.
