@@ -121,3 +121,24 @@ it("shows observed benchmark regime with bounded sample breadth",async()=>{
  expect(screen.getByText(/20 advancing · 30 declining/)).toBeTruthy();
  expect(screen.getByText(/opposing daily breadth review/)).toBeTruthy();
 });
+
+
+it("links canonical briefing watches and company evidence review to existing workspaces",async()=>{
+ const horizon=vi.fn(),portfolio=vi.fn();
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[],daily_briefing:{
+ status:"PARTIAL",ready_sections:1,total_sections:12,market:{eligible_histories:5,sampled_instruments:10,outlook_status:"MARKET_REGIME_NOT_VALIDATED"},
+ horizons:{SWING:{displayed_watch_count:1,ai_reviewed_count:1,conflicting_evidence_count:1,qualified_count:null}},
+ funds:{growth_pick_count:null,historical_watch_count:0,ready_categories:0,total_categories:10},institutional:{status:"UNAVAILABLE"},leading_evidence_gaps:[],news_headline_count:2,notice:"Not a forecast",
+ decision_context:{horizons:{SWING:{selected_watches:[{isin:"INE009A01021",id:1,exchange:"NSE",symbol:"TEST",as_of:"2026-11-23",unresolved_requirement_count:2}],qualified_count:0}},review_company_count:1,review_companies:[{isin:"INE009A01021",symbol:"TEST",horizons:["SWING"],findings:["REPLAY_REVIEW"],observations:[{exchange:"NSE",as_of:"2026-11-23"}]}],regime:{status:"OBSERVED_BENCHMARK_REGIME",trend:"RISING",as_of:"2026-11-23"},global_coverage:{available_count:3,total_count:8},notice:"Review only."}}})})));
+ render(<AutonomousOverview onPortfolio={portfolio} onFunds={()=>{}} onSettings={()=>{}} onHorizon={horizon}>{null}</AutonomousOverview>);
+ expect(await screen.findByRole("region",{name:"Today's evidence review"})).toBeTruthy();
+ expect(screen.getByText(/0 qualified in the reviewed sample/)).toBeTruthy();
+ expect(screen.getByText(/3\/8 dated global indicators/)).toBeTruthy();
+ fireEvent.click(screen.getByText(/TEST · 1 findings/));
+ expect(screen.getByText("replay review")).toBeTruthy();
+ fireEvent.click(screen.getByRole("button",{name:"Review swing research"}));
+ expect(horizon).toHaveBeenCalledWith("SWING");
+ fireEvent.click(screen.getByRole("button",{name:"Open private portfolio review"}));
+ expect(portfolio).toHaveBeenCalledTimes(1);
+ expect(fetch).toHaveBeenCalledTimes(1);
+});

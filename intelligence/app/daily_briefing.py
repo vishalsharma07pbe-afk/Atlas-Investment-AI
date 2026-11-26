@@ -6,6 +6,7 @@ watch is not a qualified investment opportunity; unknown is not zero.
 from collections import Counter
 from decimal import Decimal, InvalidOperation
 from .fund_categories import CATEGORIES
+from .replay_evidence import exact_isin
 
 MARKETS=("NSE","BSE")
 FUNDS=CATEGORIES
@@ -24,6 +25,87 @@ def _direction(value):
         return "NET_BUYING" if amount>0 else "NET_SELLING" if amount<0 else "NET_FLAT"
     except (InvalidOperation,ValueError,TypeError):
         return "UNAVAILABLE"
+
+
+def _codes(value):
+    return {v for v in value if isinstance(v,str) and v and len(v)<=180} if isinstance(value,list) else set()
+
+
+def _decision_context(snapshot,ready,enabled):
+    """Use the existing canonical selection and independent qualification gates."""
+    qualification=(snapshot.get("stock_qualification") or {}).get("horizons") or {}
+    horizons={}
+    attention=[]
+    for horizon in HORIZONS:
+        assessment=qualification.get(horizon) or {}
+        selection=assessment.get("selection")
+        if not enabled or not isinstance(selection,dict):
+            continue
+        candidates={}
+        for market in MARKETS:
+            group=(ready.get(market,{}).get("horizons") or {}).get(horizon) or {}
+            if group.get("status")!="TECHNICAL_WATCH_ONLY":
+                continue
+            for item in group.get("candidates",[]):
+                if (isinstance(item,dict) and item.get("exchange")==market
+                        and type(item.get("id")) is int and item["id"]>0 and exact_isin(item.get("isin"))):
+                    candidates.setdefault((market,item["id"],item["isin"]),[]).append(item)
+        selected=[]
+        seen=set()
+        for ref in selection.get("watch_refs",[])[:5]:
+            if not isinstance(ref,dict) or not exact_isin(ref.get("isin")):
+                continue
+            key=(ref.get("exchange"),ref.get("id"),ref["isin"])
+            matches=candidates.get(key,[])
+            if len(matches)!=1 or ref["isin"] in seen:
+                continue
+            item=matches[0]
+            decision=item.get("stock_qualification") or {}
+            if decision.get("status") not in ("WITHHELD_REVIEW_REQUIRED","WITHHELD_EVIDENCE_GAPS"):
+                continue
+            seen.add(ref["isin"])
+            company=item.get("selection_company_context") or {}
+            findings=sorted(_codes(decision.get("review_findings"))|_codes(company.get("review_findings")))
+            requirements=_codes(decision.get("blockers"))|_codes(company.get("blockers"))
+            row={"isin":ref["isin"],"exchange":key[0],"id":key[1],"symbol":item.get("symbol"),
+                 "as_of":item.get("as_of"),"horizon":horizon,"review_findings":findings,
+                 "unresolved_requirement_count":len(requirements)}
+            selected.append(row)
+            if findings:
+                attention.append(row)
+        # Only describe the bounded assessed sample. A missing qualification
+        # count is not zero, and a future qualified result is not invented here.
+        qualified=assessment.get("qualified_count")
+        horizons[horizon]={"selected_watches":selected,
+            "qualified_count":0 if type(qualified) is int and qualified==0 else None,
+            "status":assessment.get("status","AWAITING_RESEARCH")}
+    # One item per company for the brief, retain all selected horizons and
+    # cross-venue findings. Count is descriptive, not a severity score.
+    grouped={}
+    for row in attention:
+        isin=row["isin"]
+        if isin not in grouped:
+            grouped[isin]={"isin":isin,"symbol":row["symbol"],"horizons":[],
+                           "findings":set(),"observations":[]}
+        item=grouped[isin]
+        item["horizons"].append(row["horizon"])
+        item["findings"].update(row["review_findings"])
+        item["observations"].append({"exchange":row["exchange"],"as_of":row["as_of"]})
+    items=[{**item,"findings":sorted(item["findings"])} for item in grouped.values()]
+    items.sort(key=lambda item:(item["isin"],))
+    regime=snapshot.get("market_regime") or {}
+    observed={"status":"UNAVAILABLE"}
+    if enabled and regime.get("status")=="OBSERVED_BENCHMARK_REGIME":
+        observed={k:regime.get(k) for k in ("status","as_of","trend","volatility_regime","agreement")}
+    global_data=snapshot.get("global_context") or {}
+    coverage=None
+    if enabled:
+        count,total=global_data.get("available_count"),global_data.get("total_count")
+        if type(count) is int and type(total) is int and 0<=count<=total and total>0:
+            coverage={"available_count":count,"total_count":total}
+    return {"horizons":horizons,"review_company_count":len(items),"review_companies":items[:5],
+            "regime":observed,"global_coverage":coverage,
+            "notice":"Review findings are descriptive, not severity-ranked or trading instructions. Company review list is bounded to five distinct selected ISINs, ordered by identity. Portfolio review is separate and owner-local."}
 
 
 def summarize(snapshot):
@@ -96,6 +178,7 @@ def summarize(snapshot):
         "funds":{"growth_pick_count":len(fund_picks) if any(k in ready for k in FUNDS) else None,
                  "historical_watch_count":historical,
                  "ready_categories":sum(k in ready for k in FUNDS),"total_categories":len(FUNDS)},
+        "decision_context":_decision_context(snapshot,ready,enabled),
         "institutional":flow,"news_headline_count":len(snapshot.get("recent_company_news") or []) if enabled else 0,
         "leading_evidence_gaps":[{"code":code,"watch_count":count} for code,count in
                                  sorted(blockers.items(),key=lambda x:(-x[1],x[0]))[:3]],
