@@ -135,15 +135,40 @@ class LocalAcceptanceTests(unittest.TestCase):
         n.update(ids=["a","b"],revision_keys=["same","same"],total=2)
         self.assertEqual(acceptance.assess_workflows(r,o,p,n)["checks"]["notification_summary_contract"],"BLOCKED")
 
+    def test_final_contracts_separate_observation_from_product_acceptance(self):
+        intraday={"status":"NOT_AUTHORIZED","examined":0,"eligible":0,"open_exchanges":[],"candidates":[],"warnings":[]}
+        review={"holding_count":1,"holdings":[{"symbol":"PRIVATE_MARKER"}]}
+        journal={"entries":[{"id":"PRIVATE_ID","status":"IDEA","thesis":"PRIVATE_THESIS"}]}
+        result=acceptance.assess_final_contracts(intraday,{"unread_count":0},journal,review)
+        self.assertEqual(result["final_runtime"],"PASS")
+        self.assertEqual(result["intraday_evidence"],"NOT_OBSERVED")
+        self.assertEqual(result["populated_portfolio"],"OBSERVED")
+        self.assertEqual(result["product_acceptance"],"NOT_CERTIFIED")
+        self.assertNotIn("PRIVATE_",str(result))
+        intraday.update(status="RESEARCH_ONLY",examined=1,eligible=1,open_exchanges=["NSE"],
+            candidates=[{"id":1,"exchange":"NSE","pattern":"VOLUME_BREAKOUT_WATCH","bar_end":"2026-11-26T05:00:00Z"}])
+        self.assertEqual(acceptance.assess_final_contracts(intraday,{"unread_count":0},journal,review)["intraday_evidence"],"OBSERVED")
+        intraday["candidates"][0]["target"]=100
+        self.assertEqual(acceptance.assess_final_contracts(intraday,{"unread_count":0},journal,review)["final_runtime"],"BLOCKED")
+        journal["entries"].append(dict(journal["entries"][0]))
+        self.assertEqual(acceptance.assess_final_contracts(intraday,{"unread_count":False},journal,review)["checks"]["private_research_journal_contract"],"BLOCKED")
+
     def test_collection_uses_existing_read_routes_and_fails_closed(self):
         r,o,p,n=self.workflow_fixture()
         values={"/intelligence/api/v1/intelligence/data-readiness":r,
                 "/intelligence/api/v1/intelligence/research/overview":o,
                 "/api/v1/portfolio/review":p,
-                "/intelligence/api/v1/intelligence/notifications/summary":n}
+                "/intelligence/api/v1/intelligence/notifications/summary":n,
+                "/api/v1/market-data/intraday-research":{"status":"NOT_AUTHORIZED","examined":0,"eligible":0,"open_exchanges":[],"candidates":[],"warnings":[]},
+                "/api/v1/research-workspace/notifications/summary":{"unread_count":0},
+                "/intelligence/api/v1/intelligence/journal":{"entries":[]}}
         result=acceptance.collect(values.__getitem__)
         self.assertEqual(result["runtime"],"PASS")
         self.assertEqual(result["investment_qualification"],"NOT_CERTIFIED")
+        self.assertEqual(result["final_runtime"],"PASS")
+        self.assertEqual(result["product_acceptance"],"NOT_CERTIFIED")
+        values["/api/v1/research-workspace/notifications/summary"]={"unread_count":-1}
+        self.assertEqual(acceptance.collect(values.__getitem__)["runtime"],"BLOCKED")
         del o["daily_briefing"]
         self.assertEqual(acceptance.collect(values.__getitem__)["runtime"],"BLOCKED")
 

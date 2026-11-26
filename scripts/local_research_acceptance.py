@@ -72,7 +72,7 @@ def assess(readiness,overview,review):
     blockers=readiness.get("blockers")
     check("provider_declarations",readiness.get("provider_mode")=="UPSTOX" and isinstance(blockers,list) and
           not any(b in blockers for b in ("MARKET_DATA_USAGE_RIGHTS_NOT_CONFIRMED","MARKET_DATA_ENTITLEMENT_NOT_CONFIRMED")))
-    check("equity_history_eligible",any(type((rows.get(key,{}).get("result") or {}).get("eligible_count")) is int and
+    check("equity_history_eligible",any(type(_obj(rows.get(key,{}).get("result")).get("eligible_count")) is int and
           (rows[key]["result"]["eligible_count"]>0) and rows[key].get("status")=="READY" for key in ("NSE","BSE")))
     check("fund_history_eligible",any(rows.get(key,{}).get("status")=="READY" and
           isinstance(rows[key].get("result"),dict) and
@@ -174,17 +174,72 @@ def assess_workflows(readiness,overview,review,notifications):
             "checks":checks,"investment_qualification":"NOT_CERTIFIED",
             "notice":"Contract checks do not establish qualified picks, live execution, representative coverage or actual investment suitability."}
 
+def assess_final_contracts(intraday,personal,journal,review):
+    """Check read-only private and intraday surfaces; never certify investment picks."""
+    intraday,personal,journal,review=map(_obj,(intraday,personal,journal,review))
+    status=intraday.get("status")
+    examined,eligible=intraday.get("examined"),intraday.get("eligible")
+    candidates,warnings=intraday.get("candidates"),intraday.get("warnings")
+    exchanges=intraday.get("open_exchanges")
+    intraday_ok=(status in ("NOT_AUTHORIZED","SESSION_CLOSED_OR_UNVERIFIED","RESEARCH_ONLY")
+        and _count(examined) and _count(eligible) and eligible<=examined
+        and isinstance(exchanges,list) and all(x in ("NSE","BSE") for x in exchanges)
+        and len(exchanges)==len(set(exchanges))
+        and isinstance(candidates,list) and isinstance(warnings,list)
+        and len(candidates)<=5 and len(warnings)<=5
+        and len(candidates)+len(warnings)<=eligible
+        and ((status=="RESEARCH_ONLY" and bool(exchanges)) or
+             (status!="RESEARCH_ONLY" and not exchanges and examined==eligible==0 and candidates==warnings==[])))
+    if intraday_ok:
+        for rows,pattern in ((candidates,"VOLUME_BREAKOUT_WATCH"),(warnings,"FAILED_BREAKOUT_WATCH")):
+            identities=set()
+            for row in rows:
+                if (not isinstance(row,dict) or row.get("pattern")!=pattern
+                    or row.get("exchange") not in exchanges or type(row.get("id")) is not int
+                    or row["id"]<=0 or not isinstance(row.get("bar_end"),str)
+                    or any(row.get(k) is not None for k in ("target","stop_loss","recommendation"))):
+                    intraday_ok=False
+                    break
+                key=(row["exchange"],row["id"])
+                if key in identities:intraday_ok=False
+                identities.add(key)
+    entries=journal.get("entries")
+    journal_ok=isinstance(entries,list) and len(entries)<=200 and all(
+        isinstance(e,dict) and isinstance(e.get("id"),str) and bool(e["id"])
+        and e.get("status") in ("IDEA","RESEARCHING","MONITORING","CLOSED") for e in entries)
+    if journal_ok:
+        journal_ok=len({e["id"] for e in entries})==len(entries)
+    checks={
+        "intraday_watch_contract":"PASS" if intraday_ok else "BLOCKED",
+        "private_notification_summary":"PASS" if _count(personal.get("unread_count")) else "BLOCKED",
+        "private_research_journal_contract":"PASS" if journal_ok else "BLOCKED",
+    }
+    populated=_count(review.get("holding_count")) and review["holding_count"]>0 and isinstance(review.get("holdings"),list) and len(review["holdings"])==review["holding_count"]
+    return {"checks":checks,"final_runtime":"PASS" if all(v=="PASS" for v in checks.values()) else "BLOCKED",
+        "populated_portfolio":"OBSERVED" if populated else "NOT_OBSERVED",
+        "intraday_evidence":"OBSERVED" if intraday_ok and status=="RESEARCH_ONLY" and eligible>0 else "NOT_OBSERVED",
+        "product_acceptance":"NOT_CERTIFIED",
+        "remaining_acceptance":["AUTHORIZED_SOURCE_COVERAGE","QUALIFIED_INVESTMENT_RESEARCH",
+            "POPULATED_PORTFOLIO_ACCURACY","ACTUAL_LOCAL_UPGRADE_AND_RECOVERY",
+            "REPRESENTATIVE_RESOURCE_AND_UX_VERIFICATION","ACTUAL_LOCAL_PRIVACY_VERIFICATION"]}
+
 def collect(request):
     readiness=request("/intelligence/api/v1/intelligence/data-readiness")
     overview=request("/intelligence/api/v1/intelligence/research/overview")
     review=request("/api/v1/portfolio/review")
     notifications=request("/intelligence/api/v1/intelligence/notifications/summary")
+    intraday=request("/api/v1/market-data/intraday-research")
+    personal=request("/api/v1/research-workspace/notifications/summary")
+    journal=request("/intelligence/api/v1/intelligence/journal")
     result=assess(readiness,overview,review)
     workflows=assess_workflows(readiness,overview,review,notifications)
     result["workflow_runtime"]=workflows["workflow_runtime"]
     result["investment_qualification"]=workflows["investment_qualification"]
     result["checks"].update(workflows["checks"])
-    if workflows["workflow_runtime"]!="PASS":
+    final=assess_final_contracts(intraday,personal,journal,review)
+    result["checks"].update(final.pop("checks"))
+    result.update(final)
+    if workflows["workflow_runtime"]!="PASS" or final["final_runtime"]!="PASS":
         result["runtime"]="BLOCKED"
     return result
 
