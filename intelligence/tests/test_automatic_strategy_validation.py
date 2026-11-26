@@ -153,3 +153,74 @@ class AutomaticValidationTests(unittest.TestCase):
                 self.assertEqual(report["counts"],{"LISTING_CONTEXT_CONTRADICTION":1})
                 self.assertEqual(report["listing_withheld"][0]["listed_on"],identity["listed_on"])
 
+
+    def test_alternates_validated_history_hint_and_general_registry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            def connect():
+                db=sqlite3.connect(directory+"/replay.sqlite")
+                db.row_factory=sqlite3.Row
+                return db
+            instant=datetime(2026,11,26,10,tzinfo=timezone.utc)
+            registry=[{"id":i,"symbol":f"TEST{i}","active":True,"listing_status":"ACTIVE","series":"EQ","exchange":"NSE",
+                       "instrument_type":"EQUITY","isin":f"INE000A010{i:02d}"} for i in (1,2,3,4)]
+            sample=[{"id":i,"exchange":"NSE","isin":registry[i-1]["isin"],"as_of":"2026-11-25"} for i in (3,4)]
+            snapshot={"enabled":True,"sections":[{"section":"NSE","status":"READY","result":{
+                "eligible_count":2,"replay_research_universe":sample}}]}
+            calls=[]
+            def loader(path):
+                if "discovery-universe" in path:
+                    return registry
+                i=int(path.split("/")[5])
+                calls.append(i)
+                return {"instrument":registry[i-1],"candles":[]}
+            with patch("app.automatic_strategy_validation.replay",return_value={"status":"INSUFFICIENT_HISTORY","horizons":{}}):
+                for _ in range(5):
+                    refresh(snapshot,connect,loader,instant)
+            # Equal timestamps and independently opened connections must not
+            # break persisted alternation.
+            self.assertEqual(calls,[3,1,4,2])
+            with connect() as db:
+                self.assertEqual(db.execute("SELECT selection_basis FROM strategy_replay_rotation WHERE exchange=?",("NSE",)).fetchone()[0],"GENERAL_REGISTRY_ROTATION")
+            self.assertEqual(read(connect,instant)["selection_counts"],{
+                "VALIDATED_RECENT_HISTORY_HINT":2,"GENERAL_REGISTRY_ROTATION":2})
+
+    def test_reported_provider_crossing_withholds_replay_even_when_local_ledger_empty(self):
+        from datetime import date
+        with tempfile.TemporaryDirectory() as directory:
+            def connect():
+                db=sqlite3.connect(directory+"/replay.sqlite")
+                db.row_factory=sqlite3.Row
+                return db
+            instant=datetime(2026,11,26,10,tzinfo=timezone.utc)
+            today=date(2026,11,26)
+            isin="INE002A01018"
+            identity={"id":1,"symbol":"TEST","exchange":"NSE","isin":isin,"active":True,"listing_status":"ACTIVE",
+                "series":"EQ","instrument_type":"EQUITY","listed_on":"2020-01-01","delisted_on":None,
+                "registry_source":"TEST","registry_revision":"r1","latest_action_date":None,"corporate_action_context":"[]",
+                "action_context_through":"2026-11-25"}
+            candles=[{"trade_date":(today-timedelta(days=500-i)).isoformat(),"open":100,"high":101,"low":99,
+                      "close":100,"volume":100000,"adjustment_status":"ADJUSTED","quality_status":"PROVIDER_VALIDATED",
+                      "source_code":"TEST","revision":1} for i in range(500)]
+            snapshot={"enabled":True,"sections":[{"section":"NSE","status":"READY","result":{}}]}
+            def loader(path):
+                if "discovery-universe" in path:
+                    return [identity]
+                if "candles?" in path:
+                    return {"instrument":identity,"candles":candles}
+                self.fail("crossing must withhold before calendar/benchmark")
+            report={"isin":isin,"sections":{"corporate_actions":{"status":"AVAILABLE",
+                "source":{"provider":"UPSTOX","endpoint":"/v2/fundamentals/"+isin+"/corporate-actions","retrieved_at":instant.isoformat()},
+                "data":[{"date":"2026-11-20","action_type":"SPLIT","adjustment_eligible":False}]}}}
+            with patch("app.automatic_strategy_validation.cached_action_reports",return_value={isin:report}), patch(
+                "app.automatic_strategy_validation.replay",return_value={"status":"HISTORICAL_REPLAY_ONLY","horizons":{}}):
+                refresh(snapshot,connect,loader,instant)
+            summary=read(connect,instant)
+            self.assertEqual(summary["horizons"]["SWING"]["counts"],{"REPORTED_ACTION_RECONCILIATION_REQUIRED":1})
+            self.assertEqual(summary["horizons"]["SWING"]["items"],[])
+            # A stale explicit scope must still withhold even without positive
+            # provider crossing evidence. Do not relax the validation gate.
+            later=instant+timedelta(hours=25)
+            with patch("app.automatic_strategy_validation.cached_action_reports",return_value={}), patch(
+                "app.automatic_strategy_validation.replay",return_value={"status":"HISTORICAL_REPLAY_ONLY","horizons":{}}):
+                refresh(snapshot,connect,loader,later)
+            self.assertEqual(read(connect,later)["horizons"]["SWING"]["counts"],{"ACTION_CONTEXT_UNAVAILABLE":1})
