@@ -454,6 +454,34 @@ class LiveFeedsDatabaseIntegrationTest {
  }
  @Test
  @org.springframework.transaction.annotation.Transactional
+ void freshNavWithLegacyMetadataTriggersBoundedOfficialRefresh()throws Exception{
+  long code=987650459L;
+  LocalDate today=LocalDate.now(MarketCalendarService.IST);
+  db.update("UPDATE public_feed_schedule SET status='IDLE',attempts=0,claim_id=NULL,lease_until=NULL,next_attempt_at=now(),last_success_at=NULL WHERE provider='AMFI'");
+  db.update("INSERT INTO mutual_fund_schemes(scheme_code,scheme_name,category,isin_growth) VALUES (?,'Example Direct Plan Growth','Open Ended Schemes(Equity Scheme - Large Cap Fund)','INF000A01003')",code);
+  db.update("INSERT INTO mutual_fund_nav(scheme_code,nav_date,nav,source_code) VALUES (?,?,100,'AMFI')",code,today);
+  var fundMock=mock(AmfiFeedService.class);
+  var scheduler=new FeedRefreshScheduler(db,mock(UpstoxFeedService.class),fundMock,mock(MarketCalendarService.class),
+    new org.springframework.transaction.support.TransactionTemplate(
+      new org.springframework.jdbc.datasource.DataSourceTransactionManager(Objects.requireNonNull(db.getDataSource()))));
+  org.springframework.test.util.ReflectionTestUtils.setField(scheduler,"enabled",true);
+  String raw="Open Ended Schemes(Equity Scheme - Large Cap Fund)\\nExample Mutual Fund\\n"
+    +code+";INF000A01003;-;Example Fund;Direct Plan;Growth Option;100;"
+    +today.format(java.time.format.DateTimeFormatter.ofPattern("dd-MMM-uuuu",Locale.ENGLISH));
+  when(fundMock.refresh()).thenAnswer(invocation->funds.importNav(raw));
+  scheduler.ensureNav();
+  assertThat(db.queryForMap("SELECT amfi_plan,amfi_option FROM mutual_fund_schemes WHERE scheme_code=?",code))
+    .containsEntry("amfi_plan","DIRECT").containsEntry("amfi_option","GROWTH");
+  assertThat(db.queryForObject("SELECT amfi_metadata_date::text FROM mutual_fund_schemes WHERE scheme_code=?",String.class,code))
+    .isEqualTo(today.toString());
+  assertThat(db.queryForObject("SELECT status FROM public_feed_schedule WHERE provider='AMFI'",String.class)).isEqualTo("SUCCESS");
+  db.update("UPDATE public_feed_schedule SET next_attempt_at=now()-interval '1 second' WHERE provider='AMFI'");
+  scheduler.ensureNav();
+  verify(fundMock,times(1)).refresh();
+ }
+
+ @Test
+ @org.springframework.transaction.annotation.Transactional
  void publicCatalogJobsDeduplicateRecoverAndIsolateProviders()throws Exception{
   db.update("UPDATE public_feed_schedule SET status='IDLE',attempts=0,claim_id=NULL,lease_until=NULL,next_attempt_at=now(),error_code=NULL");
   var stockMock=mock(UpstoxFeedService.class);

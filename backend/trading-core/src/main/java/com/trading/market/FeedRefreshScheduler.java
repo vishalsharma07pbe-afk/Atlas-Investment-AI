@@ -53,7 +53,27 @@ import org.springframework.transaction.support.TransactionTemplate;
     SELECT max(nav_date) latest FROM mutual_fund_nav WHERE source_code='AMFI'
       AND nav_date<=(now() AT TIME ZONE 'Asia/Kolkata')::date
     """,rs->{if(!rs.next())return null;java.sql.Date value=rs.getDate("latest");return value==null?null:value.toLocalDate();});
-  if(latest==null||latest.isBefore(LocalDate.now(MarketCalendarService.IST).minusDays(3)))attempt("AMFI","NAV_AUTO",false);
+  if(latest==null||latest.isBefore(LocalDate.now(MarketCalendarService.IST).minusDays(3))||navMetadataNeedsRefresh())
+    attempt("AMFI","NAV_AUTO",false);
+ }
+ boolean navMetadataNeedsRefresh(){
+  // Fresh NAV values alone do not establish current explicit scheme metadata.
+  // Names are only a refresh hint, never evidence of plan or option. Do not
+  // repeatedly fetch the full file for legacy rows absent from today's feed.
+  return Boolean.TRUE.equals(jdbc.queryForObject("""
+    SELECT EXISTS(SELECT 1 FROM public_feed_schedule
+      WHERE provider='AMFI' AND (last_success_at IS NULL OR last_success_at<now()-interval '24 hours'))
+      AND EXISTS(SELECT 1 FROM mutual_fund_schemes s
+        WHERE ((s.amfi_plan='DIRECT' AND s.amfi_option='GROWTH')
+          OR (s.scheme_name ~* '(^|[^a-z])direct([^a-z]|$)'
+            AND s.scheme_name ~* '(^|[^a-z])growth([^a-z]|$)'
+            AND s.scheme_name !~* '(idcw|dividend|regular|bonus)'))
+          AND EXISTS(SELECT 1 FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code
+            AND n.source_code='AMFI' AND n.nav_date BETWEEN
+              (now() AT TIME ZONE 'Asia/Kolkata')::date-7 AND (now() AT TIME ZONE 'Asia/Kolkata')::date
+            AND (s.amfi_plan IS DISTINCT FROM 'DIRECT' OR s.amfi_option IS DISTINCT FROM 'GROWTH'
+              OR s.amfi_metadata_date IS NULL OR s.amfi_metadata_date<n.nav_date)))
+    """,Boolean.class));
  }
  // Recover exhausted attempts at their persisted slower retry deadline too.
  // Keeping the capped counter prevents a new burst after every failed probe.

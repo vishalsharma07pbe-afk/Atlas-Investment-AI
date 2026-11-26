@@ -157,6 +157,11 @@ public class FundHistoryResearchService {
       }
     }
     if(comparable)rollingPeerConsistency(observations,histories,commonEnd);
+    // Normalize the JDBC date at the JSON boundary, after internal date checks.
+    for(var row:observations){
+      LocalDate metadataDate=date(row.get("amfi_metadata_date"));
+      row.put("amfi_metadata_date",metadataDate==null?null:metadataDate.toString());
+    }
     if(!comparable)observations.sort(Comparator.comparingLong(row->((Number)row.get("scheme_code")).longValue()));
     var riskRank=observations.stream().filter(row->comparable&&row.get("return_to_drawdown") instanceof Number)
       .sorted(Comparator.comparingDouble((Map<String,Object> row)->((Number)row.get("return_to_drawdown")).doubleValue()).reversed()
