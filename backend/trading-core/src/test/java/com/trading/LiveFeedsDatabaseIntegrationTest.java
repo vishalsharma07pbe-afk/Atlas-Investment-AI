@@ -494,14 +494,18 @@ class LiveFeedsDatabaseIntegrationTest {
     new org.springframework.transaction.support.TransactionTemplate(
       new org.springframework.jdbc.datasource.DataSourceTransactionManager(Objects.requireNonNull(db.getDataSource()))));
   org.springframework.test.util.ReflectionTestUtils.setField(scheduler,"enabled",true);
-  when(stockMock.syncMaster()).thenThrow(new FeedHttp.ProviderHttpException(429,7200)).thenReturn(3);
+  // FeedHttp bounds provider Retry-After to 3600 seconds, including a
+  // larger supplied value. The exhausted job must keep that full cooldown.
+  var limited=new FeedHttp.ProviderHttpException(429,7200);
+  assertThat(limited.retryAfterSeconds()).isEqualTo(3600L);
+  when(stockMock.syncMaster()).thenThrow(limited).thenReturn(3);
   scheduler.retry();
   verifyNoInteractions(stockMock,fundMock);
   db.update("UPDATE public_feed_schedule SET next_attempt_at=now()-interval '1 second' WHERE provider='UPSTOX'");
   scheduler.retry();
   assertThat(db.queryForMap("SELECT status,attempts,error_code FROM public_feed_schedule WHERE provider='UPSTOX'"))
     .containsEntry("status","FAILED").containsEntry("attempts",5).containsEntry("error_code","PROVIDER_RATE_LIMITED");
-  assertThat(db.queryForObject("SELECT next_attempt_at>=now()+interval '7199 seconds' FROM public_feed_schedule WHERE provider='UPSTOX'",Boolean.class)).isTrue();
+  assertThat(db.queryForObject("SELECT next_attempt_at>=now()+interval '3599 seconds' FROM public_feed_schedule WHERE provider='UPSTOX'",Boolean.class)).isTrue();
   scheduler.retry();
   verify(stockMock,times(1)).syncMaster();
   db.update("UPDATE public_feed_schedule SET next_attempt_at=now()-interval '1 second' WHERE provider='UPSTOX'");
