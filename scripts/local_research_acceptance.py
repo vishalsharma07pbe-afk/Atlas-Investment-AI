@@ -85,11 +85,108 @@ def assess(readiness,overview,review):
             "live_feed":"OBSERVED" if checks["fresh_live_tick"]=="PASS" else "NOT_OBSERVED",
             "checks":checks,"notice":"Stored evidence is not live connectivity or a qualified investment recommendation. No data or credentials are included."}
 
+DAILY_HORIZONS=("SWING","SHORT_TERM","LONG_TERM")
+
+def _obj(value):
+    return value if isinstance(value,dict) else {}
+
+def _list(value):
+    return value if isinstance(value,list) else []
+
+def _count(value):
+    return type(value) is int and value>=0
+
+def _ref(row):
+    if not isinstance(row,dict):
+        return None
+    venue,identifier,isin=row.get("exchange"),row.get("id"),row.get("isin")
+    if venue not in ("NSE","BSE") or type(identifier) is not int or identifier<=0 or not isinstance(isin,str) or len(isin)!=12:
+        return None
+    return venue,identifier,isin
+
+def assess_workflows(readiness,overview,review,notifications):
+    """Check the current product read contracts separately from actual source qualification.
+
+    No output contains source rows, account identifiers, symbols, balances or
+    untrusted values. Missing or inconsistent contracts fail closed.
+    """
+    checks={}
+    def check(name,condition):
+        checks[name]="PASS" if condition else "BLOCKED"
+
+    sections={r["section"]:r for r in _list(overview.get("sections")) if isinstance(r,dict) and isinstance(r.get("section"),str)}
+    ready={k:v for k,v in sections.items() if k in SECTIONS and v.get("status")=="READY" and isinstance(v.get("result"),dict)}
+    briefing=_obj(overview.get("daily_briefing"))
+    decision=_obj(briefing.get("decision_context"))
+    pending=briefing.get("pending_sections")
+    check("daily_briefing_contract",briefing.get("status")=="CURRENT_SECTIONS" and
+          briefing.get("ready_sections")==len(ready)==len(SECTIONS) and briefing.get("total_sections")==len(SECTIONS)
+          and pending==[] and isinstance(decision.get("review_companies"),list)
+          and _count(decision.get("review_company_count"))
+          and len(decision["review_companies"])<=min(5,decision["review_company_count"]))
+    qualifications=_obj(_obj(overview.get("stock_qualification")).get("horizons"))
+    decisions=_obj(decision.get("horizons"))
+    canonical=True
+    for horizon in DAILY_HORIZONS:
+        report=_obj(qualifications.get(horizon))
+        selected=_obj(report.get("selection"))
+        shown=_obj(decisions.get(horizon))
+        refs=selected.get("watch_refs")
+        displayed=shown.get("selected_watches")
+        if not isinstance(refs,list) or not isinstance(displayed,list) or len(refs)>5 or len(refs)!=len(displayed):
+            canonical=False
+            continue
+        keys=[_ref(r) for r in refs]
+        if None in keys or len({k[2] for k in keys if k is not None})!=len(keys) or [_ref(r) for r in displayed]!=keys:
+            canonical=False
+            continue
+        for key,row in zip(keys,displayed):
+            group=_obj(_obj(ready.get(key[0],{}).get("result")).get("horizons"))
+            matches=[v for v in _list(_obj(group.get(horizon)).get("candidates")) if _ref(v)==key]
+            if (len(matches)!=1 or not isinstance(row,dict) or row.get("as_of")!=matches[0].get("as_of")
+                or _obj(matches[0].get("stock_qualification")).get("status") not in ("WITHHELD_REVIEW_REQUIRED","WITHHELD_EVIDENCE_GAPS")
+                or not _obj(matches[0].get("stock_qualification")).get("blockers")):
+                canonical=False
+        # This release has no certified stock qualification producer.
+        # Never equate an empty shortlist or a numeric score with qualification.
+        if not (_count(report.get("qualified_count")) and report["qualified_count"]==0 and report.get("recommendations")==[] and shown.get("qualified_count")==0):
+            canonical=False
+    check("canonical_stock_report_contract",canonical and _obj(qualifications.get("INTRADAY")).get("status")=="SEPARATE_INTRADAY_WORKFLOW")
+    fund_rows=[r["result"] for k,r in ready.items() if k not in ("NSE","BSE")]
+    fund_contract=len(fund_rows)==len(SECTIONS)-2 and all(isinstance(r.get("top_performers"),list) and isinstance(r.get("growth_outlook"),list) for r in fund_rows)
+    check("fund_qualification_contract",fund_contract and _obj(briefing.get("funds")).get("ready_categories")==len(fund_rows))
+    check("portfolio_risk_contract",isinstance(review.get("portfolio_level_risk"),dict) and
+          isinstance(review["portfolio_level_risk"].get("attention"),list))
+    ids=notifications.get("ids")
+    revisions=notifications.get("revision_keys")
+    check("notification_summary_contract",isinstance(ids,list) and isinstance(revisions,list)
+          and all(isinstance(x,str) and x for x in ids+revisions)
+          and len(ids)==len(set(ids))==len(revisions)==len(set(revisions))==notifications.get("total")
+          and notifications.get("research_history_status")=="AVAILABLE"
+          and notifications.get("live_feed_connected") is False)
+    jobs=_obj(readiness.get("research_jobs"))
+    job_rows=[r for r in _list(jobs.get("jobs")) if isinstance(r,dict)]
+    check("durable_alert_job_registered",jobs.get("status")=="PERSISTED_LOCAL_JOB_LEDGER" and
+          sum(r.get("job")=="PUBLIC_RESEARCH_ALERTS" for r in job_rows)==1)
+    # Product evidence is deliberately separate from API processing. A complete
+    # source-backed qualification gate for stocks does not exist in this release.
+    return {"workflow_runtime":"PASS" if all(v=="PASS" for v in checks.values()) else "BLOCKED",
+            "checks":checks,"investment_qualification":"NOT_CERTIFIED",
+            "notice":"Contract checks do not establish qualified picks, live execution, representative coverage or actual investment suitability."}
+
 def collect(request):
     readiness=request("/intelligence/api/v1/intelligence/data-readiness")
     overview=request("/intelligence/api/v1/intelligence/research/overview")
     review=request("/api/v1/portfolio/review")
-    return assess(readiness,overview,review)
+    notifications=request("/intelligence/api/v1/intelligence/notifications/summary")
+    result=assess(readiness,overview,review)
+    workflows=assess_workflows(readiness,overview,review,notifications)
+    result["workflow_runtime"]=workflows["workflow_runtime"]
+    result["investment_qualification"]=workflows["investment_qualification"]
+    result["checks"].update(workflows["checks"])
+    if workflows["workflow_runtime"]!="PASS":
+        result["runtime"]="BLOCKED"
+    return result
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)

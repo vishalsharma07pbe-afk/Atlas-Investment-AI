@@ -33,6 +33,8 @@ def run():
         time.sleep(3)
     acceptance=collect(lambda path: gateway.request(path,headers=headers))
     check(acceptance["runtime"]=="PASS","local acceptance runtime contract blocked")
+    check(acceptance["workflow_runtime"]=="PASS","current research workflow contract blocked")
+    check(acceptance["investment_qualification"]=="NOT_CERTIFIED","synthetic evidence incorrectly certified investments")
     check(acceptance["stored_provider_evidence"]=="BLOCKED","empty CI provider data incorrectly accepted")
     check(acceptance["live_feed"]=="NOT_OBSERVED","unauthorized CI feed incorrectly accepted")
     gateway.request("/api/v1/auth/logout","POST",headers=headers)
