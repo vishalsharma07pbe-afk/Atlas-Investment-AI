@@ -78,6 +78,37 @@ class FundDisclosuresTests(unittest.TestCase):
             self.assertEqual(disclosures.matched([{**identity,**changed}],TODAY),[])
         self.assertEqual(disclosures.matched([identity],date(2026,11,29)),[])
 
+    def test_full_sample_matching_preserves_default_cap_and_identity(self):
+        fixtures=[row(scheme_code=str(118955+i)) for i in range(8)]
+        self.assertEqual(disclosures.store(payload(*fixtures),TODAY,STAMP),8)
+        identities=[{"scheme_code":118955+i,"scheme_name":"Example Fund",
+                     "isin_growth":"INF179K01BB2","amfi_plan":"DIRECT","amfi_option":"GROWTH",
+                     "category":"Open Ended Schemes(Equity Scheme - Large Cap Fund)"} for i in range(8)]
+        self.assertEqual(len(disclosures.matched(identities,TODAY)),5)
+        self.assertEqual(len(disclosures.matched(identities,TODAY,limit=40)),8)
+        identities[-1]["isin_growth"]="INF179K01BB3"
+        self.assertEqual(len(disclosures.matched(identities,TODAY,limit=40)),7)
+        self.assertEqual(len(disclosures.matched(identities,TODAY,limit=1)),1)
+        self.assertEqual(len(disclosures.matched(identities,TODAY,limit=2)),2)
+        for invalid in (0,41,True,2.0,None):
+            with self.subTest(limit=invalid), self.assertRaisesRegex(ValueError,"INVALID_DISCLOSURE_MATCH_LIMIT"):
+                disclosures.matched(identities,TODAY,limit=invalid)
+
+    def test_full_sample_limit_and_field_expiry_are_independent(self):
+        fixtures=[row(scheme_code=str(118955+i),amfi_daily_aum_date="2026-11-11")
+                  for i in range(41)]
+        self.assertEqual(disclosures.store(payload(*fixtures),TODAY,STAMP),41)
+        identities=[{"scheme_code":118955+i,"scheme_name":"Example Fund",
+                     "isin_growth":"INF179K01BB2","amfi_plan":"DIRECT","amfi_option":"GROWTH",
+                     "category":"Open Ended Schemes(Equity Scheme - Large Cap Fund)"} for i in range(41)]
+        tomorrow=date(2026,11,26)
+        matched=disclosures.matched(identities,tomorrow,limit=40)
+        self.assertEqual([item["scheme_code"] for item in matched],
+                         [str(118955+i) for i in range(40)])
+        self.assertTrue(all(item["aum_cr_all_plans"] is None for item in matched))
+        self.assertTrue(all(item["ter_percent"]==0.7 for item in matched))
+        self.assertEqual(len(disclosures.matched(identities,tomorrow)),5)
+
     def test_requires_explicit_permission(self):
         with patch.dict("os.environ",{"MARKET_DATA_USAGE_RIGHTS_CONFIRMED":"false"}), \
              patch.object(disclosures.httpx,"Client") as client:

@@ -166,14 +166,18 @@ def refresh():
     return store(bytes(payload),stamp.astimezone(IST).date(),stamp.isoformat())
 
 
-def matched(rows,today):
+def matched(rows,today,*,limit=5):
+    # Preserve the existing display cap by default; internal research may
+    # explicitly request the entire bounded category sample.
+    if type(limit) is not int or not 1<=limit<=40:
+        raise ValueError("INVALID_DISCLOSURE_MATCH_LIMIT")
     if not permitted() or not rows:
         return []
     output=[]
     try:
         with nav_catalog._LOCK,closing(nav_catalog._connect()) as db:
             for row in rows[:40]:
-                if len(output)>=5:break
+                if len(output)>=limit:break
                 code=row.get("scheme_code")
                 if type(code) is not int:
                     continue
@@ -186,10 +190,10 @@ def matched(rows,today):
                     or not isinstance(row.get("category"),str)
                     or not row["category"].lower().strip().endswith(" - "+item["category"].lower()+")")):
                     continue
-                for field,limit,values in (("aum_date",14,("aum_cr_all_plans","benchmark","riskometer")),
+                for field,age_limit,values in (("aum_date",14,("aum_cr_all_plans","benchmark","riskometer")),
                                            ("ter_date",90,("ter_percent","base_expense_percent")),
                                            ("document_date",365,("fund_managers","exit_load"))):
-                    if not _day(item[field],today,limit):
+                    if not _day(item[field],today,age_limit):
                         for value in values:
                             item[value]=None
                         item[field]=None

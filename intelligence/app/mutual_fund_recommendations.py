@@ -369,6 +369,17 @@ def _fund_assessment(fund,source,disclosure,portfolio,top,growth,fit):
             "notice":"Historical and secondary reported observations only. The 10% holding and 30% sector review thresholds are descriptive prompts, not regulatory limits or calibrated risks. No predicted return, fund rating or qualification change."}
 
 
+def _secondary_disclosure_summary(disclosure):
+    if not disclosure:
+        return None
+    # Only the existing exact-identity matched secondary evidence. Do not
+    # copy it to official FundEvidence fields or convert it to a rating.
+    return {"status":"SECONDARY_REPORTED_NOT_INDEPENDENTLY_VERIFIED",
+            **{key:disclosure.get(key) for key in ("source","source_url","collected_at",
+                "ter_percent","ter_date","riskometer","aum_date","benchmark",
+                "aum_cr_all_plans","document_date","fund_managers","exit_load","conflicts")}}
+
+
 def _research_reports(candidates, ranked, source_rows, disclosed, portfolios):
     """Build bounded, deterministic reports from the same exact-scheme evidence
     and qualification decisions used by the existing recommendation endpoint.
@@ -406,6 +417,7 @@ def _research_reports(candidates, ranked, source_rows, disclosed, portfolios):
             "research_assessment":_fund_assessment(fund,source_by_id.get(fund.identifier,{}),
                 _unique_match(disclosed,fund.identifier),_unique_match(portfolios,fund.identifier),top,growth,ranked["suitability"]),
             "secondary_disclosure_available":fund.identifier in disclosure_ids,
+            "secondary_disclosure":_secondary_disclosure_summary(_unique_match(disclosed,fund.identifier)),
             "secondary_portfolio_available":fund.identifier in portfolio_ids,
             "top_performer":top,"growth_outlook":growth,
             "suitability":ranked["suitability"],
@@ -452,10 +464,14 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
     official=_official_history_candidates(historical,category,datetime.now(ZoneInfo("Asia/Kolkata")).date()) if historical else []
     coverage["explicit_amfi_history_candidates"]=len(official)
     official_ids={f.identifier for f in official}
-    # All sampled candidates enter the gates. Secondary diagnostics remain bounded to five.
+    # All sampled candidates enter the gates and exact secondary matching.
+    # Keep the existing five-item display and expensive portfolio report caps.
     source_rows=historical.get("research_candidates",historical["items"]) if historical else []
-    disclosed=fund_disclosures.matched([row for row in source_rows if isinstance(row,dict) and str(row.get("scheme_code")) in official_ids],datetime.now(ZoneInfo("Asia/Kolkata")).date()) if official else []
+    disclosed=fund_disclosures.matched([row for row in source_rows if isinstance(row,dict) and str(row.get("scheme_code")) in official_ids],datetime.now(ZoneInfo("Asia/Kolkata")).date(),limit=40) if official else []
     coverage["secondary_disclosure_matches"]=len(disclosed)
+    coverage["secondary_disclosure_displayed"]=min(len(disclosed),5)
+    coverage["secondary_field_matches"]={field:sum(row.get(field) is not None for row in disclosed)
+        for field in ("ter_percent","riskometer","benchmark","aum_cr_all_plans","fund_managers","exit_load")}
     portfolios=fund_portfolios.matched(disclosed)
     coverage["secondary_portfolio_matches"]=len(portfolios)
     # Public catalog discovery remains separate from exact AMFI scheme evidence.
@@ -483,7 +499,7 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
       "portfolio_evidence":{"status":"SECONDARY_COMPOSITION_ONLY" if portfolios else "NOT_AVAILABLE_OR_NOT_AUTHORIZED",
           "items":portfolios,"notice":"Selected fund coverage only. Reported weights and existing cached company evidence are not verified forward earnings or valuation coverage."},
       "disclosure_evidence":{"status":"SECONDARY_REPORTED" if disclosed else "NOT_AVAILABLE_OR_NOT_AUTHORIZED",
-          "items":disclosed,"notice":"AMFI-derived disclosures from TigZig, not independently verified. AUM covers all plans; dates differ by field. Reported benchmark names are not benchmark return histories. No holdings or rating verification."},
+          "items":disclosed[:5],"notice":"AMFI-derived disclosures from TigZig, not independently verified. AUM covers all plans; dates differ by field. Reported benchmark names are not benchmark return histories. No holdings or rating verification."},
       "historical_coverage":{"status":"UNAVAILABLE"} if historical is None else {
           "status":historical.get("status"),"comparison_date":historical.get("comparison_date"),
           "universe_count":historical["universe_count"],"eligible_count":historical["eligible_count"],

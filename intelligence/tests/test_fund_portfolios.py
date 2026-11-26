@@ -60,6 +60,10 @@ class FundPortfoliosTests(unittest.TestCase):
             self.assertEqual(item["top_holdings"][0]["isin"],"INE002A01018")
             self.assertEqual(item["cached_company_count"],1)
             self.assertEqual(portfolios.matched([{**identity,"fund_id":"fund:456"}],INSTANT),[])
+            # A portfolio beyond the first five disclosure candidates must
+            # not be skipped solely because earlier candidates lack holdings.
+            later=[{**identity,"fund_id":"missing:"+str(i)} for i in range(6)]+[identity]
+            self.assertEqual(portfolios.matched(later,INSTANT)[0]["fund_id"],identity["fund_id"])
 
     def test_overlap_uses_full_same_date_weights_and_distinct_funds(self):
         a=row(pct_of_fund="80")
