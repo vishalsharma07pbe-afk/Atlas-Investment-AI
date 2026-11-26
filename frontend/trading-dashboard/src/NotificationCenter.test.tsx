@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import {afterEach,expect,it,vi} from "vitest";
-import {cleanup,fireEvent,render,screen,waitFor} from "@testing-library/react";
+import {act,cleanup,fireEvent,render,screen,waitFor} from "@testing-library/react";
 import NotificationCenter from "./NotificationCenter";
 afterEach(()=>{cleanup();localStorage.clear();vi.unstubAllGlobals();});
 it("loads only badge metadata on mount and details on bell click",async()=>{
@@ -77,4 +77,30 @@ it("distinguishes retained historical research from current observations",async(
  fireEvent.click(screen.getByRole("button",{name:"Notifications, 1 unread"}));
  expect(await screen.findByText("Earlier market review")).toBeTruthy();
  expect(screen.getByText("Historical observation — not a current signal")).toBeTruthy();
+});
+
+it("refreshes open details on visibility and cancels an outstanding response on close",async()=>{
+ let resolve:(value:unknown)=>void=()=>{};
+ let signal:AbortSignal|undefined;
+ let detailCalls=0;
+ const alert={id:"a-test",category:"MARKET_EVENT",title:"First alert",description:"Test",published_at:"2026-11-25T10:00:00Z",source_name:"Test",source_url:null,event_date:null,subscription_total_x:null,subscription_as_of:null};
+ const mock=vi.fn((url:string,init?:RequestInit)=>{
+  if(url.endsWith("/summary"))return Promise.resolve({ok:true,json:async()=>({ids:["a-test"],total:1})});
+  detailCalls++;
+  if(detailCalls===1)return Promise.resolve({ok:true,json:async()=>({alerts:[alert]})});
+  signal=init?.signal??undefined;
+  return new Promise(done=>{resolve=done;});
+ });
+ vi.stubGlobal("fetch",mock);
+ render(<NotificationCenter/>);
+ await waitFor(()=>expect(screen.getByRole("button",{name:"Notifications, 1 unread"})).toBeTruthy());
+ fireEvent.click(screen.getByRole("button",{name:"Notifications, 1 unread"}));
+ expect(await screen.findByText("First alert")).toBeTruthy();
+ fireEvent(document,new Event("visibilitychange"));
+ await waitFor(()=>expect(detailCalls).toBe(2));
+ fireEvent.keyDown(document.activeElement!,{key:"Escape"});
+ expect(signal?.aborted).toBe(true);
+ await act(async()=>{resolve({ok:true,json:async()=>({alerts:[{...alert,id:"late",title:"Late alert"}]})});});
+ expect(screen.queryByText("Late alert")).toBeNull();
+ expect(localStorage.getItem("atlas:read-alert-ids")).not.toContain("late");
 });

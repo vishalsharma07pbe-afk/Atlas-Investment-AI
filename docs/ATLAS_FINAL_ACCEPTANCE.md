@@ -215,3 +215,11 @@ Baseline PR #294 corrected head c70bf42693cd172ef164624544c58c58d7273ab9 merged 
 
 ### Consolidated portfolio and AI reliability checkpoint
 Use the existing owner-scoped review, deterministic thesis, exact fund evidence and public committee. Private company annual archive entries for removed held/peer identities are pruned on successful selection refresh; old local model records expire even if no review is due, and no-held-identity refresh removes local AI records. These are derived caches only; no portfolio records, journal, public cache or backup mutation. Local model remains OLLAMA-only: exact matched ISIN ratio input, unique aliases, finite matching units and bounded topic counts. Reuse exact scalar claim validator; unsupported model prose and wrong values are never displayed; versioned hash prevents old free-prose cache reuse. Public committee cache now binds selected model configuration as well as provider plan and evidence, and previously attached reviews are cleared when permissions or evidence change. No increase in provider/model call budget, no external AI fallback for holdings. Actual populated portfolio valuation, actual enabled AI providers, operator-device privacy and suitability acceptance remain unverified.
+
+
+### Dashboard and notifications integration
+#298 exact head 24dbda8262c2e1e1e2ea34426f35463b287313d2 passed eight application and four applicable security checks, merged 18208b57b3b5385ef7dd58908e21ba454efa0471; full OSV skipped.
+
+
+## Open-panel delivery integration
+After the user opens the panel, public details and owner-local inbox reuse foreground-only single-flight polling at 60 seconds, with visibility-triggered refresh and abort on close. Closed panels retain metadata-only checks. An older badge response cannot replace a newer detail snapshot; late closed-panel responses cannot mark alerts read. Successful server read acknowledgements survive an older inbox poll. Failed detail refreshes are shown as unavailable, not as an empty/current feed. No provider calls, external push, or new backend endpoints. Actual browser/device verification remains required.
