@@ -55,7 +55,7 @@ class ResearchAlertsTests(unittest.TestCase):
 
     def test_existing_feed_includes_internal_reminders_without_fake_links(self):
         rows=public_research_alerts.market_alerts(self.snapshot,self.now)
-        with patch("app.notifications._load",return_value=[]),patch("app.autonomous_research.config",return_value=(True,900)),patch("app.autonomous_research.read_snapshot",return_value=self.snapshot),patch("app.automatic_news.alerts",return_value=[]),patch("app.global_releases.alerts",return_value=[]),patch("app.public_research_alerts.market_alerts",return_value=rows),patch("app.economic_calendar.read",return_value={}):
+        with patch("app.notifications._load",return_value=[]),patch("app.autonomous_research.config",return_value=(True,900)),patch("app.autonomous_research.read_snapshot",return_value=self.snapshot),patch("app.automatic_news.alerts",return_value=[]),patch("app.global_releases.alerts",return_value=[]),patch("app.public_research_alerts.market_alerts",return_value=rows),patch("app.economic_calendar.read",return_value={}),patch("app.public_alert_history.read",return_value=[]):
             badge=notifications.summary()
             feed=notifications.details()
             self.assertEqual(badge["total"],2)
