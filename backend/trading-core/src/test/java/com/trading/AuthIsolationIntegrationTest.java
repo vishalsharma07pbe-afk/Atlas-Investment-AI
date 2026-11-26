@@ -527,6 +527,35 @@ class AuthIsolationIntegrationTest {
       .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
   }
 
+  @Test void hiddenSectorAlertHasIndependentWeeklyCooldownAndOwnerIsolation()throws Exception{
+    String email="sector-risk-"+UUID.randomUUID()+"@example.test";
+    String a=create(email),b=create("sector-risk-other-"+UUID.randomUUID()+"@example.test");
+    UUID owner=jdbc.queryForObject("SELECT id FROM atlas_users WHERE email=?",UUID.class,email);
+    mvc.perform(post("/api/v1/portfolio/holdings").header("Authorization",a)
+      .contentType(MediaType.APPLICATION_JSON).content("{\"symbol\":\"SECTORTEST\",\"assetType\":\"EQUITY\",\"quantity\":2,\"averageCost\":100}"))
+      .andExpect(status().isOk());
+    mvc.perform(get("/api/v1/portfolio/review").header("Authorization",a)).andExpect(status().isOk());
+    String day=LocalDate.now(com.trading.market.MarketCalendarService.IST).minusDays(20).toString();
+    var sector=Map.of("kind","HIDDEN_SECTOR_CONCENTRATION","label","energy combined sector exposure","value",59,
+      "threshold",40,"unit","PERCENT","evidenceThrough",day);
+    var overlap=Map.of("kind","HIGH_FUND_OVERLAP","label","Shared exposure","value",60,
+      "threshold",50,"unit","PERCENT","evidenceThrough",day);
+    var risk=Map.of("look_through_status","DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE","attention",java.util.List.of(sector,overlap));
+    var look=Map.of("status","DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE","portfolio_date",day,"sector_status","NO_CURRENT_EXACT_CLASSIFICATION");
+    jdbc.update("UPDATE portfolio_review_snapshots SET generated_at=now(),result=jsonb_set(jsonb_set(result,'{portfolio_level_risk}',?::jsonb),'{diversification,look_through}',?::jsonb) WHERE user_id=?",
+      mapper.writeValueAsString(risk),mapper.writeValueAsString(look),owner);
+    riskNotifications.evaluate();
+    org.junit.jupiter.api.Assertions.assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM user_notification_history WHERE user_id=? AND title='Hidden sector concentration review'",Integer.class,owner));
+    jdbc.update("UPDATE portfolio_review_snapshots SET generated_at=now(),result=jsonb_set(result,'{diversification,look_through,sector_status}',to_jsonb('PARTIAL_CLASSIFIED_EXPOSURE'::text)) WHERE user_id=?",owner);
+    riskNotifications.evaluate();riskNotifications.evaluate();
+    org.junit.jupiter.api.Assertions.assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM user_notification_history WHERE user_id=? AND title='Hidden sector concentration review'",Integer.class,owner));
+    org.junit.jupiter.api.Assertions.assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM user_notification_history WHERE user_id=? AND title='Underlying exposure and fund overlap review'",Integer.class,owner));
+    mvc.perform(get("/api/v1/research-workspace/notifications").header("Authorization",a))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2));
+    mvc.perform(get("/api/v1/research-workspace/notifications").header("Authorization",b))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+  }
+
   @Test void journalLotsReconcileOnlyOwnerTradesAndRefreshAfterJournalDeletion()throws Exception{
     String a=create("lot-a-"+UUID.randomUUID()+"@example.test"),b=create("lot-b-"+UUID.randomUUID()+"@example.test");
     jdbc.update("""

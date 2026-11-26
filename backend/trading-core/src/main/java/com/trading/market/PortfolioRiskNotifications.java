@@ -177,13 +177,14 @@ public class PortfolioRiskNotifications {
       ), flags AS (
         SELECT f.user_id,f.generated_at,f.week_start,flag,
           CASE WHEN flag->>'kind'='BENCHMARK_RELATIVE_LAG' THEN 'BENCHMARK'
+            WHEN flag->>'kind'='HIDDEN_SECTOR_CONCENTRATION' THEN 'LOOK_THROUGH_SECTOR'
             WHEN flag->>'kind' IN ('HIDDEN_EQUITY_CONCENTRATION','HIGH_FUND_OVERLAP') THEN 'LOOK_THROUGH'
             ELSE 'CONCENTRATION' END AS family
         FROM fresh f CROSS JOIN LATERAL jsonb_array_elements(
           CASE WHEN jsonb_typeof(f.result->'portfolio_level_risk'->'attention')='array'
             THEN f.result->'portfolio_level_risk'->'attention' ELSE '[]'::jsonb END
         ) flag
-        WHERE flag->>'kind' IN ('BENCHMARK_RELATIVE_LAG','SINGLE_IDENTITY','TOP_THREE','DIRECT_EQUITY_SECTOR','HIDDEN_EQUITY_CONCENTRATION','HIGH_FUND_OVERLAP')
+        WHERE flag->>'kind' IN ('BENCHMARK_RELATIVE_LAG','SINGLE_IDENTITY','TOP_THREE','DIRECT_EQUITY_SECTOR','HIDDEN_EQUITY_CONCENTRATION','HIGH_FUND_OVERLAP','HIDDEN_SECTOR_CONCENTRATION')
           AND length(flag->>'label') BETWEEN 1 AND 200 AND jsonb_typeof(flag->'value')='number'
           AND flag->>'evidenceThrough' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
           AND (
@@ -196,8 +197,12 @@ public class PortfolioRiskNotifications {
               AND flag->>'unit'='PERCENT'
               AND flag->>'evidenceThrough'=(now() AT TIME ZONE 'Asia/Kolkata')::date::text)
             OR
-            (flag->>'kind' IN ('HIDDEN_EQUITY_CONCENTRATION','HIGH_FUND_OVERLAP')
+            (flag->>'kind' IN ('HIDDEN_EQUITY_CONCENTRATION','HIGH_FUND_OVERLAP','HIDDEN_SECTOR_CONCENTRATION')
               AND f.result->'portfolio_level_risk'->>'look_through_status'='DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE'
+              AND (flag->>'kind'<>'HIDDEN_SECTOR_CONCENTRATION' OR (
+                f.result->'diversification'->'look_through'->>'sector_status'='PARTIAL_CLASSIFIED_EXPOSURE'
+                AND flag->'value' BETWEEN '40'::jsonb AND '100'::jsonb
+                AND flag->'threshold'='40'::jsonb))
               AND f.result->'diversification'->'look_through'->>'status'='DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE'
               AND flag->>'unit'='PERCENT'
               AND flag->>'evidenceThrough'=f.result->'diversification'->'look_through'->>'portfolio_date'
@@ -214,10 +219,12 @@ public class PortfolioRiskNotifications {
       SELECT user_id,'PORTFOLIO_RISK',
         CASE family WHEN 'BENCHMARK' THEN 'Benchmark underperformance review'
           WHEN 'LOOK_THROUGH' THEN 'Underlying exposure and fund overlap review'
+          WHEN 'LOOK_THROUGH_SECTOR' THEN 'Hidden sector concentration review'
           ELSE 'Portfolio concentration review' END,
         CASE family WHEN 'BENCHMARK' THEN
           'Recorded 13-week portfolio return estimate lags the NIFTY 50 price reference by at least five percentage points. Not a personalized benchmark.'
         WHEN 'LOOK_THROUGH' THEN finding_count||' hidden concentration or high fund overlap observation(s) from dated secondary composition. Partial estimate, not verified live exposure.'
+        WHEN 'LOOK_THROUGH_SECTOR' THEN finding_count||' classified combined sector exposure observation(s) above the illustrative 40% whole-portfolio threshold after adding fund holdings. Dated partial estimate; unclassified holdings remain unknown.'
         ELSE finding_count||' aggregate exposure observation(s) exceed review thresholds using recent recorded values. Fund look-through is excluded.' END
           ||' Open My Portfolio for the dated evidence; no trade recommendation.',
         'ATLAS_PORTFOLIO_REVIEW',family||':'||week_start::text,generated_at,

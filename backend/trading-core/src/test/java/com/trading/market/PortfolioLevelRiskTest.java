@@ -45,6 +45,19 @@ class PortfolioLevelRiskTest {
     assertEquals("INSUFFICIENT_EVIDENCE",result.get("concentration_status"));
     assertEquals(List.of(),result.get("attention"));
   }
+  @Test void hiddenSectorRequiresClassifiedCurrentDatedLookThrough(){
+    var holdings=List.of(Map.of("recorded_market_value",100,"recorded_valuation_recent",true));
+    var flag=Map.of("kind","HIDDEN_SECTOR_CONCENTRATION","label","energy combined sector exposure","value",59,
+      "threshold",40,"unit","PERCENT","evidenceThrough","2026-10-31");
+    var look=new LinkedHashMap<String,Object>(Map.of("status","DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE",
+      "portfolio_date","2026-10-31","risk_observations",List.of(flag)));
+    var report=Map.<String,Object>of("holdings",holdings,"diversification",Map.of("look_through",look));
+    assertEquals(List.of(),PortfolioLevelRisk.assess(report,json,today).get("attention"));
+    look.put("sector_status","PARTIAL_CLASSIFIED_EXPOSURE");
+    assertEquals(1,((List<?>)PortfolioLevelRisk.assess(report,json,today).get("attention")).size());
+    look.put("portfolio_date","2026-09-01");
+    assertEquals(List.of(),PortfolioLevelRisk.assess(report,json,today).get("attention"));
+  }
   @Test void lookThroughRequiresCurrentValuationsAndDatedMatchingObservations(){
     var holdings=List.of(Map.of("recorded_market_value",100,"recorded_valuation_recent",true));
     var flag=Map.of("kind","HIDDEN_EQUITY_CONCENTRATION","label","Combined exposure","value",30,
