@@ -30,6 +30,14 @@ class P1ResearchTests(unittest.TestCase):
             p1.company_research("INE002A01018")
             self.assertIn("/v2/fundamentals/INE002A01018/competitors",[call.args[0] for call in get.call_args_list])
 
+    def test_competitor_route_uses_exact_supplied_venue_key_without_retry(self):
+        for key in ("NSE_EQ|INE002A01018","BSE_EQ|INE002A01018","NSE_EQ|INE009A01021"):
+            with patch.object(p1,"_get",return_value=[]) as get:
+                p1.company_research("INE002A01018",key)
+            calls=[call.args[0] for call in get.call_args_list if call.args[0].endswith("/competitors")]
+            expected=key.replace("|","%7C") if key.endswith("INE002A01018") else "INE002A01018"
+            self.assertEqual(calls,["/v2/fundamentals/"+expected+"/competitors"])
+
     def test_company_research_rejects_bad_identifiers(self):
         with self.assertRaisesRegex(ValueError, "INVALID_ISIN"):
             p1.company_research("bad")

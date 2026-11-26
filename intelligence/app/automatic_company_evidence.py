@@ -182,6 +182,19 @@ def normalize(report, isin, instant):
             endpoint=None
         sections[key]={"status":"AVAILABLE" if data else "UNAVAILABLE","data":data or None,
                        "source":{"provider":"UPSTOX","endpoint":endpoint,"retrieved_at":instant.isoformat()} if data else None}
+        if not data:
+            # Keep only fixed error labels; no raw HTTP messages or tokens.
+            error=section.get("error")
+            allowed={"NO_PROVIDER_RECORDS","PROVIDER_REQUEST_REJECTED","PROVIDER_HTTP_FAILURE",
+                     "PROVIDER_ACCESS_REJECTED","PROVIDER_RATE_LIMITED","PROVIDER_RECOVERY_COOLDOWN",
+                     "PROVIDER_RESPONSE_TOO_LARGE","PROVIDER_SCHEMA_INVALID","UPSTOX_SCHEMA_MISMATCH",
+                     "PROVIDER_REQUEST_FAILED","RECOVERY_STORAGE_UNAVAILABLE","UPSTOX_TOKEN_MISSING",
+                     "UPSTOX_RATIO_SCHEMA_INVALID"}
+            sections[key]["diagnostic"]=error if isinstance(error,str) and error in allowed else (
+                "UNSUPPORTED_OR_EMPTY_NORMALIZED_DATA" if section.get("status")=="AVAILABLE" else "UNAVAILABLE_REASON_UNKNOWN")
+            if key=="competitors" and endpoint in (f"/v2/fundamentals/{isin}/competitors",
+                f"/v2/fundamentals/NSE_EQ%7C{isin}/competitors",f"/v2/fundamentals/BSE_EQ%7C{isin}/competitors"):
+                sections[key]["attempted_endpoint"]=endpoint
     available=sum(s["status"]=="AVAILABLE" for s in sections.values())
     return {"isin":isin,"retrieved_at":instant.isoformat(),"sections":sections,
             "available_sections":available,"total_sections":len(SECTIONS),
@@ -195,9 +208,9 @@ def refresh(snapshot, connect, loader=company_research, instant=None, *, explici
     stamp=instant.isoformat()
     candidates={}
     for item,isin in identify(snapshot):
-        # Existing NSE ISIN key convention; BSE competitors require a mapping.
+        # Exact public discovery venue/ISIN; no name matching.
         if isin not in candidates or item["exchange"]=="NSE":
-            candidates[isin]="NSE_EQ|"+isin if item["exchange"]=="NSE" else None
+            candidates[isin]=item["exchange"]+"_EQ|"+isin
     if explicit_isins is not None:
         # The documented fundamentals adapter accepts ISIN without an exchange key.
         # This input is used only for bounded, public, exact as-filed fund equities.
@@ -206,7 +219,7 @@ def refresh(snapshot, connect, loader=company_research, instant=None, *, explici
     if explicit_isins is None:
         for exchange,isin in identify_sample(snapshot,instant):
             if isin not in sample or exchange=="NSE":
-                sample[isin]="NSE_EQ|"+isin if exchange=="NSE" else None
+                sample[isin]=exchange+"_EQ|"+isin
     if not candidates and not sample:
         return
     with closing(connect()) as db, db:
@@ -361,6 +374,23 @@ def attach(snapshot,connect,instant=None):
                 continue
         result["company_research_coverage"]={"distinct_eligible_isins":len(sample),"fresh_cached_reports":cached,
             "section_counts":section_counts,"notice":"Distinct eligible public identities in this exchange sample; provider-reported evidence only, not full market coverage or qualified recommendations."}
+    # Build a separate bounded exact-industry cohort from the already cached
+    # validated discovery sample, not a fabricated provider competitor list.
+    cohort={}
+    sample_keys={}
+    for exchange,isin in identify_sample(snapshot,instant):
+        if isin not in sample_keys or exchange=="NSE":
+            sample_keys[isin]=exchange+"_EQ|"+isin
+    for isin,key in sample_keys.items():
+        row=rows.get(isin)
+        if not row or not row["payload"]:
+            continue
+        try:
+            report=json.loads(row["payload"])
+            if report.get("isin")==isin and peer_research.fresh_classification(report,instant):
+                cohort[isin]=(key,_enrich(report,today))
+        except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
+            continue
     # Enrich only primary identities and their explicitly selected one-hop peers.
     primary=list(identify(snapshot))
     wanted={isin for _,isin in primary}
@@ -379,5 +409,6 @@ def attach(snapshot,connect,instant=None):
         report=reports.get(isin)
         if report:
             report["peer_research"]=peer_research.summarize(report,reports)
+            report["industry_sample"]=peer_research.industry_sample(report,cohort,instant)
             item["company_evidence"]=report
     return snapshot

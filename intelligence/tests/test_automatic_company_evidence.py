@@ -212,3 +212,16 @@ class CompanyEvidenceTests(unittest.TestCase):
         self.assertEqual(len(evidence["sections"]["income_statement"]["data"]["eps_rows"]),1)
         self.assertEqual(evidence["earnings_quality"]["tax_bridge"][-1]["reconciliation_difference"],0)
         self.assertFalse(evidence["earnings_quality"]["valuation_eligible"])
+
+    def test_competitor_diagnostic_is_bounded_and_does_not_preserve_raw_errors(self):
+        def loader(isin,key):
+            return {"isin":isin,"sections":{"competitors":{"status":"UNAVAILABLE",
+                "source":{"endpoint":"/v2/fundamentals/NSE_EQ%7C"+isin+"/competitors"},
+                "error":"PROVIDER_REQUEST_REJECTED"},"profile":{"status":"AVAILABLE","data":{"sector":"Example"}},
+                "income_statement":{"status":"UNAVAILABLE","error":"private provider body"}}}
+        company.refresh(self.snapshot,research._connect,loader,self.now)
+        company.attach(self.snapshot,research._connect,self.now)
+        sections=self.item["company_evidence"]["sections"]
+        self.assertEqual(sections["competitors"]["diagnostic"],"PROVIDER_REQUEST_REJECTED")
+        self.assertIn("NSE_EQ%7C",sections["competitors"]["attempted_endpoint"])
+        self.assertEqual(sections["income_statement"]["diagnostic"],"UNAVAILABLE_REASON_UNKNOWN")

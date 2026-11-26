@@ -121,11 +121,14 @@ def company_research(isin: str, instrument_key: str | None = None) -> dict:
         "corporate_actions": _safe_section("corporate_actions", f"/v2/fundamentals/{encoded_isin}/corporate-actions",
             lambda: _get(f"/v2/fundamentals/{encoded_isin}/corporate-actions")),
     }
-    # The documented competitor endpoint is ISIN based. Retain the optional
-    # instrument_key argument and response field for existing API callers.
+    # Public guide specifies ISIN; Swagger specifies instrument_key.
+    # Prefer an exact supplied cash-equity key for this route only. Never
+    # synthesize a venue when no mapping is known or make a second request.
+    mapped=instrument_key in ("NSE_EQ|"+isin,"BSE_EQ|"+isin)
+    competitor_id=quote(instrument_key,safe="") if mapped else encoded_isin
+    competitor_path=f"/v2/fundamentals/{competitor_id}/competitors"
     sections["competitors"] = _safe_section(
-        "competitors", f"/v2/fundamentals/{encoded_isin}/competitors",
-        lambda: _get(f"/v2/fundamentals/{encoded_isin}/competitors"))
+        "competitors", competitor_path, lambda: _get(competitor_path))
     available = sum(1 for value in sections.values() if value["status"] == "AVAILABLE")
     return {
         "isin": isin,
