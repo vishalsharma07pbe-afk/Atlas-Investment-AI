@@ -5,7 +5,7 @@ import tempfile
 import threading
 from datetime import datetime,timezone
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID,uuid4
 from typing import Literal
 from pydantic import BaseModel,Field
 
@@ -26,8 +26,17 @@ class JournalEntry(JournalEntryInput):
     created_at:datetime
     updated_at:datetime
 
-def _path()->Path:
-    return Path(os.environ.get("ATLAS_RESEARCH_JOURNAL_FILE","/app/journal/entries.json"))
+def _path(owner:UUID|None=None)->Path:
+    legacy=Path(os.environ.get("ATLAS_RESEARCH_JOURNAL_FILE","/app/journal/entries.json"))
+    if owner is None:
+        # Offline legacy utility only; HTTP callers must resolve an owner.
+        return legacy
+    if not isinstance(owner,UUID):
+        raise ValueError("Authenticated journal owner required")
+    parent=legacy.parent/"owners"
+    if legacy.parent.is_symlink() or parent.is_symlink():
+        raise ValueError("Journal directory cannot be a symlink")
+    return parent/(str(owner)+".json")
 
 def _read(path:Path)->list[dict]:
     if path.is_symlink():raise ValueError("Journal path cannot be a symlink")
@@ -51,21 +60,21 @@ def _write(path:Path,items:list[dict])->None:
     finally:
         if os.path.exists(tmp):os.unlink(tmp)
 
-def list_entries()->list[dict]:
-    with _LOCK:return list(reversed(_read(_path())))
+def list_entries(owner:UUID|None=None)->list[dict]:
+    with _LOCK:return list(reversed(_read(_path(owner))))
 
-def create_entry(entry:JournalEntryInput)->dict:
+def create_entry(entry:JournalEntryInput,owner:UUID|None=None)->dict:
     with _LOCK:
-        path=_path();items=_read(path)
+        path=_path(owner);items=_read(path)
         if len(items)>=_MAX_RECORDS:raise ValueError("Journal entry limit reached")
         now=datetime.now(timezone.utc)
         item=JournalEntry(**entry.model_dump(),id=str(uuid4()),created_at=now,updated_at=now).model_dump(mode="json")
         items.append(item);_write(path,items)
         return item
 
-def update_entry(entry_id:str,entry:JournalEntryInput)->dict|None:
+def update_entry(entry_id:str,entry:JournalEntryInput,owner:UUID|None=None)->dict|None:
     with _LOCK:
-        path=_path();items=_read(path)
+        path=_path(owner);items=_read(path)
         for i,item in enumerate(items):
             if item["id"]==entry_id:
                 updated=JournalEntry(**entry.model_dump(),id=entry_id,created_at=item["created_at"],
@@ -73,9 +82,9 @@ def update_entry(entry_id:str,entry:JournalEntryInput)->dict|None:
                 items[i]=updated;_write(path,items);return updated
         return None
 
-def delete_entry(entry_id:str)->bool:
+def delete_entry(entry_id:str,owner:UUID|None=None)->bool:
     with _LOCK:
-        path=_path();items=_read(path)
+        path=_path(owner);items=_read(path)
         remaining=[item for item in items if item["id"]!=entry_id]
         if len(remaining)==len(items):return False
         _write(path,remaining);return True

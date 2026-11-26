@@ -29,6 +29,8 @@ def run():
     gateway.request("/intelligence/health",expected=401,required_headers=SECURITY_HEADERS)
     gateway.request("/intelligence/api/v1/intelligence/notifications/summary",expected=401)
     gateway.request("/api/v1/research-workspace/notifications/summary",expected=401)
+    journal="/intelligence/api/v1/intelligence/journal"
+    gateway.request(journal,expected=401)
     credentials={"email":f"production-{uuid.uuid4().hex}@example.test","password":"disposable-production-ci-password"}
     gateway.request("/api/v1/auth/register","POST",credentials)
     login=gateway.request("/api/v1/auth/login","POST",credentials)
@@ -43,6 +45,22 @@ def run():
     gateway.request("/intelligence/api/v1/ai/providers/health",expected=401,
         headers={**headers,"X-Atlas-Service-Token":service_token})
     del service_token
+    # Distinct cookie jars prevent accidental authentication as the first user.
+    other=Browser("http://127.0.0.1:8088")
+    other_credentials={"email":f"journal-{uuid.uuid4().hex}@example.test","password":"disposable-production-ci-password"}
+    other.request("/api/v1/auth/register","POST",other_credentials)
+    other.request("/api/v1/auth/login","POST",other_credentials)
+    note={"symbol":"CI_NOTE","thesis":"Disposable owner-specific research note"}
+    gateway.request(journal,"POST",note,expected=201,headers=headers)
+    entries=gateway.request(journal,headers=headers)["entries"]
+    check(len(entries)==1 and entries[0]["symbol"]=="CI_NOTE","owner research journal write failed")
+    entry_id=entries[0]["id"]
+    check(other.request(journal)["entries"]==[],"research journal isolation failed")
+    other.request(journal+"/"+entry_id,"PUT",note,expected=404)
+    other.request(journal+"/"+entry_id,"DELETE",expected=404)
+    gateway.request(journal+"/"+entry_id,"DELETE",expected=204,headers=headers)
+    other.request("/api/v1/auth/logout","POST")
+    other.request(journal,expected=401)
     personal=gateway.request("/api/v1/research-workspace/notifications/summary",headers=headers)
     check(type(personal.get("unread_count")) is int and personal["unread_count"]>=0,"personal notification summary contract failed")
     gateway.request("/api/v1/portfolio/holdings","POST",
@@ -68,6 +86,7 @@ def run():
     gateway.request("/intelligence/health",expected=401,headers=headers)
     gateway.request("/intelligence/api/v1/intelligence/notifications/summary",expected=401,headers=headers)
     gateway.request("/api/v1/research-workspace/notifications/summary",expected=401,headers=headers)
+    gateway.request(journal,expected=401,headers=headers)
     print("PASS: production gateway, authorization, portfolio review, internal research, logout")
 
 if __name__=="__main__":

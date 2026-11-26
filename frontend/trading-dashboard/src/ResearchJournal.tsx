@@ -57,6 +57,6 @@ export default function ResearchJournal(){
         <td><button type="button" className="secondary" onClick={()=>{setEditing(entry.id);setForm({symbol:entry.symbol,thesis:entry.thesis,evidence:entry.evidence,risks:entry.risks,source_url:entry.source_url,status:entry.status});}}>Edit</button>
         <button type="button" className="secondary" onClick={()=>remove(entry.id)}>Delete</button></td></tr>)}
     </tbody></table></div>
-    <p className="muted tiny">Stored in a local journal file. Back up your notes; do not store credentials or private broker tokens.</p>
+    <p className="muted tiny">Stored locally for your signed-in account. Legacy installation notes are preserved separately until an operator assigns ownership. Back up your notes; do not store credentials or private broker tokens.</p>
   </section>;
 }
