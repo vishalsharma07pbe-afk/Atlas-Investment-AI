@@ -125,6 +125,21 @@ class FundHistoryResearchServiceTest {
   assertNull(zero.get("sharpe_proxy"));assertNull(zero.get("sortino_proxy"));
   assertNull(six.get("sharpe_proxy"));assertEquals(-Math.sqrt(52),(Double)six.get("sortino_proxy"),.0001);
  }
+ @Test void capitalPreservationUsesOverlappingNonAnnualizedHoldingPeriods(){
+  var anchors=new ArrayList<Double>();
+  for(int i=0;i<=156;i++)anchors.add(i%2==0?100.0:90.0);
+  var block=FundHistoryResearchService.capitalPreservation(anchors);
+  assertEquals("HISTORICAL_NAV_WINDOWS_ONLY",block.get("status"));
+  var windows=(List<?>)block.get("windows");
+  var four=(Map<?,?>)windows.get(0);var thirteen=(Map<?,?>)windows.get(1);var twentySix=(Map<?,?>)windows.get(2);
+  assertEquals(153,four.get("window_count"));assertEquals(153,four.get("flat_windows"));
+  assertEquals(144,thirteen.get("window_count"));assertEquals(72,thirteen.get("loss_windows"));
+  assertEquals(72,thirteen.get("gain_windows"));assertEquals(50.0,thirteen.get("loss_window_percent"));
+  assertEquals(-10.0,thirteen.get("worst_return_percent"));assertEquals(-10.0,thirteen.get("fifth_percentile_return_percent"));
+  assertEquals(11.1111,thirteen.get("best_return_percent"));assertEquals(131,twentySix.get("flat_windows"));
+  assertTrue(FundHistoryResearchService.capitalPreservation(anchors.subList(0,156)).isEmpty());
+  anchors.set(0,Double.NaN);assertTrue(FundHistoryResearchService.capitalPreservation(anchors).isEmpty());
+ }
  @Test void underwaterDurationIncludesUnrecoveredObservedDecline(){
   LocalDate end=LocalDate.of(2026,11,24);
   List<Map<String,Object>> rows=new ArrayList<>();

@@ -149,6 +149,26 @@ class RecommendationEngineTests(unittest.TestCase):
             self.assertIsNone(recommendations._weekly_hurdle_context({"weekly_hurdle_sensitivity":invalid}))
         self.assertIsNone(recommendations._weekly_hurdle_context({}))
 
+    def test_short_horizon_nav_context_is_descriptive_and_validated(self):
+        def window(weeks):
+            n=157-weeks
+            return {"weeks":weeks,"window_count":n,"loss_windows":1,"flat_windows":0,"gain_windows":n-1,
+                    "loss_window_percent":round(100/n,4),"worst_return_percent":-2,
+                    "fifth_percentile_return_percent":1,"median_return_percent":2,"best_return_percent":3}
+        block={"status":"HISTORICAL_NAV_WINDOWS_ONLY","weekly_anchors":157,"windows":[window(w) for w in (4,13,26)]}
+        self.assertEqual(recommendations._short_horizon_nav_context({"short_horizon_nav_risk":block}),block)
+        for changes in ({"loss_window_percent":99},{"window_count":152},{"gain_windows":0},
+                        {"worst_return_percent":4},{"median_return_percent":float("nan")},{"weeks":True}):
+            bad={**block,"windows":[{**block["windows"][0],**changes},*block["windows"][1:]]}
+            self.assertIsNone(recommendations._short_horizon_nav_context({"short_horizon_nav_risk":bad}))
+        fund=strong(identifier="123456",category="CORPORATE_BOND")
+        ranked=rank_candidates([fund],"CORPORATE_BOND",84,"HIGH")
+        report=_research_reports([fund],ranked,[{"scheme_code":123456,"short_horizon_nav_risk":block}],[],[])[0]
+        self.assertEqual(report["historical"]["short_horizon_nav_risk"],block)
+        self.assertIn("CATEGORY_SPECIFIC_RISK_MODEL_REQUIRED",report["top_performer"]["missing"])
+        self.assertEqual(report["growth_outlook"]["status"],"WITHHELD")
+        self.assertEqual(ranked["top_performers"],[])
+
     def test_history_gate_counts_reconcile_with_sample(self):
         gates={"OFFICIAL_ANCHOR_UNAVAILABLE":1,"COMPARISON_DATE_MISMATCH":2,
                "HISTORY_QUALITY_OR_LENGTH":3,"ELIGIBLE":4}

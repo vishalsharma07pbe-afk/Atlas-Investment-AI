@@ -1,0 +1,9 @@
+export type ShortHorizonNavRisk={status:string;weekly_anchors:number;windows:{weeks:number;window_count:number;loss_windows:number;flat_windows:number;gain_windows:number;loss_window_percent:number;worst_return_percent:number;fifth_percentile_return_percent:number;median_return_percent:number;best_return_percent:number}[]};
+export default function FundShortHorizonRisk({category,evidence}:{category:string;evidence?:ShortHorizonNavRisk|null}){
+ if(!["AGGRESSIVE_HYBRID","CORPORATE_BOND","SHORT_DURATION"].includes(category))return null;
+ const debt=category!=="AGGRESSIVE_HYBRID";
+ return <section><h5>Short-horizon historical NAV risk</h5>{evidence?.status==="HISTORICAL_NAV_WINDOWS_ONLY"?<>
+ {evidence.windows.map(row=><dl key={row.weeks}><div><dt>{row.weeks}-week observed loss windows</dt><dd>{row.loss_window_percent.toFixed(2)}% ({row.loss_windows}/{row.window_count})</dd></div><div><dt>Worst / fifth-percentile return</dt><dd>{row.worst_return_percent.toFixed(2)}% / {row.fifth_percentile_return_percent.toFixed(2)}%</dd></div><div><dt>Median / best return</dt><dd>{row.median_return_percent.toFixed(2)}% / {row.best_return_percent.toFixed(2)}%</dd></div><div><dt>Gain / flat windows</dt><dd>{row.gain_windows} / {row.flat_windows}</dd></div></dl>)}
+ <p className="muted tiny">Observed non-annualized holding-period returns; overlapping windows are not independent probabilities or a capital guarantee. Fifth percentile is a historical order statistic, not predictive VaR.</p></>:<p>Complete weekly NAV evidence unavailable.</p>}
+ <p className="muted tiny">{debt?"Credit ratings, issuer exposure, maturity, modified duration, yield and liquidity evidence are required for debt risk qualification.":"Verified equity/debt allocation, credit, duration, liquidity and derivative exposure are required for hybrid risk qualification."} NAV history cannot establish these risks. No category-specific recommendation is qualified by these observations.</p></section>;
+}

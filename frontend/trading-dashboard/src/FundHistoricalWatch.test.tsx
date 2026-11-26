@@ -16,3 +16,15 @@ it("separates historical return and downside rankings with explicit missing metr
  expect(screen.getByText("2.36")).toBeTruthy();
  expect(screen.getByText(/not observed risk-free rates or benchmark TRI/)).toBeTruthy();
 });
+
+it("shows descriptive debt windows and explicit credit and duration blockers",async()=>{
+ const item={scheme_code:1,scheme_name:"Debt history",nav:100,nav_date:"2026-11-23",cagr_1y_percent:6,cagr_3y_percent:6,drawdown_3y_percent:-2,observations:750,sources:["AMFI"],short_horizon_nav_risk:{status:"HISTORICAL_NAV_WINDOWS_ONLY",weekly_anchors:157,windows:[4,13,26].map(weeks=>({weeks,window_count:157-weeks,loss_windows:1,flat_windows:0,gain_windows:156-weeks,loss_window_percent:100/(157-weeks),worst_return_percent:-2,fifth_percentile_return_percent:1,median_return_percent:2,best_return_percent:3}))}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({category:"CORPORATE_BOND",items:[item],risk_adjusted_items:[],category_comparison_enabled:false,comparison_date:"2026-11-23",sample_count:1,universe_count:10,eligible_count:1,notice:"Historical only"})})));
+ render(<FundHistoricalWatch category="CORPORATE_BOND"/>);
+ expect(await screen.findByText("Debt history")).toBeTruthy();
+ expect(screen.getByText("4-week observed loss windows")).toBeTruthy();
+ expect(screen.getByText("13-week observed loss windows")).toBeTruthy();
+ expect(screen.getByText("26-week observed loss windows")).toBeTruthy();
+ expect(screen.getByText(/Credit ratings, issuer exposure, maturity, modified duration/)).toBeTruthy();
+ expect(screen.queryByRole("button",{name:"Return versus drawdown"})).toBeNull();
+});

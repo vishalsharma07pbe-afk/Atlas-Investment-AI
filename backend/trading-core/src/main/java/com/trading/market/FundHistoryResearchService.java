@@ -132,6 +132,10 @@ public class FundHistoryResearchService {
         else{
           // Use the identical anchored window for category metrics and peer comparisons.
           histories.put(code,rows);
+          if(Set.of("AGGRESSIVE_HYBRID","CORPORATE_BOND","SHORT_DURATION").contains(category)){
+            var shortRisk=capitalPreservation(weeklyAnchors(rows,commonEnd).stream().map(Anchor::nav).toList());
+            if(!shortRisk.isEmpty())metrics.put("short_horizon_nav_risk",shortRisk);
+          }
           metrics.putAll(fund);observations.add(metrics);gate="ELIGIBLE";
         }
       }
@@ -455,6 +459,32 @@ public class FundHistoryResearchService {
     return Map.of("status","HYPOTHETICAL_HURDLE_ONLY","weekly_intervals",156,
       "annualized_arithmetic_return_percent",round(annualMean),"annualized_volatility_percent",round(volatility),
       "scenarios",scenarios);
+  }
+  /** Observed rolling holding-period outcomes, not annualized, independent
+   * probabilities, credit, duration, or market-rate sensitivity. */
+  static Map<String,Object> capitalPreservation(List<Double> anchors){
+    if(anchors.size()!=157||anchors.stream().anyMatch(v->v==null||!Double.isFinite(v)||v<=0))return Map.of();
+    List<Map<String,Object>> windows=new ArrayList<>();
+    for(int weeks:new int[]{4,13,26}){
+      List<Double> returns=new ArrayList<>();
+      int losses=0,flat=0;
+      for(int i=weeks;i<anchors.size();i++){
+        double value=100*(anchors.get(i)/anchors.get(i-weeks)-1);
+        if(!Double.isFinite(value)||value< -100||value>1_000_000)return Map.of();
+        // Treat negligible differences as ties consistently with the displayed precision.
+        double observed=round(value);
+        if(observed<0)losses++;else if(observed==0)flat++;
+        returns.add(observed);
+      }
+      returns.sort(Double::compare);
+      int n=returns.size();
+      double median=n%2==0?returns.get(n/2-1)/2+returns.get(n/2)/2:returns.get(n/2);
+      windows.add(Map.of("weeks",weeks,"window_count",n,"loss_windows",losses,"flat_windows",flat,
+        "gain_windows",n-losses-flat,"loss_window_percent",round(100.0*losses/n),
+        "worst_return_percent",returns.getFirst(),"fifth_percentile_return_percent",returns.get((int)Math.ceil(n*.05)-1),
+        "median_return_percent",round(median),"best_return_percent",returns.getLast()));
+    }
+    return Map.of("status","HISTORICAL_NAV_WINDOWS_ONLY","weekly_anchors",157,"windows",windows);
   }
   private static LocalDate date(Object d){return d instanceof java.sql.Date x?x.toLocalDate():d instanceof LocalDate x?x:null;}
   private static double round(double n){return Math.round(n*10000d)/10000d;}
