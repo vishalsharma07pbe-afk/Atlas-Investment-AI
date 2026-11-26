@@ -374,7 +374,7 @@ def attach(snapshot,connect,instant=None):
                 continue
         result["company_research_coverage"]={"distinct_eligible_isins":len(sample),"fresh_cached_reports":cached,
             "section_counts":section_counts,"notice":"Distinct eligible public identities in this exchange sample; provider-reported evidence only, not full market coverage or qualified recommendations."}
-    # Build a separate bounded exact-industry cohort from the already cached
+    # Build bounded sector/industry cohorts from the already cached
     # validated discovery sample, not a fabricated provider competitor list.
     cohort={}
     sample_keys={}
@@ -387,7 +387,7 @@ def attach(snapshot,connect,instant=None):
             continue
         try:
             report=json.loads(row["payload"])
-            if report.get("isin")==isin and peer_research.fresh_classification(report,instant):
+            if report.get("isin")==isin and peer_research.fresh_sector(report,instant):
                 cohort[isin]=(key,_enrich(report,today))
         except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
             continue
@@ -410,5 +410,6 @@ def attach(snapshot,connect,instant=None):
         if report:
             report["peer_research"]=peer_research.summarize(report,reports)
             report["industry_sample"]=peer_research.industry_sample(report,cohort,instant)
+            report["sector_sample"]=peer_research.sector_sample(report,cohort,instant)
             item["company_evidence"]=report
     return snapshot
