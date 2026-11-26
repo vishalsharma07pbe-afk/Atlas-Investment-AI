@@ -391,9 +391,11 @@ public class FundHistoryResearchService {
     if(points.size()!=157)return Map.of();
     List<Double> anchors=points.stream().map(Anchor::nav).toList();
     double sum=0,sumSq=0,downsideSq=0,worst=Double.POSITIVE_INFINITY;int positive=0,rolling=0,negativeWeeks=0;
-    List<Double> rollingReturns=new ArrayList<>();
+    List<Double> rollingReturns=new ArrayList<>(),weeklyReturns=new ArrayList<>();
     for(int i=1;i<anchors.size();i++){
-      double r=anchors.get(i)/anchors.get(i-1)-1;sum+=r;sumSq+=r*r;
+      double r=anchors.get(i)/anchors.get(i-1)-1;
+      if(!Double.isFinite(r))return Map.of();
+      weeklyReturns.add(r);sum+=r;sumSq+=r*r;
       if(r<0){downsideSq+=r*r;negativeWeeks++;}
       if(i>=52){
         double annual=100*(Math.pow(anchors.get(i)/anchors.get(i-52),365.2425/364)-1);
@@ -420,7 +422,39 @@ public class FundHistoryResearchService {
     result.put("negative_week_percent",round(100.0*negativeWeeks/n));
     result.put("rolling_windows",rolling);
     result.put("weekly_intervals",n);
+    var sensitivity=weeklyHurdleSensitivity(weeklyReturns);
+    if(!sensitivity.isEmpty())result.put("weekly_hurdle_sensitivity",sensitivity);
     return result;
+  }
+  /** Descriptive fixed-hurdle sensitivity only; not observed risk-free returns.
+   * Use the same complete weekly NAV proxies and arithmetic annualization.
+   * Downside RMS includes all intervals; suppress near-zero denominators.
+   */
+  static Map<String,Object> weeklyHurdleSensitivity(List<Double> returns){
+    if(returns.size()!=156||returns.stream().anyMatch(r->r==null||!Double.isFinite(r)||r<=-1))return Map.of();
+    double mean=returns.stream().mapToDouble(Double::doubleValue).average().orElseThrow();
+    double std=Math.sqrt(returns.stream().mapToDouble(r->Math.pow(r-mean,2)).sum()/155);
+    double volatility=100*Math.sqrt(52)*std;
+    double annualMean=100*52*mean;
+    if(!Double.isFinite(volatility)||!Double.isFinite(annualMean)||Math.abs(annualMean)>1_000_000)return Map.of();
+    List<Map<String,Object>> scenarios=new ArrayList<>();
+    for(double hurdle:new double[]{0,6}){
+      double weekly=Math.expm1(Math.log1p(hurdle/100)/52);
+      double excess=100*52*(mean-weekly);
+      double downside=100*Math.sqrt(52*returns.stream().mapToDouble(r->Math.pow(Math.min(0,r-weekly),2)).sum()/156);
+      if(!Double.isFinite(excess)||!Double.isFinite(downside)||downside>1_000_000||volatility>1_000_000)return Map.of();
+      Map<String,Object> scenario=new LinkedHashMap<>();
+      scenario.put("annual_effective_hurdle_percent",hurdle);
+      scenario.put("annualized_arithmetic_excess_percent",round(excess));
+      scenario.put("annualized_downside_percent",round(downside));
+      // One basis point annualized denominator floor: no infinite or unstable near-zero ratios.
+      scenario.put("sharpe_proxy",volatility>=0.01?round(excess/volatility):null);
+      scenario.put("sortino_proxy",downside>=0.01?round(excess/downside):null);
+      scenarios.add(scenario);
+    }
+    return Map.of("status","HYPOTHETICAL_HURDLE_ONLY","weekly_intervals",156,
+      "annualized_arithmetic_return_percent",round(annualMean),"annualized_volatility_percent",round(volatility),
+      "scenarios",scenarios);
   }
   private static LocalDate date(Object d){return d instanceof java.sql.Date x?x.toLocalDate():d instanceof LocalDate x?x:null;}
   private static double round(double n){return Math.round(n*10000d)/10000d;}

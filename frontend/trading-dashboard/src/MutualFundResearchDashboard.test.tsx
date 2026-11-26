@@ -96,7 +96,7 @@ it("supports debt category navigation without implying an equity ranking",async(
 
 it("opens an individual scheme report and preserves missing-evidence decisions",async()=>{
  const report={identifier:"123456",name:"Example Integrated Fund",category:"LARGE_CAP",plan:"DIRECT",option:"GROWTH",nav:"100.50",nav_date:"2026-11-24",nav_age_days:1,
-  historical:{sources:["AMFI","MFAPI"],returns_1y:12,returns_3y:14,sample_peer_percentile:80,worst_rolling_return:-8,max_drawdown:-17,volatility:13,rolling_peer_consistency:{status:"MATCHED_SAMPLE_ONLY",matched_windows:100,total_windows:105,minimum_peer_count:4,above_median_windows:60,below_median_windows:30,tied_windows:10,above_median_percent:60,median_difference_pp:1.5,worst_difference_pp:-10,notice:"Sample only, not benchmark TRI."}},
+  historical:{weekly_hurdle_sensitivity:{status:"HYPOTHETICAL_HURDLE_ONLY",weekly_intervals:156,annualized_arithmetic_return_percent:26,annualized_volatility_percent:11,scenarios:[{annual_effective_hurdle_percent:0,annualized_arithmetic_excess_percent:26,annualized_downside_percent:5,sharpe_proxy:2.3636,sortino_proxy:5.2},{annual_effective_hurdle_percent:6,annualized_arithmetic_excess_percent:20,annualized_downside_percent:6,sharpe_proxy:null,sortino_proxy:3.33}]},sources:["AMFI","MFAPI"],returns_1y:12,returns_3y:14,sample_peer_percentile:80,worst_rolling_return:-8,max_drawdown:-17,volatility:13,rolling_peer_consistency:{status:"MATCHED_SAMPLE_ONLY",matched_windows:100,total_windows:105,minimum_peer_count:4,above_median_windows:60,below_median_windows:30,tied_windows:10,above_median_percent:60,median_difference_pp:1.5,worst_difference_pp:-10,notice:"Sample only, not benchmark TRI."}},
   secondary_disclosure_available:false,secondary_portfolio_available:false,
   research_assessment:{version:"FUND-ASSESSMENT-1",status:"REVIEW_REQUIRED",supporting_evidence:[{code:"POSITIVE_REPORTED_THREE_YEAR_CAGR",value:14,unit:"PERCENT",source:"NAV_HISTORY"}],review_findings:[{code:"NEGATIVE_WORST_ROLLING_YEAR",value:-8,unit:"PERCENT",source:"NAV_HISTORY"}],next_evidence_checks:["MATCHED_REPORTED_PORTFOLIO_REQUIRED"],notice:"Descriptive evidence only."},
   top_performer:{status:"WITHHELD",missing:["BENCHMARK_HIT_RATE"],published_rank:null},
@@ -109,6 +109,8 @@ it("opens an individual scheme report and preserves missing-evidence decisions",
  fireEvent.change(screen.getByLabelText("Research report"),{target:{value:"123456"}});
  expect(screen.getByText(/100\/105 windows/)).toBeTruthy();
  expect(screen.getByText("Integrated fund assessment")).toBeTruthy();
+ expect(screen.getByText("Historical return hurdle sensitivity")).toBeTruthy();
+ expect(screen.getByText(/not observed risk-free rates or benchmark TRI/)).toBeTruthy();
  expect(screen.getByText(/Positive reported three year cagr/)).toBeTruthy();
  expect(screen.getByText(/Negative worst rolling year/)).toBeTruthy();
  fireEvent.click(screen.getByText("Next evidence checks (1)"));
