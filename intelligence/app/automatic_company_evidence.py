@@ -15,6 +15,7 @@ from .p1_research import company_research
 from .financial_trends import summarize as financial_trends, earnings_evidence
 from .fundamental_quality import summarize as fundamental_quality
 from . import peer_research, shareholding_research
+from .corporate_action_normalization import normalize_reported_actions
 
 ISIN = re.compile(r"^IN[A-Z0-9]{10}$")
 HORIZONS = ("LONG_TERM", "SHORT_TERM", "SWING")
@@ -135,13 +136,7 @@ def normalize(report, isin, instant):
                 elif name and not instrument:
                     data.append({"name":name,"sector":text(row.get("sector"))})
         elif key=="corporate_actions" and isinstance(raw,list):
-            data=[]
-            for row in raw[:12]:
-                if not isinstance(row,dict):
-                    continue
-                name=text(row.get("name") or row.get("company_name"))
-                if name:
-                    data.append({"name":name,"date":text(row.get("expiry_date")),"sector":text(row.get("sector"))})
+            data=normalize_reported_actions(raw)
         source=section.get("source")
         endpoint=source.get("endpoint") if isinstance(source,dict) else None
         # Existing adapter supplies fixed public paths, never persist arbitrary URLs.
@@ -233,6 +228,34 @@ def peer_candidates(rows,primary,instant):
         except (ValueError,TypeError,AttributeError):
             continue
     return result
+
+
+def cached_action_reports(connect,identities,instant):
+    """Bounded public exact-ISIN cache read; no network or personal data."""
+    if not permitted():
+        return {}
+    wanted={i for i in identities if isinstance(i,str) and re.fullmatch(r"INE[A-Z0-9]{9}",i)}
+    if not wanted or len(wanted)>200:
+        return {}
+    try:
+        with closing(connect()) as db:
+            marks=",".join("?" for _ in wanted)
+            rows=db.execute(f"""SELECT isin,payload FROM automatic_company_evidence
+                WHERE isin IN ({marks}) AND status IN ('AVAILABLE','PARTIAL')
+                AND attempted_at BETWEEN ? AND ?""",(*sorted(wanted),(instant-timedelta(hours=24)).isoformat(),instant.isoformat())).fetchall()
+        result={}
+        for row in rows:
+            try:
+                report=json.loads(row["payload"])
+                if report.get("isin")==row["isin"]:
+                    result[row["isin"]]=report
+            except (ValueError,TypeError,AttributeError,KeyError):
+                continue
+        return result
+    except (OSError,ValueError,TypeError,KeyError,AttributeError):
+        return {}
+    except __import__("sqlite3").Error:
+        return {}
 
 
 def _enrich(report,today):

@@ -5,7 +5,7 @@ from math import isfinite
 from .technical import Candle, compute
 from .horizon_research import evaluate, summarize, MIN_HISTORY as HORIZON_MIN_HISTORY
 from .price_structure import analyze as price_structure
-from .corporate_action_normalization import preview as action_preview
+from .corporate_action_normalization import preview as action_preview, reported_crossings
 from .replay_evidence import fingerprint, exact_isin
 from . import price_volume_pressure
 
@@ -20,7 +20,7 @@ def report_close_history(candles):
             "points": [{"date": c.date, "close": round(c.close, 4)} for c in candles[-30:]]}
 
 
-def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit=MAX_INSTRUMENTS, include_horizons=False, *, batch_loaded=False, expected_session=None):
+def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit=MAX_INSTRUMENTS, include_horizons=False, *, batch_loaded=False, expected_session=None, action_reports=None, instant=None):
     limit = max(1, min(200 if batch_loaded else 60, universe_limit))
     today = as_of or date.today()
     rows = []
@@ -33,6 +33,8 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
     action_previews=[]
     action_preview_count=0
     action_preview_withheld=0
+    provider_crossing_count=0
+    provider_crossings=[]
     history_coverage = {h:0 for h in HORIZON_MIN_HISTORY}
     skipped = {"NO_HISTORY": 0, "STALE": 0, "INVALID": 0, "MIXED_ADJUSTMENT": 0}
     if batch_loaded:
@@ -74,8 +76,18 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                     skipped["SESSION_MISMATCH"] += 1
                     continue
                 event=instrument.get("latest_action_date")
-                if (event is not None and candles[-1].adjustment_status=="RAW_UNADJUSTED"
-                    and date.fromisoformat(candles[0].date)<date.fromisoformat(event)<=last_day):
+                first_day=date.fromisoformat(candles[0].date)
+                # The cached provider report may reveal a crossing absent from
+                # the separate local action ledger. It cannot authorize adjustment.
+                isin=instrument.get("isin")
+                crossings=reported_crossings((action_reports or {}).get(isin),isin,first_day,last_day,instant) if instant is not None else []
+                raw_history=candles[-1].adjustment_status=="RAW_UNADJUSTED"
+                if crossings and raw_history:
+                    provider_crossing_count+=1
+                    if len(provider_crossings)<5:
+                        provider_crossings.append({"symbol":instrument["symbol"],"exchange":instrument["exchange"],
+                            "events":crossings,"status":"REPORTED_ACTION_RECONCILIATION_REQUIRED"})
+                if raw_history and (crossings or (event is not None and first_day<date.fromisoformat(event)<=last_day)):
                     skipped["RAW_CORPORATE_ACTION"] += 1
                     normalized=action_preview(candles,instrument)
                     if normalized["status"]=="KNOWN_ACTIONS_NORMALIZED_PRICE_ONLY":
@@ -162,6 +174,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
             "notice":"Counts of adjusted histories in the selected registry sample, grouped by preceding observed date; not full-exchange breadth."}
         result["corporate_action_review"]={"normalized_preview_count":action_preview_count,
             "withheld_count":action_preview_withheld,"previews":action_previews,
+            "provider_crossing_count":provider_crossing_count,"provider_crossings":provider_crossings,
             "notice":"Recorded split/bonus normalization diagnostics only. These histories remain excluded from rankings and backtesting."}
     if include_horizons:
         result["horizons"] = summarize(horizon_evaluations)
