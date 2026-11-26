@@ -1,4 +1,5 @@
 import {useEffect,useState} from "react";
+import {useOverlayFocus} from "./useOverlayFocus";
 import NotificationSourceHealth from "./NotificationSourceHealth";
 import PersonalNotificationInbox from "./PersonalNotificationInbox";
 import {indiaDateToday,upcomingIpoEvents} from "./ipoCalendar";
@@ -13,6 +14,7 @@ export default function NotificationCenter({includePersonal=false}:{includePerso
   const [view,setView]=useState<"ALL"|"IPO_CALENDAR">("ALL");
   const [seen,setSeen]=useState<string[]>(savedIds);
   const [open,setOpen]=useState(false);
+  const {triggerRef,panelRef}=useOverlayFocus(open,()=>setOpen(false));
   const [alerts,setAlerts]=useState<Alert[]|null>(null);
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState("");
@@ -77,13 +79,13 @@ export default function NotificationCenter({includePersonal=false}:{includePerso
     }catch(e){setError(String(e));}finally{setLoading(false);}
   }
   return <div className="atlas-notifications">
-    <button className="atlas-bell" type="button" aria-label={`Notifications, ${count} unread`} aria-expanded={open} onClick={toggle}>
+    <button ref={triggerRef} className="atlas-bell" type="button" aria-haspopup="dialog" aria-label={`Notifications, ${count} unread`} aria-expanded={open} onClick={toggle}>
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
       {count>0&&<span className="atlas-notification-count">{count>99?"99+":count}</span>}
       {(summaryError||personalError)&&<span className="atlas-notification-warning" title="Alert count unavailable">!</span>}
     </button>
-    {open&&<><button type="button" className="atlas-notification-backdrop" aria-label="Close notifications" onClick={()=>setOpen(false)}/>
-      <section className="atlas-notification-panel glass" aria-label="Notification center">
+    {open&&<><button type="button" tabIndex={-1} className="atlas-notification-backdrop" aria-label="Close notifications" onClick={()=>setOpen(false)}/>
+      <section ref={panelRef} tabIndex={-1} className="atlas-notification-panel glass" role="dialog" aria-modal="true" aria-label="Notification center">
         <div className="atlas-notification-heading"><div><strong>Notifications</strong><small>IPOs · subscription · market events</small></div><button type="button" aria-label="Close notifications" onClick={()=>setOpen(false)}>×</button></div>
         {includePersonal&&<PersonalNotificationInbox onRead={()=>setReadRevision(v=>v+1)}/>}
         {!loading&&!error&&alerts&&<div className="atlas-notification-filters"><button type="button" aria-pressed={view==="ALL"} onClick={()=>setView("ALL")}>All alerts</button><button type="button" aria-pressed={view==="IPO_CALENDAR"} onClick={()=>setView("IPO_CALENDAR")}>IPO calendar (30 days)</button></div>}

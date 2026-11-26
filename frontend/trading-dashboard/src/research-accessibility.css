@@ -1,0 +1,25 @@
+/* Scope report and header-overlay fixes; no layout or theme reset. */
+.horizon-cards { align-items: start; }
+.horizon-card:has(> .stock-report-disclosure[open]) { grid-column: 1 / -1; }
+.horizon-card .stock-report-disclosure { scroll-margin-top: 20px; min-width: 0; overflow-wrap: anywhere; }
+.horizon-card :is(dl,details,section,figure) { min-width: 0; max-width: 100%; }
+.horizon-card dl { grid-template-columns: repeat(2,minmax(0,1fr)); }
+.horizon-card dd { overflow-wrap: anywhere; }
+.horizon-card .stock-report-disclosure > summary { min-height: 40px; padding-block: 8px; }
+.dashboard :is(.horizon-workspace,.autonomous-overview) .tablewrap { max-width: 100%; min-width: 0; overflow-x: auto; }
+.dashboard :is(.horizon-workspace,.autonomous-overview) .tablewrap table { min-width: max-content; }
+.dashboard :is(.horizon-workspace,.autonomous-overview) .tablewrap :is(th,td) { white-space: normal; max-width: 360px; overflow-wrap: anywhere; }
+.dashboard :is(.horizon-workspace,.autonomous-overview,.appearance-panel,.atlas-notification-panel) :is(summary,button,a,.tablewrap):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dashboard :is(.appearance-panel,.atlas-notification-panel) { box-sizing: border-box; overscroll-behavior: contain; }
+.dashboard :is(.appearance-panel,.atlas-notification-panel) :is(button,select) { max-width: 100%; white-space: normal; }
+.dashboard .atlas-notification-filters { flex-wrap: wrap; min-width: 0; }
+.dashboard .atlas-notification-filters select { min-width: 0; max-width: 100%; }
+@media (max-width: 540px) {
+ .horizon-card { padding: 12px; }
+ .horizon-card dl { gap: 6px; }
+ .horizon-card .stock-report-disclosure { padding: 10px; }
+ .dashboard :is(.horizon-workspace,.autonomous-overview) .tablewrap :is(th,td) { max-width: 240px; }
+}
+@media (prefers-reduced-motion: reduce) {
+ .dashboard :is(.horizon-workspace,.autonomous-overview,.appearance-panel,.atlas-notification-panel) { scroll-behavior: auto; }
+}

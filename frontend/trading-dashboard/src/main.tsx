@@ -1,6 +1,8 @@
 import React, {useEffect, useRef, useState} from "react";
 import {createRoot} from "react-dom/client";
 import "./style.css";
+import "./research-accessibility.css";
+import {useOverlayFocus} from "./useOverlayFocus";
 import ResearchHome from "./ResearchHome";
 import WorkspaceNavigation,{pages,validPage} from "./WorkspaceNavigation";
 import AdvancedSection from "./AdvancedSection";
@@ -84,11 +86,11 @@ const getSavedAppearance = ():Appearance => {
 export function AppearanceControls({value, onChange, open, onOpenChange}:{value:Appearance;onChange:(next:Appearance)=>void;open:boolean;onOpenChange:(open:boolean)=>void}) {
   const update = <K extends keyof Appearance>(key:K, next:Appearance[K]) => onChange({...value, [key]:next});
   useEffect(()=>{const close=()=>onOpenChange(false);window.addEventListener("atlas:close-appearance",close);return()=>window.removeEventListener("atlas:close-appearance",close);},[onOpenChange]);
-  useEffect(()=>{if(!open)return;const close=(event:KeyboardEvent)=>{if(event.key==="Escape")onOpenChange(false);};window.addEventListener("keydown",close);return()=>window.removeEventListener("keydown",close);},[open,onOpenChange]);
+  const {triggerRef,panelRef}=useOverlayFocus(open,()=>onOpenChange(false));
   const toggle=()=>{const next=!open;if(next)window.dispatchEvent(new Event("atlas:close-notifications"));onOpenChange(next);};
   return <div className="appearance-shell">
-    <button className="appearance-trigger" type="button" aria-label="Open appearance settings" aria-expanded={open} onClick={toggle}><span className="appearance-spark">✦</span><span>Appearance</span></button>
-    {open && <><button className="appearance-scrim" type="button" aria-label="Close appearance settings" onClick={() => onOpenChange(false)}/><section className="appearance-panel" role="dialog" aria-modal="true" aria-label="Appearance settings">
+    <button ref={triggerRef} className="appearance-trigger" type="button" aria-label="Open appearance settings" aria-haspopup="dialog" aria-expanded={open} onClick={toggle}><span className="appearance-spark">✦</span><span>Appearance</span></button>
+    {open && <><button className="appearance-scrim" type="button" tabIndex={-1} aria-label="Close appearance settings" onClick={() => onOpenChange(false)}/><section ref={panelRef} tabIndex={-1} className="appearance-panel" role="dialog" aria-modal="true" aria-label="Appearance settings">
       <div className="appearance-title"><div><small>DISPLAY</small><strong>Liquid Glass</strong></div><button type="button" aria-label="Close appearance settings" onClick={() => onOpenChange(false)}>×</button></div>
       <div className="setting-group"><label>Theme</label><div className="theme-picker" role="group" aria-label="Theme">
         {(["system", "dark", "light"] as Theme[]).map(theme => <button type="button" key={theme} className={value.theme === theme ? "selected" : ""} aria-pressed={value.theme === theme} onClick={() => update("theme", theme)}>{theme === "system" ? "◐" : theme === "dark" ? "☾" : "☀"}<span>{theme === "system" ? "Auto" : theme}</span></button>)}
