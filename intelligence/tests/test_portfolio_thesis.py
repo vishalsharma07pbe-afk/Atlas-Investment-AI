@@ -1,7 +1,7 @@
 import os
 import tempfile
 import unittest
-from datetime import datetime,timezone
+from datetime import datetime,timezone,timedelta
 from unittest.mock import patch
 from fastapi.testclient import TestClient
 from app import portfolio_thesis as thesis, automatic_company_evidence as company
@@ -26,12 +26,12 @@ class PortfolioThesisTests(unittest.TestCase):
 
     def test_local_model_only_and_evidence_hash(self):
         item=thesis._items(thesis.selection(self.rows))[0]
-        item["company_evidence"]={"sections":{"ratios":{"data":[{"name":"P/E","company_value":20,"sector_value":15,"unit":"RATIO"},{"name":"Unknown ratio","company_value":999}]}}}
+        item["company_evidence"]={"isin":item["isin"],"sections":{"ratios":{"status":"AVAILABLE","data":[{"name":"P/E","company_value":20,"sector_value":15,"unit":"RATIO","sector_unit":"RATIO"},{"name":"Unknown ratio","company_value":999}]}}}
         def runner(prompt,ids,providers):
             self.assertEqual(providers,["OLLAMA"])
             self.assertNotIn("private-owner",prompt)
             self.assertNotIn("999",prompt)
-            return {"status":"MODEL_GROUNDED","provider":"OLLAMA","response":{"findings":[{"statement":"Company ratio exceeds the sector ratio.","evidence_ids":["RATIOS"]}]}}
+            return {"status":"MODEL_GROUNDED","provider":"OLLAMA","response":{"findings":[{"statement":'{"path":"/RATIOS/PE/company","value":20}',"evidence_ids":["RATIOS"]}]}}
         with patch.object(thesis,"_local_enabled",return_value=True):
             thesis._review([item],thesis.connect,runner,datetime.now(timezone.utc))
             with thesis.connect() as db:
@@ -82,3 +82,43 @@ class PortfolioThesisTests(unittest.TestCase):
             self.assertEqual(thesis.fund_evidence([{**row,"amfi_metadata_date":"2026-11-01"}],instant),{})
         with patch.object(fund_disclosures,"permitted",return_value=False):
             self.assertEqual(thesis.fund_evidence([row],instant),{})
+
+    def test_local_claims_reject_wrong_value_prose_and_unsafe_units(self):
+        item=thesis._items(thesis.selection(self.rows))[0]
+        row={"name":"P/E","company_value":20,"sector_value":15,"unit":"RATIO","sector_unit":"RATIO"}
+        item["company_evidence"]={"isin":item["isin"],"sections":{"ratios":{"status":"AVAILABLE","data":[row]}}}
+        pack=thesis._pack(item)
+        self.assertEqual(pack["RATIOS"]["PE"]["company"],20)
+        def runner(prompt,ids,providers):
+            self.assertEqual(providers,["OLLAMA"])
+            self.assertNotIn(item["isin"],prompt)
+            return {"status":"MODEL_GROUNDED","provider":"OLLAMA","response":{"findings":[
+                {"statement":'{"path":"/RATIOS/PE/company","value":999}',"evidence_ids":["RATIOS"]},
+                {"statement":"Unsupported prose","evidence_ids":["RATIOS"]}]}}
+        with patch.object(thesis,"_local_enabled",return_value=True):
+            thesis._review([item],thesis.connect,runner,datetime.now(timezone.utc))
+        with thesis.connect() as db:
+            self.assertEqual(tuple(db.execute("SELECT status,payload FROM portfolio_local_ai").fetchone()),("UNAVAILABLE",None))
+        item["company_evidence"]["sections"]["ratios"]["data"]=[row,{**row,"name":"PE"}]
+        self.assertIsNone(thesis._pack(item))
+        item["company_evidence"]["sections"]["ratios"]["data"]=[{**row,"sector_unit":"PRIVATE_TEXT"}]
+        self.assertIsNone(thesis._pack(item))
+
+    def test_removed_identity_archive_and_expired_model_cache_are_pruned_only_locally(self):
+        from app import autonomous_research as public
+        now=datetime.now(timezone.utc)
+        with thesis.connect() as db:
+            company._table(db)
+            thesis._table(db)
+            db.execute("INSERT INTO automatic_company_annual_archive VALUES(?,?,?)",(self.rows[0]["isin"],now.isoformat(),"{}"))
+            db.execute("INSERT INTO portfolio_local_ai VALUES(?,?,?,?)",("old",(now-timedelta(days=8)).isoformat(),"AVAILABLE","[]"))
+        with public._connect() as db:
+            company._table(db)
+            db.execute("INSERT INTO automatic_company_annual_archive VALUES(?,?,?)",(self.rows[0]["isin"],now.isoformat(),"{}"))
+        with patch.object(company,"refresh"),patch.object(thesis.news,"refresh"),patch.object(company,"attach"),patch.object(thesis.news,"attach"),patch.object(thesis,"_review"):
+            thesis.refresh(loader=lambda _:[],instant=now)
+        with thesis.connect() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM automatic_company_annual_archive").fetchone()[0],0)
+            self.assertEqual(db.execute("SELECT count(*) FROM portfolio_local_ai").fetchone()[0],0)
+        with public._connect() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM automatic_company_annual_archive").fetchone()[0],1)

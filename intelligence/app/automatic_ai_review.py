@@ -110,7 +110,9 @@ def evidence(candidate, horizon, context=None):
 
 def identity(pack, selected=None):
     # A changed permitted provider plan never silently reuses a completed committee.
-    scope={"evidence":pack,"plan":list(selected or [])}
+    plan=list(selected or [])
+    models={p:os.getenv("ATLAS_"+p+"_MODEL",ai_failover.DEFAULT_MODELS.get(p,"")) for p in plan}
+    scope={"evidence":pack,"plan":plan,"models":models}
     return sha256(json.dumps(scope, sort_keys=True, allow_nan=False).encode()).hexdigest()
 
 
@@ -260,7 +262,14 @@ def refresh(snapshot, connect, runner=ai_failover.grounded_research):
 
 
 def attach(snapshot, connect):
-    # Only display reviews for the exact current evidence and permitted plan.
+    # Always clear previously attached reviews, even if permission or evidence changes.
+    for section in snapshot.get("sections",[]):
+        for group in ((section.get("result") or {}).get("horizons") or {}).values():
+            if isinstance(group,dict):
+                for item in group.get("candidates",[]):
+                    if isinstance(item,dict):
+                        item.pop("ai_review",None)
+    # Only display reviews for the exact current evidence, model and permitted plan.
     if not snapshot["enabled"] or not enabled():
         snapshot["automatic_ai_status"]="DISABLED"
         return snapshot

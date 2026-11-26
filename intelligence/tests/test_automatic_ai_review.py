@@ -132,3 +132,22 @@ class AutomaticAiReviewTests(unittest.TestCase):
             self.assertEqual(committee["status"],"PARTIAL_REVIEWS")
             self.assertEqual(committee["members"][1]["status"],"NO_USABLE_REVIEW")
             self.assertEqual(committee["reviewed_count"],2)
+
+    def test_changed_model_and_disabled_permissions_clear_attached_review(self):
+        data=snapshot()
+        def runner(prompt,ids,providers):
+            return {"status":"MODEL_GROUNDED","provider":providers[0],"response":{"findings":[
+                {"statement":'{"path":"/OBS/observations/atr_percent","value":2}',"evidence_ids":["OBS"]}]}}
+        with patch.object(review.ai_failover,"_enabled",return_value=True),patch.dict(os.environ,{"ATLAS_OLLAMA_MODEL":"first"}):
+            review.refresh(data,research._connect,runner)
+            review.attach(data,research._connect)
+            item=data["sections"][0]["result"]["horizons"]["SWING"]["candidates"][0]
+            self.assertIn("ai_review",item)
+            with patch.dict(os.environ,{"ATLAS_OLLAMA_MODEL":"second"}):
+                review.attach(data,research._connect)
+                self.assertNotIn("ai_review",item)
+            review.attach(data,research._connect)
+            self.assertIn("ai_review",item)
+            with patch.dict(os.environ,{"ATLAS_AUTOMATIC_AI_REVIEW_ENABLED":"false"}):
+                review.attach(data,research._connect)
+                self.assertNotIn("ai_review",item)
