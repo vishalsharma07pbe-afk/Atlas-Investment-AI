@@ -38,11 +38,25 @@ fi
 # with a one-off Compose run. No credentials are printed.
 docker compose "${compose_args[@]}" config --quiet
 for service in postgres intelligence; do
-  if [[ -z "$(docker compose "${compose_args[@]}" ps --status running -q "$service")" ]]; then
+  container_id="$(docker compose "${compose_args[@]}" ps --status running -q "$service")"
+  if [[ -z "$container_id" ]]; then
     printf 'Backup blocked: selected %s service %s is not running\n' "$mode" "$service" >&2
     exit 1
   fi
+  if [[ ! "$container_id" =~ ^[a-f0-9]{12,64}$ ]]; then
+    printf 'Backup blocked: expected exactly one running container per source service\n' >&2
+    exit 1
+  fi
+  if [[ "$service" == intelligence ]]; then
+    intelligence_id="$container_id"
+  fi
 done
+# Inspect the actual installed image, not a mutable tag or a Compose build.
+intelligence_image="$(docker inspect --format '{{.Image}}' "$intelligence_id")"
+if [[ ! "$intelligence_image" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+  printf 'Backup blocked: installed intelligence image not identified\n' >&2
+  exit 1
+fi
 mkdir -p "$backup_root"
 if [[ -e "$final_dir" || -L "$final_dir" ]]; then
   printf 'Backup destination already exists; refusing overwrite\n' >&2
@@ -72,7 +86,10 @@ docker compose "${compose_args[@]}" exec -T postgres sh -c 'pg_dump -U "$POSTGRE
 # Quiesce SQLite and JSON state before streaming its named volumes.
 intelligence_stopped=true
 docker compose "${compose_args[@]}" stop intelligence >/dev/null
-docker compose "${compose_args[@]}" run --rm --no-deps --no-build -T intelligence python -m app.ops_snapshot > "$work_dir/intelligence-state.tar.gz"
+# Compose run has no portable --no-build option. Use the installed image ID
+# and exact stopped source mounts, read-only, without network or env secrets.
+docker run --rm --pull never --network none --volumes-from "$intelligence_id:ro" \
+  --entrypoint python "$intelligence_image" -m app.ops_snapshot > "$work_dir/intelligence-state.tar.gz"
 docker compose "${compose_args[@]}" start intelligence >/dev/null
 intelligence_stopped=false
 

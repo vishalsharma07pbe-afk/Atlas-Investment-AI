@@ -181,6 +181,44 @@ class BackupVerificationTests(unittest.TestCase):
             self.assertNotIn(" run ",log.read_text())
 
 
+    def test_backup_archives_exact_installed_image_and_read_only_mounts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            docker=root/"docker"
+            log=root/"calls"
+            image="sha256:"+"a"*64
+            container="b"*64
+            archive=root/"fixture.tar.gz"
+            with tarfile.open(archive,"w:gz") as tar:
+                info=tarfile.TarInfo("journal/owners/test.json")
+                payload=b"[]"
+                info.size=len(payload)
+                tar.addfile(info,io.BytesIO(payload))
+            docker.write_text("""#!/bin/sh
+printf '%s\\n' "$*" >> "$ATLAS_FAKE_LOG"
+case "$*" in
+  *"config --quiet"*) exit 0;;
+  *"ps --status running -q"*) printf '%s\\n' "$ATLAS_FAKE_CONTAINER";;
+  "inspect --format "*) printf '%s\\n' "$ATLAS_FAKE_IMAGE";;
+  *"exec -T postgres "*) printf 'synthetic dump';;
+  *"stop intelligence"*|*"start intelligence"*) exit 0;;
+  "run --rm --pull never --network none --volumes-from "*) cat "$ATLAS_FAKE_ARCHIVE";;
+  *) exit 99;;
+esac
+""")
+            docker.chmod(0o700)
+            env=dict(os.environ,PATH=str(root)+os.pathsep+os.environ["PATH"],ATLAS_FAKE_LOG=str(log),
+                     ATLAS_FAKE_IMAGE=image,ATLAS_FAKE_CONTAINER=container,ATLAS_FAKE_ARCHIVE=str(archive),
+                     ATLAS_BACKUP_DIR=str(root/"backups"),ATLAS_PRODUCTION_ENV_FILE="",
+                     ATLAS_PRODUCTION_COMPOSE_FILE=str(ROOT/"docker-compose.production.yml"))
+            result=subprocess.run(["bash",str(ROOT/"scripts/backup-production.sh")],cwd=ROOT,env=env,capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertIn("run --rm --pull never --network none --volumes-from "+container+":ro --entrypoint python "+image+" -m app.ops_snapshot",log.read_text())
+            self.assertNotIn("--no-build",log.read_text())
+            backups=list((root/"backups").iterdir())
+            self.assertEqual(len(backups),1)
+            self.assertEqual(verify_backup.verify(backups[0])["status"],"VERIFIED")
+
     def test_recovery_checks_exact_alert_and_scheduler_registration(self):
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/"research.sqlite3"
