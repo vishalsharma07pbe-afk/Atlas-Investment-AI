@@ -100,7 +100,21 @@ def assess(item,group,coverage,context,horizon,today):
         elif costs[0]["net_return_percent"]<=0:warnings.add("NONPOSITIVE_BASE_COST_REPLAY")
     gate("HISTORICAL_VALIDATION",replay_ok,requirements)
     prospective=reliability.get("prospective_status")=="DESCRIPTIVE_SAMPLE_AVAILABLE"
-    gate("PROSPECTIVE_VALIDATION",prospective,["INDEPENDENT_PROSPECTIVE_STRATEGY_VALIDATION_REQUIRED"])
+    history=((context.get("research_reliability") or {}).get("horizons") or {}).get(horizon) or {}
+    paths=history.get("risk_path_summary") or {}
+    benchmark=history.get("benchmark_summary") or {}
+    requirements=["INDEPENDENT_PROSPECTIVE_STRATEGY_VALIDATION_REQUIRED"]
+    if not (_num(paths.get("coverage_percent")) and paths["coverage_percent"]>=80
+            and type(paths.get("observed_paths")) is int and paths["observed_paths"]>=30):
+        requirements.append("REPRESENTATIVE_PROSPECTIVE_DOWNSIDE_EVIDENCE_REQUIRED")
+    if not (_num(benchmark.get("coverage_percent")) and benchmark["coverage_percent"]>=80
+            and type(benchmark.get("matched_outcomes")) is int and benchmark["matched_outcomes"]>=30):
+        requirements.append("MATCHED_PROSPECTIVE_BENCHMARK_EVIDENCE_REQUIRED")
+    else:
+        paired=[r for r in benchmark.get("cost_scenarios",[]) if r.get("cost_bps_per_side")==30]
+        if len(paired)==1 and _num(paired[0].get("mean_net_minus_price_index_pp")) and paired[0]["mean_net_minus_price_index_pp"]<=0:
+            warnings.add("NONPOSITIVE_PROSPECTIVE_NET_INDEX_DIFFERENCE")
+    gate("PROSPECTIVE_VALIDATION",prospective,requirements)
 
     regime=context.get("market_regime") or {}
     regime_ok=regime.get("status")=="OBSERVED_BENCHMARK_REGIME" and regime.get("as_of")==item.get("as_of")

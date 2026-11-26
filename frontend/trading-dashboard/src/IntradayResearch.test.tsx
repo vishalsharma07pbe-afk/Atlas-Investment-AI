@@ -16,3 +16,11 @@ it("distinguishes a failed breakout from a qualifying volume breakout",async()=>
  expect(await screen.findByText("TEST · NSE")).toBeTruthy();
  expect(screen.getByText("No qualifying observations.")).toBeTruthy();
 });
+
+it("keeps intraday qualification separate from current technical patterns",async()=>{
+ const qualification={status:"NO_QUALIFIED_IN_REVIEWED_SAMPLE",reviewed_count:1,review_required_count:1,qualified_count:0,unidentified_listing_count:1,cross_venue_company_count:1,conflicting_company_count:1,leading_blockers:[],notice:"Exact identities only."};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({status:"RESEARCH_ONLY",eligible:3,examined:3,candidates:[],warnings:[],qualification,notice:"Research only."})})));
+ render(<IntradayResearch/>);
+ expect(await screen.findByText(/0 qualified in reviewed sample/)).toBeTruthy();
+ expect(screen.getByText(/1 conflicting companies/)).toBeTruthy();
+});
