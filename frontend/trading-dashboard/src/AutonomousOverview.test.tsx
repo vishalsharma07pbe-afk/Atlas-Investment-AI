@@ -142,3 +142,29 @@ it("links canonical briefing watches and company evidence review to existing wor
  expect(portfolio).toHaveBeenCalledTimes(1);
  expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+
+it("keeps the briefing first and evidence in expandable sections without duplicate navigation or requests",async()=>{
+ const navigate=vi.fn();
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[{section:"NSE",status:"READY",generated_at:null,result:{momentum_leaders:[{id:1,symbol:"MOMENTUM",exchange:"NSE",as_of:"2026-11-23",momentum_20d_percent:3}]}}],global_fx:{status:"REFERENCE_RATES_AVAILABLE",items:[],notice:"Reference only."},daily_briefing:{
+ status:"PARTIAL",ready_sections:1,total_sections:12,market:{eligible_histories:1,sampled_instruments:2,outlook_status:"MARKET_REGIME_NOT_VALIDATED"},horizons:{},funds:{growth_pick_count:null,historical_watch_count:0,ready_categories:0,total_categories:10},institutional:{status:"UNAVAILABLE"},leading_evidence_gaps:[],notice:"Not a forecast",
+ decision_context:{horizons:{SWING:{selected_watches:[{isin:"INE009A01021",id:1,exchange:"NSE",symbol:"TEST",as_of:"2026-11-23",unresolved_requirement_count:2}],qualified_count:0}},review_company_count:0,review_companies:[],regime:{status:"UNAVAILABLE"},global_coverage:null,notice:"Review only."}}})})));
+ render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}} onHorizon={navigate}>{null}</AutonomousOverview>);
+ expect(await screen.findByRole("region",{name:"Daily research briefing"})).toBeTruthy();
+ const observations=screen.getByText("Market and fund observation details").closest("details")!;
+ const global=screen.getByText("Detailed market regime and global evidence").closest("details")!;
+ const selected=screen.getByText("View 1 selected observations").closest("details")!;
+ expect(observations.open).toBe(false);
+ expect(global.open).toBe(false);
+ expect(selected.open).toBe(false);
+ expect(screen.queryByLabelText("Automatic equity research shortcuts")).toBeNull();
+ fireEvent.click(screen.getByText("Detailed market regime and global evidence"));
+ expect(global.open).toBe(true);
+ expect(screen.getByRole("region",{name:"Global currency context"})).toBeTruthy();
+ fireEvent.click(screen.getByText("View 1 selected observations"));
+ expect(selected.open).toBe(true);
+ expect(screen.getByText(/TEST · NSE/)).toBeTruthy();
+ fireEvent.click(screen.getByRole("button",{name:"Review swing research"}));
+ expect(navigate).toHaveBeenCalledWith("SWING");
+ expect(fetch).toHaveBeenCalledTimes(1);
+});
