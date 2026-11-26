@@ -465,11 +465,15 @@ class LiveFeedsDatabaseIntegrationTest {
     new org.springframework.transaction.support.TransactionTemplate(
       new org.springframework.jdbc.datasource.DataSourceTransactionManager(Objects.requireNonNull(db.getDataSource()))));
   org.springframework.test.util.ReflectionTestUtils.setField(scheduler,"enabled",true);
-  String raw="Open Ended Schemes(Equity Scheme - Large Cap Fund)\\nExample Mutual Fund\\n"
+  String raw="Open Ended Schemes(Equity Scheme - Large Cap Fund)\nExample Mutual Fund\n"
     +code+";INF000A01003;-;Example Fund;Direct Plan;Growth Option;100;"
     +today.format(java.time.format.DateTimeFormatter.ofPattern("dd-MMM-uuuu",Locale.ENGLISH));
   when(fundMock.refresh()).thenAnswer(invocation->funds.importNav(raw));
+  assertThat((Boolean)org.springframework.test.util.ReflectionTestUtils.invokeMethod(scheduler,"navMetadataNeedsRefresh")).isTrue();
   scheduler.ensureNav();
+  verify(fundMock,times(1)).refresh();
+  assertThat(db.queryForMap("SELECT status,error_code FROM public_feed_schedule WHERE provider='AMFI'"))
+    .containsEntry("status","SUCCESS").containsEntry("error_code",null);
   assertThat(db.queryForMap("SELECT amfi_plan,amfi_option FROM mutual_fund_schemes WHERE scheme_code=?",code))
     .containsEntry("amfi_plan","DIRECT").containsEntry("amfi_option","GROWTH");
   assertThat(db.queryForObject("SELECT amfi_metadata_date::text FROM mutual_fund_schemes WHERE scheme_code=?",String.class,code))
