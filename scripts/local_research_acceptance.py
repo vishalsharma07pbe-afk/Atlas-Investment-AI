@@ -240,7 +240,99 @@ def assess_final_contracts(intraday,personal,journal,review):
             "POPULATED_PORTFOLIO_ACCURACY","ACTUAL_LOCAL_UPGRADE_AND_RECOVERY",
             "REPRESENTATIVE_RESOURCE_AND_UX_VERIFICATION","ACTUAL_LOCAL_PRIVACY_VERIFICATION"]}
 
-def collect(request):
+STOCK_DOMAINS=("TECHNICAL","EXECUTION_AND_RISK","FUNDAMENTALS","VALUATION",
+    "OWNERSHIP_AND_INSTITUTIONAL","EVENT_RISK","HISTORICAL_VALIDATION",
+    "PROSPECTIVE_VALIDATION","MARKET_REGIME_AND_GLOBAL_CONTEXT","AI_COMMITTEE")
+FUND_GATES=frozenset(("OFFICIAL_CATEGORY","EXACT_DIRECT_GROWTH_PLAN",
+    "CATEGORY_SPECIFIC_RISK_MODEL_REQUIRED","CATEGORY_STRATEGY_MISMATCH","FRESH_DATED_NAV",
+    "OFFICIAL_RISKOMETER","THREE_YEAR_NAV_HISTORY","EXPENSE_RATIO","UNDERLYING_INDEX",
+    "TRACKING_DIFFERENCE","TRACKING_ERROR","ONE_YEAR_RETURN","THREE_YEAR_RETURN",
+    "PEER_PERCENTILE","BENCHMARK_HIT_RATE","WORST_ROLLING_RETURN","MAX_DRAWDOWN",
+    "VOLATILITY","RECENT_PORTFOLIO_DISCLOSURE","PORTFOLIO_COVERAGE_80_PERCENT",
+    "INDEX_OUTLOOK_COVERAGE_70_PERCENT","EARNINGS_COVERAGE_70_PERCENT",
+    "VALUATION_COVERAGE_60_PERCENT","FORWARD_EARNINGS_GROWTH","VALUATION_EVIDENCE",
+    "SECTOR_DRIVERS","CONCENTRATION","LIQUIDITY","DUPLICATE_SCHEME_IDENTITY",
+    "SELECTED_HORIZON_OR_RISK_REVIEW_REQUIRED"))
+STOCK_GATE_STATES=("PARTIAL_CONTEXT","MISSING_EVIDENCE","OBSERVATION_CHECKS_MET",
+                   "SUPPLEMENTARY_MATCHED_CLAIMS","SUPPLEMENTARY_UNAVAILABLE")
+
+def _bounded_count(value,maximum=1000000):
+    return value if _count(value) and value<=maximum else None
+
+def qualification_audit(overview):
+    """Aggregate existing public evidence; never echo identifiers or unknown strings.
+
+    A missing gate is not a passed gate. Audit coverage is separate from certification.
+    """
+    section_rows=_list(overview.get("sections"))
+    def section(key):
+        matches=[r for r in section_rows if isinstance(r,dict) and r.get("section")==key]
+        return _obj(matches[0].get("result")) if len(matches)==1 and matches[0].get("status")=="READY" else {}
+    stocks={}
+    reports=_obj(_obj(overview.get("stock_qualification")).get("horizons"))
+    reliability=_obj(_obj(overview.get("research_reliability")).get("horizons"))
+    for horizon in DAILY_HORIZONS:
+        report=_obj(reports.get(horizon))
+        domains={domain:{state:0 for state in STOCK_GATE_STATES}|{"UNKNOWN":0} for domain in STOCK_DOMAINS}
+        coverage={}
+        for venue in ("NSE","BSE"):
+            result=section(venue)
+            group=_obj(_obj(result.get("horizons")).get(horizon))
+            candidates=group.get("candidates")
+            coverage[venue]={"eligible_history_count":_bounded_count(result.get("eligible_count")),
+                             "watch_rows":len(candidates) if isinstance(candidates,list) and len(candidates)<=100 else None}
+            if coverage[venue]["watch_rows"] is None:
+                continue
+            seen=set()
+            for item in candidates:
+                key=_ref(item)
+                if key is None or key[0]!=venue or key in seen:
+                    continue
+                seen.add(key)
+                decision=_obj(item.get("stock_qualification"))
+                gates=_list(decision.get("gates"))
+                for domain in STOCK_DOMAINS:
+                    matched=[g for g in gates if isinstance(g,dict) and g.get("domain")==domain]
+                    state=matched[0].get("status") if len(matched)==1 else None
+                    domains[domain][state if state in STOCK_GATE_STATES else "UNKNOWN"]+=1
+        prospective=_obj(reliability.get(horizon))
+        stocks[horizon]={"market_coverage":coverage,"reviewed_count":_bounded_count(report.get("reviewed_count")),
+            "qualified_count":_bounded_count(report.get("qualified_count")),"domain_counts":domains,
+            "prospective_mature_watches":_bounded_count(prospective.get("selected_mature_watches")),
+            "prospective_observed_outcomes":_bounded_count(prospective.get("observed_outcomes")),
+            "prospective_distinct_isins":_bounded_count(prospective.get("distinct_observed_isins"))}
+    funds={}
+    for category in sorted(SECTIONS-{"NSE","BSE"}):
+        result=section(category)
+        historical=_obj(result.get("historical_coverage"))
+        summary=_obj(result.get("qualification_summary"))
+        evaluated=_bounded_count(summary.get("evaluated_count"),40)
+        excluded=summary.get("excluded")
+        def gap_counts(field):
+            if evaluated is None or not isinstance(excluded,list) or len(excluded)>evaluated:
+                return None
+            counts={}
+            seen=set()
+            for row in excluded:
+                if not isinstance(row,dict) or not isinstance(row.get("identifier"),str) or row["identifier"] in seen:
+                    return None
+                seen.add(row["identifier"])
+                values=row.get(field)
+                if not isinstance(values,list) or any(not isinstance(v,str) for v in values):
+                    return None
+                for gate in {v if v in FUND_GATES else "UNKNOWN_GATE" for v in values}:
+                    counts[gate]=counts.get(gate,0)+1
+            return counts
+        funds[category]={"history_sample_count":_bounded_count(historical.get("sample_count"),40),
+            "history_eligible_count":_bounded_count(historical.get("eligible_count"),40),
+            "evaluated_count":evaluated,"top_eligible_count":_bounded_count(summary.get("top_eligible_count"),40),
+            "growth_eligible_count":_bounded_count(summary.get("growth_eligible_count"),40),
+            "top_missing_gate_counts":gap_counts("top_performer_missing"),
+            "growth_missing_gate_counts":gap_counts("growth_outlook_missing")}
+    return {"status":"EVIDENCE_AUDIT_ONLY","stocks":stocks,"funds":funds,
+            "notice":"Counts describe bounded existing snapshots; null means unavailable, not zero. No new data acquisition, investment recommendation or certification."}
+
+def collect(request,include_qualification_audit=False):
     readiness=request("/intelligence/api/v1/intelligence/data-readiness")
     overview=request("/intelligence/api/v1/intelligence/research/overview")
     review=request("/api/v1/portfolio/review")
@@ -256,6 +348,8 @@ def collect(request):
     final=assess_final_contracts(intraday,personal,journal,review)
     result["checks"].update(final.pop("checks"))
     result.update(final)
+    if include_qualification_audit:
+        result["qualification_audit"]=qualification_audit(overview)
     if workflows["workflow_runtime"]!="PASS" or final["final_runtime"]!="PASS":
         result["runtime"]="BLOCKED"
     return result
@@ -264,6 +358,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url",choices=BASES,default=BASES[0])
     parser.add_argument("--require-live",action="store_true",help="Require a fresh tick during an expected live trading session")
+    parser.add_argument("--qualification-audit",action="store_true",help="Include redacted stock and fund evidence gap counts")
     args=parser.parse_args()
     session=LocalSession(args.base_url)
     result=None
@@ -279,7 +374,7 @@ def main():
         session.token=token
         del login,token
         session.request("/api/v1/auth/me")
-        result=collect(session.request)
+        result=collect(session.request,include_qualification_audit=args.qualification_audit)
     except (RuntimeError,ValueError,TypeError,KeyError,AttributeError):
         print(json.dumps({"runtime":"BLOCKED","reason":"LOCAL_ACCEPTANCE_REQUEST_OR_CONTRACT_FAILED"}))
         return 1

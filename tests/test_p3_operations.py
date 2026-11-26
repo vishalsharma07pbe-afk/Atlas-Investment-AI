@@ -105,6 +105,30 @@ class LocalAcceptanceTests(unittest.TestCase):
         ctx.update(status="DISABLED",held_excluded_count=-1)
         self.assertEqual(acceptance.assess(r,o,p)["checks"]["portfolio_review_contract"],"BLOCKED")
 
+    def test_qualification_audit_counts_only_fixed_public_evidence_labels(self):
+        r,o,p,n=self.workflow_fixture()
+        nse=next(x for x in o["sections"] if x["section"]=="NSE")["result"]
+        item={"id":1,"exchange":"NSE","isin":"INE009A01021","symbol":"PRIVATE_MARKER",
+              "stock_qualification":{"gates":[{"domain":"FUNDAMENTALS","status":"PARTIAL_CONTEXT"},
+                  {"domain":"VALUATION","status":"PRIVATE_MARKER"}]}}
+        nse["horizons"]["SWING"]["candidates"]=[item,item]
+        fund=next(x for x in o["sections"] if x["section"]=="LARGE_CAP")["result"]
+        fund["qualification_summary"]={"evaluated_count":1,"top_eligible_count":0,"growth_eligible_count":0,
+            "excluded":[{"identifier":"PRIVATE_MARKER","top_performer_missing":["EXPENSE_RATIO","EXPENSE_RATIO","PRIVATE_MARKER"],
+                         "growth_outlook_missing":["OFFICIAL_RISKOMETER"]}]}
+        result=acceptance.qualification_audit(o)
+        swing=result["stocks"]["SWING"]
+        self.assertEqual(swing["domain_counts"]["FUNDAMENTALS"]["PARTIAL_CONTEXT"],1)
+        self.assertEqual(swing["domain_counts"]["VALUATION"]["UNKNOWN"],1)
+        self.assertIsNone(swing["prospective_observed_outcomes"])
+        self.assertEqual(result["funds"]["LARGE_CAP"]["top_missing_gate_counts"],{"EXPENSE_RATIO":1,"UNKNOWN_GATE":1})
+        self.assertEqual(result["funds"]["LARGE_CAP"]["growth_missing_gate_counts"],{"OFFICIAL_RISKOMETER":1})
+        self.assertIsNone(result["funds"]["SMALL_CAP"]["evaluated_count"])
+        self.assertNotIn("PRIVATE_MARKER",str(result))
+        self.assertNotIn("INE009A01021",str(result))
+        fund["qualification_summary"]["excluded"]*=2
+        self.assertIsNone(acceptance.qualification_audit(o)["funds"]["LARGE_CAP"]["top_missing_gate_counts"])
+
     def test_empty_and_stale_sources_cannot_pass(self):
         r, o, p = self.fixture()
         r["backend_evidence"][0]["records"] = 0
