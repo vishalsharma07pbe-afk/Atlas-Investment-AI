@@ -22,6 +22,8 @@ class UpstoxAuthorizationTests(unittest.TestCase):
         self.assertEqual(authorize_feed("private-token",client),uri)
         self.assertEqual(client.request.full_url,AUTHORIZE_URL)
         self.assertEqual(client.request.get_header("Authorization"),"Bearer private-token")
+        self.assertEqual(client.request.get_header("User-agent"),"ATLAS/2.0")
+        self.assertEqual(client.request.get_header("Accept"),"application/json")
 
     def test_reject_untrusted_signed_redirect(self):
         client=FakeOpener({"status":"success","data":{"authorized_redirect_uri":"wss://evil.test/?code=secret"}})

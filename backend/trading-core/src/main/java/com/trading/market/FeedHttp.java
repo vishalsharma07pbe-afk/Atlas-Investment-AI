@@ -26,12 +26,20 @@ import org.springframework.stereotype.Service;
   if(value==null||!value.matches("[0-9]{1,18}"))return 0;
   try{return Math.min(3600,Long.parseLong(value));}catch(NumberFormatException ex){return 0;}
  }
- public byte[] get(String url,String token,int maxBytes) throws Exception{
+ static HttpRequest request(String url,String token){
   URI uri=URI.create(url);
   if(!"https".equals(uri.getScheme()))throw new IllegalArgumentException("HTTPS required");
-  HttpRequest.Builder b=HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(25)).header("Accept","application/json,text/plain,*/*").GET();
+  // Stable truthful identification for the Upstox REST and public registry
+  // clients. Other providers retain their existing request behavior.
+  boolean upstox="api.upstox.com".equalsIgnoreCase(uri.getHost())||"assets.upstox.com".equalsIgnoreCase(uri.getHost());
+  HttpRequest.Builder b=HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(25))
+    .header("Accept",upstox&&!url.endsWith(".gz")?"application/json":"application/json,text/plain,*/*").GET();
+  if(upstox)b.header("User-Agent","ATLAS/2.0");
   if(token!=null)b.header("Authorization","Bearer "+token);
-  HttpResponse<InputStream> response=client.send(b.build(),HttpResponse.BodyHandlers.ofInputStream());
+  return b.build();
+ }
+ public byte[] get(String url,String token,int maxBytes) throws Exception{
+  HttpResponse<InputStream> response=client.send(request(url,token),HttpResponse.BodyHandlers.ofInputStream());
   try(InputStream raw=response.body()){
    if(response.statusCode()!=200)throw new ProviderHttpException(response.statusCode(),numericRetryAfter(response.headers().firstValue("Retry-After").orElse(null)));
    InputStream stream=url.endsWith(".gz")?new GZIPInputStream(raw):raw;

@@ -44,7 +44,7 @@ class MultiProviderTests(unittest.TestCase):
         response=Mock(status_code=200,content=b'{"status":"success"}')
         with patch.object(multi.httpx,"get",return_value=response) as get:
             multi._request("https://api.upstox.com",{"Accept":"application/json"})
-        self.assertEqual(get.call_args.kwargs["headers"]["User-Agent"],"ATLAS-Research/1.0")
+        self.assertEqual(get.call_args.kwargs["headers"]["User-Agent"],"ATLAS/2.0")
     def test_ambiguous_cross_market_identity_never_routes(self):
         stamp = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
         def fake_request(url, headers):

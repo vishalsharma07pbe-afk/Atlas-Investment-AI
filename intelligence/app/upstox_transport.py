@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable
 from .upstox_authorization import AuthorizationError, authorize_feed
 from .upstox_stream import StreamPolicy,subscription_request
+from .upstox_http_identity import USER_AGENT
 
 @dataclass(frozen=True)
 class TransportPolicy:
@@ -69,7 +70,8 @@ async def receive_session(
     count=0
     try:
         async with connect(uri,open_timeout=policy.connect_timeout_seconds,
-                           max_size=policy.max_frame_bytes,ping_interval=20,ping_timeout=20) as ws:
+                           max_size=policy.max_frame_bytes,ping_interval=20,ping_timeout=20,
+                           user_agent_header=USER_AGENT) as ws:
             await ws.send(json.dumps(payload).encode("utf-8"))
             if on_connection_change is not None:
                 await on_connection_change(True)
