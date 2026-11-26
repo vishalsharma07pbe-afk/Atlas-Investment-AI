@@ -145,3 +145,40 @@ class FundUnderlyingResearchTests(unittest.TestCase):
                 self.assertEqual(set(research.exact_sector_evidence(holdings,NOW,loaded)),{C})
             with patch.object(company,"permitted",return_value=False):
                 self.assertEqual(research.load(holdings,NOW),{})
+
+    def test_sector_relative_financial_quality_requires_fresh_exact_source_and_groups_units(self):
+        from datetime import timedelta
+        def ratios(isin,sector,pe,roe,age=0):
+            raw=report(isin)
+            stamp=(NOW-timedelta(hours=age)).isoformat()
+            raw["retrieved_at"]=stamp
+            raw["sections"]["profile"]={"status":"AVAILABLE","data":{"sector":sector},"source":{"provider":"UPSTOX","retrieved_at":stamp}}
+            raw["sections"]["ratios"]={"status":"AVAILABLE","source":{"provider":"UPSTOX","retrieved_at":stamp},"data":[
+                {"name":"P/E","company_value":pe,"sector_value":10,"unit":"RATIO","sector_unit":"RATIO"},
+                {"name":"ROE","company_value":roe,"sector_value":10,"unit":"PERCENT","sector_unit":"PERCENT"},
+                {"name":"debt/equity","company_value":.5,"sector_value":1,"unit":"RATIO","sector_unit":"RATIO"}]}
+            return raw
+        holdings=[{"isin":A,"weight_percent":40},{"isin":B,"weight_percent":25},{"isin":C,"weight_percent":10}]
+        rows={A:ratios(A,"Banks",20,12),B:ratios(B," banks ",5,8),C:ratios(C,"Industrials",30,15,25)}
+        result=research.summarize(holdings,NOW,rows)
+        quality=result["sector_relative_financial_quality"]
+        self.assertEqual(quality["status"],"REPORTED_UNDATED_COMPARISONS")
+        self.assertEqual(len(quality["items"]),3)
+        items={r["metric"]:r for r in quality["items"]}
+        pe=items["PE"]
+        self.assertEqual(pe["sector"],"banks")
+        self.assertEqual(pe["coverage_weight_percent"],65)
+        self.assertEqual(pe["above_sector_weight_percent"],40)
+        self.assertEqual(pe["below_sector_weight_percent"],25)
+        self.assertAlmostEqual(pe["covered_subset_weighted_difference"],(40*100-25*50)/65,places=4)
+        self.assertEqual(pe["covered_subset_weighted_median"],100)
+        self.assertEqual(pe["comparison_unit"],"PERCENT_PREMIUM_DISCOUNT")
+        self.assertEqual(items["ROE"]["comparison_unit"],"PERCENTAGE_POINTS")
+        self.assertEqual(items["DEBT_EQUITY"]["comparison_unit"],"RATIO_DIFFERENCE")
+        self.assertEqual(pe["observation_period"],"UNVERIFIED")
+        self.assertIsNone(result["valuation_attractiveness"])
+        rows[A]["sections"]["ratios"]["source"]["retrieved_at"]="invalid"
+        rows[B]["historical_cache_only"]=True
+        result=research.summarize(holdings,NOW,rows)
+        self.assertEqual(result["sector_relative_financial_quality"]["status"],"UNAVAILABLE")
+        self.assertEqual(result["annual_statement_weight_percent"],75)

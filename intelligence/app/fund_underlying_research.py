@@ -188,6 +188,7 @@ def summarize(equities,instant,reports=None):
     quality=0.0
     flagged=0.0
     valuation=defaultdict(lambda:{"coverage":0.0,"above":0.0,"below":0.0,"equal":0.0})
+    sector_comparisons=defaultdict(list)
     seen=set()
     covered=0.0
     exact_weight=0.0
@@ -253,6 +254,27 @@ def summarize(equities,instant,reports=None):
                 bucket=valuation[key]
                 bucket["coverage"]+=w
                 bucket[{"ABOVE_SECTOR":"above","BELOW_SECTOR":"below","AT_SECTOR":"equal"}[ratio["position"]]]+=w
+            # Separate provider-relative financial quality from dated annual
+            # evidence. Retrieval freshness does not date the ratio observation.
+            # Use the same exact ISIN and require a fresh provider sector profile.
+            if raw.get("historical_cache_only") is not True:
+                exact=exact_sector_evidence([h],instant,{isin:raw}).get(isin)
+                source=sections.get("ratios",{}).get("source") or {}
+                if exact and source.get("provider")=="UPSTOX":
+                    try:
+                        stamp=datetime.fromisoformat(source.get("retrieved_at",""))
+                    except (ValueError,TypeError):
+                        stamp=None
+                    if stamp is not None and stamp.tzinfo is not None and instant-timedelta(hours=24)<=stamp<=instant:
+                        for ratio in report["fundamental_quality"]["sector_comparisons"]:
+                            key=ratio["metric"]
+                            if key not in ("PE","PB","EV_EBITDA","ROE","ROCE","ROA","DEBT_EQUITY","INTEREST_COVERAGE"):
+                                continue
+                            value=ratio["premium_discount_percent"] if key in ("PE","PB","EV_EBITDA") else ratio["difference"]
+                            if not _number(value) or abs(value)>1_000_000:
+                                continue
+                            sector_key=" ".join(exact["sector"].casefold().split())
+                            sector_comparisons[(sector_key,key)].append((value,w))
             if raw.get("available_sections",0)>0:
                 if raw.get("historical_cache_only") is True:
                     if current:
@@ -267,6 +289,29 @@ def summarize(equities,instant,reports=None):
         return {"status":"INVALID_HOLDING_IDENTITIES","notice":"No metrics calculated for conflicting holding weights."}
     def rounded(data):
         return {k:round(v,4) for k,v in data.items()}
+    def sector_row(key,observations):
+        sector,metric=key
+        weight=sum(w for _,w in observations)
+        # Weighted median of the covered holdings, not the sector market median.
+        ordered=sorted(observations)
+        cumulative=0.0
+        median=ordered[-1][0]
+        for value,w in ordered:
+            cumulative+=w
+            if cumulative>=weight/2:
+                median=value
+                break
+        return {"sector":sector,"metric":metric,
+            "comparison_unit":"PERCENT_PREMIUM_DISCOUNT" if metric in ("PE","PB","EV_EBITDA") else
+                              "PERCENTAGE_POINTS" if metric in ("ROE","ROCE","ROA") else "RATIO_DIFFERENCE",
+            "holding_count":len(observations),"coverage_weight_percent":round(weight,4),
+            "above_sector_weight_percent":round(sum(w for value,w in observations if value>0),4),
+            "below_sector_weight_percent":round(sum(w for value,w in observations if value<0),4),
+            "equal_sector_weight_percent":round(sum(w for value,w in observations if value==0),4),
+            "covered_subset_weighted_difference":round(sum(value*w for value,w in observations)/weight,4),
+            "covered_subset_weighted_median":round(median,4),
+            "observation_period":"UNVERIFIED","provider":"UPSTOX"}
+    comparisons=[sector_row(k,v) for k,v in sorted(sector_comparisons.items())]
     multi=_multi_year_exposure(multi_year)
     multi["exact_equity_weight_percent"]=round(exact_weight,4)
     multi["unassessed_exact_equity_weight_percent"]=round(max(0.0,exact_weight-multi["assessed_weight_percent"]),4)
@@ -285,5 +330,7 @@ def summarize(equities,instant,reports=None):
             "deteriorated_weight_percent":round(v["deteriorated"],4),"unchanged_weight_percent":round(v["unchanged"],4),
             "covered_subset_weighted_change_pp":round(v["weighted_change"]/v["coverage"],4)}
             for k,v in sorted(margin_trends.items()) if v["coverage"]>0],
+        "sector_relative_financial_quality":{"status":"REPORTED_UNDATED_COMPARISONS" if comparisons else "UNAVAILABLE",
+            "items":comparisons,"notice":"Fresh retrieval, unknown ratio observation date. Original fund weight per sector and metric; weighted mean and median refer only to covered holdings. No universal quality threshold, fair value, forward earnings or investment qualification."},
         "forward_earnings_coverage_percent":None,"valuation_attractiveness":None,
         "notice":"Historical provider reports weighted by disclosed fund exposure, grouped by exact annual periods. Sector and trend weights are partial, not normalized. Annual statements may be reused for seven days with existing fiscal-period checks; older cached statements are historical-only and excluded from fresh company coverage. Ratios and profiles still require retrieval within 24 hours. Relative valuation ratios have unverified observation dates. No forecast, fair value or qualified Growth Outlook."}
