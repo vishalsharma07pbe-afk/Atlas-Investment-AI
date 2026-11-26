@@ -145,3 +145,18 @@ it("uses the exact per-report disclosure beyond the five-item display and preser
  fireEvent.change(screen.getByLabelText("Research report"),{target:{value:"123451"}});
  expect(screen.getByText("No current matched secondary disclosure in this bounded snapshot.")).toBeTruthy();
 });
+
+
+it("shows a full-sample composition without claiming detailed company enrichment or qualification",async()=>{
+ const report={identifier:"123456",name:"Composition-only Fund",category:"LARGE_CAP",plan:"DIRECT",option:"GROWTH",nav:"100",nav_date:"2026-11-24",nav_age_days:1,historical:{sources:["AMFI"],returns_1y:12,returns_3y:14,sample_peer_percentile:80,worst_rolling_return:-8,max_drawdown:-17,volatility:13},secondary_disclosure_available:false,secondary_portfolio_available:false,secondary_portfolio_summary:{status:"SECONDARY_COMPOSITION_ONLY",portfolio_date:"2026-10-31",collected_at:"2026-11-25T04:00:00Z",reported_weight_total_percent:100,asset_allocation_percent:{Equity:60,Cash:40},exact_listed_equity_weight_percent:60,top_10_exact_equity_weight_percent:60,exact_equity_count:1,top_holdings:[{isin:"INE002A01018",name:"Exact Holding",weight_percent:60}],notice:"Secondary reported composition; not independently verified."},top_performer:{status:"WITHHELD",missing:["EXPENSE_RATIO"],published_rank:null},growth_outlook:{status:"WITHHELD",missing:["RECENT_PORTFOLIO_DISCLOSURE"],published_rank:null},suitability:{status:"POTENTIALLY_SUITABLE",flags:[]},conclusion:"Neither list qualifies.",reassessment:"Await official evidence."};
+ const result={...response,coverage:{...response.coverage,secondary_portfolio_composition_matches:1,secondary_portfolio_matches:0},portfolio_evidence:{status:"NOT_AVAILABLE_OR_NOT_AUTHORIZED",items:[],notice:"Enrichment bounded."},research_reports:[report]};
+ vi.stubGlobal("fetch",vi.fn(async(url:string)=>({ok:true,json:async()=>url.includes("historical-watch")?{category:"LARGE_CAP",items:[],universe_count:12,sample_count:10,eligible_count:1,automatic_collection_enabled:true,notice:"Historical only"}:result})));
+ render(<MutualFundResearchDashboard onExplore={()=>{}}/>);
+ await screen.findByText("Individual fund research reports (1)");
+ expect(screen.getByText(/1 exact secondary composition matches/)).toBeTruthy();
+ fireEvent.change(screen.getByLabelText("Research report"),{target:{value:"123456"}});
+ expect(screen.getByText("Exact Holding · 60.00%")).toBeTruthy();
+ expect(screen.getByText("Detailed underlying company enrichment not included in this bounded snapshot.")).toBeTruthy();
+ expect(screen.getByText("Growth Outlook: Withheld")).toBeTruthy();
+ expect(screen.getAllByText("No fund currently qualifies")).toHaveLength(2);
+});

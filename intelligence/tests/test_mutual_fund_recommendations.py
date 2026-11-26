@@ -175,6 +175,7 @@ class RecommendationEngineTests(unittest.TestCase):
             with patch.object(recommendations,"_catalog_candidates",return_value=([],{"official_category_verified":0,"dated_nav_history_eligible":0})), \
                  patch.object(recommendations,"backend_json",return_value=history), \
                  patch.object(recommendations.fund_disclosures,"matched",return_value=[{"scheme_code":"123456","ter_percent":0.1}]), \
+                 patch.object(recommendations.fund_portfolios,"composition_matches",return_value=[{"scheme_code":"123456","status":"SECONDARY_COMPOSITION_ONLY","portfolio_date":"2026-10-31"}]), \
                  patch.object(recommendations.fund_portfolios,"matched",return_value=[]), \
                  patch.object(recommendations.fund_portfolios,"overlap",return_value={"pairs":[]}), \
                  patch.object(recommendations.nav_catalog,"_connect",return_value=db):
@@ -188,6 +189,11 @@ class RecommendationEngineTests(unittest.TestCase):
             self.assertEqual(first["growth_outlook"],[])
             report=first["research_reports"][0]
             self.assertTrue(report["secondary_disclosure_available"])
+            self.assertEqual(first["coverage"]["secondary_portfolio_composition_matches"],1)
+            self.assertEqual(first["coverage"]["secondary_portfolio_matches"],0)
+            self.assertEqual(report["secondary_portfolio_summary"]["status"],"SECONDARY_COMPOSITION_ONLY")
+            self.assertFalse(report["secondary_portfolio_available"])
+            self.assertIn("RECENT_PORTFOLIO_DISCLOSURE",report["growth_outlook"]["missing"])
             self.assertIn("EXPENSE_RATIO",report["top_performer"]["missing"])
             stored=db.execute("SELECT result_json FROM mf_recommendation_snapshots").fetchall()
             self.assertEqual(len(stored),1)

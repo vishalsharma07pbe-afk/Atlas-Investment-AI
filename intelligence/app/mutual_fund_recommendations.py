@@ -420,7 +420,7 @@ def _secondary_disclosure_summary(disclosure):
                 "aum_cr_all_plans","document_date","fund_managers","exit_load","conflicts")}}
 
 
-def _research_reports(candidates, ranked, source_rows, disclosed, portfolios):
+def _research_reports(candidates, ranked, source_rows, disclosed, portfolios, compositions=()):
     """Build bounded, deterministic reports from the same exact-scheme evidence
     and qualification decisions used by the existing recommendation endpoint.
     Secondary evidence is descriptive and never substitutes for missing gates.
@@ -460,6 +460,7 @@ def _research_reports(candidates, ranked, source_rows, disclosed, portfolios):
             "secondary_disclosure_available":fund.identifier in disclosure_ids,
             "secondary_disclosure":_secondary_disclosure_summary(_unique_match(disclosed,fund.identifier)),
             "secondary_portfolio_available":fund.identifier in portfolio_ids,
+            "secondary_portfolio_summary":_unique_match(compositions,fund.identifier) or None,
             "top_performer":top,"growth_outlook":growth,
             "suitability":ranked["suitability"],
             "conclusion":"Evidence gates met for both research lists." if not top_missing and not growth_missing
@@ -513,7 +514,9 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
     coverage["secondary_disclosure_displayed"]=min(len(disclosed),5)
     coverage["secondary_field_matches"]={field:sum(row.get(field) is not None for row in disclosed)
         for field in ("ter_percent","riskometer","benchmark","aum_cr_all_plans","fund_managers","exit_load")}
+    compositions=fund_portfolios.composition_matches(disclosed)
     portfolios=fund_portfolios.matched(disclosed)
+    coverage["secondary_portfolio_composition_matches"]=len(compositions)
     coverage["secondary_portfolio_matches"]=len(portfolios)
     # Public catalog discovery remains separate from exact AMFI scheme evidence.
     # Unknown fee, benchmark, holdings and risk data still block recommendations.
@@ -536,7 +539,7 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
       "filters":{"horizon_months":horizon_months,"risk_tolerance":risk_tolerance},"coverage":coverage,
       "top_performers":ranked["top_performers"],"growth_outlook":ranked["growth_outlook"],
       "portfolio_overlap":fund_portfolios.overlap(disclosed),
-      "research_reports":_research_reports(official,ranked,source_rows,disclosed,portfolios),
+      "research_reports":_research_reports(official,ranked,source_rows,disclosed,portfolios,compositions),
       "portfolio_evidence":{"status":"SECONDARY_COMPOSITION_ONLY" if portfolios else "NOT_AVAILABLE_OR_NOT_AUTHORIZED",
           "items":portfolios,"notice":"Selected fund coverage only. Reported weights and existing cached company evidence are not verified forward earnings or valuation coverage."},
       "disclosure_evidence":{"status":"SECONDARY_REPORTED" if disclosed else "NOT_AVAILABLE_OR_NOT_AUTHORIZED",

@@ -65,6 +65,30 @@ class FundPortfoliosTests(unittest.TestCase):
             later=[{**identity,"fund_id":"missing:"+str(i)} for i in range(6)]+[identity]
             self.assertEqual(portfolios.matched(later,INSTANT)[0]["fund_id"],identity["fund_id"])
 
+    def test_composition_full_sample_without_expensive_enrichment(self):
+        rows=[]
+        ids=[]
+        for i in range(7):
+            fund="fund:"+str(i)
+            changes={"fund_code":str(i),"amfi_ssd_fund_id":fund}
+            rows.extend([row(**changes),{**CASH,**changes}])
+            ids.append({"fund_id":fund,"scheme_code":str(123450+i),"scheme_name":str(i)})
+        portfolios.store(payload(*rows),TODAY,INSTANT.isoformat())
+        with patch("app.fund_underlying_research.load") as load,patch.object(portfolios,"company_coverage") as coverage:
+            matches=portfolios.composition_matches(ids,INSTANT)
+            self.assertEqual(len(matches),7)
+            self.assertEqual(matches[-1]["scheme_code"],"123456")
+            self.assertEqual(matches[-1]["asset_allocation_percent"],{"Cash":40,"Equity":60})
+            self.assertEqual(matches[-1]["top_holdings"][0]["weight_percent"],60)
+            self.assertNotIn("exact_equity_weights",matches[-1])
+            self.assertNotIn("underlying_research",matches[-1])
+            self.assertEqual(len(portfolios.composition_matches(ids+[ids[0]],INSTANT)),6)
+            self.assertEqual(portfolios.composition_matches(ids,datetime(2026,11,29,tzinfo=timezone.utc)),[])
+            with patch.dict("os.environ",{"MARKET_DATA_USAGE_RIGHTS_CONFIRMED":"false"}):
+                self.assertEqual(portfolios.composition_matches(ids,INSTANT),[])
+            load.assert_not_called()
+            coverage.assert_not_called()
+
     def test_overlap_uses_full_same_date_weights_and_distinct_funds(self):
         a=row(pct_of_fund="80")
         b=row(fund_code="SECOND",amfi_ssd_fund_id="fund:456",pct_of_fund="60")
