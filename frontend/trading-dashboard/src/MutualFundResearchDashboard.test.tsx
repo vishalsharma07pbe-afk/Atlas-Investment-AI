@@ -79,7 +79,8 @@ it("distinguishes reported underlying fundamentals from a qualified growth outlo
  expect(screen.getByText(/weighted company CAGR \(covered subset only\) 15.00%/)).toBeTruthy();
  fireEvent.click(screen.getByText("Historical company margin changes"));
  expect(screen.getByText(/weighted change \(covered subset only\) 2.50 pp/)).toBeTruthy();
- expect(screen.getByText(/Historical-only annual evidence from older cached reports: 12.00%/)).toBeTruthy();
+ expect(screen.getByText(/Retained historical annual evidence: 12.00%/)).toBeTruthy();
+ expect(screen.getByText(/same holdings may have independently fresh profile or ratio evidence/)).toBeTruthy();
  fireEvent.click(screen.getByText("Sector-relative valuation and financial quality"));
  expect(screen.getByText(/covered weighted difference 25.00%/)).toBeTruthy();
  expect(screen.getByText(/Provider ratio observation dates unverified/)).toBeTruthy();

@@ -182,3 +182,35 @@ class FundUnderlyingResearchTests(unittest.TestCase):
         result=research.summarize(holdings,NOW,rows)
         self.assertEqual(result["sector_relative_financial_quality"]["status"],"UNAVAILABLE")
         self.assertEqual(result["annual_statement_weight_percent"],75)
+
+
+    def test_archive_fills_missing_annual_capture_without_reusing_old_profile_or_ratios(self):
+        import json,sqlite3,tempfile
+        from datetime import timedelta
+        from app import automatic_company_evidence as company
+        with tempfile.TemporaryDirectory() as folder:
+            path=folder+"/research.sqlite3"
+            db=sqlite3.connect(path)
+            company._table(db)
+            old=report(A)
+            previous=(NOW-timedelta(days=2)).isoformat()
+            old["retrieved_at"]=previous
+            old["sections"]["income_statement"]["source"]={"provider":"UPSTOX","endpoint":"/v2/fundamentals/"+A+"/income-statement","retrieved_at":previous}
+            company._archive(db,old,A,NOW)
+            fresh=report(A)
+            fresh["retrieved_at"]=NOW.isoformat()
+            fresh["available_sections"]=1
+            fresh["sections"]={"profile":{"status":"AVAILABLE","data":{"sector":"New sector"}}}
+            db.execute("INSERT INTO automatic_company_evidence VALUES(?,?,?,?,?)",(A,NOW.isoformat(),NOW.isoformat(),"PARTIAL",json.dumps(fresh)))
+            db.commit();db.close()
+            holdings=[{"isin":A,"weight_percent":40}]
+            with patch.dict("os.environ",{"ATLAS_RESEARCH_SNAPSHOT_DB":path}),patch.object(company,"permitted",return_value=True):
+                raw=research.load(holdings,NOW)[A]
+                self.assertEqual(raw["historical_annual_capture_at"],previous)
+                self.assertEqual(set(raw["sections"]),{"profile","income_statement"})
+                result=research.summarize(holdings,NOW,{A:raw})
+                self.assertEqual(result["cached_report_weight_percent"],40)
+                self.assertEqual(result["annual_history_cache_weight_percent"],40)
+                self.assertEqual(result["annual_statement_weight_percent"],40)
+                self.assertEqual(result["sector_weights"],[{"sector":"New sector","weight_percent":40}])
+                self.assertEqual(result["relative_valuation"],[])

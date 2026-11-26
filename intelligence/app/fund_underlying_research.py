@@ -19,8 +19,8 @@ from . import automatic_company_evidence as company
 IST=ZoneInfo("Asia/Kolkata")
 METRICS=("REVENUE","NET_PROFIT","OPERATING_CASH_FLOW")
 PERIOD=re.compile(r"20[0-9]{2}-(?:0[1-9]|1[0-2])")
-ANNUAL_HISTORY_CACHE_DAYS=7
-ANNUAL_SECTIONS=("income_statement","balance_sheet","cash_flow")
+ANNUAL_HISTORY_CACHE_DAYS=company.ANNUAL_HISTORY_CACHE_DAYS
+ANNUAL_SECTIONS=company.ANNUAL_SECTIONS
 
 
 def _number(value):
@@ -38,6 +38,9 @@ def load(equities,instant):
     try:
         with closing(sqlite3.connect(path.resolve().as_uri()+"?mode=ro",uri=True,timeout=2)) as db:
             # Bounded batches avoid a query per holding and SQLite variable limits.
+            tables={row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('automatic_company_evidence','automatic_company_annual_archive')")}
+            if "automatic_company_evidence" not in tables:
+                return {}
             for start in range(0,len(ids),200):
                 chunk=ids[start:start+200]
                 marks=",".join("?" for _ in chunk)
@@ -71,6 +74,27 @@ def load(equities,instant):
                         result[isin]=report
                     except (ValueError,TypeError,AttributeError,KeyError):
                         continue
+                if "automatic_company_annual_archive" in tables:
+                    for isin,payload in db.execute(f"""SELECT isin,payload FROM automatic_company_annual_archive WHERE isin IN ({marks})
+                        AND retrieved_at BETWEEN ? AND ?""",
+                        (*chunk,(instant-timedelta(days=ANNUAL_HISTORY_CACHE_DAYS)).isoformat(),instant.isoformat())):
+                        try:
+                            archived=company.annual_capture(json.loads(payload),isin,instant)
+                            if not archived:
+                                continue
+                            current=result.get(isin)
+                            if current is None:
+                                result[isin]=archived
+                            elif current.get("historical_cache_only") is not True and not any(
+                                current["sections"].get(key,{}).get("status")=="AVAILABLE" for key in ANNUAL_SECTIONS):
+                                # Keep current nonannual evidence separate from a
+                                # coherent earlier annual capture; do not mix two
+                                # annual captures or promote old ratios/actions.
+                                sections={**current["sections"],**archived["sections"]}
+                                result[isin]={**current,"sections":sections,
+                                    "historical_annual_capture_at":archived["retrieved_at"]}
+                        except (ValueError,TypeError,AttributeError,KeyError):
+                            continue
     except (OSError,sqlite3.Error):
         return {}
     return result
@@ -281,6 +305,8 @@ def summarize(equities,instant,reports=None):
                         historical_cache_weight+=w
                 else:
                     covered+=w
+                    if raw.get("historical_annual_capture_at") and current:
+                        historical_cache_weight+=w
                 multi_year.append((w,report["fundamental_quality"]["multi_year_quality"]))
         except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
             # A malformed cached report cannot supply an outlook.
@@ -333,4 +359,4 @@ def summarize(equities,instant,reports=None):
         "sector_relative_financial_quality":{"status":"REPORTED_UNDATED_COMPARISONS" if comparisons else "UNAVAILABLE",
             "items":comparisons,"notice":"Fresh retrieval, unknown ratio observation date. Original fund weight per sector and metric; weighted mean and median refer only to covered holdings. No universal quality threshold, fair value, forward earnings or investment qualification."},
         "forward_earnings_coverage_percent":None,"valuation_attractiveness":None,
-        "notice":"Historical provider reports weighted by disclosed fund exposure, grouped by exact annual periods. Sector and trend weights are partial, not normalized. Annual statements may be reused for seven days with existing fiscal-period checks; older cached statements are historical-only and excluded from fresh company coverage. Ratios and profiles still require retrieval within 24 hours. Relative valuation ratios have unverified observation dates. No forecast, fair value or qualified Growth Outlook."}
+        "notice":"Historical provider reports weighted by disclosed fund exposure, grouped by exact annual periods. Sector and trend weights are partial, not normalized. Annual statements may be reused for seven days with existing fiscal-period checks. Retained coherent annual captures are historical-only; fresh company coverage requires independently current nonannual or annual evidence. Historical annual weight can overlap fresh nonannual coverage. Ratios and profiles still require retrieval within 24 hours. Relative valuation ratios have unverified observation dates. No forecast, fair value or qualified Growth Outlook."}

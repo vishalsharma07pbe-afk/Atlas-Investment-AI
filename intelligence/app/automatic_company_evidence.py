@@ -23,6 +23,9 @@ ISIN = re.compile(r"^IN[A-Z0-9]{10}$")
 HORIZONS = ("LONG_TERM", "SHORT_TERM", "SWING")
 SECTIONS = ("profile","ratios","income_statement","balance_sheet","cash_flow","shareholding","corporate_actions","competitors")
 NORMALIZATION_VERSION=2
+ANNUAL_HISTORY_CACHE_DAYS=7
+ANNUAL_SECTIONS=("income_statement","balance_sheet","cash_flow")
+MAX_PRIORITY_STREAK=3
 REFRESH_OUTCOMES=("NO_CANDIDATES","PROVIDER_COOLDOWN","NO_DUE_CANDIDATES","CLAIM_NOT_ACQUIRED","AVAILABLE","PARTIAL","UNAVAILABLE")
 
 
@@ -77,6 +80,42 @@ def _table(db):
     db.execute("""CREATE TABLE IF NOT EXISTS automatic_company_evidence(
         isin TEXT PRIMARY KEY, attempted_at TEXT NOT NULL, next_attempt_at TEXT NOT NULL,
         status TEXT NOT NULL, payload TEXT)""")
+    db.execute("""CREATE TABLE IF NOT EXISTS automatic_company_annual_archive(
+        isin TEXT PRIMARY KEY, retrieved_at TEXT NOT NULL, payload TEXT NOT NULL)""")
+    db.execute("""CREATE TABLE IF NOT EXISTS automatic_company_rotation(
+        scope TEXT PRIMARY KEY, priority_streak INTEGER NOT NULL)""")
+
+
+def annual_capture(report,isin,instant):
+    """One coherent exact-source annual capture, never refreshed by a cache read."""
+    try:
+        if not re.fullmatch(r"INE[A-Z0-9]{9}",isin) or report.get("isin")!=isin:
+            return None
+        stamp=datetime.fromisoformat(report["retrieved_at"])
+        if stamp.tzinfo is None or not instant-timedelta(days=ANNUAL_HISTORY_CACHE_DAYS)<=stamp<=instant:
+            return None
+        from .financial_strength import _block
+        sections={}
+        for key in ANNUAL_SECTIONS:
+            data,source=_block(report,key)
+            if data and source and data.get("rows") and datetime.fromisoformat(source["retrieved_at"])==stamp:
+                sections[key]=report["sections"][key]
+        if not sections:
+            return None
+        return {"isin":isin,"retrieved_at":stamp.isoformat(),"sections":sections,
+                "available_sections":len(sections),"historical_cache_only":True,
+                "notice":"Retained exact-source annual capture only. Not fresh company evidence or a forward estimate."}
+    except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
+        return None
+
+
+def _archive(db,report,isin,instant):
+    captured=annual_capture(report,isin,instant)
+    if captured:
+        db.execute("""INSERT INTO automatic_company_annual_archive VALUES(?,?,?)
+            ON CONFLICT(isin) DO UPDATE SET retrieved_at=excluded.retrieved_at,payload=excluded.payload
+            WHERE automatic_company_annual_archive.retrieved_at<=excluded.retrieved_at""",
+            (isin,captured["retrieved_at"],json.dumps(captured,allow_nan=False)))
 
 
 def text(value):
@@ -258,27 +297,32 @@ def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None):
         if any(r["status"]=="UNAVAILABLE" and r["attempted_at"]>(instant-timedelta(hours=1)).isoformat() for r in rows.values()):
             return "PROVIDER_COOLDOWN"
         priority={isin:i for i,isin in enumerate(candidates)} if explicit_isins is not None else {}
-        due=sorted((isin for isin in candidates if isin not in rows or rows[isin]["next_attempt_at"]<=stamp),
+        def due_now(i):
+            return i not in rows or rows[i]["next_attempt_at"]<=stamp
+        due=sorted((isin for isin in candidates if due_now(isin)),
                    key=lambda isin:(rows[isin]["attempted_at"] if isin in rows else "",priority.get(isin,0),isin))
-        if not due:
-            if explicit_isins is not None:
-                return "NO_DUE_CANDIDATES"
-            # A peer never displaces due primary company research; no additional
-            # provider requests per pass, and no recursive peer expansion.
+        broad=False
+        streak=0
+        if explicit_isins is None:
+            rotation=db.execute("SELECT priority_streak FROM automatic_company_rotation WHERE scope='STOCK'").fetchone()
+            streak=rotation["priority_streak"] if rotation else 0
             peers=peer_candidates(rows,candidates,instant)
-            due=sorted((i for i in peers if i not in rows or rows[i]["next_attempt_at"]<=stamp),
-                       key=lambda i:(rows[i]["attempted_at"] if i in rows else "",i))
-            if due:
-                candidates.update(peers)
-            else:
-                # Expand the existing one-company rotation only after due
-                # watches and their bounded peers. No new jobs or API budget.
-                due=sorted((i for i in sample if i not in rows or rows[i]["next_attempt_at"]<=stamp),
-                           key=lambda i:(0 if _legacy(rows.get(i)) else 1,
-                                         rows[i]["attempted_at"] if i in rows else "",i))
-                if not due:
-                    return "NO_DUE_CANDIDATES"
+            peer_due=sorted((i for i in peers if due_now(i)),
+                            key=lambda i:(rows[i]["attempted_at"] if i in rows else "",i))
+            sample_due=sorted((i for i in sample if i not in candidates and i not in peers and due_now(i)),
+                              key=lambda i:(0 if _legacy(rows.get(i)) else 1,
+                                            rows[i]["attempted_at"] if i in rows else "",i))
+            # Reserve one bounded pass after three priority claims when broad
+            # work is due. Never increase the request budget or bypass due gates.
+            if sample_due and (streak>=MAX_PRIORITY_STREAK or not (due or peer_due)):
+                due=sample_due
                 candidates.update(sample)
+                broad=True
+            elif not due and peer_due:
+                due=peer_due
+                candidates.update(peers)
+        if not due:
+            return "NO_DUE_CANDIDATES"
         isin=due[0]
         claim=db.execute("""INSERT INTO automatic_company_evidence VALUES(?,?,?,'RUNNING',NULL)
             ON CONFLICT(isin) DO UPDATE SET attempted_at=excluded.attempted_at,
@@ -287,18 +331,34 @@ def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None):
             (isin,stamp,(instant+timedelta(hours=6)).isoformat(),stamp))
         if claim.rowcount!=1:
             return "CLAIM_NOT_ACQUIRED"
+        previous=rows.get(isin)
+        if previous and previous["status"] in ("AVAILABLE","PARTIAL") and previous["payload"]:
+            try:
+                _archive(db,json.loads(previous["payload"]),isin,instant)
+            except (ValueError,TypeError,AttributeError):
+                pass
+        if explicit_isins is None:
+            db.execute("""INSERT INTO automatic_company_rotation VALUES('STOCK',?)
+                ON CONFLICT(scope) DO UPDATE SET priority_streak=excluded.priority_streak""",
+                (0 if broad else min(MAX_PRIORITY_STREAK,streak+1),))
     try:
         report=normalize(loader(isin,candidates[isin]),isin,instant)
         status="AVAILABLE" if report["available_sections"]==len(SECTIONS) else "PARTIAL" if report["available_sections"] else "UNAVAILABLE"
     except Exception:
-        report=None
+        report={"isin":isin,"retrieved_at":stamp,"normalization_version":NORMALIZATION_VERSION,
+                "available_sections":0,"total_sections":len(SECTIONS),
+                "sections":{key:{"status":"UNAVAILABLE","data":None,"source":None,
+                    "diagnostic":"COLLECTION_OR_NORMALIZATION_FAILED"} for key in SECTIONS}}
         status="UNAVAILABLE"
     with closing(connect()) as db, db:
-        db.execute("""UPDATE automatic_company_evidence SET status=?,payload=?,next_attempt_at=?
-            WHERE isin=? AND attempted_at=?""",
-            (status,json.dumps(report,allow_nan=False) if report and status!="UNAVAILABLE" else None,
+        updated=db.execute("""UPDATE automatic_company_evidence SET status=?,payload=?,next_attempt_at=?
+            WHERE isin=? AND attempted_at=? AND status='RUNNING'""",
+            (status,json.dumps(report,allow_nan=False),
              (instant+timedelta(hours=24 if status=="AVAILABLE" else 6)).isoformat(),isin,stamp))
+        if updated.rowcount==1 and status!="UNAVAILABLE":
+            _archive(db,report,isin,instant)
         db.execute("DELETE FROM automatic_company_evidence WHERE attempted_at<?",((instant-timedelta(days=30)).isoformat(),))
+        db.execute("DELETE FROM automatic_company_annual_archive WHERE retrieved_at<?",((instant-timedelta(days=ANNUAL_HISTORY_CACHE_DAYS)).isoformat(),))
     return status
 
 
@@ -313,8 +373,20 @@ def acquisition_status(snapshot,connect,instant):
     stamp=instant.isoformat()
     try:
         with closing(connect()) as db:
-            tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('automatic_company_evidence','automatic_company_refresh_state')")}
+            tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('automatic_company_evidence','automatic_company_refresh_state','automatic_company_annual_archive','automatic_company_rotation')")}
             rows={r["isin"]:r for r in db.execute("SELECT * FROM automatic_company_evidence")} if "automatic_company_evidence" in tables else {}
+            archived={}
+            if "automatic_company_annual_archive" in tables:
+                for row in db.execute("SELECT * FROM automatic_company_annual_archive WHERE retrieved_at BETWEEN ? AND ?",
+                                      ((instant-timedelta(days=ANNUAL_HISTORY_CACHE_DAYS)).isoformat(),stamp)):
+                    if row["isin"] in sample:
+                        try:
+                            captured=annual_capture(json.loads(row["payload"]),row["isin"],instant)
+                            if captured:
+                                archived[row["isin"]]=captured
+                        except (ValueError,TypeError,AttributeError):
+                            continue
+            rotation=db.execute("SELECT priority_streak FROM automatic_company_rotation WHERE scope='STOCK'").fetchone() if "automatic_company_rotation" in tables else None
             outcomes={}
             if "automatic_company_refresh_state" in tables:
                 for row in db.execute("SELECT * FROM automatic_company_refresh_state"):
@@ -327,6 +399,13 @@ def acquisition_status(snapshot,connect,instant):
         counts=Counter()
         sections=Counter()
         detail=Counter()
+        diagnostic_counts={key:Counter() for key in SECTIONS}
+        allowed_diagnostics={"NO_PROVIDER_RECORDS","PROVIDER_REQUEST_REJECTED","PROVIDER_HTTP_FAILURE",
+            "PROVIDER_ACCESS_REJECTED","PROVIDER_RATE_LIMITED","PROVIDER_RECOVERY_COOLDOWN",
+            "PROVIDER_RESPONSE_TOO_LARGE","PROVIDER_SCHEMA_INVALID","UPSTOX_SCHEMA_MISMATCH",
+            "PROVIDER_REQUEST_FAILED","RECOVERY_STORAGE_UNAVAILABLE","UPSTOX_TOKEN_MISSING",
+            "UPSTOX_RATIO_SCHEMA_INVALID","UNSUPPORTED_OR_EMPTY_NORMALIZED_DATA",
+            "UNAVAILABLE_REASON_UNKNOWN","COLLECTION_OR_NORMALIZATION_FAILED"}
         for isin in sample:
             row=rows.get(isin)
             if not row:
@@ -340,12 +419,19 @@ def acquisition_status(snapshot,connect,instant):
                 counts["legacy_reports"]+=1
                 if due(isin):
                     counts["due_legacy_reports"]+=1
-            if row["status"] not in ("AVAILABLE","PARTIAL") or not row["payload"]:
+            if row["status"] not in ("AVAILABLE","PARTIAL","UNAVAILABLE") or not row["payload"]:
                 continue
             try:
                 report=json.loads(row["payload"])
                 retrieved=datetime.fromisoformat(report["retrieved_at"])
                 if report.get("isin")!=isin or retrieved.tzinfo is None or not instant-timedelta(hours=24)<=retrieved<=instant:
+                    continue
+                for key in SECTIONS:
+                    block=report["sections"].get(key) or {}
+                    if block.get("status")=="UNAVAILABLE":
+                        reason=block.get("diagnostic")
+                        diagnostic_counts[key][reason if isinstance(reason,str) and reason in allowed_diagnostics else "UNAVAILABLE_REASON_UNKNOWN"]+=1
+                if row["status"]=="UNAVAILABLE":
                     continue
                 counts["fresh_reports"]+=1
                 if report.get("normalization_version")==NORMALIZATION_VERSION:
@@ -362,6 +448,10 @@ def acquisition_status(snapshot,connect,instant):
                 "primary_identities":len(primary),"due_sample":sum(due(i) for i in sample),
                 "due_primary":sum(due(i) for i in primary),"counts":dict(counts),
                 "fresh_sections":dict(sections),"fresh_detailed_statements":dict(detail),
+                "annual_archive_companies":len(archived),
+                "annual_archive_section_counts":dict(Counter(key for capture in archived.values() for key in capture["sections"])),
+                "priority_streak":rotation["priority_streak"] if rotation else 0,
+                "recent_section_diagnostics":{k:dict(v) for k,v in diagnostic_counts.items() if v},
                 "global_company_cooldown":any(r["status"]=="UNAVAILABLE" and r["attempted_at"]>(instant-timedelta(hours=1)).isoformat() for r in rows.values()),
                 "last_passes":outcomes,
                 "notice":"Latest bounded pass outcomes and validated sample coverage, not full market coverage. A completed scheduler pass may have made no request."}
