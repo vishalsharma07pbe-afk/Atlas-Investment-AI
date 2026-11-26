@@ -31,7 +31,7 @@ def permitted():
     return fund_disclosures.permitted()
 
 
-def parse(payload,today):
+def parse(payload,today,*,audit=None):
     if len(payload)>MAX_BYTES:
         raise ValueError("PORTFOLIO_BYTE_LIMIT")
     reader=csv.DictReader(io.StringIO(payload.decode("utf-8-sig"),newline=""))
@@ -41,6 +41,7 @@ def parse(payload,today):
     groups=defaultdict(list)
     latest={}
     fund_codes=defaultdict(set)
+    statuses={}
     for n,row in enumerate(reader,1):
         if n>MAX_ROWS:
             raise ValueError("PORTFOLIO_ROW_LIMIT")
@@ -53,6 +54,7 @@ def parse(payload,today):
         if day>today:
             raise ValueError("PORTFOLIO_FUTURE_DATE")
         if (today-day).days>60:
+            statuses.setdefault(fund,"STALE_PORTFOLIO_DATE")
             continue
         latest[fund]=max(latest.get(fund,day),day)
         key=(fund,day)
@@ -61,23 +63,30 @@ def parse(payload,today):
     output={}
     for fund,day in latest.items():
         rows=groups[(fund,day)]
-        if len(fund_codes[(fund,day)])!=1 or not 1<=len(rows)<=1000:
+        if len(fund_codes[(fund,day)])!=1:
+            statuses[fund]="CONFLICTING_FUND_CODES"
+            continue
+        if not 1<=len(rows)<=1000:
+            statuses[fund]="HOLDING_COUNT_LIMIT"
             continue
         allocations=defaultdict(Decimal)
         equities=defaultdict(Decimal)
         names={}
         seen=set()
-        valid=True
+        reason=None
         for row in rows:
             fingerprint=tuple(row[k] for k in sorted(REQUIRED))
             try:
                 weight=Decimal(row["pct_of_fund"])
             except InvalidOperation:
-                valid=False;break
+                reason="INVALID_WEIGHT";break
             group=row["asset_group"]
-            if (fingerprint in seen or group not in GROUPS or not weight.is_finite()
-                or abs(weight)>100 or (weight<0 and group!="Others")):
-                valid=False;break
+            if fingerprint in seen:
+                reason="DUPLICATE_HOLDING_ROW";break
+            if group not in GROUPS:
+                reason="UNSUPPORTED_ASSET_GROUP";break
+            if not weight.is_finite() or abs(weight)>100 or (weight<0 and group!="Others"):
+                reason="INVALID_WEIGHT";break
             seen.add(fingerprint)
             allocations[group]+=weight
             isin=row["isin"]
@@ -86,8 +95,10 @@ def parse(payload,today):
                 equities[isin]+=weight
                 names[isin]=row["security_name"][:200]
         total=sum(allocations.values(),Decimal(0))
-        if not valid or not Decimal("99.5")<=total<=Decimal("100.5") or sum(equities.values())>Decimal("100.5"):
+        if reason or not Decimal("99.5")<=total<=Decimal("100.5") or sum(equities.values())>Decimal("100.5"):
+            statuses[fund]=reason or "WEIGHTS_NOT_RECONCILED"
             continue
+        statuses[fund]="ACCEPTED"
         ordered=sorted(equities,key=lambda k:(-equities[k],k))
         output[fund]={"fund_id":fund,"portfolio_date":day.isoformat(),"source":"TIGZIG_AMC_DERIVED",
             "source_url":URL,"reported_weight_total_percent":float(total),
@@ -97,19 +108,27 @@ def parse(payload,today):
             "exact_equity_count":len(ordered),
             "equities":[{"isin":k,"name":names[k],"weight_percent":float(equities[k])} for k in ordered],
             "notice":"Secondary reported portfolio. Weight total is a reconciliation check, not proof of completeness. Derivative exposures outside reported net assets may be missing."}
+    if audit is not None:
+        audit.update(statuses)
     if not output:
         raise ValueError("NO_USABLE_PORTFOLIOS")
     return output
 
 
 def store(payload,today,stamp):
-    rows=parse(payload,today)
+    audit={}
+    rows=parse(payload,today,audit=audit)
     with nav_catalog._LOCK,closing(nav_catalog._connect()) as db,db:
         db.execute("""CREATE TABLE IF NOT EXISTS fund_portfolio_snapshot(
             fund_id TEXT PRIMARY KEY,payload TEXT NOT NULL,collected_at TEXT NOT NULL)""")
         db.execute("DELETE FROM fund_portfolio_snapshot")
         db.executemany("INSERT INTO fund_portfolio_snapshot VALUES(?,?,?)",
                        [(k,json.dumps(v,allow_nan=False),stamp) for k,v in rows.items()])
+        db.execute("""CREATE TABLE IF NOT EXISTS fund_portfolio_ingestion_audit(
+            fund_id TEXT PRIMARY KEY,status TEXT NOT NULL,collected_at TEXT NOT NULL)""")
+        db.execute("DELETE FROM fund_portfolio_ingestion_audit")
+        db.executemany("INSERT INTO fund_portfolio_ingestion_audit VALUES(?,?,?)",
+                       [(k,v,stamp) for k,v in audit.items()])
     return len(rows)
 
 
@@ -127,6 +146,46 @@ def refresh():
                 payload.extend(part)
     stamp=datetime.now(timezone.utc)
     return store(bytes(payload),stamp.astimezone(IST).date(),stamp.isoformat())
+
+
+def ingestion_coverage(disclosures=(),instant=None):
+    """Read-only aggregate audit of the last successfully stored bulk file.
+    Does not fetch, expose holding identities, or imply official coverage.
+    """
+    if not permitted():
+        return {"status":"DISABLED_OR_NOT_AUTHORIZED","source_counts":{},"sample_counts":{}}
+    instant=instant or datetime.now(timezone.utc)
+    today=instant.astimezone(IST).date()
+    from collections import Counter
+    sample=Counter()
+    try:
+        with nav_catalog._LOCK,closing(nav_catalog._connect()) as db:
+            rows=db.execute("SELECT fund_id,status,collected_at FROM fund_portfolio_ingestion_audit").fetchall()
+            if not rows:
+                return {"status":"NO_AUDIT","source_counts":{},"sample_counts":{}}
+            stamps={row["collected_at"] for row in rows}
+            if len(stamps)!=1 or not fund_disclosures._day(next(iter(stamps)),today,2):
+                return {"status":"STALE_OR_INCONSISTENT_AUDIT","source_counts":{},"sample_counts":{}}
+            allowed={"ACCEPTED","STALE_PORTFOLIO_DATE","CONFLICTING_FUND_CODES","HOLDING_COUNT_LIMIT",
+                     "INVALID_WEIGHT","DUPLICATE_HOLDING_ROW","UNSUPPORTED_ASSET_GROUP","WEIGHTS_NOT_RECONCILED"}
+            indexed={row["fund_id"]:row["status"] for row in rows}
+            if not set(indexed.values())<=allowed:
+                return {"status":"INVALID_AUDIT","source_counts":{},"sample_counts":{}}
+            stored={row["fund_id"] for row in db.execute("SELECT fund_id FROM fund_portfolio_snapshot WHERE collected_at=?",(next(iter(stamps)),))}
+            if stored!={k for k,v in indexed.items() if v=="ACCEPTED"}:
+                return {"status":"INVALID_AUDIT","source_counts":{},"sample_counts":{}}
+            for item in disclosures[:40]:
+                fund=item.get("fund_id") if isinstance(item,dict) else None
+                if not isinstance(fund,str) or not 0<len(fund)<=80:
+                    sample["MISSING_FUND_ID"]+=1
+                else:
+                    sample[indexed.get(fund,"NOT_IN_SOURCE_FILE")]+=1
+            return {"status":"LAST_SUCCESSFUL_SECONDARY_FILE","collected_at":next(iter(stamps)),
+                    "source_counts":dict(sorted(Counter(indexed.values()).items())),
+                    "sample_counts":dict(sorted(sample.items())),
+                    "notice":"Source counts are distinct provider fund IDs, sample counts are matched disclosure scheme rows. Accepted means parser checks passed, not independently verified holdings."}
+    except (OSError,sqlite3.Error,ValueError,TypeError,KeyError,AttributeError):
+        return {"status":"NO_AUDIT_OR_STORAGE_UNAVAILABLE","source_counts":{},"sample_counts":{}}
 
 
 def company_coverage(equities,instant):
@@ -212,6 +271,38 @@ def concentration(equities,sector_evidence,category,allocations):
     return result
 
 
+def _validated_equities(report):
+    """Shared exact composition checks; return ordered holdings or None."""
+    allocations=report["asset_allocation_percent"]
+    equities=report["equities"]
+    def weight(v,lower=0,upper=100.5):
+        return type(v) in (int,float) and lower<=v<=upper
+    if (not isinstance(allocations,dict) or not allocations or not set(allocations)<=GROUPS
+        or any(not weight(v,-100 if k=="Others" else 0,100.5) for k,v in allocations.items())
+        or not weight(report["reported_weight_total_percent"],99.5,100.5)
+        or abs(sum(allocations.values())-report["reported_weight_total_percent"])>.0001
+        or not isinstance(equities,list) or len(equities)>1000
+        or type(report["exact_equity_count"]) is not int or report["exact_equity_count"]!=len(equities)):
+        return None
+    seen=set()
+    for holding in equities:
+        isin=holding["isin"]
+        if (not isinstance(isin,str) or not ISIN.fullmatch(isin) or isin in seen
+            or not weight(holding["weight_percent"],0,100) or holding["weight_percent"]<=0
+            or not isinstance(holding["name"],str) or len(holding["name"])>200):
+            raise ValueError("INVALID_COMPOSITION_HOLDING")
+        seen.add(isin)
+    ordered=sorted(equities,key=lambda h:(-h["weight_percent"],h["isin"]))
+    exact=report["exact_listed_equity_weight_percent"]
+    top=report["top_10_exact_equity_weight_percent"]
+    if (not weight(exact) or not weight(top) or top>exact+.0001
+        or abs(sum(h["weight_percent"] for h in ordered)-exact)>.0001
+        or abs(sum(h["weight_percent"] for h in ordered[:10])-top)>.0001
+        or exact>allocations.get("Equity",0)+.0001):
+        return None
+    return ordered
+
+
 def composition_matches(disclosures,instant=None):
     """Cheap full-sample secondary composition; no company cache or network calls.
     Distinguish a known composition outside the detailed report budget from no
@@ -242,32 +333,8 @@ def composition_matches(disclosures,instant=None):
                     report=json.loads(found["payload"])
                     if report.get("fund_id")!=fund or not fund_disclosures._day(report["portfolio_date"],today,60):
                         continue
-                    allocations=report["asset_allocation_percent"]
-                    equities=report["equities"]
-                    def weight(v,lower=0,upper=100.5):
-                        return type(v) in (int,float) and lower<=v<=upper
-                    if (not isinstance(allocations,dict) or not allocations or not set(allocations)<=GROUPS
-                        or any(not weight(v,-100 if k=="Others" else 0,100.5) for k,v in allocations.items())
-                        or not weight(report["reported_weight_total_percent"],99.5,100.5)
-                        or abs(sum(allocations.values())-report["reported_weight_total_percent"])>.0001
-                        or not isinstance(equities,list) or len(equities)>1000
-                        or type(report["exact_equity_count"]) is not int or report["exact_equity_count"]!=len(equities)):
-                        continue
-                    seen=set()
-                    for holding in equities:
-                        isin=holding["isin"]
-                        if (not isinstance(isin,str) or not ISIN.fullmatch(isin) or isin in seen
-                            or not weight(holding["weight_percent"],0,100) or holding["weight_percent"]<=0
-                            or not isinstance(holding["name"],str) or len(holding["name"])>200):
-                            raise ValueError("INVALID_COMPOSITION_HOLDING")
-                        seen.add(isin)
-                    ordered=sorted(equities,key=lambda h:(-h["weight_percent"],h["isin"]))
-                    exact=report["exact_listed_equity_weight_percent"]
-                    top=report["top_10_exact_equity_weight_percent"]
-                    if (not weight(exact) or not weight(top) or top>exact+.0001
-                        or abs(sum(h["weight_percent"] for h in ordered)-exact)>.0001
-                        or abs(sum(h["weight_percent"] for h in ordered[:10])-top)>.0001
-                        or exact>allocations.get("Equity",0)+.0001):
+                    ordered=_validated_equities(report)
+                    if ordered is None:
                         continue
                     result.append({"scheme_code":code,"status":"SECONDARY_COMPOSITION_ONLY",
                         "source":"TIGZIG_AMC_DERIVED","source_url":URL,"collected_at":found["collected_at"],
@@ -300,10 +367,16 @@ def matched(disclosures,instant=None,*,include_exact_weights=False):
                 found=db.execute("SELECT payload,collected_at FROM fund_portfolio_snapshot WHERE fund_id=?",(fund,)).fetchone()
                 if not found or not fund_disclosures._day(found["collected_at"],today,2):
                     continue
-                report=json.loads(found["payload"])
-                if report.get("fund_id")!=fund or not fund_disclosures._day(report["portfolio_date"],today,60):
+                try:
+                    report=json.loads(found["payload"])
+                    if report.get("fund_id")!=fund or not fund_disclosures._day(report["portfolio_date"],today,60):
+                        continue
+                    equities=_validated_equities(report)
+                    if equities is None:
+                        continue
+                    report.pop("equities")
+                except (ValueError,TypeError,KeyError,AttributeError):
                     continue
-                equities=report.pop("equities")
                 from .fund_underlying_research import summarize, load, exact_sector_evidence
                 reports=load(equities,instant)
                 sector_evidence=exact_sector_evidence(equities,instant,reports)
