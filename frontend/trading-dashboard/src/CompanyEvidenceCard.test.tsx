@@ -78,3 +78,13 @@ it("separates older detailed earnings from current summary and withholds valuati
  expect(screen.getByText("26.67%")).toBeTruthy();
  expect(screen.getByText("verified share and eps basis required")).toBeTruthy();
 });
+
+it("labels documented sector-only sample separately from industry",()=>{
+ const missing={status:"UNAVAILABLE",data:null,source:null};
+ const evidence:CompanyEvidence={isin:"INE002A01018",retrieved_at:"2026-11-24T10:00:00Z",available_sections:1,total_sections:8,notice:"Provider reported.",sections:{profile:missing,ratios:missing,income_statement:missing,cash_flow:missing,balance_sheet:missing,shareholding:missing,corporate_actions:missing,competitors:missing},
+ sector_sample:{status:"CACHED_SECTOR_COMPARISON",sector:"refineries",industry:null,matching_cached_count:3,sample_count:3,metrics:[{metric:"REVENUE",period:"2026-03",unit:"INR_CRORE",company_value:100,peer_median:120,peer_count:3,peers_above:2,peers_below:1,peers:[]}],valuation_research:{status:"INSUFFICIENT_COMPARABLE_MULTIPLES",same_industry_cached_count:0,metrics:[],review_prompt:null,notice:"No valuation."},notice:"Industry identity is not established."}};
+ render(<CompanyEvidenceCard evidence={evidence}/>);
+ expect(screen.getByText("Cached same-sector comparison (not industry)")).toBeTruthy();
+ expect(screen.getByText("120 Cr")).toBeTruthy();
+ expect(screen.getByText("Industry identity is not established.")).toBeTruthy();
+});

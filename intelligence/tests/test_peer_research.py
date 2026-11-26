@@ -123,3 +123,28 @@ class PeerResearchTests(unittest.TestCase):
         cohort[PEERS[0]][1]["sections"]["profile"]["source"]["retrieved_at"]=instant.isoformat()
         cohort[PEERS[0]][1]["sections"]["profile"]["data"]["industry"]="Banks"
         self.assertEqual(industry_sample(target,cohort,instant)["matching_cached_count"],2)
+
+    def test_documented_sector_only_profile_never_becomes_industry_or_valuation(self):
+        from datetime import datetime,timezone,timedelta
+        from app.peer_research import sector_sample,industry_sample,fresh_sector,fresh_classification
+        instant=datetime(2026,11,26,10,tzinfo=timezone.utc)
+        def classified(isin,revenue):
+            value=report(isin,revenue)
+            value["retrieved_at"]=instant.isoformat()
+            value["sections"]["profile"]["source"]={"provider":"UPSTOX","endpoint":"/v2/fundamentals/"+isin+"/profile","retrieved_at":instant.isoformat()}
+            value["sections"]["competitors"]={"status":"UNAVAILABLE","data":None}
+            return value
+        target=classified(TARGET,100)
+        cohort={p:("NSE_EQ|"+p,classified(p,v)) for p,v in zip(PEERS,(80,120,150))}
+        self.assertEqual(fresh_sector(target,instant),"refineries")
+        self.assertIsNone(fresh_classification(target,instant))
+        result=sector_sample(target,cohort,instant)
+        self.assertEqual(result["status"],"CACHED_SECTOR_COMPARISON")
+        self.assertEqual(result["classification_basis"],"PROVIDER_SECTOR_ONLY")
+        self.assertEqual(result["metrics"][0]["peer_median"],120)
+        self.assertIsNone(result["industry"])
+        self.assertFalse(result["market_leadership_verified"])
+        self.assertEqual(result["valuation_research"]["metrics"],[])
+        self.assertEqual(industry_sample(target,cohort,instant)["metrics"],[])
+        cohort[PEERS[0]][1]["sections"]["profile"]["source"]["retrieved_at"]=(instant-timedelta(hours=25)).isoformat()
+        self.assertEqual(sector_sample(target,cohort,instant)["metrics"],[])
