@@ -67,3 +67,11 @@ class QuoteRecoveryTests(unittest.TestCase):
             with self.assertRaisesRegex(multi.ProviderFailure,"RECOVERY_STORAGE_UNAVAILABLE"):
                 multi._request("https://api.upstox.com/v3/market-quote/quotes",{})
             request.assert_not_called()
+
+    def test_dhan_success_respects_minimum_request_interval(self):
+        token=recovery.claim("DHAN",100)
+        self.assertTrue(token)
+        self.assertTrue(recovery.finish("DHAN",token,now=101))
+        self.assertIsNone(recovery.claim("DHAN",101.5))
+        self.assertTrue(recovery.claim("UPSTOX",101.5))
+        self.assertTrue(recovery.claim("DHAN",102))

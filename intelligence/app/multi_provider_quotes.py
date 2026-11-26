@@ -1,5 +1,6 @@
 """Read-only authorized quote adapters; never submit orders or silently invent timestamps."""
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from decimal import Decimal, InvalidOperation
 import json
 import os
@@ -18,8 +19,12 @@ DEFAULT_TIMEOUT = 5
 # Circuit state survives separate HTTP requests within this process.
 quote_breaker = CircuitBreaker()
 
-def _request(url, headers):
-    provider={"api.upstox.com":"UPSTOX","api.polygon.io":"POLYGON"}.get(urlsplit(url).hostname)
+def _request(url, headers, *, payload=None):
+    provider={"api.upstox.com":"UPSTOX","api.polygon.io":"POLYGON","api.dhan.co":"DHAN"}.get(urlsplit(url).hostname)
+    # The only POST supported by this market-data transport is this fixed
+    # read-only quote endpoint. Never forward arbitrary paths or order requests.
+    if provider=="DHAN" and (url!="https://api.dhan.co/v2/marketfeed/quote" or payload is None) or provider!="DHAN" and payload is not None:
+        raise ProviderFailure("PROVIDER_REQUEST_FAILED")
     if provider is None:
         raise ProviderFailure("PROVIDER_REQUEST_FAILED")
     try:
@@ -32,8 +37,11 @@ def _request(url, headers):
     retry_after=None
     try:
         safe_headers = {**headers, "User-Agent": USER_AGENT if provider=="UPSTOX" else "ATLAS-Research/1.0"}
-        response = httpx.get(url, headers=safe_headers, timeout=DEFAULT_TIMEOUT,
-                             follow_redirects=False)
+        if provider=="DHAN":
+            response=httpx.post(url,headers=safe_headers,json=payload,timeout=DEFAULT_TIMEOUT,follow_redirects=False)
+        else:
+            response = httpx.get(url, headers=safe_headers, timeout=DEFAULT_TIMEOUT,
+                                 follow_redirects=False)
         if response.status_code in (401, 403):
             raise ProviderFailure("PROVIDER_ACCESS_REJECTED")
         if response.status_code == 429:
@@ -131,6 +139,68 @@ def polygon_quote(symbol, api_key):
                  observed_at=datetime.fromtimestamp(ns / 1_000_000_000, tz=timezone.utc),
                  provider="POLYGON")
 
+def dhan_quote(symbol,upstox_key,security_id,token,client_id,*,confirmed_ist=False):
+    """Optional read-only quote fallback for one operator-verified exact EQ identity."""
+    match=re.fullmatch(r"(NSE_EQ|BSE_EQ)\|INE[A-Z0-9]{9}",upstox_key)
+    if (not SYMBOL_RE.fullmatch(symbol) or not match or type(security_id) is not int
+        or not 0<security_id<=2_147_483_647 or not token or not client_id):
+        raise ProviderFailure("INVALID_DHAN_CONFIGURATION")
+    segment=match.group(1)
+    body=_request("https://api.dhan.co/v2/marketfeed/quote",
+        {"access-token":token,"client-id":client_id,"Accept":"application/json","Content-Type":"application/json"},
+        payload={segment:[security_id]})
+    data=body.get("data")
+    if body.get("status")!="success" or not isinstance(data,dict) or set(data)!={segment}:
+        raise ProviderFailure("DHAN_INSTRUMENT_MISMATCH")
+    rows=data[segment]
+    if not isinstance(rows,dict) or set(rows)!={str(security_id)} or not isinstance(rows[str(security_id)],dict):
+        raise ProviderFailure("DHAN_INSTRUMENT_MISMATCH")
+    item=rows[str(security_id)]
+    stamp=item.get("last_trade_time")
+    # Dhan's REST example is a timezone-less DD/MM/YYYY string. Do not
+    # guess its timezone: accept explicit offset, or require separate operator
+    # confirmation of this exact format and IST semantics before using it.
+    try:
+        if isinstance(stamp,str) and re.fullmatch(r"[0-9]{2}/[0-9]{2}/[0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2}",stamp):
+            if not confirmed_ist:
+                raise ProviderFailure("DHAN_TIMESTAMP_UNVERIFIED")
+            observed=datetime.strptime(stamp,"%d/%m/%Y %H:%M:%S").replace(tzinfo=ZoneInfo("Asia/Kolkata")).astimezone(timezone.utc)
+        elif isinstance(stamp,str) and not stamp.isdigit():
+            observed=_timestamp(stamp)
+        else:
+            raise ProviderFailure("DHAN_TIMESTAMP_UNVERIFIED")
+    except (ValueError,TypeError):
+        raise ProviderFailure("DHAN_TIMESTAMP_UNVERIFIED") from None
+    return Quote(symbol=symbol,price=_price(item.get("last_price")),observed_at=observed,provider="DHAN")
+
+
+def _dhan_mapping(mapping):
+    # The provider security ID is intentionally not inferred from the symbol.
+    # The operator must independently verify the corresponding venue and ISIN
+    # against Dhan's security master. Match the existing canonical Upstox key.
+    raw=os.getenv("ATLAS_DHAN_SYMBOL_MAP","{}")
+    if len(raw)>40000:
+        return {}
+    try:
+        parsed=json.loads(raw)
+    except (ValueError,TypeError):
+        return {}
+    if not isinstance(parsed,dict) or len(parsed)>300:
+        return {}
+    result={}
+    for symbol,row in parsed.items():
+        if (not isinstance(row,dict) or set(row)!={"upstox_key","security_id"} or symbol not in mapping
+            or row["upstox_key"]!=mapping[symbol]
+            or not re.fullmatch(r"(NSE_EQ|BSE_EQ)\|INE[A-Z0-9]{9}",mapping[symbol])
+            or type(row["security_id"]) is not int or not 0<row["security_id"]<=2_147_483_647):
+            continue
+        result[symbol]=row["security_id"]
+    # A single venue/security ID must not map to conflicting canonical ISINs.
+    from collections import Counter
+    counts=Counter((mapping[s].split("|")[0],v) for s,v in result.items())
+    return {s:v for s,v in result.items() if counts[(mapping[s].split("|")[0],v)]==1}
+
+
 def _mapping():
     """JSON map of exact local symbols to authorized Upstox instrument keys."""
     raw = os.getenv("ATLAS_UPSTOX_SYMBOL_MAP", "{}")
@@ -150,6 +220,12 @@ def configured_router():
     mapping = _mapping()
     upstox_token = os.getenv("UPSTOX_ACCESS_TOKEN", "")
     polygon_key = os.getenv("ATLAS_POLYGON_API_KEY", "")
+    dhan_mapping=_dhan_mapping(mapping)
+    dhan_token=os.getenv("ATLAS_DHAN_ACCESS_TOKEN","")
+    dhan_client=os.getenv("ATLAS_DHAN_CLIENT_ID","")
+    dhan_ist=os.getenv("ATLAS_DHAN_QUOTE_IST_CONFIRMED","false").lower()=="true"
+    dhan_allowed=(os.getenv("ATLAS_DHAN_QUOTES_AUTHORIZED","false").lower()=="true"
+                  and bool(dhan_token.strip()) and bool(dhan_client.strip()) and bool(dhan_mapping))
     upstox_allowed = (os.getenv("ATLAS_UPSTOX_QUOTES_AUTHORIZED", "false").lower() == "true"
                       and bool(upstox_token) and bool(mapping))
     polygon_allowed = (os.getenv("ATLAS_POLYGON_QUOTES_AUTHORIZED", "false").lower() == "true"
@@ -162,6 +238,9 @@ def configured_router():
          upstox_allowed and bool(mapping)),
         ("POLYGON", lambda s: polygon_quote(s, polygon_key), polygon_allowed),
     ]
+    # Disabled-by-default preserves the existing two-provider response contract.
+    if dhan_allowed:
+        adapters.insert(1,("DHAN",lambda s:dhan_quote(s,mapping[s],dhan_mapping[s],dhan_token,dhan_client,confirmed_ist=dhan_ist),True))
     # Route eligibility is checked per requested symbol, not merely per provider.
     class SymbolScopedRouter(ReadOnlyRouter):
         def quote(self, symbol, max_age_seconds=60):
@@ -169,10 +248,9 @@ def configured_router():
                 # The legacy symbol-only endpoint cannot distinguish venues.
                 return {"status":"UNAVAILABLE","live":False,"quote":None,"attempts":[],
                         "notice":"Ambiguous Indian/US symbol mapping; use an unambiguous instrument identity.","reason":"AMBIGUOUS_MARKET_IDENTITY"}
-            self.adapters = [
-                ("UPSTOX", adapters[0][1], upstox_allowed and symbol in mapping),
-                ("POLYGON", adapters[1][1], polygon_allowed and symbol in us_symbols),
-            ]
+            self.adapters = [(name,fetch,enabled and (symbol in mapping if name=="UPSTOX"
+                              else symbol in dhan_mapping if name=="DHAN" else symbol in us_symbols))
+                             for name,fetch,enabled in adapters]
             return super().quote(symbol, max_age_seconds)
     return SymbolScopedRouter(adapters, breaker=quote_breaker)
 
@@ -184,12 +262,18 @@ def quote_status(symbol, max_age_seconds=60):
     return result
 
 def provider_status():
+    dhan_mapping=_dhan_mapping(_mapping())
+    dhan_configured=bool(os.getenv("ATLAS_DHAN_ACCESS_TOKEN","").strip() and os.getenv("ATLAS_DHAN_CLIENT_ID","").strip() and dhan_mapping)
+    dhan_gate=os.getenv("ATLAS_DHAN_QUOTES_AUTHORIZED","false").lower()=="true"
     return {"providers": [
         {"code":"UPSTOX","configured":bool(os.getenv("UPSTOX_ACCESS_TOKEN")) and bool(_mapping()),
          "authorization_gate":os.getenv("ATLAS_UPSTOX_QUOTES_AUTHORIZED", "false").lower()=="true"},
         {"code":"POLYGON","configured":bool(os.getenv("ATLAS_POLYGON_API_KEY")),
-         "authorization_gate":os.getenv("ATLAS_POLYGON_QUOTES_AUTHORIZED", "false").lower()=="true"}],
-        "automatic_fallback_available": False, "streaming_verified": False,
+         "authorization_gate":os.getenv("ATLAS_POLYGON_QUOTES_AUTHORIZED", "false").lower()=="true"},
+        {"code":"DHAN","configured":dhan_configured,"authorization_gate":dhan_gate,
+         "mapped_symbol_count":len(dhan_mapping),"naive_timestamp_ist_confirmed":os.getenv("ATLAS_DHAN_QUOTE_IST_CONFIRMED","false").lower()=="true"}],
+        "automatic_fallback_available": False, "same_market_fallback_configured":dhan_configured and dhan_gate,
+        "streaming_verified": False,
         "http_recovery":quote_recovery.status(),
-        "circuits":[quote_breaker.status(name) for name in ("UPSTOX","POLYGON")],
-        "notice":"Quote requests require independently authorized credentials. Indian and US instruments cannot substitute for one another; a same-market backup is not configured."}
+        "circuits":[quote_breaker.status(name) for name in ("UPSTOX","POLYGON","DHAN")],
+        "notice":"Optional same-market Dhan HTTP fallback requires independently verified mappings, quote entitlement and timestamp semantics. Configuration does not prove live availability. Indian and US instruments cannot substitute for one another."}

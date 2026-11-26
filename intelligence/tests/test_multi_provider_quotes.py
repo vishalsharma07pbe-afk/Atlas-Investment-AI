@@ -76,5 +76,45 @@ class MultiProviderTests(unittest.TestCase):
     def test_accepts_provider_epoch_milliseconds_as_string(self):
         value = str(int(datetime.now(timezone.utc).timestamp() * 1000))
         self.assertIsNotNone(multi._timestamp(value).tzinfo)
+    def test_dhan_fallback_exact_mapping_and_read_only_post(self):
+        now=datetime.now(timezone.utc).isoformat()
+        with patch.dict("os.environ",{
+            "UPSTOX_ACCESS_TOKEN":"dummy","ATLAS_UPSTOX_SYMBOL_MAP":'{"RELIANCE":"NSE_EQ|INE002A01018"}',
+            "ATLAS_UPSTOX_QUOTES_AUTHORIZED":"true","ATLAS_DHAN_QUOTES_AUTHORIZED":"true",
+            "ATLAS_DHAN_ACCESS_TOKEN":"secret","ATLAS_DHAN_CLIENT_ID":"client",
+            "ATLAS_DHAN_SYMBOL_MAP":'{"RELIANCE":{"upstox_key":"NSE_EQ|INE002A01018","security_id":123}}',
+            "ATLAS_POLYGON_US_SYMBOLS":""}),patch.object(multi.httpx,"get",return_value=Mock(status_code=403)) as get, \
+            patch.object(multi.httpx,"post",return_value=Mock(status_code=200,content=__import__("json").dumps(
+                {"status":"success","data":{"NSE_EQ":{"123":{"last_price":150,"last_trade_time":now}}}}).encode())) as post:
+            result=multi.quote_status("RELIANCE")
+            self.assertEqual(result["quote"]["source"],"DHAN")
+            self.assertEqual(result["quote"]["price"],"150")
+            self.assertFalse(result["live_feed_verified"])
+            get.assert_called_once()
+            post.assert_called_once()
+            self.assertEqual(post.call_args.args[0],"https://api.dhan.co/v2/marketfeed/quote")
+            self.assertEqual(post.call_args.kwargs["json"],{"NSE_EQ":[123]})
+            self.assertFalse(post.call_args.kwargs["follow_redirects"])
+            self.assertNotIn("secret",str(result))
+            self.assertTrue(multi.provider_status()["same_market_fallback_configured"])
+            self.assertFalse(multi.provider_status()["automatic_fallback_available"])
+    def test_dhan_rejects_unverified_naive_time_and_mismatched_identity(self):
+        body={"status":"success","data":{"NSE_EQ":{"123":{"last_price":150,"last_trade_time":"26/11/2026 15:00:00"}}}}
+        with patch.object(multi,"_request",return_value=body):
+            with self.assertRaisesRegex(multi.ProviderFailure,"DHAN_TIMESTAMP_UNVERIFIED"):
+                multi.dhan_quote("RELIANCE","NSE_EQ|INE002A01018",123,"token","client")
+            quote=multi.dhan_quote("RELIANCE","NSE_EQ|INE002A01018",123,"token","client",confirmed_ist=True)
+            self.assertEqual(quote.observed_at.isoformat(),"2026-11-26T09:30:00+00:00")
+            with self.assertRaisesRegex(multi.ProviderFailure,"DHAN_INSTRUMENT_MISMATCH"):
+                multi.dhan_quote("RELIANCE","BSE_EQ|INE002A01018",123,"token","client",confirmed_ist=True)
+    def test_dhan_mapping_conflict_and_unapproved_transport_fail_closed(self):
+        mapping={"A":"NSE_EQ|INE002A01018","B":"NSE_EQ|INE009A01021"}
+        with patch.dict("os.environ",{"ATLAS_DHAN_SYMBOL_MAP":'{"A":{"upstox_key":"NSE_EQ|INE002A01018","security_id":1},"B":{"upstox_key":"NSE_EQ|INE009A01021","security_id":1}}'}):
+            self.assertEqual(multi._dhan_mapping(mapping),{})
+        with patch.object(multi.httpx,"post") as post:
+            with self.assertRaises(multi.ProviderFailure):
+                multi._request("https://api.dhan.co/v2/orders",{},payload={})
+            post.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main()
