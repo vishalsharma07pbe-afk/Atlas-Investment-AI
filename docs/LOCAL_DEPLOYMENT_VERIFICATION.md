@@ -24,6 +24,9 @@ For the production loopback gateway, use `--base-url http://127.0.0.1:8088`. Pro
 
 - **runtime:** all twelve automatic research sections processed, portfolio review contract, scheduler enabled, research-only mode and current workflow checks.
 - **workflow_runtime:** current daily briefing coverage, exact canonical stock report linkage (up to five per daily horizon), strict fund result contract, portfolio-level risk, public notification revision metadata and registered durable alert job. An empty but valid research result can pass the contract; unavailable history or mismatched report identity blocks it.
+- **final_runtime:** separate intraday watch contract, private notification count and authenticated research-notes journal read. Denied/closed intraday session may pass the contract with empty results; this does not prove intraday coverage.
+- **populated_portfolio / intraday_evidence:** observation markers only, not validated holdings accuracy or strategy evidence.
+- **product_acceptance:** NOT_CERTIFIED. See [final acceptance matrix](ATLAS_FINAL_ACCEPTANCE.md) for remaining evidence and verification.
 - **investment_qualification:** NOT_CERTIFIED for this release. A successful contract check does not certify investment picks or validate execution, strategy, valuation or suitability.
 - **stored_provider_evidence:** recent Upstox registry, validated daily history, official AMFI NAV, operator rights declarations, eligible equity history and historical fund evidence. Empty or stale data cannot pass.
 - **live_feed:** OBSERVED only when the readiness endpoint reports a fresh authorized tick. A closed market can legitimately report NOT_OBSERVED. Add `--require-live` during a known live trading session if this is an acceptance requirement.
