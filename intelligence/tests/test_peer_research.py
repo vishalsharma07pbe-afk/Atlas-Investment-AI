@@ -96,3 +96,30 @@ class PeerResearchTests(unittest.TestCase):
         altered[PEERS[0]]["sections"]["ratios"]["source"]["retrieved_at"]="2026-11-24T15:00:00+00:00"
         altered[PEERS[1]]["sections"]["ratios"]["source"]["retrieved_at"]="2026-11-26T02:00:00+00:00"
         self.assertEqual(summarize(target,altered)["valuation_research"]["metrics"],[])
+
+    def test_separate_cached_industry_sample_needs_exact_fresh_classification(self):
+        from datetime import datetime,timezone,timedelta
+        from app.peer_research import industry_sample
+        instant=datetime(2026,11,26,10,tzinfo=timezone.utc)
+        def classified(isin,revenue):
+            value=report(isin,revenue)
+            value["retrieved_at"]=instant.isoformat()
+            block=value["sections"]["profile"]
+            block["data"]["industry"]="Oil refining"
+            block["source"]={"provider":"UPSTOX","endpoint":"/v2/fundamentals/"+isin+"/profile","retrieved_at":instant.isoformat()}
+            value["sections"]["competitors"]={"status":"UNAVAILABLE","data":None}
+            return value
+        target=classified(TARGET,100)
+        cohort={p:("NSE_EQ|"+p,classified(p,v)) for p,v in zip(PEERS,(80,120,150))}
+        result=industry_sample(target,cohort,instant)
+        self.assertEqual(result["status"],"CACHED_INDUSTRY_COMPARISON")
+        self.assertEqual(result["matching_cached_count"],3)
+        self.assertEqual(result["metrics"][0]["peer_median"],120)
+        self.assertFalse(result["market_leadership_verified"])
+        self.assertFalse(result["valuation_eligible"])
+        self.assertEqual(selected(target),[])
+        cohort[PEERS[0]][1]["sections"]["profile"]["source"]["retrieved_at"]=(instant-timedelta(hours=25)).isoformat()
+        self.assertEqual(industry_sample(target,cohort,instant)["metrics"],[])
+        cohort[PEERS[0]][1]["sections"]["profile"]["source"]["retrieved_at"]=instant.isoformat()
+        cohort[PEERS[0]][1]["sections"]["profile"]["data"]["industry"]="Banks"
+        self.assertEqual(industry_sample(target,cohort,instant)["matching_cached_count"],2)

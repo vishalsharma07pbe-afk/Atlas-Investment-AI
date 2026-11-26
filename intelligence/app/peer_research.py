@@ -201,3 +201,57 @@ def summarize(report,reports):
             "minimum_peers_per_metric":3,"sample_limit":MAX_PEERS,"metrics":metrics,
             "valuation_research":_valuation(report,compatible),
             "notice":"Bounded provider-listed same-sector sample, not a market-leadership or market-share ranking. Annual figures are provider-reported, not independently filing-verified; differences in business mix remain possible. No fair-value estimate or investment qualification."}
+
+
+INDUSTRY_SAMPLE_LIMIT=10
+
+def fresh_classification(report,instant):
+    try:
+        isin=report["isin"]
+        block=report["sections"]["profile"]
+        source=block["source"]
+        stamp=datetime.fromisoformat(source["retrieved_at"])
+        retrieved=datetime.fromisoformat(report["retrieved_at"])
+        if (not re.fullmatch(r"INE[A-Z0-9]{9}",isin) or source["provider"]!="UPSTOX"
+            or source["endpoint"]!=f"/v2/fundamentals/{isin}/profile"
+            or stamp.tzinfo is None or retrieved.tzinfo is None
+            or not instant-timedelta(hours=24)<=stamp<=instant
+            or not instant-timedelta(hours=24)<=retrieved<=instant):
+            return None
+        return (sector(report),_industry(report)) if sector(report) and _industry(report) else None
+    except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
+        return None
+
+def industry_sample(report,cohort,instant):
+    """Separate exact-classification sample; never claim identified competitors."""
+    classification=fresh_classification(report,instant)
+    matches=[]
+    if classification:
+        for isin,(key,peer) in sorted(cohort.items()):
+            if isin!=report["isin"] and peer.get("isin")==isin and key in ("NSE_EQ|"+isin,"BSE_EQ|"+isin) and fresh_classification(peer,instant)==classification:
+                matches.append((isin,key,peer))
+    selected=matches[:INDUSTRY_SAMPLE_LIMIT]
+    metrics=[]
+    for key in ("REVENUE","REVENUE_GROWTH","NET_MARGIN","OPERATING_MARGIN"):
+        target=_metric(report,key)
+        if not target:
+            continue
+        period,unit,value=target
+        observed=[]
+        for isin,instrument,peer in selected:
+            point=_metric(peer,key)
+            if point and point[:2]==(period,unit):
+                observed.append({"isin":isin,"instrument_key":instrument,"value":point[2]})
+        if len(observed)<3:
+            continue
+        metrics.append({"metric":key,"period":period,"unit":unit,"company_value":value,
+                        "peer_count":len(observed),"peer_median":median(r["value"] for r in observed),
+                        "peers_above":sum(r["value"]>value for r in observed),
+                        "peers_below":sum(r["value"]<value for r in observed),"peers":observed})
+    valuation=_valuation(report,selected)
+    return {"status":"CACHED_INDUSTRY_COMPARISON" if metrics or valuation["metrics"] else "INSUFFICIENT_COMPARABLE_INDUSTRY_SAMPLE",
+            "classification_verified":classification is not None,"sector":classification[0] if classification else None,
+            "industry":classification[1] if classification else None,"matching_cached_count":len(matches),
+            "sample_count":len(selected),"sample_limit":INDUSTRY_SAMPLE_LIMIT,"metrics":metrics,
+            "valuation_research":valuation,"valuation_eligible":False,"market_leadership_verified":False,
+            "notice":"Fresh exact provider sector and industry labels in the validated local discovery sample, sorted by ISIN and capped at ten other companies. Not provider-listed competitors, market share or market leadership. Matched annual periods only; multiple dates remain unverified. No qualification or fair-value estimate."}
