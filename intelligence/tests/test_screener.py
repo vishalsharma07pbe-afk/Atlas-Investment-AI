@@ -1,6 +1,7 @@
 import unittest
 from datetime import date, timedelta
-from app.screener import screen
+from app.screener import screen, report_close_history
+from app.technical import Candle
 
 def candles(n=25, offset=0):
     start=date(2026,10,20)
@@ -11,6 +12,16 @@ def candles(n=25, offset=0):
     } for i in range(n)]}
 
 class ScreenerTests(unittest.TestCase):
+    def test_report_close_history_is_bounded_and_preserves_observation_dates(self):
+        rows=[Candle((date(2026,9,1)+timedelta(days=i*2)).isoformat(),
+                     100,200,90,100+i,1000,"ADJUSTED") for i in range(40)]
+        report=report_close_history(rows)
+        self.assertEqual(len(report["points"]),30)
+        self.assertEqual(report["points"][0],{"date":rows[10].date,"close":110})
+        self.assertEqual(report["points"][-1],{"date":rows[-1].date,"close":139})
+        self.assertEqual(report["as_of"],rows[-1].date)
+        self.assertEqual(report["adjustment_status"],"ADJUSTED")
+
     def test_fresh_daily_data_returns_observations(self):
         instruments=[{"id":1,"exchange":"NSE","symbol":"TEST"}]
         result=screen(instruments,lambda _:candles(),as_of=date(2026,11,13))
