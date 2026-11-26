@@ -68,3 +68,13 @@ it("shows annual cash and liquidity evidence without imputing free cash flow",()
  expect(screen.getByText("Liquidity and cash flow reconciliation")).toBeTruthy();
  expect(screen.getByText("Investing cash flow is not capital expenditure.")).toBeTruthy();
 });
+
+it("separates older detailed earnings from current summary and withholds valuation",()=>{
+ const missing={status:"UNAVAILABLE",data:null,source:null};
+ const evidence:CompanyEvidence={isin:"INE002A01018",retrieved_at:"2026-11-24T10:00:00Z",available_sections:1,total_sections:8,notice:"Provider reported.",sections:{profile:missing,ratios:missing,income_statement:missing,cash_flow:missing,balance_sheet:missing,shareholding:missing,corporate_actions:missing,competitors:missing},
+ earnings_quality:{status:"REPORTED_EARNINGS_BRIDGES",latest_summary_period:"2026-03",latest_detail_period:"2025-03",period_scope_status:"DETAIL_OLDER_THAN_SUMMARY",revenue_bridge:[],pretax_bridge:[],tax_bridge:[{period:"2025-03",profit_before_tax:30,tax:8,profit_after_tax:22,reported_tax_to_pretax_percent:26.6667,reconciliation_difference:0}],cash_quality:[],valuation_blockers:["VERIFIED_SHARE_AND_EPS_BASIS_REQUIRED"],notice:"No target price or intrinsic value."}};
+ render(<CompanyEvidenceCard evidence={evidence}/>);
+ expect(screen.getByText(/Detailed earnings statement is older/)).toBeTruthy();
+ expect(screen.getByText("26.67%")).toBeTruthy();
+ expect(screen.getByText("verified share and eps basis required")).toBeTruthy();
+});
