@@ -1,4 +1,5 @@
-import {useEffect,useState} from "react";
+import {useEffect,useRef,useState} from "react";
+import {visiblePolling} from "./visiblePolling";
 import {useOverlayFocus} from "./useOverlayFocus";
 import NotificationSourceHealth from "./NotificationSourceHealth";
 import PersonalNotificationInbox from "./PersonalNotificationInbox";
@@ -13,6 +14,8 @@ export default function NotificationCenter({includePersonal=false}:{includePerso
   const [category,setCategory]=useState("ALL");
   const [view,setView]=useState<"ALL"|"IPO_CALENDAR">("ALL");
   const [seen,setSeen]=useState<string[]>(savedIds);
+  const seenRef=useRef(seen);
+  const detailRevision=useRef(0);
   const [open,setOpen]=useState(false);
   const {triggerRef,panelRef}=useOverlayFocus(open,()=>setOpen(false));
   const [alerts,setAlerts]=useState<Alert[]|null>(null);
@@ -30,13 +33,16 @@ export default function NotificationCenter({includePersonal=false}:{includePerso
     async function refreshSummary(){
       if(cancelled||inFlight||document.visibilityState==="hidden")return;
       inFlight=true;
+      const revision=detailRevision.current;
       try{
         const response=await fetch(BASE+"/summary",{signal:controller.signal,cache:"no-store"});
         if(!response.ok)throw Error("Notification summary unavailable");
         const value=await response.json() as Summary;
-        if(!cancelled){setIds(value.revision_keys??value.ids);setSummaryError(false);setHistoryUnavailable(value.research_history_status==="UNAVAILABLE");}
+        const keys=value.revision_keys??value.ids;
+        if(!Array.isArray(keys)||keys.some(k=>typeof k!=="string"))throw Error("Invalid notification metadata");
+        if(!cancelled&&revision===detailRevision.current){setIds([...new Set(keys)]);setSummaryError(false);setHistoryUnavailable(value.research_history_status==="UNAVAILABLE");}
       }catch{
-        if(!cancelled)setSummaryError(true);
+        if(!cancelled&&revision===detailRevision.current)setSummaryError(true);
       }finally{inFlight=false;}
     }
     void refreshSummary();
@@ -65,21 +71,34 @@ export default function NotificationCenter({includePersonal=false}:{includePerso
   },[includePersonal,readRevision]);
   const count=ids.filter(id=>!seen.includes(id)).length+(includePersonal?personalCount:0);
   const upcoming=alerts?upcomingIpoEvents(alerts,indiaDateToday()):[];
-  async function toggle(){
+  useEffect(()=>{
+    if(!open)return;
+    let first=true;
+    return visiblePolling(async signal=>{
+      if(first){setLoading(true);first=false;}
+      try{
+        const response=await fetch(BASE,{cache:"no-store",signal});
+        if(!response.ok)throw Error();
+        const value:{alerts:Alert[];research_history_status?:string}=await response.json();
+        if(!Array.isArray(value.alerts)||value.alerts.some(a=>!a||typeof a.id!=="string"||typeof a.title!=="string"))throw Error();
+        if(signal.aborted)return;
+        detailRevision.current++;
+        setHistoryUnavailable(value.research_history_status==="UNAVAILABLE");
+        setAlerts(value.alerts);setError("");setSummaryError(false);
+        const current=[...new Set(value.alerts.map(a=>a.revision_key??a.id))];
+        const updated=[...new Set([...seenRef.current,...current])].slice(-Math.max(500,current.length));
+        seenRef.current=updated;
+        setSeen(updated);setIds(current);
+        try{localStorage.setItem(KEY,JSON.stringify(updated));}catch{/* In-memory read state remains usable. */}
+      }catch{
+        if(!signal.aborted)setError("Notification details unavailable. Retrying while open.");
+      }finally{if(!signal.aborted)setLoading(false);}
+    },60000);
+  },[open]);
+  function toggle(){
     if(open){setOpen(false);return;}
     window.dispatchEvent(new Event("atlas:close-appearance"));
-    setOpen(true);setLoading(true);setError("");
-    try{
-      const response=await fetch(BASE,{cache:"no-store"});
-      if(!response.ok)throw Error("Notification details unavailable.");
-      const value:{alerts:Alert[];research_history_status?:string}=await response.json();
-      setHistoryUnavailable(value.research_history_status==="UNAVAILABLE");
-      setAlerts(value.alerts);
-      const updated=[...new Set([...seen,...value.alerts.map(a=>a.revision_key??a.id)])].slice(-500);
-      setSeen(updated);
-      setIds(value.alerts.map(a=>a.revision_key??a.id));
-      try{localStorage.setItem(KEY,JSON.stringify(updated));}catch{/* Read state remains usable in memory when browser storage is blocked. */}
-    }catch(e){setError(String(e));}finally{setLoading(false);}
+    setLoading(true);setError("");setAlerts(null);setOpen(true);
   }
   return <div className="atlas-notifications">
     <button ref={triggerRef} className="atlas-bell" type="button" aria-haspopup="dialog" aria-label={`Notifications, ${count} unread`} aria-expanded={open} onClick={toggle}>
@@ -94,7 +113,7 @@ export default function NotificationCenter({includePersonal=false}:{includePerso
         {!loading&&!error&&alerts&&<div className="atlas-notification-filters"><button type="button" aria-pressed={view==="ALL"} onClick={()=>setView("ALL")}>All alerts</button><button type="button" aria-pressed={view==="IPO_CALENDAR"} onClick={()=>setView("IPO_CALENDAR")}>IPO calendar (30 days)</button></div>}
         {!loading&&!error&&alerts&&view==="ALL"&&<div className="atlas-notification-filters"><label htmlFor="notification-filter">Filter</label><select id="notification-filter" value={category} onChange={e=>setCategory(e.target.value)}><option value="ALL">All notifications</option><option value="IPO_UPCOMING">Upcoming IPOs</option><option value="IPO_SUBSCRIPTION">IPO subscriptions</option><option value="IPO_ALLOTMENT">IPO allotments</option><option value="MARKET_EVENT">Market events</option><option value="CORPORATE_ACTION">Corporate actions</option><option value="RESEARCH_UPDATE">Research updates</option><option value="RISK_WARNING">Risk warnings</option></select></div>}
         {loading&&<p role="status">Loading notifications…</p>}
-        {error&&<p role="alert">{error}</p>}
+        {error&&<p role="alert">{error} {alerts&&"Previously loaded alerts are hidden until a successful refresh."}</p>}
         {historyUnavailable&&<p role="status">Saved research alert history unavailable. Other available alerts are shown.</p>}
         {!loading&&!error&&alerts?.length===0&&<p className="muted tiny">No verified local alerts available. Live IPO and subscription feeds are not connected yet.</p>}
         {!loading&&!error&&view==="IPO_CALENDAR"&&upcoming.length===0&&<p className="muted tiny">No dated IPO events supplied for the next 30 days. This does not mean no IPOs are scheduled.</p>}
@@ -110,7 +129,7 @@ export default function NotificationCenter({includePersonal=false}:{includePerso
         </article>)}
         {!loading&&!error&&view==="ALL"&&alerts&&alerts.length>0&&alerts.every(a=>category!=="ALL"&&a.category!==category)&&<p className="muted tiny">No alerts in this category.</p>}
         <NotificationSourceHealth/>
-        <p className="muted tiny">Alerts are loaded only when opened. Badge checks lightweight local metadata; no background market scraping.</p>
+        <p className="muted tiny">Full alerts refresh every minute while this panel is open and visible. Closed panels check only lightweight metadata; no background market scraping.</p>
       </section></>}
   </div>;
 }
