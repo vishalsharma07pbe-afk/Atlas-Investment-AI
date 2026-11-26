@@ -55,7 +55,7 @@ def _load():
 
 def _combined():
     local = _load()
-    from . import automatic_news, global_releases, research_alerts, economic_calendar
+    from . import automatic_news, global_releases, public_research_alerts, economic_calendar
     from .autonomous_research import config, _connect, read_snapshot
     if not config()[0]:
         return local, False
@@ -70,8 +70,8 @@ def _combined():
     has_news=bool(news)
     instant=datetime.now(timezone.utc)
     for producer in (
-        lambda: research_alerts.market_alerts(read_snapshot(False),instant),
-        lambda: research_alerts.calendar_alerts(economic_calendar.read(_connect,instant),instant),
+        lambda: public_research_alerts.market_alerts(read_snapshot(False),instant),
+        lambda: public_research_alerts.calendar_alerts(economic_calendar.read(_connect,instant),instant),
     ):
         try:
             news.extend(ResearchAlert.model_validate(item) for item in producer())
