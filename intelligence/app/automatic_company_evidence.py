@@ -40,6 +40,35 @@ def identify(snapshot):
                     yield item,isin
 
 
+def identify_sample(snapshot,instant):
+    """Only validated completed public histories from the bounded discovery sample."""
+    today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
+    for section in snapshot.get("sections",[]):
+        exchange=section.get("section")
+        if exchange not in ("NSE","BSE") or section.get("status")!="READY":
+            continue
+        result=section.get("result") or {}
+        rows=result.get("company_research_universe")
+        if not isinstance(rows,list) or len(rows)>200:
+            continue
+        count=result.get("eligible_count")
+        if type(count) is not int or not len(rows)<=count<=200:
+            continue
+        ids=[r.get("id") for r in rows if isinstance(r,dict)]
+        if any(type(i) is not int or i<=0 for i in ids) or len(ids)!=len(rows) or len(set(ids))!=len(ids):
+            continue
+        for row in rows:
+            isin=row.get("isin")
+            if not isinstance(isin,str) or not re.fullmatch(r"INE[A-Z0-9]{9}",isin) or row.get("exchange")!=exchange:
+                continue
+            try:
+                observed=datetime.strptime(row.get("as_of",""),"%Y-%m-%d").date()
+            except (ValueError,TypeError):
+                continue
+            if 1<=(today-observed).days<=4:
+                yield exchange,isin
+
+
 def _table(db):
     db.execute("""CREATE TABLE IF NOT EXISTS automatic_company_evidence(
         isin TEXT PRIMARY KEY, attempted_at TEXT NOT NULL, next_attempt_at TEXT NOT NULL,
@@ -164,7 +193,12 @@ def refresh(snapshot, connect, loader=company_research, instant=None, *, explici
         # The documented fundamentals adapter accepts ISIN without an exchange key.
         # This input is used only for bounded, public, exact as-filed fund equities.
         candidates={i:None for i in explicit_isins[:200] if isinstance(i,str) and re.fullmatch(r"INE[A-Z0-9]{9}",i)}
-    if not candidates:
+    sample={}
+    if explicit_isins is None:
+        for exchange,isin in identify_sample(snapshot,instant):
+            if isin not in sample or exchange=="NSE":
+                sample[isin]="NSE_EQ|"+isin if exchange=="NSE" else None
+    if not candidates and not sample:
         return
     with closing(connect()) as db, db:
         _table(db)
@@ -183,9 +217,16 @@ def refresh(snapshot, connect, loader=company_research, instant=None, *, explici
             peers=peer_candidates(rows,candidates,instant)
             due=sorted((i for i in peers if i not in rows or rows[i]["next_attempt_at"]<=stamp),
                        key=lambda i:(rows[i]["attempted_at"] if i in rows else "",i))
-            if not due:
-                return
-            candidates.update(peers)
+            if due:
+                candidates.update(peers)
+            else:
+                # Expand the existing one-company rotation only after due
+                # watches and their bounded peers. No new jobs or API budget.
+                due=sorted((i for i in sample if i not in rows or rows[i]["next_attempt_at"]<=stamp),
+                           key=lambda i:(rows[i]["attempted_at"] if i in rows else "",i))
+                if not due:
+                    return
+                candidates.update(sample)
         isin=due[0]
         claim=db.execute("""INSERT INTO automatic_company_evidence VALUES(?,?,?,'RUNNING',NULL)
             ON CONFLICT(isin) DO UPDATE SET attempted_at=excluded.attempted_at,
@@ -277,6 +318,38 @@ def attach(snapshot,connect,instant=None):
         rows={r["isin"]:r for r in db.execute("SELECT * FROM automatic_company_evidence WHERE status IN ('AVAILABLE','PARTIAL') AND attempted_at BETWEEN ? AND ?",
               ((instant-timedelta(hours=24)).isoformat(),instant.isoformat()))}
     today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
+    # Coverage counts are distinct public identities, not qualified stocks.
+    sample_by_exchange={exchange:set() for exchange in ("NSE","BSE")}
+    for exchange,isin in identify_sample(snapshot,instant):
+        sample_by_exchange[exchange].add(isin)
+    for section in snapshot["sections"]:
+        if section.get("section") not in sample_by_exchange or section.get("status")!="READY":
+            continue
+        result=section.get("result") or {}
+        if not isinstance(result.get("company_research_universe"),list):
+            continue
+        sample=sample_by_exchange[section["section"]]
+        cached=0
+        section_counts={k:0 for k in SECTIONS}
+        for isin in sample:
+            row=rows.get(isin)
+            if not row or not row["payload"]:
+                continue
+            try:
+                report=json.loads(row["payload"])
+                stamp=datetime.fromisoformat(report["retrieved_at"])
+                if report.get("isin")!=isin or stamp.tzinfo is None or not instant-timedelta(hours=24)<=stamp<=instant:
+                    continue
+                available=[k for k in SECTIONS if (report.get("sections",{}).get(k) or {}).get("status")=="AVAILABLE"
+                           and (report.get("sections",{}).get(k) or {}).get("data")]
+                if available:
+                    cached+=1
+                    for k in available:
+                        section_counts[k]+=1
+            except (ValueError,TypeError,KeyError,AttributeError):
+                continue
+        result["company_research_coverage"]={"distinct_eligible_isins":len(sample),"fresh_cached_reports":cached,
+            "section_counts":section_counts,"notice":"Distinct eligible public identities in this exchange sample; provider-reported evidence only, not full market coverage or qualified recommendations."}
     # Enrich only primary identities and their explicitly selected one-hop peers.
     primary=list(identify(snapshot))
     wanted={isin for _,isin in primary}

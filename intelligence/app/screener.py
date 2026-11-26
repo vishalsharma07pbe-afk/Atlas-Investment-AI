@@ -30,6 +30,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
     pressure_eligible=0
     trap_eligible=0
     trap_rows=[]
+    company_research_universe=[]
     action_previews=[]
     action_preview_count=0
     action_preview_withheld=0
@@ -151,6 +152,8 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                 counts=breadth_pairs.setdefault(key,{"advancing":0,"declining":0,"unchanged":0})
                 counts["advancing" if close>previous else "declining" if close<previous else "unchanged"]+=1
             rows.append(row)
+            if batch_loaded and exact_isin(instrument.get("isin")):
+                company_research_universe.append({"id":row["id"],"exchange":row["exchange"],"isin":instrument["isin"],"as_of":row["as_of"]})
         except (KeyError, TypeError, ValueError, OverflowError, ZeroDivisionError):
             skipped["INVALID"] += 1
     rows.sort(key=lambda x: (-x["change_1d_percent"], x["exchange"], x["symbol"]))
@@ -169,6 +172,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
         "notice": f"Bounded daily sample of up to {limit} registry instruments; not a full-market top-five ranking, live feed, intraday signal or recommendation.",
     }
     if batch_loaded:
+        result["company_research_universe"]=company_research_universe
         result["sample_breadth"]={"as_of":expected_session.isoformat() if expected_session is not None else None,
             "adjustment_status":"ADJUSTED","pairs":[{"previous_session":k,**v} for k,v in sorted(breadth_pairs.items())],
             "notice":"Counts of adjusted histories in the selected registry sample, grouped by preceding observed date; not full-exchange breadth."}

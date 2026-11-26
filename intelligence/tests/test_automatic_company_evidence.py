@@ -145,3 +145,33 @@ class CompanyEvidenceTests(unittest.TestCase):
         self.assertEqual(actions[1]["ratio_basis"],"UNVERIFIED")
         self.assertFalse(actions[1]["adjustment_eligible"])
         self.assertEqual(company.cached_action_reports(research._connect,[self.isin],self.now+timedelta(hours=25)),{})
+
+    def test_broad_discovery_rotation_preserves_watch_priority_and_budget(self):
+        other="INE009A01021"
+        third="INE242A01010"
+        result=self.snapshot["sections"][0]["result"]
+        result["eligible_count"]=2
+        result["company_research_universe"]=[
+            {"id":1,"exchange":"NSE","isin":other,"as_of":"2026-11-23"},
+            {"id":2,"exchange":"NSE","isin":third,"as_of":"2026-11-23"}]
+        calls=[]
+        def load(isin,key):
+            calls.append((isin,key))
+            return {"isin":isin,"sections":{"profile":{"status":"AVAILABLE","data":{"sector":"Example"}}}}
+        company.refresh(self.snapshot,research._connect,load,self.now)
+        self.assertEqual(calls,[(self.isin,"NSE_EQ|"+self.isin)])
+        company.refresh(self.snapshot,research._connect,load,self.now)
+        self.assertEqual(calls[-1],(other,"NSE_EQ|"+other))
+        company.attach(self.snapshot,research._connect,self.now)
+        coverage=result["company_research_coverage"]
+        self.assertEqual(coverage["distinct_eligible_isins"],2)
+        self.assertEqual(coverage["fresh_cached_reports"],1)
+        self.assertEqual(coverage["section_counts"]["profile"],1)
+        company.refresh(self.snapshot,research._connect,load,self.now)
+        self.assertEqual(calls[-1],(third,"NSE_EQ|"+third))
+        company.refresh(self.snapshot,research._connect,load,self.now)
+        self.assertEqual(len(calls),3)
+        result["company_research_universe"][0]["as_of"]="2026-11-01"
+        self.assertEqual(list(company.identify_sample(self.snapshot,self.now)),[("NSE",third)])
+        result["company_research_universe"][1]["id"]=1
+        self.assertEqual(list(company.identify_sample(self.snapshot,self.now)),[])

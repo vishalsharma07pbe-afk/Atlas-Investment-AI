@@ -157,6 +157,7 @@ class AutonomousResearchTests(unittest.TestCase):
              patch.object(research,"backend_json",side_effect=load):
             result=research.market_snapshot("NSE")
         self.assertEqual(result["eligible_count"],200)
+        self.assertEqual(result["company_research_universe"],[]) # missing exact ISINs never enter company rotation
         self.assertEqual(result["universe_size"],200)
         self.assertEqual(result["discovery_coverage"]["recent_registry_count"],230)
         self.assertEqual(len(calls),11)
