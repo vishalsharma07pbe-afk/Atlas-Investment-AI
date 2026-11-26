@@ -6,9 +6,11 @@ import json
 from .market_client import backend_json
 from .strategy_validation import replay, WINDOWS, attach_market_benchmark
 from .horizon_research import VERSION
+from .automatic_company_evidence import cached_action_reports
+from .corporate_action_normalization import reported_crossings
 from .replay_evidence import (VERSION as EVIDENCE_VERSION, exact_isin, fingerprint,
     full_manifest, corporate_action_status, revision_audit, session_audit, listing_audit)
-CACHE_VERSION = VERSION + ':' + EVIDENCE_VERSION + ':market-price-index-v1:signal-regime-v1:chronological-folds-v1:execution-proxy-v1:full-provenance-v1:session-continuity-v1:listing-evidence-v1:scoped-action-v1'
+CACHE_VERSION = VERSION + ':' + EVIDENCE_VERSION + ':market-price-index-v1:signal-regime-v1:chronological-folds-v1:execution-proxy-v1:full-provenance-v1:session-continuity-v1:listing-evidence-v1:scoped-action-v1:provider-action-and-rotation-v1'
 
 IST=ZoneInfo("Asia/Kolkata")
 def _table(db):
@@ -16,6 +18,44 @@ def _table(db):
         exchange TEXT NOT NULL, instrument_id INTEGER NOT NULL, symbol TEXT NOT NULL,
         methodology TEXT NOT NULL, attempted_at TEXT NOT NULL,status TEXT NOT NULL,payload TEXT,
         PRIMARY KEY(exchange,instrument_id))""")
+
+def _ready_ids(snapshot,exchange,registry,today):
+    """Exact eligible public identities, independent of watch scores."""
+    for section in snapshot.get("sections",[]):
+        if section.get("section")!=exchange or section.get("status")!="READY":
+            continue
+        result=section.get("result") or {}
+        rows=result.get("replay_research_universe")
+        count=result.get("eligible_count")
+        if not isinstance(rows,list) or type(count) is not int or not 0<=len(rows)<=count<=200:
+            return set()
+        ids=set()
+        seen=set()
+        for row in rows:
+            if not isinstance(row,dict) or type(row.get("id")) is not int or row["id"] in seen:
+                return set()
+            i=row["id"]
+            seen.add(i)
+            identity=registry.get(i)
+            if not identity or row.get("exchange")!=exchange or row.get("isin")!=identity["isin"]:
+                continue
+            try:
+                age=(today-date.fromisoformat(row["as_of"])).days
+                if 1<=age<=4:
+                    ids.add(i)
+            except (ValueError,KeyError,TypeError):
+                continue
+        return ids
+    return set()
+
+
+def _payload(row):
+    try:
+        value=json.loads(row["payload"] or "{}")
+        return value if isinstance(value,dict) else {}
+    except (ValueError,TypeError,KeyError):
+        return {}
+
 
 def refresh(snapshot,connect,loader=backend_json,instant=None):
     if not snapshot["enabled"]:
@@ -44,9 +84,18 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
                 or existing[i]["attempted_at"]<=(instant-timedelta(hours=24)).isoformat()]
             if not due:
                 continue
-            selected=min(due,key=lambda r:(existing[r["id"]]["attempted_at"] if r["id"] in existing else "",r["id"]))
+            ready=_ready_ids(snapshot,exchange,registry,today)
+            eligible=[r for r in due if r["id"] in ready]
+            general=[r for r in due if r["id"] not in ready]
+            latest=max(existing.values(),key=lambda r:(r["attempted_at"],r["instrument_id"]),default=None)
+            last_basis=_payload(latest).get("selection_basis") if latest is not None else None
+            # Alternate when both queues are due; never eliminate registry rotation.
+            prefer_ready=bool(eligible) and (not general or last_basis!="VALIDATED_RECENT_HISTORY_HINT")
+            pool=eligible if prefer_ready else general
+            basis="VALIDATED_RECENT_HISTORY_HINT" if prefer_ready else "GENERAL_REGISTRY_ROTATION"
+            selected=min(pool,key=lambda r:(existing[r["id"]]["attempted_at"] if r["id"] in existing else "",r["id"]))
             i=selected["id"]
-            previous_payload=json.loads(existing[i]["payload"] or "{}") if i in existing else {}
+            previous_payload=_payload(existing[i]) if i in existing else {}
             prior_manifest=previous_payload.get("_history_manifest") if previous_payload.get("isin")==selected["isin"] else None
             db.execute("""INSERT INTO strategy_validation VALUES(?,?,?,?,?,'RUNNING',NULL)
                 ON CONFLICT(exchange,instrument_id) DO UPDATE SET symbol=excluded.symbol,methodology=excluded.methodology,
@@ -71,6 +120,12 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
                         action=discovered_action
                     elif discovered_action!="NO_RECORDED_CROSSING_ACTION" and action=="NO_RECORDED_CROSSING_ACTION":
                         action="ACTION_CONTEXT_UNAVAILABLE"
+                    # Same exact-ISIN authorized cache as discovery, no provider call.
+                    cached=cached_action_reports(connect,[selected["isin"]],instant)
+                    crossings=reported_crossings(cached.get(selected["isin"]),selected["isin"],
+                        date.fromisoformat(manifest["first_date"]),date.fromisoformat(manifest["last_date"]),instant)
+                    if crossings and action=="NO_RECORDED_CROSSING_ACTION":
+                        action="REPORTED_ACTION_RECONCILIATION_REQUIRED"
                     audit=revision_audit(manifest,prior_manifest)
                     audit["corporate_action_status"]=action
                     audit["notice"]="Full bounded replay input fingerprint, compared with the previous local capture only. No recorded crossing action does not verify adjustment completeness or point-in-time availability."
@@ -80,6 +135,8 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
                         result={"status":listing["status"],"horizons":{},"listing_evidence":listing}
                     elif action!="NO_RECORDED_CROSSING_ACTION":
                         result={"status":action,"horizons":{}}
+                        if crossings:
+                            result["reported_crossing_actions"]=crossings
                     else:
                         try:
                             calendar=loader(f"/api/v1/market-data/strategy-calendar?exchange={exchange}")
@@ -103,6 +160,7 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
         # Keep the last successful manifest through transient failures; raw
         # per-date digests stay in this local cache, not in research responses.
         result["isin"]=selected["isin"]
+        result["selection_basis"]=basis
         if manifest is not None or prior_manifest is not None:
             result["_history_manifest"]=manifest if manifest is not None else prior_manifest
         with closing(connect()) as db,db:
@@ -144,6 +202,12 @@ def read(connect,instant=None,*,snapshot=None):
                             and 1<=(today-date.fromisoformat(payload["as_of"])).days<=5):
                         item["matched_strategy_replay"]={"as_of":payload["as_of"],"attempted_at":row["attempted_at"],
                             **replay_result,"notice":"Exact ISIN and shared recent adjusted history match the cached replay. Full history was audited at replay time, not revalidated by this snapshot; later revisions and missing corporate actions remain possible. Not a forward performance estimate."}
+    selection_counts={}
+    for row in rows:
+        basis=_payload(row).get("selection_basis","UNKNOWN")
+        if basis not in ("VALIDATED_RECENT_HISTORY_HINT","GENERAL_REGISTRY_ROTATION"):
+            basis="UNKNOWN"
+        selection_counts[basis]=selection_counts.get(basis,0)+1
     horizons={}
     for horizon in WINDOWS:
         items=[]
@@ -170,5 +234,5 @@ def read(connect,instant=None,*,snapshot=None):
                 items.append({"exchange":row["exchange"],"symbol":row["symbol"],"as_of":payload["as_of"],**result})
         horizons[horizon]={"counts":counts,"observed_instruments":len(items),"items":items[:10],"calendar_withheld":calendar_withheld,"listing_withheld":listing_withheld}
     return {"methodology":VERSION,"evidence_version":EVIDENCE_VERSION,"sample_count":len(rows),"horizons":horizons,
-        "universe_basis":"CURRENT_ACTIVE_REGISTRY_SAMPLE","historical_universe_verified":False,
-        "notice":"Bounded rotating current-registry sample, not selected by current watch score. Delisted/suspended historical membership is not established; survivorship and selection bias remain. Per-instrument replay only; results are not independent or a portfolio backtest. Nifty 50 price-index comparison and signal-date trend cohorts require matching observed dates; Repeated fixed-rule test windows are descriptive; no prospective validation. No recommendation gate is lifted."}
+        "universe_basis":"CURRENT_ACTIVE_REGISTRY_SAMPLE","historical_universe_verified":False,"selection_counts":selection_counts,
+        "notice":"Bounded rotating current-registry sample alternating recent validated adjusted-history hints with general registry entries, not selected by current watch score. History availability selection bias remains. Delisted/suspended historical membership is not established; survivorship and selection bias remain. Per-instrument replay only; results are not independent or a portfolio backtest. Nifty 50 price-index comparison and signal-date trend cohorts require matching observed dates; Repeated fixed-rule test windows are descriptive; no prospective validation. No recommendation gate is lifted."}
