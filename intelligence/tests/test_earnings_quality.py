@@ -3,7 +3,9 @@ from datetime import date
 from app.earnings_quality import summarize
 
 ISIN="INE002A01018"
-TODAY=date(2026,11,26)
+# March 2025 is exactly 18 calendar months old here; March 2026
+# summary is newer but the detailed bridge remains within the freshness gate.
+TODAY=date(2026,9,26)
 
 def row(name,a,b):
     return {"name":name,"history":[{"period":"Mar 2024","value":a},{"period":"Mar 2025","value":b}]}
@@ -51,3 +53,14 @@ class EarningsQualityTests(unittest.TestCase):
         self.assertIsNone(result["tax_bridge"][-1]["reported_tax_to_pretax_percent"])
         self.assertIsNone(result["cash_quality"][-1]["cash_to_profit_ratio"])
         self.assertEqual(result["tax_bridge"][-1]["reconciliation_difference"],0)
+
+    def test_stale_detail_is_withheld_even_with_newer_summary(self):
+        value=fixture()
+        result=summarize(value,date(2026,11,26))
+        self.assertEqual(result["status"],"INSUFFICIENT_MATCHED_EVIDENCE")
+        self.assertEqual(result["period_scope_status"],"DETAIL_OLDER_THAN_SUMMARY")
+        self.assertEqual(result["latest_detail_period"],"2025-03")
+        for key in ("revenue_bridge","pretax_bridge","tax_bridge","cash_quality"):
+            self.assertEqual(result[key],[])
+        self.assertFalse(result["valuation_eligible"])
+        self.assertIsNone(result["fair_value"])
