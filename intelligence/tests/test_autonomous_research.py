@@ -37,6 +37,47 @@ class AutonomousResearchTests(unittest.TestCase):
         self.assertNotIn("private-token", str(sections))
         self.assertEqual(sections[2]["status"], "READY")
 
+    def test_market_only_read_skips_fund_payloads_and_matches_full_snapshot(self):
+        instant=datetime(2026,11,26,4,tzinfo=timezone.utc)
+        with patch.object(research,"now",return_value=instant):
+            research.refresh_once(
+                lambda exchange: {"exchange":exchange,"momentum_leaders":[{"as_of":"2026-11-25"}]},
+                lambda category: {"category":category,"fund_only_payload":"x"*10000})
+            # Measure decoded payload count, not machine-specific wall time.
+            with patch.object(research.json,"loads",wraps=research.json.loads) as loads:
+                market=research.read_market_snapshot()
+                self.assertEqual(loads.call_count,2)
+            with patch.object(research.json,"loads",wraps=research.json.loads) as loads:
+                full=research.read_snapshot(False)
+                self.assertEqual(loads.call_count,12)
+            self.assertEqual(market,{**full,"sections":full["sections"][:2]})
+            self.assertNotIn("fund_only_payload",str(market))
+            # A corrupt fund section is still visible to the full reader but
+            # is irrelevant to equity-only consumers.
+            from contextlib import closing
+            with closing(research._connect()) as db,db:
+                db.execute("UPDATE research_sections SET payload='not-json' WHERE section='LARGE_CAP'")
+            self.assertEqual(research.read_market_snapshot(),market)
+            self.assertEqual(next(r for r in research.read_snapshot(False)["sections"] if r["section"]=="LARGE_CAP")["status"],"FAILED")
+        with patch.object(research,"now",return_value=datetime(2026,11,30,4,tzinfo=timezone.utc)):
+            self.assertTrue(all(r["status"]=="STALE" for r in research.read_market_snapshot()["sections"]))
+
+    def test_equity_only_background_jobs_use_market_reader(self):
+        snapshot={"enabled":True,"sections":[{"section":"NSE","status":"READY"}]}
+        with patch.object(research,"read_market_snapshot",return_value=snapshot) as market, \
+             patch.object(research,"read_snapshot",side_effect=AssertionError("full snapshot not needed")), \
+             patch.object(research.automatic_company_evidence,"permitted",return_value=True), \
+             patch.object(research.automatic_news,"permitted",return_value=True), \
+             patch.object(research.automatic_company_evidence,"refresh") as company, \
+             patch.object(research.automatic_news,"refresh") as news, \
+             patch.object(research.automatic_strategy_validation,"refresh") as replay, \
+             patch.object(research.watch_outcomes,"refresh") as outcomes:
+            for job in ("COMPANY_EVIDENCE","COMPANY_NEWS","STRATEGY_REPLAY","WATCH_OUTCOMES"):
+                self.assertEqual(research._execute_job(job),"PASS_COMPLETED")
+            self.assertEqual(market.call_count,4)
+            for consumer in (company,news,replay,outcomes):
+                consumer.assert_called_once_with(snapshot,research._connect)
+
     def test_invalid_interval_disables_scheduler(self):
         with patch.dict(os.environ, {"ATLAS_AUTONOMOUS_RESEARCH_INTERVAL_SECONDS": "1"}):
             self.assertFalse(research.config()[0])

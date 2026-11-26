@@ -43,13 +43,13 @@ class PublicAlertHistoryTests(unittest.TestCase):
         self.assertEqual(len(history.read(self.connect,self.now)),history.LIMIT)
 
     def test_scheduler_persists_without_browser(self):
-        with patch.object(autonomous_research,"_connect",self.connect),patch.object(autonomous_research,"read_snapshot",return_value={"enabled":True}),patch.object(autonomous_research,"now",return_value=self.now),patch("app.public_research_alerts.market_alerts",return_value=[self.row]):
+        with patch.object(autonomous_research,"_connect",self.connect),patch.object(autonomous_research,"read_market_snapshot",return_value={"enabled":True}),patch.object(autonomous_research,"now",return_value=self.now),patch("app.public_research_alerts.market_alerts",return_value=[self.row]):
             self.assertEqual(autonomous_research._execute_job("PUBLIC_RESEARCH_ALERTS"),"PASS_COMPLETED")
         self.assertEqual(len(history.read(self.connect,self.now)),1)
 
     def test_existing_feed_labels_historical_and_current_wins(self):
         self.refresh([self.row])
-        with patch("app.notifications._load",return_value=[]),patch.object(autonomous_research,"config",return_value=(True,900)),patch.object(autonomous_research,"_connect",self.connect),patch.object(autonomous_research,"read_snapshot",return_value={"enabled":True}),patch("app.automatic_news.alerts",return_value=[]),patch("app.global_releases.alerts",return_value=[]),patch("app.economic_calendar.read",return_value={}),patch("app.public_research_alerts.market_alerts",return_value=[]) as market:
+        with patch("app.notifications._load",return_value=[]),patch.object(autonomous_research,"config",return_value=(True,900)),patch.object(autonomous_research,"_connect",self.connect),patch.object(autonomous_research,"read_market_snapshot",return_value={"enabled":True}),patch("app.automatic_news.alerts",return_value=[]),patch("app.global_releases.alerts",return_value=[]),patch("app.economic_calendar.read",return_value={}),patch("app.public_research_alerts.market_alerts",return_value=[]) as market:
             old=notifications.details()
             self.assertEqual(old["alerts"][0]["research_state"],"HISTORICAL_OBSERVATION")
             self.assertEqual(notifications.summary()["revision_keys"],[self.row["id"]])
