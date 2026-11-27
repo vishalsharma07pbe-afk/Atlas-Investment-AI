@@ -9,7 +9,7 @@ export default function PortfolioSummary({analysis,onOpen,holdings=[],feedConnec
    <article><span>Invested</span><strong>{fmt(analysis.invested)}</strong></article>
    <article><span>Recorded value</span><strong>{analysis.holdingCount===analysis.unpricedHoldings?"—":fmt(analysis.pricedMarketValue)}</strong><small>{feedConnected&&equities.length>0?`${fresh}/${equities.length} stocks priced in the last 20s`:analysis.recentRecordedHoldings!==undefined?`${analysis.recentRecordedHoldings}/${analysis.holdingCount} recent recorded`:analysis.valuationComplete?"All holdings priced":analysis.unpricedHoldings+" unpriced"}</small></article>
    <article><span>Unrealized P&amp;L</span><strong className={analysis.pricedUnrealizedPnl>=0?"positive":"negative"}>{analysis.holdingCount===analysis.unpricedHoldings?"—":fmt(analysis.pricedUnrealizedPnl)}</strong><small>Priced holdings only</small></article>
-   <article><span>Day change · priced subset</span><strong className={dayChange>=0?"positive":"negative"}>{daily.length?fmt(dayChange):"—"}</strong><small>{daily.length}/{analysis.holdingCount} with previous close / NAV · {analysis.holdingCount} holdings</small></article>
+   <article><span>Recorded day change · priced subset</span><strong className={dayChange>=0?"positive":"negative"}>{daily.length?fmt(dayChange):"—"}</strong><small>{daily.length}/{analysis.holdingCount} with previous close / NAV · {analysis.holdingCount} holdings</small></article>
   </div>}
   {!!analysis&&analysis.holdingCount>0&&analysis.recentRecordedHoldings!==undefined&&analysis.recentRecordedHoldings<analysis.holdingCount&&<p className="muted tiny" role="status">Some valuations are missing, aged or undated. Recorded totals may not reflect current market value.</p>}
  </section>;

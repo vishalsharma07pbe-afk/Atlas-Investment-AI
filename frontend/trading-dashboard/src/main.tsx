@@ -152,8 +152,8 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
 
   async function refreshFeedState(){
     if(feedPending.current)return;feedPending.current=true;
-    try{const response=await fetch("/intelligence/api/v1/intelligence/providers/upstox/quote-status");if(response.ok)setFeedState(await response.json());}
-    catch{/* Background feed status must not interrupt portfolio use. */}
+    try{const response=await fetch("/intelligence/api/v1/intelligence/providers/upstox/quote-status");if(response.ok)setFeedState(await response.json());else setFeedState(null);}
+    catch{setFeedState(null);/* Background feed status must not interrupt portfolio use. */}
     finally{feedPending.current=false;}
   }
 

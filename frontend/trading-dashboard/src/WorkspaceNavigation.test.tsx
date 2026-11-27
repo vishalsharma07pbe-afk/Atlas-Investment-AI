@@ -35,8 +35,16 @@ describe("results-first workspace",()=>{
  it("labels recorded rather than live portfolio values",()=>{
   const open=vi.fn();
   render(<PortfolioSummary analysis={{holdingCount:2,invested:100,pricedMarketValue:0,pricedUnrealizedPnl:0,unpricedHoldings:2,valuationComplete:false}} onOpen={open}/>);
-  expect(screen.getAllByText("—")).toHaveLength(2);
+  expect(screen.getAllByText("—")).toHaveLength(3); // value, P&L and previous-close change all unavailable
   expect(screen.getByText("2 unpriced")).toBeTruthy();
   fireEvent.click(screen.getByRole("button",{name:"Open portfolio"}));expect(open).toHaveBeenCalledOnce();
  });
+});
+
+it("shows fresh coverage separately from recorded portfolio values",()=>{
+ const stamp=new Date().toISOString();
+ render(<PortfolioSummary analysis={{holdingCount:2,invested:100,pricedMarketValue:120,pricedUnrealizedPnl:20,unpricedHoldings:0,valuationComplete:true}} holdings={[{asset_type:"EQUITY",price_as_of:stamp,one_day_change:5},{asset_type:"EQUITY",price_as_of:"2025-01-01",one_day_change:null}]} feedConnected onOpen={()=>{}}/>);
+ expect(screen.getByText("1/2 stocks priced in the last 20s")).toBeTruthy();
+ expect(screen.getByText(/1\/2 with previous close/)).toBeTruthy();
+ expect(screen.getByText("Recorded value")).toBeTruthy();
 });
