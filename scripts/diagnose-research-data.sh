@@ -29,6 +29,7 @@ SELECT e.code AS exchange,a.status,count(*) AS attempts,max(a.attempted_at) AS l
 FROM discovery_history_attempts a JOIN instruments i ON i.id=a.instrument_id JOIN exchanges e ON e.id=i.exchange_id
 GROUP BY e.code,a.status ORDER BY e.code,a.status;
 SELECT failure_code,failure_count,blocked_until,blocked_until>now() AS blocked FROM operator_feed_cooldown;
+SELECT * FROM discovery_quote_coverage ORDER BY exchange;
 SELECT source_code,count(DISTINCT scheme_code) AS schemes,max(nav_date) AS latest FROM mutual_fund_nav GROUP BY source_code ORDER BY source_code;
 COMMIT;
 SQL

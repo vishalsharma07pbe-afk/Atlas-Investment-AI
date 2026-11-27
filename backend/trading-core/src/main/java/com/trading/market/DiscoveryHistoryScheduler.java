@@ -23,6 +23,7 @@ public class DiscoveryHistoryScheduler {
   @Value("${MARKET_DATA_USAGE_RIGHTS_CONFIRMED:false}") boolean usageRights;
   @Value("${MARKET_DATA_ENTITLEMENT_CONFIRMED:false}") boolean entitlement;
   @Value("${UPSTOX_ACCESS_TOKEN:}") String accessToken="";
+  @Value("${ATLAS_DISCOVERY_QUOTE_SCREEN_ENABLED:false}") boolean quoteScreenEnabled;
   @Value("${atlas.discovery.history.request-gap-ms:1000}") long requestGapMs;
   public DiscoveryHistoryScheduler(JdbcTemplate jdbc,UpstoxFeedService stocks,MarketCalendarService calendar){
     this.jdbc=jdbc;this.stocks=stocks;this.calendar=calendar;
@@ -67,6 +68,7 @@ public class DiscoveryHistoryScheduler {
             AND x.session_date=s.session_date AND x.is_trading_day AND x.session_type<>'REGULAR')
       ), candidates AS (
       SELECT i.id,m.instrument_key,h.candle_count,h.latest_date,g.first_missing_date,a.attempted_at,
+        CASE WHEN q.state='PRIORITY' AND q.observed_at>=now()-interval '15 minutes' AND q.response_at>=now()-interval '15 minutes' THEN 1 ELSE 0 END AS quote_priority,
         CASE WHEN h.candle_count>=25 AND h.latest_date<? THEN 0 ELSE 1 END AS workload
       FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
       JOIN LATERAL (
@@ -78,6 +80,7 @@ public class DiscoveryHistoryScheduler {
         ORDER BY instrument_key LIMIT 1
       ) m ON true
       LEFT JOIN discovery_history_attempts a ON a.instrument_id=i.id
+      LEFT JOIN discovery_quote_screen q ON q.instrument_id=i.id AND q.instrument_key=m.instrument_key AND q.isin=i.isin
       CROSS JOIN LATERAL (
         SELECT count(DISTINCT (c.candle_time AT TIME ZONE 'Asia/Kolkata')::date)
                  FILTER (WHERE c.candle_time >= ?::date::timestamp AT TIME ZONE 'Asia/Kolkata'
@@ -106,14 +109,15 @@ public class DiscoveryHistoryScheduler {
         AND (h.candle_count<? OR h.latest_date IS NULL OR h.latest_date<? OR g.first_missing_date IS NOT NULL)
         AND (a.next_attempt_at IS NULL OR a.next_attempt_at<=now())
       ), ranked AS (
-        SELECT *,row_number() OVER (PARTITION BY workload ORDER BY attempted_at ASC NULLS FIRST,
+        SELECT *,row_number() OVER (PARTITION BY workload ORDER BY
+          CASE WHEN workload=1 THEN quote_priority ELSE 0 END DESC,attempted_at ASC NULLS FIRST,
           candle_count DESC,id) AS position
         FROM candidates
       )
       SELECT id,instrument_key,candle_count,latest_date,first_missing_date FROM ranked
       WHERE (workload=0 AND position<=8) OR (workload=1 AND position<=2)
       ORDER BY workload,position LIMIT 10
-      """,exchange,end.minusMonths(BACKFILL_MONTHS),end,end,end.minusMonths(BACKFILL_MONTHS),end,end,exchange,REQUIRED_DAILY_CANDLES,end);
+      """.replace("CASE WHEN workload=1 THEN quote_priority ELSE 0 END DESC,",quoteScreenEnabled?"CASE WHEN workload=1 THEN quote_priority ELSE 0 END DESC,":""),exchange,end.minusMonths(BACKFILL_MONTHS),end,end,end.minusMonths(BACKFILL_MONTHS),end,end,exchange,REQUIRED_DAILY_CANDLES,end);
     for(var row:rows){
       if(OperatorFeedCooldown.blocked(jdbc))return;
       long id=((Number)row.get("id")).longValue();
