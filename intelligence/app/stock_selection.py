@@ -83,6 +83,7 @@ def summarize(observations,ready_markets,venue_observations=None,instant=None):
             # horizon's small technical shortlist. Never substitute its data.
             findings.update("REPORTED_"+r["security_state"]+"_AT_"+r["exchange"]
                             for r in rows if r.get("security_state") in company_venues.SPECIAL)
+            findings.update(f for r in rows for f in (r.get("exchange_surveillance") or {}).get("findings",[]))
             if chosen is not None:
                 consolidated=company_venues.consolidate(eligible,venue_observations,instant,rank)
                 if consolidated:

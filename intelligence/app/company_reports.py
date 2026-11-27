@@ -85,6 +85,7 @@ def attach(snapshot,instant):
             continue
         other=venues.get(isin,[])
         findings.update("REPORTED_"+r["security_state"]+"_AT_"+r["exchange"] for r in other if r.get("security_state") in company_venues.SPECIAL)
+        findings.update(f for r in other for f in (r.get("exchange_surveillance") or {}).get("findings",[]))
         shared_news=news[0] if news and all(r==news[0] for r in news) else None
         if news and shared_news is None:findings.add("CONFLICTING_COMPANY_NEWS_CAPTURE")
         reports[isin]={"isin":isin,"status":"REVIEW_REQUIRED" if findings else "RESEARCH_ONLY",
