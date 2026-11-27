@@ -55,3 +55,32 @@ class FinancialFilingTests(unittest.TestCase):
         for data in (payload([row],2),payload([row,{**row,"ixbrl":alternate}]),payload([{**row,"symbol":"OTHER"}]),
                      payload([{**row,"consolidated":"Standalone"}]),payload([{**row,"ixbrl":"https://evil.test/a"}])):
             with self.assertRaises(ValueError):f.select_index(data,"TEST",TODAY)
+
+    def test_public_index_refresh_and_private_read_only_reuse(self):
+        from datetime import datetime,timezone,timedelta
+        from pathlib import Path
+        from unittest.mock import patch
+        import sqlite3
+        instant=datetime(2026,11,27,5,tzinfo=timezone.utc)
+        item={"isin":ISIN,"exchange":"NSE","id":1,"symbol":"TEST","as_of":"2026-11-26"}
+        snapshot={"enabled":True,"scope":"PUBLIC_MARKET_RESEARCH_ONLY","sections":[{"section":"NSE","status":"READY","result":{
+            "discovery_coverage":{"calendar_status":"PUBLISHED_SESSION","calendar_checked_on":TODAY.isoformat(),"expected_session":item["as_of"]},
+            "venue_observations":[dict(item)],"horizons":{"SWING":{"candidates":[item]}}}}]}
+        result={**f.parse(html(),ISIN,PERIOD,TODAY),"source_url":URL,"source_sha256":"a"*64,
+                "acquisition_method":f.INDEX_METHOD,"index_source":f.INDEX,"index_sha256":"b"*64}
+        with tempfile.TemporaryDirectory() as d:
+            db=Path(d)/"research.db";manifest=Path(d)/"not-present.json"
+            def connect():
+                c=sqlite3.connect(db);c.row_factory=sqlite3.Row;return c
+            with patch.object(f,"permitted",return_value=True),patch.object(f,"index_permitted",return_value=True):
+                with patch.object(f,"discover",side_effect=AssertionError("Unexpected network")):
+                    self.assertTrue(f.refresh(snapshot,connect,instant,path=manifest,index_loader=lambda *args:result))
+                    f.attach(snapshot,connect,instant,path=manifest)
+                    self.assertEqual(item["independent_financial_evidence"]["acquisition_method"],f.INDEX_METHOD)
+                    f.attach(snapshot,connect,instant+timedelta(hours=25),path=manifest)
+                    self.assertNotIn("independent_financial_evidence",item)
+                    snapshot["scope"]="PRIVATE"
+                    self.assertFalse(f.refresh(snapshot,connect,instant+timedelta(days=2),path=manifest,index_loader=lambda *args:self.fail("Private selection cannot acquire")))
+                with patch.object(f,"index_permitted",return_value=False):
+                    f.attach(snapshot,connect,instant,path=manifest)
+                    self.assertNotIn("independent_financial_evidence",item)

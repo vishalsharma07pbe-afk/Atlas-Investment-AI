@@ -107,7 +107,7 @@ def refresh(instant,*,path=PATH,loader=fetch,connect=None):
         _table(db)
         old={r["benchmark"]:r for r in db.execute("SELECT * FROM official_tri_downloads")}
     due=[name for name in links if name not in old or old[name]["url"]!=links[name] or old[name]["attempted_at"]<=(instant-timedelta(seconds=INTERVAL)).isoformat()]
-    if not due:return any(r["status"]=="AVAILABLE" and links.get(name)==r["url"] for name,r in old.items())
+    if not due:return bool(read(instant,path=path,connect=connect)["indices"])
     # One publisher request per scheduler pass, round-robin by last attempt.
     name=min(due,key=lambda k:(old[k]["attempted_at"] if k in old else "",k))
     url=links[name];observations=None;digest=None

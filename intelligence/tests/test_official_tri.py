@@ -33,5 +33,6 @@ class OfficialTRITest(unittest.TestCase):
                 day=max(result["indices"][NAME])
                 self.assertNotIn(NAME,t.combine({"indices":{NAME:{day:1}}},result)["indices"])
                 self.assertEqual(t.read(NOW+timedelta(hours=49),path=path,connect=connect)["indices"],{})
+                self.assertTrue(t.refresh(NOW+timedelta(minutes=15),path=path,loader=lambda u:self.fail("Not due"),connect=connect))
                 path.write_text(json.dumps({"schema":t.VERSION,"authorization_attested":True,"sources":[]}))
                 self.assertEqual(t.read(NOW,path=path,connect=connect)["indices"],{})

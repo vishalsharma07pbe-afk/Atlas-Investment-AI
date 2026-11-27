@@ -229,7 +229,7 @@ def refresh(snapshot,connect,instant,loader=load,path=PATH,index_loader=discover
         observed=observations.get(isin,[])
         if not any(r.get("as_of")==item.get("as_of") and r.get("id")==item.get("id") and r["exchange"]==item["exchange"] for r in observed):continue
         if isin in links:targets[isin]=None;continue
-        if not index_permitted():continue
+        if not index_permitted() or snapshot.get("scope")!="PUBLIC_MARKET_RESEARCH_ONLY":continue
         symbols={r.get("symbol") for r in observed if r.get("exchange")=="NSE" and r.get("as_of")==item.get("as_of")}
         if len(symbols)==1:
             symbol=next(iter(symbols))
@@ -262,7 +262,7 @@ def refresh(snapshot,connect,instant,loader=load,path=PATH,index_loader=discover
             if result.get("period")!=period.isoformat() or result.get("source_url")!=url:raise ValueError("RESULT_LINK")
         else:
             p=date.fromisoformat(result["period"]);link=result["source_url"]
-            if not fresh_period(p,today) or not valid_url(link) or result.get("acquisition_method")!=INDEX_METHOD or result.get("index_source")!=INDEX or not re.fullmatch(r"[a-f0-9]{64}",result.get("index_sha256","")):
+            if not fresh_period(p,today) or not valid_url(link) or result.get("scope")!="CONSOLIDATED" or not re.fullmatch(r"[a-f0-9]{64}",result.get("source_sha256","")) or result.get("acquisition_method")!=INDEX_METHOD or result.get("index_source")!=INDEX or not re.fullmatch(r"[a-f0-9]{64}",result.get("index_sha256","")):
                 raise ValueError("RESULT_INDEX")
             period,url=p,link
     except (ValueError,TypeError,KeyError,AttributeError,ArithmeticError,httpx.HTTPError,OSError):result=None
@@ -310,11 +310,11 @@ def attach(snapshot,connect,instant,path=PATH):
             elif index_permitted():
                 period=date.fromisoformat(row["period"]);url=row["source_url"]
                 stamp=datetime.fromisoformat(row["attempted_at"])
-                if not timedelta(0)<=instant-stamp<=timedelta(hours=24) or not fresh_period(period,today) or not valid_url(url) or e.get("acquisition_method")!=INDEX_METHOD or e.get("index_source")!=INDEX or not re.fullmatch(r"[a-f0-9]{64}",e.get("index_sha256","")):
+                if not timedelta(0)<=instant-stamp<=timedelta(hours=24) or not fresh_period(period,today) or not valid_url(url) or e.get("scope")!="CONSOLIDATED" or not re.fullmatch(r"[a-f0-9]{64}",e.get("source_sha256","")) or e.get("acquisition_method")!=INDEX_METHOD or e.get("index_source")!=INDEX or not re.fullmatch(r"[a-f0-9]{64}",e.get("index_sha256","")):
                     continue
             else:continue
             if e["isin"]!=isin or e["period"]!=period.isoformat() or e["source_url"]!=url:continue
-        except (ValueError,TypeError,KeyError):continue
+        except (ValueError,TypeError,KeyError,AttributeError):continue
         item["independent_financial_evidence"]={**e,"retrieved_at":row["attempted_at"],"status":"REPORTED_CONSOLIDATED_FILING",
             "comparison":compare(e,item.get("company_evidence")),"notice":NOTICE}
         matched.add(isin)
