@@ -61,6 +61,11 @@ def publish(snapshot, connect, instant):
                         # Keep the original publication, not a later edited candidate.
                         evidence = {k:item[k] for k in ("symbol","exchange","close","adjustment_status","as_of")}
                         evidence["methodology"] = result.get("methodology","UNKNOWN")
+                        # Freeze score inputs at original publication, never backfill
+                        # past rows using a subsequent research snapshot.
+                        from . import score_calibration
+                        frozen=score_calibration.capture(item,horizon,result,(section.get("result") or {}).get("discovery_coverage") or {},today)
+                        if frozen is not None:evidence["score_calibration"]=frozen
                         if isinstance(item.get("isin"),str) and re.fullmatch(r"IN[A-Z0-9]{10}",item["isin"]):
                             evidence["isin"]=item["isin"]
                         db.execute("""INSERT OR IGNORE INTO watch_outcomes

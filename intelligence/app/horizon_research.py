@@ -53,18 +53,21 @@ def evaluate(candles, indicators, base):
             continue
         if horizon == "SWING":
             passed = close > sma20 > sma50 and 50 <= rsi <= 70 and relative >= 1.2 and 0 < atr_pct <= 5 and momentum > 0
+            terms={"momentum_percent":momentum*100,"relative_volume_bonus":min(relative,3)*2,"atr_penalty":-atr_pct}
             rank = momentum*100 + min(relative, 3)*2 - atr_pct
             reasons = ["Close above aligned 20/50-day averages", "Relative volume at least 1.2x", "RSI 50–70 and ATR within 5%"]
             window = "2–20 trading sessions (review horizon)"
         elif horizon == "SHORT_TERM":
             change = close/candles[-61].close-1
             passed = close > sma50 > sma100 and 45 <= rsi <= 72 and 0 < atr_pct <= 4 and change > 0
+            terms={"momentum_percent":change*100,"atr_penalty":-atr_pct}
             rank = change*100 - atr_pct
             reasons = ["Close above 50/100-day averages", "Positive 60-session momentum", "Daily ATR within 4%"]
             window = "1–3 months (review horizon)"
         else:
             change = close/candles[-121].close-1
             passed = close > sma200 and sma50 > sma200 and 0 < atr_pct <= 4 and change > 0
+            terms={"momentum_percent":change*100,"atr_penalty":-atr_pct}
             rank = change*100 - atr_pct
             reasons = ["Close and 50-day average above 200-day average", "Positive 120-session momentum", "Business and valuation evidence still required"]
             window = "6–24 months (research horizon, not a holding instruction)"
@@ -75,7 +78,7 @@ def evaluate(candles, indicators, base):
         if candles[-1].adjustment_status == "RAW_UNADJUSTED":
             warnings.append("Raw prices; corporate actions can distort historical signals.")
         result[horizon] = ("TECHNICAL_WATCH", {**base,
-            "rank_score": round(rank, 4), "review_horizon": window,
+            "rank_score": round(rank, 4), "rank_components":{k:round(v,8) for k,v in terms.items()}, "review_horizon": window,
             "history_count": len(candles), "atr_percent": round(atr_pct, 2),
             "median_daily_traded_value": round(turnover, 2),
             "reasons": reasons, "warnings": warnings})

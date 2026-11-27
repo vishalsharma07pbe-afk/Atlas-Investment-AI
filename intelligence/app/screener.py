@@ -7,7 +7,7 @@ from .horizon_research import evaluate, summarize, MIN_HISTORY as HORIZON_MIN_HI
 from .price_structure import analyze as price_structure
 from .corporate_action_normalization import preview as action_preview, reported_crossings
 from .replay_evidence import fingerprint, exact_isin
-from . import price_volume_pressure, steady_momentum, relative_strength, company_venues, sector_price_context
+from . import price_volume_pressure, steady_momentum, relative_strength, company_venues, sector_price_context, score_calibration
 
 MIN_HISTORY = 21
 MAX_INSTRUMENTS = 20
@@ -146,12 +146,16 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                         pressure_rows.append({"id":row["id"],"symbol":row["symbol"],"exchange":row["exchange"],
                             "isin":instrument.get("isin") if exact_isin(instrument.get("isin")) else None,
                             "as_of":row["as_of"],"price_volume_pressure":pressure})
+            comparative={}
+            if batch_loaded and expected_session is not None and exact_isin(instrument.get("isin")) and row["adjustment_status"]=="ADJUSTED" and row["security_state"] not in sector_price_context.SPECIAL:
+                comparative=sector_price_context.windows(raw,today)
             if include_horizons:
                 evidence_hash=fingerprint(raw,today) if batch_loaded else None
                 evaluation=evaluate(candles, ind, row)
                 for state,candidate in evaluation.values():
                     if candidate is not None and evidence_hash is not None:
                         candidate["replay_evidence_hash"]=evidence_hash
+                paths=steady_momentum.window_observations(candles) if comparative and any(c is not None for _,c in evaluation.values()) else {}
                 for horizon, (state,candidate) in evaluation.items():
                     if candidate is not None:
                         candidate["price_structure"]=price_structure(candles,ind,horizon,
@@ -159,6 +163,10 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                         if batch_loaded:
                             candidate["security_state"]=row["security_state"]
                             candidate["report_close_history"]=report_close_history(candles)
+                            n=score_calibration.WINDOW.get(horizon)
+                            if n and str(n) in comparative:
+                                candidate["score_window"]=comparative[str(n)]
+                                candidate["score_risk_path"]=paths.get(str(n))
                 horizon_evaluations.append(evaluation)
                 for horizon,minimum in HORIZON_MIN_HISTORY.items():
                     if len(candles)>=minimum:
@@ -178,7 +186,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                 if expected_session is not None:
                     identity["security_state"]=row["security_state"]
                     if row["adjustment_status"]=="ADJUSTED" and row["security_state"] not in sector_price_context.SPECIAL:
-                        identity["comparative_price_windows"]=sector_price_context.windows(raw,today)
+                        identity["comparative_price_windows"]=comparative
                 company_research_universe.append(identity)
                 if instrument["id"] in venue_observations:
                     venue_observations[instrument["id"]]=company_venues.observation(instrument,candles)
