@@ -189,7 +189,11 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                         identity["comparative_price_windows"]=comparative
                         if fip_dates and fip_dates[-1]==row["as_of"]:
                             fip=fip_research.observe(raw,fip_dates,today)
-                            if fip is not None:identity["fip_research"]=fip
+                            if fip is not None:
+                                # Only matching rows need the full metrics in
+                                # the broad snapshot; keep status/reasons for
+                                # coverage and strict Elite review of others.
+                                identity["fip_research"]=fip if fip["status"]=="FIP_PRICE_MATCH" else {k:v for k,v in fip.items() if k!="windows"}
                 company_research_universe.append(identity)
                 if instrument["id"] in venue_observations:
                     venue_observations[instrument["id"]]=company_venues.observation(instrument,candles)

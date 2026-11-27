@@ -151,7 +151,10 @@ def rank(snapshot,instant):
                 "review_findings":sorted({v for r in observations[isin] for v in (r.get("exchange_surveillance") or {}).get("findings",[])}|{"REPORTED_"+r["security_state"]+"_AT_"+r["exchange"] for r in observations[isin] if r.get("security_state") in company_venues.SPECIAL})})
     summary["matched_listings"]=sum(len(v) for v in groups.values())
     def key(r):return (-r["score"],-r["median_daily_turnover_cr"],r["exchange"],r["id"])
-    chosen=[min(v,key=key) for v in groups.values()]
+    # Conflicting same-venue registry observations are not resolved by
+    # selecting the better score; keep all cross-venue warnings.
+    chosen=[min(v,key=key) for isin,v in groups.items()
+        if len({r["exchange"] for r in observations[isin]})==len(observations[isin])]
     summary.update(matched_companies=len(chosen),items=sorted(chosen,key=key)[:10],exclusions=dict(reasons),
         status="PRICE_MATCHES_AVAILABLE" if chosen else "NO_PRICE_MATCHES" if summary["eligible_listings"] else "AWAITING_STRICT_HISTORY")
     return summary
@@ -162,10 +165,19 @@ def publish(snapshot,connect,instant):
     report=rank(snapshot,instant)
     with closing(connect()) as db,db:
         watch_outcomes._table(db)
+        db.execute("BEGIN IMMEDIATE")
+        # Freeze one company per observed date, even if venue preference
+        # changes before a subsequent scheduler pass.
+        existing=set()
+        for saved in db.execute("SELECT observed_date,evidence FROM watch_outcomes WHERE horizon=? AND observed_date>=?",(HORIZON,(today-timedelta(days=4)).isoformat())):
+            try:existing.add((saved["observed_date"],json.loads(saved["evidence"]).get("isin")))
+            except (ValueError,TypeError,KeyError):continue
         for row in report["items"]:
+            if (row["as_of"],row["isin"]) in existing:continue
             if row["review_findings"] or not isinstance(row["close"],(int,float)) or not isfinite(row["close"]) or row["close"]<=0:continue
             evidence={k:row[k] for k in ("symbol","exchange","close","adjustment_status","as_of","isin")}
             evidence.update(methodology=VERSION,fip_score=row["score"],fip_windows=row["windows"],fip_history_fingerprint=row["history_fingerprint"])
+            existing.add((row["as_of"],row["isin"]))
             db.execute("""INSERT OR IGNORE INTO watch_outcomes(instrument_id,horizon,observed_date,published_at,maturity_date,evidence)
                 VALUES(?,?,?,?,?,?)""",(row["id"],HORIZON,row["as_of"],instant.isoformat(),(today+timedelta(days=DAYS)).isoformat(),json.dumps(evidence,allow_nan=False)))
 

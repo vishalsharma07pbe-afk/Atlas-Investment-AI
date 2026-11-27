@@ -161,7 +161,8 @@ def summarize(snapshot,connect,instant):
                 out["eligible_history_count"]+=result.get("eligible_count",0)
     from . import fip_research
     out["fip_research"]=fip_research.rank(snapshot,instant)
-    out["fip_research"]["prospective"]=fip_research.prospective(connect,instant)
+    if connect is not None:
+        out["fip_research"]["prospective"]=fip_research.prospective(connect,instant)
     replay=snapshot.get("fip_replay_sample") or {}
     out["fip_research"]["replay_sample_count"]=replay.get("sample_count",0)
     for item in out["fip_research"]["items"]:
@@ -198,6 +199,10 @@ def summarize(snapshot,connect,instant):
         coverage=result.get("discovery_coverage") or {}
         if coverage.get("calendar_checked_on")!=today.isoformat() or coverage.get("calendar_status")!="PUBLISHED_SESSION":
             continue
+        strict={}
+        for observed in result.get("company_research_universe",[]):
+            key=(observed.get("id"),observed.get("isin"),observed.get("as_of"))
+            strict[key]=None if key in strict else observed.get("fip_research")
         for row in result.get("steady_momentum_candidates",[]):
             if row.get("exchange")!=venue or not exact_isin(row.get("isin")) or row.get("as_of")!=coverage.get("expected_session"):
                 continue
@@ -243,6 +248,9 @@ def summarize(snapshot,connect,instant):
             candidate={**row,**evidence,**cap,"quarterly_financials":quarter,"company_evidence":enriched[isin],
                 "benchmark_relative_strength":relative_strength.compare(row,snapshot.get("market_regime") or {},today),
                 "governance_review":governance_review.assess(row,report,today),"status":"SCREEN_MATCH_ONLY"}
+            strict_fip=strict.get((row["id"],isin,row["as_of"]))
+            if isinstance(strict_fip,dict) and strict_fip.get("methodology")==fip_research.VERSION and strict_fip.get("adjustment_status")=="ADJUSTED" and row.get("adjustment_status")=="ADJUSTED":
+                candidate["strict_fip_evidence"]=strict_fip
             candidate["elite_assessment"]=elite_assessment.assess(candidate)
             candidates.append(candidate)
     # Category tabs rank the entire deduplicated matched cohort independently.

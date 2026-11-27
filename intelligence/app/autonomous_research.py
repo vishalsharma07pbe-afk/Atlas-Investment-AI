@@ -523,7 +523,14 @@ def _execute_job(job):
     # Previously published mature watches still need outcome evaluation even
     # when today's discovery failed; new publication uses READY sections only.
     if job=="WATCH_OUTCOMES":
-        fip_research.publish(snapshot,_connect,now())
+        # Apply cached positive independent cautions before publication.
+        # A failed optional surveillance read must not prevent existing
+        # mature-watch evaluation or silently clear a new FIP publication.
+        try:
+            current=now()
+            nse_surveillance.attach(snapshot,_connect,current)
+            fip_research.publish(snapshot,_connect,current)
+        except (ValueError,TypeError,OSError,sqlite3.Error):pass
         watch_outcomes.refresh(snapshot,_connect)
         return "PASS_COMPLETED"
     if not any(s["section"] in ("NSE","BSE") and s["status"]=="READY" for s in snapshot["sections"]):

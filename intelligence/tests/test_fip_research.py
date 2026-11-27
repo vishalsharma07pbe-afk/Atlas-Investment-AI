@@ -45,3 +45,10 @@ class FipTests(unittest.TestCase):
                 row=db.execute("SELECT * FROM watch_outcomes WHERE horizon='FIP'").fetchone()
             self.assertEqual(json.loads(row["evidence"])["fip_score"],ranked["items"][0]["score"])
             self.assertEqual(f.prospective(research._connect,NOW)["immature"],1)
+            # Venue switch on the same observed session does not duplicate
+            # the frozen company publication.
+            other={**identity,"id":2,"exchange":"BSE"}
+            snap["sections"]=[{"section":"BSE","status":"READY","result":{"discovery_coverage":{"calendar_checked_on":TODAY.isoformat(),"calendar_status":"PUBLISHED_SESSION","expected_session":report["as_of"]},"company_research_universe":[other],"venue_observations":[{**other,"symbol":"TEST","close":101}]}}]
+            f.publish(snap,research._connect,NOW)
+            with research._connect() as db:
+                self.assertEqual(db.execute("SELECT count(*) FROM watch_outcomes WHERE horizon='FIP'").fetchone()[0],1)
