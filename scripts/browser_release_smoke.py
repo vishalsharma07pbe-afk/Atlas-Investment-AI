@@ -48,10 +48,19 @@ def run():
             go("Overview")
             expect(page.get_by_role("region",name="Portfolio attention summary")).to_be_visible()
             expect(page.get_by_role("region",name="Automatic research overview")).to_be_visible()
+            expect(page.get_by_role("region",name="Recorded portfolio charts")).to_be_visible()
+            expect(page.get_by_text("No recorded valuations",exact=True)).to_be_visible()
+            assert page.locator(".dashboard").evaluate("(el)=>getComputedStyle(el).getPropertyValue('--terminal-surface').trim().length > 0"),"terminal stylesheet not applied"
+            Path("browser-preview").mkdir(exist_ok=True)
+            page.screenshot(path="browser-preview/overview-desktop.png",timeout=5000)
             # Verify navigation and overlay controls on narrow and desktop layouts.
             for width in (768,320,1440):
                 page.set_viewport_size({"width":width,"height":900})
                 go("My Portfolio")
+                expect(page.get_by_role("region",name="Recorded portfolio charts")).to_be_visible()
+                assert page.locator(".terminal-portfolio-visuals").evaluate("(el)=>{const r=el.getBoundingClientRect();return r.left>=-1 && r.right<=innerWidth+1}"),f"portfolio charts overflow viewport {width}"
+                if width in (320,1440):
+                    page.screenshot(path=f"browser-preview/portfolio-{width}.png",timeout=5000)
                 page.get_by_role("button",name="Open appearance settings").click()
                 expect(page.get_by_role("dialog",name="Appearance settings")).to_be_visible()
                 page.keyboard.press("Escape")

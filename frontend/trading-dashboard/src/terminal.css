@@ -100,9 +100,9 @@
 .terminal-value-bars strong{font-variant-numeric:tabular-nums}
 .terminal-value-track,.terminal-period-track,.terminal-breadth-track{height:8px;border-radius:4px;background:var(--row-line);overflow:hidden}
 .terminal-value-track i,.terminal-period-track i{display:block;height:100%;border-radius:4px}
-.dashboard .gain{background:#2caa86}
-.dashboard .loss{background:#d66580}
-.dashboard .flat{background:#8293a9}
+.dashboard :is(.terminal-value-track,.terminal-period-track,.terminal-breadth) .gain{background:#2caa86}
+.dashboard :is(.terminal-value-track,.terminal-period-track,.terminal-breadth) .loss{background:#d66580}
+.dashboard :is(.terminal-value-track,.terminal-period-track,.terminal-breadth) .flat{background:#8293a9}
 .terminal-chart-empty{display:grid;min-height:130px;place-items:center;align-content:center;gap:8px;text-align:center;color:var(--ink-muted);padding:12px}
 .terminal-chart-empty p{margin:0}
 .terminal-chart-empty strong{color:var(--ink)}
