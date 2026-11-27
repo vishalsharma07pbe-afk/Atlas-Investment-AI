@@ -7,9 +7,9 @@ NOW=datetime(2026,11,27,5,30,tzinfo=timezone.utc)
 ISIN="INE002A01018"
 def fixture():
     rows=[{"isin":ISIN,"id":1,"exchange":"NSE","symbol":"TEST","security_state":"NORMAL","as_of":"2026-11-26",
-          "adjustment_status":"RAW_UNADJUSTED","turnover_first_date":"2026-10-28","turnover_proxy_cr":20,"quote":None},
+          "adjustment_status":"RAW_UNADJUSTED","turnover_first_date":"2026-10-28","turnover_dates_digest":"a"*64,"turnover_proxy_cr":20,"quote":None},
           {"isin":ISIN,"id":2,"exchange":"BSE","symbol":"TEST","security_state":"NORMAL","as_of":"2026-11-26",
-          "adjustment_status":"RAW_UNADJUSTED","turnover_first_date":"2026-10-28","turnover_proxy_cr":50,"quote":None}]
+          "adjustment_status":"RAW_UNADJUSTED","turnover_first_date":"2026-10-28","turnover_dates_digest":"a"*64,"turnover_proxy_cr":50,"quote":None}]
     matches=[{**r,"score":100-i} for i,r in enumerate(rows)]
     return rows,matches
 def consolidate(rows,matches):
@@ -53,3 +53,27 @@ class CompanyVenueTests(unittest.TestCase):
         snapshot={"sections":[{"section":"NSE","status":"READY","result":{"discovery_coverage":{"calendar_checked_on":"2026-11-27","calendar_status":"PUBLISHED_SESSION","expected_session":"2026-11-26"},"venue_observations":rows[:1]}},
             {"section":"BSE","status":"STALE","result":{"venue_observations":rows[1:]}}]}
         self.assertEqual(cv.collect(snapshot,NOW),{ISIN:rows[:1]})
+
+    def test_historical_window_dates_must_match(self):
+        rows,matches=fixture()
+        rows[1]["turnover_dates_digest"]="b"*64
+        chosen=consolidate(rows,matches)[0]
+        self.assertEqual(chosen["exchange"],"NSE")
+        self.assertIsNone(chosen["company_venue_context"]["preferred_exchange"])
+
+    def test_horizon_selection_uses_same_policy_and_preserves_other_listing_warning(self):
+        from app import stock_selection
+        rows,matches=fixture()
+        observations=[]
+        for i,row in enumerate(matches):
+            row.update(close=100,rank_score=100-i,adjustment_status="ADJUSTED")
+            observations.append((row,{"status":"WITHHELD_EVIDENCE_GAPS","blockers":["FINAL_QUALIFICATION_VALIDATION_REQUIRED"],
+                "review_findings":[],"gates":[{"domain":"TECHNICAL","status":"OBSERVATION_CHECKS_MET","requirements":[]}]}))
+        # Historical comparison uses the venue observations, not transferred price levels.
+        selection=stock_selection.summarize(observations,{"NSE","BSE"},{ISIN:rows},NOW)
+        self.assertEqual(selection["watch_refs"],[{"exchange":"BSE","id":2,"isin":ISIN}])
+        self.assertEqual(matches[1]["company_venue_context"]["preferred_exchange"],"BSE")
+        rows[1]["security_state"]="SUSPENDED_REPORTED"
+        selection=stock_selection.summarize(observations,{"NSE","BSE"},{ISIN:rows},NOW)
+        self.assertEqual(selection["watch_refs"],[{"exchange":"NSE","id":1,"isin":ISIN}])
+        self.assertIn("REPORTED_SUSPENDED_REPORTED_AT_BSE",matches[0]["selection_company_context"]["review_findings"])

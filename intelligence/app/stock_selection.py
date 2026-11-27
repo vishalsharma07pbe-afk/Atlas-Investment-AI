@@ -7,9 +7,10 @@ assessment and a conservative union of its requirements and findings.
 from collections import defaultdict
 from math import isfinite
 from .replay_evidence import exact_isin
+from . import company_venues
 
 NOTICE=("Distinct ISINs in already shortlisted current venue samples, not a full-market scan. "
-        "Representative uses current technical observation checks, then technical score and historical turnover; "
+        "Representative uses current technical observation checks, comparable observed venue preference when available, then technical score and historical turnover; "
         "not expected return, verified execution liquidity or investment rank. "
         "Unidentified or conflicting registry listings do not enter the consolidated watch shortlist. "
         "All company-level blockers and findings from reviewed listings remain visible.")
@@ -38,10 +39,11 @@ def _technical(item,decision):
             and any(g.get("domain")=="TECHNICAL" and g.get("status")=="OBSERVATION_CHECKS_MET"
                     for g in decision.get("gates",[])))
 
-def summarize(observations,ready_markets):
+def summarize(observations,ready_markets,venue_observations=None,instant=None):
     listings=defaultdict(list)
     for item,decision in observations:
         item.pop("selection_company_context",None)
+        item.pop("company_venue_context",None)
         listings[_key(item)].append((item,decision))
     groups=defaultdict(list)
     unidentified=0
@@ -70,18 +72,38 @@ def summarize(observations,ready_markets):
         if isin in conflicting_isins:
             blockers.add("CONFLICTING_VENUE_LISTING_EVIDENCE")
             findings.add("CONFLICTING_VENUE_LISTING_EVIDENCE")
+        eligible=[i for i,d in entries if _technical(i,d) and i.get("security_state") not in company_venues.SPECIAL]
+        def rank(i):
+            return (-_score(i.get("rank_score")),-_score(i.get("median_daily_traded_value")),i["exchange"],i["symbol"],i["id"])
+        chosen=min(eligible,key=rank) if eligible and isin not in conflicting_isins else None
+        venue_context=None
+        if venue_observations is not None and instant is not None:
+            rows=venue_observations.get(isin,[])
+            # Preserve known restrictions even when a listing is outside this
+            # horizon's small technical shortlist. Never substitute its data.
+            findings.update("REPORTED_"+r["security_state"]+"_AT_"+r["exchange"]
+                            for r in rows if r.get("security_state") in company_venues.SPECIAL)
+            if chosen is not None:
+                consolidated=company_venues.consolidate(eligible,venue_observations,instant,rank)
+                if consolidated:
+                    selected=consolidated[0]
+                    venue_context=selected["company_venue_context"]
+                    chosen=next(i for i in eligible if _key(i)==_key(selected))
+                    findings.update(venue_context["review_findings"])
+                else:
+                    chosen=None
+                    findings.add("CONFLICTING_OR_RESTRICTED_VENUE_OBSERVATIONS")
+                    blockers.add("CONFLICTING_OR_RESTRICTED_VENUE_OBSERVATIONS")
         if findings:
             review_companies+=1
         context={"listing_count":len(entries),"venues":venues,"blockers":sorted(blockers),
                  "review_findings":sorted(findings),"status":"COMPANY_REVIEW_REQUIRED" if findings else "COMPANY_UNQUALIFIED"}
         for item,_ in entries:
             item["selection_company_context"]=context
-        eligible=[i for i,d in entries if _technical(i,d)]
-        if not eligible or isin in conflicting_isins:
-            continue
-        # No ranking by model count, missing gate count or private holdings.
-        eligible.sort(key=lambda i:(-_score(i.get("rank_score")),-_score(i.get("median_daily_traded_value")),i["exchange"],i["symbol"],i["id"]))
-        representatives.append(eligible[0])
+            if venue_context is not None:
+                item["company_venue_context"]=venue_context
+        if chosen is not None:
+            representatives.append(chosen)
     representatives.sort(key=lambda i:(-_score(i.get("rank_score")),-_score(i.get("median_daily_traded_value")),i["isin"],i["exchange"],i["id"]))
     return {"unique_company_count":len(groups),"unidentified_listing_count":unidentified,
             "conflicting_listing_count":conflicts,"cross_venue_company_count":both,

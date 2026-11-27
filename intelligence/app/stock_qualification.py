@@ -10,7 +10,7 @@ from datetime import date
 from math import isfinite
 from .horizon_research import HORIZONS, MIN_HISTORY, BLOCKERS, VERSION as TECH_VERSION
 from .replay_evidence import exact_isin
-from . import stock_selection, governance_review
+from . import stock_selection, governance_review, company_venues
 
 VERSION="STOCK-QUALIFICATION-1"
 NOTICE=("Strict evidence assessment of the already shortlisted daily watches only. Descriptive, reported and simulated evidence "
@@ -144,10 +144,11 @@ def assess(item,group,coverage,context,horizon,today):
             "horizon":horizon,"gates":gates,"blockers":sorted(all_blockers),
             "review_findings":sorted(warnings),"notice":NOTICE}
 
-def attach(snapshot,today):
+def attach(snapshot,today,instant=None):
     report={"methodology":VERSION,"horizons":{},"notice":NOTICE}
     snapshot["stock_qualification"]=report
     enabled=snapshot.get("enabled") is True
+    venues=company_venues.collect(snapshot,instant) if enabled and instant is not None else None
     for horizon in HORIZONS:
         if horizon=="INTRADAY":
             report["horizons"][horizon]={"status":"SEPARATE_INTRADAY_WORKFLOW","reviewed_count":0,
@@ -178,7 +179,7 @@ def attach(snapshot,today):
                     # Duplicate observations must never inflate coverage.
                     continue
                 reviewed[key]=decision
-        selection=stock_selection.summarize(observations,ready_markets)
+        selection=stock_selection.summarize(observations,ready_markets,venues,instant)
         counts=Counter(code for decision in reviewed.values() for code in decision["blockers"])
         report["horizons"][horizon]={"status":"DISABLED" if not enabled else
             "NO_QUALIFIED_IN_REVIEWED_SAMPLE" if reviewed else "NO_TECHNICAL_WATCHES" if groups else "AWAITING_RESEARCH",

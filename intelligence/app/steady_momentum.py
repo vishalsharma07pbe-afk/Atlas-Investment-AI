@@ -159,6 +159,11 @@ def summarize(snapshot,connect,instant):
             coverage=result.get("discovery_coverage") or {}
             if coverage.get("calendar_checked_on")==today.isoformat() and coverage.get("calendar_status")=="PUBLISHED_SESSION":
                 out["eligible_history_count"]+=result.get("eligible_count",0)
+    observations=company_venues.collect(snapshot,instant)
+    out["company_coverage"]={"observed_distinct_isins":len(observations),
+        "observed_listings":sum(len(rows) for rows in observations.values()),
+        "cross_venue_isins":sum(len({r["exchange"] for r in rows})>1 for rows in observations.values()),
+        "notice":company_venues.NOTICE}
     if not automatic_company_evidence.permitted():
         out["status"]="AWAITING_EVIDENCE"
         out["exclusions"]=[{"reason":"COMPANY_EVIDENCE_NOT_AUTHORIZED","count":1}]
@@ -225,11 +230,6 @@ def summarize(snapshot,connect,instant):
             candidate["elite_assessment"]=elite_assessment.assess(candidate)
             candidates.append(candidate)
     # Category tabs rank the entire deduplicated matched cohort independently.
-    observations=company_venues.collect(snapshot,instant)
-    out["company_coverage"]={"observed_distinct_isins":len(observations),
-        "observed_listings":sum(len(rows) for rows in observations.values()),
-        "cross_venue_isins":sum(len({r["exchange"] for r in rows})>1 for rows in observations.values()),
-        "notice":company_venues.NOTICE}
     out["items"],out["category_items"],out["matched_count"]=ranked_shortlists(candidates,observations,instant)
     out["exclusions"]=[{"reason":k,"count":v} for k,v in excluded.most_common()]
     out["status"]="SCREEN_MATCHES_AVAILABLE" if out["items"] else "NO_SCREEN_MATCHES" if out["technical_count"] else "AWAITING_EVIDENCE"

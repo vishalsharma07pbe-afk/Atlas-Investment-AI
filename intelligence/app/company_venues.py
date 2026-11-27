@@ -1,6 +1,7 @@
 """Company-first, venue-aware public research; no trading or venue clearance."""
 from collections import defaultdict
 from datetime import date,datetime,timedelta
+from hashlib import sha256
 from math import isfinite
 from statistics import median
 from zoneinfo import ZoneInfo
@@ -30,11 +31,12 @@ def observation(instrument,candles=None):
     if state not in ("NORMAL","UNKNOWN",*SPECIAL):state="UNKNOWN"
     row={"id":instrument["id"],"exchange":instrument["exchange"],"isin":instrument["isin"],
          "symbol":instrument["symbol"],"security_state":state,"as_of":None,"close":None,"adjustment_status":None,
-         "turnover_proxy_cr":None,"turnover_first_date":None,"quote":None}
+         "turnover_proxy_cr":None,"turnover_first_date":None,"turnover_dates_digest":None,"quote":None}
     if candles and len(candles)>=21:
         row.update(as_of=candles[-1].date,close=candles[-1].close,adjustment_status=candles[-1].adjustment_status,
                    turnover_proxy_cr=round(median(c.close*c.volume for c in candles[-20:])/1e7,6),
-                   turnover_first_date=candles[-20].date)
+                   turnover_first_date=candles[-20].date,
+                   turnover_dates_digest=sha256("\n".join(c.date for c in candles[-20:]).encode()).hexdigest())
     observed,response=stamp(instrument.get("venue_quote_observed_at")),stamp(instrument.get("venue_quote_response_at"))
     price,spread,turnover=(number(instrument.get(k)) for k in ("venue_quote_price","venue_quote_spread_percent","venue_quote_turnover"))
     if observed and response and observed<=response and price is not None and price>0 and spread is not None and turnover is not None and turnover>0:
@@ -109,7 +111,10 @@ def consolidate(candidates,observations,instant,rank):
                     if x["spread_percent"]<y["spread_percent"] and x["turnover_proxy_cr"]>=y["turnover_proxy_cr"]:
                         preferred=first["exchange"];status="PAIRED_QUOTE_LIQUIDITY_PREFERENCE";break
                 if preferred is None:status="PAIRED_QUOTE_NO_CLEAR_PREFERENCE"
-            elif a.get("adjustment_status")==b.get("adjustment_status") and a.get("turnover_first_date") and a.get("turnover_first_date")==b.get("turnover_first_date"):
+            elif (a.get("adjustment_status")==b.get("adjustment_status") and a.get("turnover_first_date")
+                  and a.get("turnover_first_date")==b.get("turnover_first_date")
+                  and isinstance(a.get("turnover_dates_digest"),str) and len(a["turnover_dates_digest"])==64
+                  and a["turnover_dates_digest"]==b.get("turnover_dates_digest")):
                 x,y=number(a.get("turnover_proxy_cr")),number(b.get("turnover_proxy_cr"))
                 if x is not None and y is not None and min(x,y)>0 and max(x,y)>=1.2*min(x,y):
                     preferred=a["exchange"] if x>y else b["exchange"]

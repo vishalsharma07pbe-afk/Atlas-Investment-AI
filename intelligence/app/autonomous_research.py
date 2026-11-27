@@ -357,7 +357,7 @@ def read_snapshot(include_ai=True):
         except (ValueError, OSError, sqlite3.Error):
             snapshot["automatic_ai_status"] = "UNAVAILABLE"
         research_reliability.attach_conclusions(snapshot)
-        stock_qualification.attach(snapshot,current.astimezone(ZoneInfo("Asia/Kolkata")).date())
+        stock_qualification.attach(snapshot,current.astimezone(ZoneInfo("Asia/Kolkata")).date(),current)
         snapshot["daily_briefing"] = daily_briefing.summarize(snapshot)
         try:
             snapshot["steady_momentum"] = steady_momentum.summarize(snapshot,_connect,current)
