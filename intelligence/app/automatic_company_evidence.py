@@ -16,12 +16,12 @@ from .financial_trends import summarize as financial_trends, earnings_evidence
 from .fundamental_quality import summarize as fundamental_quality
 from .financial_strength import summarize as financial_strength, DETAIL_NAMES
 from .earnings_quality import summarize as earnings_quality, INCOME_NAMES
-from . import peer_research, shareholding_research
+from . import peer_research, shareholding_research, quarterly_financials
 from .corporate_action_normalization import normalize_reported_actions
 
 ISIN = re.compile(r"^IN[A-Z0-9]{10}$")
 HORIZONS = ("LONG_TERM", "SHORT_TERM", "SWING")
-SECTIONS = ("profile","ratios","income_statement","balance_sheet","cash_flow","shareholding","corporate_actions","competitors")
+SECTIONS = ("profile","ratios","income_statement","balance_sheet","cash_flow","shareholding","corporate_actions","competitors","quarterly_income")
 NORMALIZATION_VERSION=2
 ANNUAL_HISTORY_CACHE_DAYS=7
 ANNUAL_SECTIONS=("income_statement","balance_sheet","cash_flow")
@@ -188,6 +188,8 @@ def normalize(report, isin, instant):
                     data.append({"name":text(r["name"]),"company_value":company,"sector_value":sector,
                                  "unit":r.get("unit") if r.get("unit") in ("PERCENT","RATIO") else "UNKNOWN",
                                  "sector_unit":r.get("sector_unit") if r.get("sector_unit") in ("PERCENT","RATIO") else "UNKNOWN"})
+        elif key=="quarterly_income":
+            data=quarterly_financials.normalize(raw,instant.astimezone(ZoneInfo("Asia/Kolkata")).date())
         elif key in ("income_statement","cash_flow") and isinstance(raw,dict):
             rows=history(raw.get(key))
             if rows:
@@ -527,6 +529,7 @@ def cached_action_reports(connect,identities,instant):
 
 def _enrich(report,today):
     report["financial_trends"]=financial_trends(report,today.year,as_of=today)
+    report["quarterly_financials"]=quarterly_financials.summarize(report,today)
     report["reported_earnings"]=earnings_evidence(report,today)
     report["fundamental_quality"]=fundamental_quality(report,today.year)
     report["financial_strength"]=financial_strength(report,today)

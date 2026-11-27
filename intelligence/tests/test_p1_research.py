@@ -19,6 +19,13 @@ class P1ResearchTests(unittest.TestCase):
         self.assertEqual(result["sections"]["competitors"]["status"], "UNAVAILABLE")
         self.assertIsNone(result["recommendation"])
 
+    def test_quarterly_income_uses_separate_summary_request(self):
+        with patch.object(p1,"_get",return_value={}) as get:
+            p1.company_research("INE002A01018")
+        calls=[call.args[1] for call in get.call_args_list if call.args[0].endswith("/income-statement")]
+        self.assertEqual(calls,[{"type":"consolidated","time_period":"yearly","fs":"true"},
+                                {"type":"consolidated","time_period":"quarterly","fs":"false"}])
+
     def test_ratio_unit_mismatch_cannot_produce_relative_difference(self):
         ratio=p1._normalize_ratios([{"name":"ROE","company_value":"12%","sector_value":"0.1"}])[0]
         self.assertEqual(ratio["unit"],"PERCENT")

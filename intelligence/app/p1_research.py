@@ -110,6 +110,9 @@ def company_research(isin: str, instrument_key: str | None = None) -> dict:
         "income_statement": _safe_section("income_statement", f"/v2/fundamentals/{encoded_isin}/income-statement",
             lambda: _get(f"/v2/fundamentals/{encoded_isin}/income-statement",
                          {"type": "consolidated", "time_period": "yearly", "fs": "true"})),
+        "quarterly_income": _safe_section("quarterly_income", f"/v2/fundamentals/{encoded_isin}/income-statement",
+            lambda: _get(f"/v2/fundamentals/{encoded_isin}/income-statement",
+                         {"type": "consolidated", "time_period": "quarterly", "fs": "false"})),
         "balance_sheet": _safe_section("balance_sheet", f"/v2/fundamentals/{encoded_isin}/balance-sheet",
             lambda: _get(f"/v2/fundamentals/{encoded_isin}/balance-sheet",
                          {"type": "consolidated", "time_period": "yearly", "fs": "true"})),
@@ -138,7 +141,7 @@ def company_research(isin: str, instrument_key: str | None = None) -> dict:
         "sections": sections,
         "interpretation": {
             "valuation": "Company ratios are compared with the provider's current sector values; this is not a fair-value estimate.",
-            "statements": "Consolidated yearly summaries; verify period labels and filings before decisions.",
+            "statements": "Consolidated annual and separate quarterly summaries; verify period labels and filings before decisions.",
             "corporate_actions": "Events are shown as reported and are not automatically treated as price adjustments.",
         },
         "recommendation": None,
