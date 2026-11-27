@@ -49,6 +49,7 @@ def attach(snapshot,instant):
         pledges=[]
         financial=[]
         comparative={}
+        official={}
         findings=set()
         for horizon,row in items:
             key=(horizon,row["exchange"],row["id"],row["as_of"])
@@ -76,6 +77,13 @@ def attach(snapshot,instant):
                     findings.add("CONFLICTING_SECTOR_PRICE_EVIDENCE")
                     comparative[k]=None
                 elif k not in comparative:comparative[k]=relative
+            index=row.get("official_sector_benchmark") or {}
+            if index.get("isin")==isin and index.get("exchange")==row["exchange"] and index.get("id")==row["id"] and index.get("as_of")==row["as_of"]:
+                key=(row["exchange"],row["id"],row["as_of"])
+                if key in official and official[key]!=index:
+                    findings.add("CONFLICTING_OFFICIAL_SECTOR_BENCHMARK")
+                    official[key]=None
+                elif key not in official:official[key]=index
             filing=row.get("independent_financial_evidence") or {}
             if filing.get("isin")==isin and filing.get("status")=="REPORTED_CONSOLIDATED_FILING":
                 financial.append(filing)
@@ -121,7 +129,7 @@ def attach(snapshot,instant):
             "observations":[observations[k] for k in sorted(observations)],
             "observed_venues":sorted({r["exchange"] for r in observations.values()}|{r["exchange"] for r in other}),
             "venue_observations":[{**r,"quote":company_venues.fresh_quote(r,instant)} for r in sorted(other,key=lambda r:(r["exchange"],r["id"]))],
-            "review_findings":sorted(findings),"company_evidence":shared,"news_evidence":shared_news,"independent_pledge_evidence":shared_pledge,"independent_financial_evidence":shared_financial,"sector_price_context":[comparative[k] for k in sorted(comparative) if comparative[k] is not None],"ai_review":review,
+            "review_findings":sorted(findings),"company_evidence":shared,"news_evidence":shared_news,"independent_pledge_evidence":shared_pledge,"independent_financial_evidence":shared_financial,"sector_price_context":[comparative[k] for k in sorted(comparative) if comparative[k] is not None],"official_sector_benchmarks":[official[k] for k in sorted(official) if official[k] is not None],"ai_review":review,
             "qualified":False,"notice":NOTICE}
     snapshot["company_reports"]={"status":"AVAILABLE" if reports else "AWAITING_EVIDENCE","items":reports,"notice":NOTICE}
     return snapshot

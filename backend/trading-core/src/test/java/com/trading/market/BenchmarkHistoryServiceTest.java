@@ -28,6 +28,12 @@ class BenchmarkHistoryServiceTest {
       assertThrows(IllegalArgumentException.class,()->BenchmarkHistoryService.parse(body,date,date));
     }
   }
+  @Test void sectorIndexHistoryUrlIsFixedAndEncoded(){
+    var url=BenchmarkHistoryService.historyUrl("NSE_INDEX|Nifty Bank",date,date);
+    assertTrue(url.contains("NSE_INDEX%7CNifty%20Bank/days/1/"));
+    assertThrows(IllegalArgumentException.class,()->BenchmarkHistoryService.historyUrl("https://example.org",date,date));
+    assertEquals(6,BenchmarkHistoryService.SECTOR_KEYS.size());
+  }
   @Test void schedulerRequiresAllPermissionsAndToken(){
     var db=mock(JdbcTemplate.class);
     var service=mock(BenchmarkHistoryService.class);

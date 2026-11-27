@@ -13,6 +13,7 @@ public class BenchmarkHistoryScheduler {
   private final BenchmarkHistoryService history;
   private final MarketCalendarService calendar;
   @Value("${ATLAS_BENCHMARK_HISTORY_ENABLED:false}") boolean enabled;
+  @Value("${ATLAS_SECTOR_BENCHMARKS_ENABLED:false}") boolean sectors;
   @Value("${MARKET_DATA_USAGE_RIGHTS_CONFIRMED:false}") boolean rights;
   @Value("${MARKET_DATA_ENTITLEMENT_CONFIRMED:false}") boolean entitlement;
   @Value("${UPSTOX_ACCESS_TOKEN:}") String token="";
@@ -32,8 +33,16 @@ public class BenchmarkHistoryScheduler {
   void refresh(LocalDate end){
     if(OperatorFeedCooldown.blocked(jdbc))return;
     if(!Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM data_sources WHERE source_code='UPSTOX' AND enabled)",Boolean.class)))return;
-    Long id=history.ensureIndex();
-    if(id==null)return;
+    // Keep the broad-market benchmark first. At most one provider call per
+    // scheduler pass, including failures; per-index persisted claim is reused.
+    if(refreshOne(end,BenchmarkHistoryService.KEY))return;
+    if(sectors)for(String key:BenchmarkHistoryService.SECTOR_KEYS){
+      if(OperatorFeedCooldown.blocked(jdbc)||refreshOne(end,key))return;
+    }
+  }
+  boolean refreshOne(LocalDate end,String key){
+    Long id=BenchmarkHistoryService.KEY.equals(key)?history.ensureIndex():history.ensureIndex(key);
+    if(id==null)return false;
     int claimed=jdbc.update("""
       INSERT INTO discovery_history_attempts(instrument_id,attempted_at,next_attempt_at,status)
       VALUES (?,now(),now()+interval '6 hours','RUNNING')
@@ -41,9 +50,10 @@ public class BenchmarkHistoryScheduler {
         next_attempt_at=now()+interval '6 hours',status='RUNNING'
       WHERE discovery_history_attempts.next_attempt_at<=now()
       """,id);
-    if(claimed!=1)return;
+    if(claimed!=1)return false;
     int written=0;
-    try{written=history.refresh(id,token,end.minusDays(470),end);}catch(Exception ex){
+    try{written=BenchmarkHistoryService.KEY.equals(key)?history.refresh(id,token,end.minusDays(470),end):
+      history.refresh(id,key,token,end.minusDays(470),end);}catch(Exception ex){
       // Never persist provider bodies, URLs or credentials.
       OperatorFeedCooldown.record(jdbc,ex);
     }
@@ -57,5 +67,6 @@ public class BenchmarkHistoryScheduler {
       UPDATE discovery_history_attempts SET status='FAILED',rows_written=0,
         next_attempt_at=now()+interval '6 hours' WHERE instrument_id=?
       """,id);
+    return true;
   }
 }

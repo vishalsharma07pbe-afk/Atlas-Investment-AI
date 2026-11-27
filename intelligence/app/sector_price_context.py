@@ -152,8 +152,12 @@ def attach(snapshot,connect,instant):
     snapshot["sector_price_context"]=summary
     if not snapshot.get("enabled") or not automatic_company_evidence.permitted():return snapshot
     today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
-    reports,summary=analyze(snapshot,_classifications(connect,instant),today)
+    classifications=_classifications(connect,instant)
+    reports,summary=analyze(snapshot,classifications,today)
     snapshot["sector_price_context"]=summary
+    # The official index comparison is independent of peer cohort size.
+    from . import sector_benchmarks
+    sector_benchmarks.attach_candidates(snapshot,classifications,today)
     for item,isin in automatic_company_evidence.identify_priority(snapshot):
         item.pop("sector_price_context",None)
         key=(item["exchange"],isin,item.get("id"),item.get("as_of"))

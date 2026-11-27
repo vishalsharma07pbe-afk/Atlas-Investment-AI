@@ -267,6 +267,41 @@ public class InternalFeedController {
     return Map.of("benchmark_key","NSE_INDEX|Nifty 50","kind","PRICE_INDEX","candles",rows);
   }
 
+  /** Fixed allowlisted sector indices; service-authenticated local cache only. */
+  @GetMapping("/sector-benchmarks")
+  public Map<String,Object> sectorBenchmarks(HttpServletRequest request){
+    requireServiceToken(request.getHeader("X-Atlas-Service-Token"));
+    List<Map<String,Object>> reports=new ArrayList<>();
+    for(String key:com.trading.market.BenchmarkHistoryService.SECTOR_KEYS){
+      var rows=jdbc.queryForList("""
+        WITH candidate AS (
+          SELECT i.id,i.exchange_id FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
+          WHERE e.code='NSE' AND i.active AND i.listing_status='ACTIVE'
+            AND i.instrument_type='INDEX' AND i.exchange_token=?
+        )
+        SELECT (c.candle_time AT TIME ZONE 'Asia/Kolkata')::date AS trade_date,
+          c.open,c.close,c.revision,ds.source_code
+        FROM candidate i JOIN market_candles c ON c.instrument_id=i.id
+        JOIN data_sources ds ON ds.id=c.source_id
+        WHERE (SELECT count(*) FROM candidate)=1 AND c.timeframe='1d' AND c.is_complete
+          AND c.quality_status='PROVIDER_VALIDATED' AND c.adjustment_status='RAW_UNADJUSTED'
+          AND ds.enabled AND ds.source_code='UPSTOX'
+          AND c.candle_time < (now() AT TIME ZONE 'Asia/Kolkata')::date::timestamp AT TIME ZONE 'Asia/Kolkata'
+          AND c.candle_time >= ((now() AT TIME ZONE 'Asia/Kolkata')::date-480)::timestamp AT TIME ZONE 'Asia/Kolkata'
+          AND EXISTS(SELECT 1 FROM market_sessions s WHERE s.exchange_id=i.exchange_id
+            AND s.session_date=(c.candle_time AT TIME ZONE 'Asia/Kolkata')::date
+            AND s.session_type='REGULAR' AND s.is_trading_day AND s.close_time=c.candle_time
+            AND s.open_time IS NOT NULL AND s.open_time<s.close_time)
+          AND NOT EXISTS(SELECT 1 FROM market_sessions s WHERE s.exchange_id=i.exchange_id
+            AND s.session_date=(c.candle_time AT TIME ZONE 'Asia/Kolkata')::date
+            AND s.is_trading_day AND s.session_type<>'REGULAR')
+        ORDER BY c.candle_time LIMIT 400
+        """,key);
+      reports.add(Map.of("benchmark_key",key,"kind","PRICE_INDEX","candles",rows));
+    }
+    return Map.of("items",reports);
+  }
+
   /** Fixed bounded public historical calendar read. */
   @GetMapping("/strategy-calendar")
   public Map<String,Object> strategyCalendar(HttpServletRequest request,@RequestParam String exchange) {

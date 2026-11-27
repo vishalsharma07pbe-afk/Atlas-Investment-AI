@@ -1,9 +1,10 @@
+import OfficialSectorView,{type OfficialSectorEvidence} from "./OfficialSectorView";
 import SectorPriceView,{type SectorPriceEvidence} from "./SectorPriceView";
 import {useEffect,useState} from "react";
 import PledgeEvidenceView,{type PledgeEvidence} from "./PledgeEvidenceView";
 import FinancialFilingView,{type FilingEvidence} from "./FinancialFilingView";
 import CompanyEvidenceCard,{type CompanyEvidence} from "./CompanyEvidenceCard";
-type Report={sector_price_context?:SectorPriceEvidence[];independent_financial_evidence?:FilingEvidence|null;independent_pledge_evidence?:PledgeEvidence|null;isin:string;status:string;observations:{id:number;exchange:string;symbol:string;horizon:string;as_of:string;close:number|null;qualification_status:string}[];observed_venues:string[];review_findings:string[];company_evidence:CompanyEvidence|null;venue_observations?:{exchange:string;id:number;as_of:string|null;close:number|null;security_state:string;turnover_proxy_cr:number|null}[];news_evidence?:{source_exchange:string;retrieved_at:string;articles:{id:string;headline:string;url:string;published_at:string;topics:string[]}[];notice:string}|null;ai_review:{reviews:{provider:string;role?:string;findings:{statement:string;evidence_ids:string[]}[]}[];reviewed_at:string;notice:string}|null;notice:string};
+type Report={official_sector_benchmarks?:OfficialSectorEvidence[];sector_price_context?:SectorPriceEvidence[];independent_financial_evidence?:FilingEvidence|null;independent_pledge_evidence?:PledgeEvidence|null;isin:string;status:string;observations:{id:number;exchange:string;symbol:string;horizon:string;as_of:string;close:number|null;qualification_status:string}[];observed_venues:string[];review_findings:string[];company_evidence:CompanyEvidence|null;venue_observations?:{exchange:string;id:number;as_of:string|null;close:number|null;security_state:string;turnover_proxy_cr:number|null}[];news_evidence?:{source_exchange:string;retrieved_at:string;articles:{id:string;headline:string;url:string;published_at:string;topics:string[]}[];notice:string}|null;ai_review:{reviews:{provider:string;role?:string;findings:{statement:string;evidence_ids:string[]}[]}[];reviewed_at:string;notice:string}|null;notice:string};
 const words=(s:string)=>s.toLowerCase().replace(/_/g," ");
 export default function UnifiedCompanyReport({isin}:{isin:string}){
  const [report,setReport]=useState<Report|null>(null),[status,setStatus]=useState("Loading current company research…");
@@ -25,6 +26,7 @@ export default function UnifiedCompanyReport({isin}:{isin:string}){
  <div className="tablewrap"><table><thead><tr><th>Horizon</th><th>Venue</th><th>Observation date</th><th>Close</th><th>Assessment</th></tr></thead><tbody>{report.observations.map(r=><tr key={r.horizon+":"+r.exchange+":"+r.id+":"+r.as_of}><td>{words(r.horizon)}</td><td>{r.exchange}</td><td>{r.as_of}</td><td>{r.close==null?"—":"₹"+r.close.toFixed(2)}</td><td>{words(r.qualification_status)}</td></tr>)}</tbody></table></div>
  {report.review_findings.length>0&&<details><summary>Company review findings</summary><ul>{report.review_findings.map(f=><li key={f}>{words(f)}</li>)}</ul></details>}
  {!!report.venue_observations?.length&&<details><summary>All sampled venue observations</summary>{report.venue_observations.map(v=><p key={v.exchange+":"+v.id}>{v.exchange} · {v.as_of??"No validated close"} · {words(v.security_state)}{v.turnover_proxy_cr!=null?" · ₹"+v.turnover_proxy_cr.toFixed(2)+" cr historical turnover proxy":""}</p>)}</details>}
+ {report.official_sector_benchmarks?.map(r=><OfficialSectorView key={r.exchange+":"+r.id+":"+r.as_of} report={r}/>)}
  {report.sector_price_context?.map(r=><SectorPriceView key={r.exchange+":"+r.id+":"+r.as_of} report={r}/>)}
  {report.independent_financial_evidence&&<FinancialFilingView report={report.independent_financial_evidence}/>}
  {report.independent_pledge_evidence&&<PledgeEvidenceView report={report.independent_pledge_evidence}/>}
