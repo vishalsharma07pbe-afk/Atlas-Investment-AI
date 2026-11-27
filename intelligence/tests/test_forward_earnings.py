@@ -30,11 +30,16 @@ class ForwardEarningsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             def connect():
                 db=sqlite3.connect(Path(d)/"test.db");db.row_factory=sqlite3.Row;return db
-            snapshot={"enabled":True,"scope":"PUBLIC_MARKET_RESEARCH_ONLY","sections":[{"section":"NSE","status":"READY",
-                 "result":{"horizons":{"SWING":{"candidates":[{"isin":ISIN,"exchange":"NSE"}]}}}}]}
+            item={"isin":ISIN,"exchange":"NSE","id":1,"symbol":"TEST","as_of":"2026-11-26"}
+            snapshot={"enabled":True,"scope":"PUBLIC_MARKET_RESEARCH_ONLY","research_date":NOW.date().isoformat(),"sections":[{"section":"NSE","status":"READY",
+                 "result":{"horizons":{"SWING":{"candidates":[item]}},"venue_observations":[dict(item)],
+                    "discovery_coverage":{"calendar_checked_on":NOW.date().isoformat(),"calendar_status":"PUBLISHED_SESSION","expected_session":item["as_of"]}}}]}
             with patch.object(f.company,"permitted",return_value=True),patch.object(f.company,"cached_action_reports",return_value={ISIN:report()}) as loader:
                 self.assertEqual(f.refresh(snapshot,connect,NOW),1)
                 self.assertEqual(f.refresh(snapshot,connect,NOW),0)
+                snapshot["research_date"]="2026-11-26"
+                self.assertEqual(f.refresh(snapshot,connect,NOW),0)
+                snapshot["research_date"]=NOW.date().isoformat()
                 self.assertEqual(f.summary(connect,NOW)["pending_count"],1)
                 with connect() as db:
                     with self.assertRaises(sqlite3.IntegrityError):db.execute("UPDATE earnings_persistence SET evidence='{}'")

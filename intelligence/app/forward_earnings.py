@@ -14,6 +14,7 @@ import json
 import re
 from . import quarterly_financials as q, automatic_company_evidence as company
 from .replay_evidence import exact_isin
+from .company_venues import collect
 
 VERSION="QUARTER-PERSISTENCE-1"
 IST=ZoneInfo("Asia/Kolkata")
@@ -80,7 +81,7 @@ def evaluate(row,report,instant):
     try:
         e=json.loads(row["evidence"]);target=date.fromisoformat(row["target_quarter"])
         published=datetime.fromisoformat(row["published_at"]);old=date.fromisoformat(e["observed_quarter"])
-        if e["methodology"]!=VERSION or e["isin"]!=row["isin"] or e["target_quarter"]!=target.isoformat() or q.shift(old,3)!=target or not old<published.astimezone(IST).date()<target or not target<today or latest<target or stamp<=published:return None
+        if published.tzinfo is None or e.get("qualified") is not False or e["methodology"]!=VERSION or e["isin"]!=row["isin"] or e["target_quarter"]!=target.isoformat() or q.shift(old,3)!=target or not old<published.astimezone(IST).date()<target or not target<today or latest<target or stamp<=published:return None
         if any(target not in series[k] for k in METRICS):return None
         rows={}
         for key in METRICS:
@@ -90,6 +91,9 @@ def evaluate(row,report,instant):
             if any(d not in p for d in anchors):return None
             if any(p[d]!=v for d,v in zip(anchors,expected)):return {"status":"REVISED_BASE_EVIDENCE"}
             actual=p[target];base=f["target_prior_year_amount_cr"]
+            # Reconcile stored baseline arithmetic before evaluating.
+            growth=q.growth(f["latest_amount_cr"],f["latest_prior_year_amount_cr"])
+            if growth is None or growth!=f["persisted_growth_percent"] or not -50<=growth<=100 or f["unchanged_amount_cr"]!=base or abs(f["persistence_amount_cr"]-round(base*(1+growth/100),6))>1e-6:return None
             if not 0<base<=1e12:return None
             # Scale by original positive seasonal base, not possibly zero actual.
             a=100*abs(actual-f["persistence_amount_cr"])/base
@@ -102,8 +106,12 @@ def evaluate(row,report,instant):
 def refresh(snapshot,connect,instant):
     if snapshot.get("enabled") is not True or snapshot.get("scope")!="PUBLIC_MARKET_RESEARCH_ONLY" or not company.permitted():return 0
     today=instant.astimezone(IST).date()
+    if snapshot.get("research_date")!=today.isoformat():return 0
     # Only public selected daily/Elite candidates; no private portfolio source.
-    ids=sorted({isin for _,isin in company.identify_priority(snapshot)})[:100]
+    venues=collect(snapshot,instant)
+    ids=sorted({isin for item,isin in company.identify_priority(snapshot)
+        if any(r.get("as_of")==item.get("as_of") and r.get("id")==item.get("id") and r.get("exchange")==item.get("exchange")
+               and item.get("as_of") is not None for r in venues.get(isin,[]))})[:100]
     with closing(connect()) as db,db:
         _table(db)
         db.execute("UPDATE earnings_persistence SET status='EVIDENCE_GAP' WHERE status='PENDING' AND target_quarter<?",((today-timedelta(days=150)).isoformat(),))

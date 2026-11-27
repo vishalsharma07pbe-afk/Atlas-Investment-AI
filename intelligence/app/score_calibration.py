@@ -80,7 +80,7 @@ def temporal_diagnostics(selected,horizon,today,truncated):
     for r in selected:
         day=r[1]
         groups[(day.year,(day.month-1)//3+1,r[2]["score_band"])].append(r)
-    result=[]
+    result=[];day_values={}
     for (year,quarter,label),items in sorted(groups.items()):
         # Only assess completed publication quarters whose last possible
         # publication has passed the full predeclared maturity allowance.
@@ -91,16 +91,17 @@ def temporal_diagnostics(selected,horizon,today,truncated):
         by_day=defaultdict(list)
         for r in items:by_day[r[1]].append(r)
         observed=[r for r in items if r[3] is not None]
-        complete_dates=0;date_means=[]
+        complete_dates=0;date_means=[];daily={}
         for day,rows in sorted(by_day.items()):
             returns=[(1+r[3])*(1-.003)**2-1 for r in rows if r[3] is not None]
             # Require 80% outcome coverage on a date, not simply a surviving winner.
             if len(returns)/len(rows)>=.8:
-                date_means.append(mean(returns)*100);complete_dates+=1
+                daily[day]=mean(returns)*100;date_means.append(daily[day]);complete_dates+=1
         coverage=len(observed)/len(items)
         dates_coverage=complete_dates/len(by_day)
         enough=(not truncated and len(observed)>=30 and len({r[0] for r in observed})>=10 and
                 coverage>=.8 and complete_dates>=10 and dates_coverage>=.8)
+        if enough:day_values[(f"{year}-Q{quarter}",label)]=daily
         result.append({"publication_quarter":f"{year}-Q{quarter}","score_band":label,
             "mature_count":len(items),"observed_count":len(observed),"distinct_isins":len({r[0] for r in observed}),
             "publication_dates":len(by_day),"covered_dates":complete_dates,"coverage_percent":round(100*coverage,2),
@@ -115,13 +116,17 @@ def temporal_diagnostics(selected,horizon,today,truncated):
         bands={r["score_band"]:r for r in result if r["publication_quarter"]==quarter}
         low,high=bands.get(SCORE_BANDS[0]),bands.get(SCORE_BANDS[-1])
         if low and high and low["status"]==high["status"]=="DESCRIPTIVE_QUARTER_ONLY":
-            contrasts.append({"publication_quarter":quarter,"high_minus_low_pp":round(high["equal_date_mean_net_change_percent"]-low["equal_date_mean_net_change_percent"],4)})
+            a=day_values[(quarter,SCORE_BANDS[0])];b=day_values[(quarter,SCORE_BANDS[-1])]
+            matched=sorted(a.keys()&b.keys())
+            if len(matched)<10 or len(matched)/max(len(a),len(b))<.8:continue
+            contrasts.append({"publication_quarter":quarter,"matched_publication_dates":len(matched),
+                "high_minus_low_pp":round(mean(b[d]-a[d] for d in matched),4)})
     return {"status":"DESCRIPTIVE_TEMPORAL_COMPARISON" if len(contrasts)>=2 and not truncated else "AWAITING_COMPARABLE_QUARTERS",
         "quarter_bands":result,"comparable_quarters":contrasts,
         "positive_spread_quarters":sum(r["high_minus_low_pp"]>0 for r in contrasts),
         "calibrated":False,
         "notice":"Fixed mature calendar publication quarters; 30 bps/side; equal weight per covered publication date. "
-                 "No same-date matching between bands, independence, statistical significance, model fit or confidence."}
+                 "High-minus-low uses only common covered dates. No independence, statistical significance, model fit or confidence."}
 
 def summarize(rows,horizon,today,truncated=False):
     from . import research_reliability as rel

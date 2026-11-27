@@ -64,6 +64,9 @@ class ScoreCalibrationTests(unittest.TestCase):
         self.assertEqual(len(result["comparable_quarters"]),1)
         self.assertEqual(result["status"],"AWAITING_COMPARABLE_QUARTERS")
         self.assertGreater(result["comparable_quarters"][0]["high_minus_low_pp"],0)
+        self.assertEqual(result["comparable_quarters"][0]["matched_publication_dates"],12)
+        shifted=[(r[0],r[1]+timedelta(days=30) if r[2]["score_band"]=="BELOW_5" else r[1],r[2],r[3],r[4]) for r in rows]
+        self.assertFalse(s.temporal_diagnostics(shifted,"SWING",TODAY,False)["comparable_quarters"])
         self.assertEqual(s.temporal_diagnostics(rows,"SWING",date(2026,7,1),False)["quarter_bands"],[])
         self.assertFalse(s.temporal_diagnostics(rows,"SWING",TODAY,True)["comparable_quarters"])
         missing=[(r[0],r[1],r[2],None if i%3==0 else r[3],r[4]) for i,r in enumerate(rows)]
