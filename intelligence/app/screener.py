@@ -7,7 +7,7 @@ from .horizon_research import evaluate, summarize, MIN_HISTORY as HORIZON_MIN_HI
 from .price_structure import analyze as price_structure
 from .corporate_action_normalization import preview as action_preview, reported_crossings
 from .replay_evidence import fingerprint, exact_isin
-from . import price_volume_pressure, steady_momentum, relative_strength, company_venues
+from . import price_volume_pressure, steady_momentum, relative_strength, company_venues, sector_price_context
 
 MIN_HISTORY = 21
 MAX_INSTRUMENTS = 20
@@ -173,6 +173,12 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                 annual_depth_count+=1
             if batch_loaded and exact_isin(instrument.get("isin")):
                 identity={"id":row["id"],"exchange":row["exchange"],"isin":instrument["isin"],"as_of":row["as_of"]}
+                # Collect comparable returns for the broad valid sample, not
+                # only bullish candidates. Reuse the already loaded histories.
+                if expected_session is not None:
+                    identity["security_state"]=row["security_state"]
+                    if row["adjustment_status"]=="ADJUSTED" and row["security_state"] not in sector_price_context.SPECIAL:
+                        identity["comparative_price_windows"]=sector_price_context.windows(raw,today)
                 company_research_universe.append(identity)
                 if instrument["id"] in venue_observations:
                     venue_observations[instrument["id"]]=company_venues.observation(instrument,candles)

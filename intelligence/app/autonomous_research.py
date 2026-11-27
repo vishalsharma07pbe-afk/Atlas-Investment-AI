@@ -16,7 +16,7 @@ import sqlite3
 from urllib.parse import urlencode
 
 from .market_client import backend_json
-from . import steady_momentum, amfi_equity_caps, company_reports, nse_surveillance, nse_pledge_filings, nse_financial_filings
+from . import steady_momentum, amfi_equity_caps, company_reports, nse_surveillance, nse_pledge_filings, nse_financial_filings, sector_price_context
 from .screener import screen
 from . import discovery_scan
 from .mutual_fund_recommendations import CATEGORIES, dashboard
@@ -360,6 +360,10 @@ def read_snapshot(include_ai=True):
             nse_financial_filings.attach(snapshot,_connect,current)
         except (ValueError,TypeError,OSError,sqlite3.Error):
             snapshot["independent_financial_filings"]={"status":"UNAVAILABLE","notice":nse_financial_filings.NOTICE}
+        try:
+            sector_price_context.attach(snapshot,_connect,current)
+        except (ValueError,TypeError,OSError,sqlite3.Error):
+            snapshot["sector_price_context"]={"status":"UNAVAILABLE","notice":sector_price_context.NOTICE}
         try:
             snapshot["steady_momentum"] = steady_momentum.summarize(snapshot,_connect,current)
         except (ValueError,TypeError,OSError,sqlite3.Error):

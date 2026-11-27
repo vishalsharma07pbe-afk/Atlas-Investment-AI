@@ -148,7 +148,7 @@ def parse(payload,isin,expected,today):
     if declaration=="Statement on impact of audit qualification":
         opinion="ISSUER_REPORTED_AUDIT_QUALIFICATION"
         if len(detail)==1:
-            stated=field(detail,"Auditor's opinion",1)[0]
+            stated=field(detail[0],"Auditor's opinion",1)[0]
             if stated in ("Qualified opinion","Adverse opinion","Disclaimer of opinion"):opinion=stated.upper().replace(" ","_")
     elif declaration=="Declaration of unmodified opinion":
         opinion="ISSUER_DECLARED_UNMODIFIED_NOT_SIGNED_REPORT_VERIFIED" if audit==["Audited"]*2 else "DECLARATION_PRESENT_UNAUDITED_PERIOD"
