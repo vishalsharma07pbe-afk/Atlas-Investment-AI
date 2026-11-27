@@ -13,7 +13,7 @@ class PortfolioReassessmentTest {
   assertEquals(false,result.get("qualified"));
  }
  @Test void completeExactEquityFundHistoryScoresButNeverQualifies(){
-  var weekly=Map.of("methodology","MF-WEEKLY-MATCH-1","anchor_count",157,"last_date","2026-11-26","cagr_percent",12,"drawdown_percent",-20);
+  var weekly=Map.of("methodology","MF-WEEKLY-MATCH-1","anchor_count",157,"last_date","2026-11-26","date_digest","a".repeat(64),"cagr_percent",12,"drawdown_percent",-20);
   var history=Map.of("scheme_code",123456,"isin_growth","INF179K01BB2","amfi_option","GROWTH","category","Open Ended Schemes(Equity Scheme - Large Cap Fund)","matched_weekly_comparison",weekly,"worst_rolling_52w_annualized_percent",2,"weekly_volatility_percent",18);
   var row=new LinkedHashMap<String,Object>();row.put("asset_type","MUTUAL_FUND");row.put("exact_scheme_code",123456);row.put("fund_history_evidence",history);
   var result=PortfolioReassessment.holding(row,json,LocalDate.of(2026,11,27));

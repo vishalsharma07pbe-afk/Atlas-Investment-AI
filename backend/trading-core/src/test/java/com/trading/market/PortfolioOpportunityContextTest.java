@@ -42,4 +42,15 @@ class PortfolioOpportunityContextTest {
   assertEquals("UNAVAILABLE",result.get("status"));
   assertTrue(((List<?>)result.get("equities")).isEmpty());
  }
+ @Test void matchedAlternativeRequiresIdenticalDatesAndHigherObservedReturn(){
+  var heldWindow=Map.of("first_date","2026-08-25","last_date","2026-11-23","dates_digest","a".repeat(64),"stock_return_percent",3);
+  var holding=Map.<String,Object>of("asset_type","EQUITY","isin","INE002A01018","exchange","NSE","symbol","HELD","holding_relative_strength",Map.of("windows",Map.of("60",heldWindow)));
+  var watch=new LinkedHashMap<>(candidate("INE009A01021"));watch.put("adjustment_status","ADJUSTED");
+  var other=Map.of("first_date","2026-08-25","last_date","2026-11-23","dates_digest","a".repeat(64),"return_percent",5);
+  watch.put("matched_60",other);
+  var report=PortfolioOpportunityContext.compare(List.of(holding),Map.of(),json.valueToTree(Map.of("equities",List.of(watch))),json);
+  assertEquals(1,((List<?>)report.get("matched_comparisons")).size());
+  watch.put("matched_60",Map.of("first_date","2026-08-25","last_date","2026-11-23","dates_digest","b".repeat(64),"return_percent",5));
+  assertTrue(((List<?>)PortfolioOpportunityContext.compare(List.of(holding),Map.of(),json.valueToTree(Map.of("equities",List.of(watch))),json).get("matched_comparisons")).isEmpty());
+ }
 }

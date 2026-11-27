@@ -82,6 +82,14 @@ final class PortfolioOpportunityContext {
  static List<Map<String,Object>> matched(List<Map<String,Object>> holdings,JsonNode snapshot,ObjectMapper json,
     Set<String> equityIds,Set<String> fundIds,boolean unknownEquity,boolean unknownFund){
   List<Map<String,Object>> rows=new ArrayList<>();
+  Set<String> heldFundIsins=new HashSet<>();
+  boolean unresolvedFundIsin=false;
+  for(var holding:holdings){
+   JsonNode h=json.valueToTree(holding);
+   if(!"MUTUAL_FUND".equals(h.path("asset_type").asText()))continue;
+   String isin=h.path("fund_history_evidence").path("isin_growth").asText();
+   if(isin.matches("INF[A-Z0-9]{9}"))heldFundIsins.add(isin);else unresolvedFundIsin=true;
+  }
   Set<String> seen=new HashSet<>();
   for(var holding:holdings){
    var h=json.valueToTree(holding);
@@ -101,7 +109,7 @@ final class PortfolioOpportunityContext {
        "holding_return_percent",old,"alternative_return_percent",value,"basis","60_MATCHED_SESSIONS_PRICE_ONLY"));
      if(rows.size()>=30)return rows;
     }
-   }else if("MUTUAL_FUND".equals(h.path("asset_type").asText())&&!unknownFund){
+   }else if("MUTUAL_FUND".equals(h.path("asset_type").asText())&&!unknownFund&&!unresolvedFundIsin){
     var history=h.path("fund_history_evidence");var held=history.path("matched_weekly_comparison");
     String category=label(history.path("category"));
     if(!"DIRECT".equals(history.path("amfi_plan").asText())||!"GROWTH".equals(history.path("amfi_option").asText())||
@@ -114,7 +122,7 @@ final class PortfolioOpportunityContext {
      String isin=item.path("isin_growth").asText();
      if(!"HISTORICAL_WATCH_ONLY".equals(item.path("evidence_type").asText())||cat==null||
        !category.contains(" - "+cat+")")||!code.matches("[1-9][0-9]{5,8}")||fundIds.contains(code)||
-       !isin.matches("INF[A-Z0-9]{9}")||isin.equals(history.path("isin_growth").asText()))continue;
+       !isin.matches("INF[A-Z0-9]{9}")||heldFundIsins.contains(isin))continue;
      var other=item.path("matched_weekly");Double value=number(other,"cagr_percent"),dd=number(other,"drawdown_percent");
      if(value==null||dd==null||dd>0||dd< -100||!sameDates(held,other,"date_digest")||value<=old||dd<risk||
         !seen.add(history.path("scheme_code").asText()+":"+code))continue;

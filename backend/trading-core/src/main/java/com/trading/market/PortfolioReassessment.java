@@ -53,7 +53,7 @@ final class PortfolioReassessment {
      for(var trend:annual.path("items"))if(Set.of("NET_PROFIT","OPERATING_CASH_FLOW").contains(trend.path("metric").asText())
        &&!trend.path("latest_period_may_be_stale").asBoolean(true)&&number(trend,"latest_value")!=null
        &&number(trend,"latest_value")>0)current.add(trend.path("metric").asText()+":"+trend.path("latest_year").asText());
-     for(String key:current)if(key.startsWith("NET_PROFIT:")&&current.contains("OPERATING_CASH_FLOW:"+key.substring("NET_PROFIT:".length())))
+     for(String key:current)if(key.startsWith("NET_PROFIT:")&&key.substring("NET_PROFIT:".length()).equals(metric.path("latest_year").asText())&&"RATIO".equals(metric.path("unit").asText())&&current.contains("OPERATING_CASH_FLOW:"+key.substring("NET_PROFIT:".length())))
        cash=number(metric,"latest_value");
     }
    }
@@ -70,6 +70,7 @@ final class PortfolioReassessment {
      &&h.path("exact_scheme_code").asText().equals(history.path("scheme_code").asText())
      &&history.path("isin_growth").asText().matches("INF[A-Z0-9]{9}")
      &&"GROWTH".equals(history.path("amfi_option").asText())&&category.contains("equity scheme")
+     &&weekly.path("date_digest").asText().matches("[a-f0-9]{64}")
      &&"MF-WEEKLY-MATCH-1".equals(weekly.path("methodology").asText())&&weekly.path("anchor_count").asInt()==157
      &&recent(weekly.path("last_date").asText(),today,7);
    factor(factors,"MATCHED_WEEKLY_CAGR",valid?number(weekly,"cagr_percent"):null,0,20);
