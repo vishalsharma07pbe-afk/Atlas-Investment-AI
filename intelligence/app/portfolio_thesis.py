@@ -309,6 +309,10 @@ def read(rows,db_connect=connect,instant=None):
                     result["status"]="EVIDENCE_AVAILABLE"
             except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
                 result["governance_review"]=None
+            from . import sector_benchmarks, peer_research
+            report=item.get("company_evidence") or {}
+            if item["exchange"]=="NSE" and report.get("isin")==item["isin"] and sector_benchmarks.permitted():
+                result["sector_benchmark_key"]=sector_benchmarks.mapping(peer_research.fresh_classification(report,instant))
             pack=_pack(item)
             if local and pack is not None:
                 cached=db.execute("SELECT * FROM portfolio_local_ai WHERE evidence_hash=? AND status='AVAILABLE' AND attempted_at BETWEEN ? AND ?",

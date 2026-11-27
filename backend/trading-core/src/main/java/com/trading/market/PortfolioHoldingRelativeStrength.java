@@ -21,9 +21,15 @@ final class PortfolioHoldingRelativeStrength {
    if(!(entry instanceof Map<?,?> m)||!(m.get("trade_date") instanceof String date)||!(m.get("state") instanceof String state))return out;
    if(calendar.putIfAbsent(LocalDate.parse(date),state)!=null)return out;
   }
-  var benchmark=PortfolioBenchmarkEvidence.points(jdbc,today.minusDays(1),today).stream()
+  var benchmark=PortfolioBenchmarkEvidence.points(jdbc,today.minusDays(1),today,BenchmarkHistoryService.KEY,470).stream()
     .map(b->new Point(b.date(),b.close(),b.source(),b.eligible())).toList();
-  if(benchmark.isEmpty())return out;
+  Map<String,List<Point>> sectors=new LinkedHashMap<>();
+  for(String key:BenchmarkHistoryService.SECTOR_KEYS){
+   var points=PortfolioBenchmarkEvidence.points(jdbc,today.minusDays(1),today,key,470).stream()
+     .map(b->new Point(b.date(),b.close(),b.source(),b.eligible())).toList();
+   if(!points.isEmpty())sectors.put(key,points);
+  }
+  if(benchmark.isEmpty()&&sectors.isEmpty())return out;
   Set<Long> seen=new HashSet<>();
   for(var row:rows){
    if(!"EQUITY".equals(row.get("asset_type"))||!"NSE".equals(row.get("exchange"))
@@ -44,10 +50,20 @@ final class PortfolioHoldingRelativeStrength {
      WHERE c.instrument_id=? AND i.isin=? AND e.code='NSE' AND i.active AND i.listing_status='ACTIVE'
        AND c.timeframe='1d' AND (c.candle_time AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ? AND ?
      ORDER BY c.candle_time
-     """,id.longValue(),isin,today.minusDays(366),today.minusDays(1));
+     """,id.longValue(),isin,today.minusDays(470),today.minusDays(1));
    var stock=history.stream().map(m->new Point(day(m.get("trade_date")),(BigDecimal)m.get("close"),
       (String)m.get("source_code"),Boolean.TRUE.equals(m.get("eligible")))).toList();
-   var result=compare(stock,benchmark,calendar,today);
+   var result=new LinkedHashMap<>(compare(stock,benchmark,calendar,today));
+   Map<String,Object> sectorWindows=new LinkedHashMap<>();
+   sectors.forEach((key,points)->{
+     var matched=compare(stock,points,calendar,today);
+     if("MATCHED_PRICE_INDEX_OBSERVATIONS".equals(matched.get("status"))){
+       var sector=new LinkedHashMap<>(matched);
+       sector.put("benchmark_key",key);
+       sectorWindows.put(key,sector);
+     }
+   });
+   result.put("sector_candidates_internal",sectorWindows);
    out.put("NSE:"+isin+":"+id.longValue(),result);
   }
   return out;
@@ -73,7 +89,7 @@ final class PortfolioHoldingRelativeStrength {
    double stockReturn=change(s.get(first),s.get(last)),indexReturn=change(b.get(first),b.get(last));
    if(!Double.isFinite(stockReturn)||!Double.isFinite(indexReturn)||Math.abs(stockReturn)>1e9||Math.abs(indexReturn)>1e9)continue;
    windows.put(String.valueOf(n),Map.of("first_date",first.toString(),"last_date",last.toString(),
-     "stock_return_percent",round(stockReturn),"index_return_percent",round(indexReturn),"difference_pp",round(stockReturn-indexReturn)));
+     "stock_return_percent",round(stockReturn),"index_return_percent",round(indexReturn),"difference_pp",round(stockReturn-indexReturn),"dates_digest",digest(expected)));
   }
   return Map.of("status",windows.isEmpty()?"UNAVAILABLE":"MATCHED_PRICE_INDEX_OBSERVATIONS",
     "benchmark_key","NSE_INDEX|Nifty 50","windows",windows,"notice",NOTICE);
@@ -89,5 +105,11 @@ final class PortfolioHoldingRelativeStrength {
  private static boolean valid(Point p){return p!=null&&p.eligible()&&"UPSTOX".equals(p.source())&&p.close()!=null
    &&p.close().signum()>0&&Double.isFinite(p.close().doubleValue());}
  private static double change(Point first,Point last){return 100*(last.close().doubleValue()/first.close().doubleValue()-1);}
+ private static String digest(List<LocalDate> dates){
+  try{
+   String joined=String.join("\n",dates.reversed().stream().map(LocalDate::toString).toList());
+   return HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(joined.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+  }catch(java.security.NoSuchAlgorithmException ex){throw new IllegalStateException(ex);}
+ }
  private static double round(double value){return Math.round(value*10000d)/10000d;}
 }

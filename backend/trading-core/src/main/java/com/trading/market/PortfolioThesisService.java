@@ -51,6 +51,15 @@ public class PortfolioThesisService {
     JsonNode fund=evidence.path("fund_items").path(code);
     if(allowedFunds.contains(code)&&fund.isObject()&&"SECONDARY_REPORTED_EVIDENCE".equals(fund.path("status").asText())&&code.equals(fund.path("disclosure").path("scheme_code").asText()))h.put("fund_thesis_evidence",fund);
    }
+   if(h.get("holding_relative_strength") instanceof Map<?,?> rawRelative){
+    var relative=new LinkedHashMap<String,Object>((Map<String,Object>)rawRelative);
+    Object candidates=relative.remove("sector_candidates_internal");
+    JsonNode thesis=json.valueToTree(h.get("thesis_evidence"));
+    String sector=thesis.path("sector_benchmark_key").asText();
+    if(BenchmarkHistoryService.SECTOR_KEYS.contains(sector)&&candidates instanceof Map<?,?> m&&m.get(sector)!=null)
+      h.put("holding_sector_strength",m.get(sector));
+    h.put("holding_relative_strength",relative);
+   }
    h.put("thesis_summary",PortfolioThesisSummary.summarize(h,json));
   }
   var result=new LinkedHashMap<>(review);result.put("holdings",holdings);
