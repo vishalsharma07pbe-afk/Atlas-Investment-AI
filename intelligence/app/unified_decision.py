@@ -95,7 +95,13 @@ def summarize(snapshot,today):
         company["qualified"]=False
         company["ai_reviewed"]=any(r["ai"]["reviewed_count"] is not None for r in rows)
     out["equity_companies"]=sorted(companies.values(),key=lambda c:(c["state"]!="REVIEW_REQUIRED",c["isin"]))
-    out["equity_company_count"]=len(companies) if companies or any((selections.get(h) or {}).get("qualified_count")==0 for h in HORIZONS[:-1]) else None
+    projected={(r["horizon"],r["exchange"],r["id"],r["isin"]) for c in companies.values() for r in c["observations"] if r["horizon"]!="ELITE"}
+    missing=selected-projected
+    out["canonical_projection_complete"]=not missing
+    out["missing_canonical_watch_count"]=len(missing)
+    all_daily_processed=all((selections.get(h) or {}).get("qualified_count")==0 for h in HORIZONS[:-1])
+    # A failed projection is neither a genuine zero nor complete coverage.
+    out["equity_company_count"]=len(companies) if not missing and (companies or all_daily_processed) else None
     out["equity_review_count"]=sum(c["state"]=="REVIEW_REQUIRED" for c in companies.values()) if out["equity_company_count"] is not None else None
     out["ai_reviewed_company_count"]=sum(c["ai_reviewed"] for c in companies.values()) if out["equity_company_count"] is not None else None
     # Fund historical watches and existing qualification results remain distinct.
@@ -134,4 +140,5 @@ def summarize(snapshot,today):
           "prospective_status":(result.get("prospective_validation") or {}).get("status","UNAVAILABLE"),
           "qualification_status":result.get("recommendation_status","UNAVAILABLE")})
     if companies or out["fund_categories"]:out["status"]="RESEARCH_CONTEXT_AVAILABLE"
+    if missing:out["status"]="INCOMPLETE_DECISION_PROJECTION"
     return out

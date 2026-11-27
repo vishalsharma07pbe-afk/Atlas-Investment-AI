@@ -411,9 +411,23 @@ def advanced_audit(readiness,overview,review,intraday):
             reviews+=required;ai_count+=reviewed
         counts=(d.get("equity_company_count"),d.get("equity_review_count"),d.get("ai_reviewed_company_count"))
         ok=ok and (counts==(len(companies),reviews,ai_count) or not companies and counts==(None,None,None))
+    # Compare the projection with actual canonical selection, not its self-reported count.
+    canonical=set();canonical_ok=True
+    reports=_obj(_obj(overview.get("stock_qualification")).get("horizons"))
+    for horizon in DAILY_HORIZONS:
+        refs=_obj(_obj(reports.get(horizon)).get("selection")).get("watch_refs")
+        if not isinstance(refs,list) or len(refs)>5:
+            canonical_ok=False;continue
+        keys=[_ref(r) for r in refs]
+        if any(k is None for k in keys) or len(set(keys))!=len(keys):
+            canonical_ok=False;continue
+        canonical.update((horizon,key) for key in keys)
+    projected={x for x in observations if x[0]!="ELITE"}
+    check("canonical_decision_projection",canonical_ok and canonical==projected and
+          d.get("canonical_projection_complete") is True and d.get("missing_canonical_watch_count")==0)
     check("unified_equity_decisions",ok)
-    evidence["unified_company_count"]=len(seen) if ok else None
-    evidence["ai_reviewed_company_count"]=ai_count if ok else None
+    evidence["unified_company_count"]=_bounded_count(d.get("equity_company_count"),55) if ok else None
+    evidence["ai_reviewed_company_count"]=_bounded_count(d.get("ai_reviewed_company_count"),55) if ok else None
     funds=d.get("fund_categories");seen_categories=set()
     fund_ok=isinstance(funds,list) and len(funds)<=len(SECTIONS)-2
     if fund_ok:

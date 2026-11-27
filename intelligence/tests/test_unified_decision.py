@@ -27,7 +27,11 @@ class UnifiedDecisionTests(unittest.TestCase):
     def test_missing_final_gate_or_stale_scope_not_promoted(self):
         snapshot,item=fixture()
         item["stock_qualification"]["blockers"]=[]
-        self.assertFalse(d.summarize(snapshot,TODAY)["equity_companies"])
+        result=d.summarize(snapshot,TODAY)
+        self.assertFalse(result["equity_companies"])
+        self.assertIsNone(result["equity_company_count"])
+        self.assertEqual(result["status"],"INCOMPLETE_DECISION_PROJECTION")
+        self.assertEqual(result["missing_canonical_watch_count"],1)
         snapshot["research_date"]="2026-11-26"
         self.assertIsNone(d.summarize(snapshot,TODAY)["equity_company_count"])
     def test_exact_fund_historical_match_preserves_blockers(self):
@@ -50,3 +54,13 @@ class UnifiedDecisionTests(unittest.TestCase):
         result=d.summarize(snapshot,TODAY)
         self.assertEqual(result["equity_company_count"],1)
         self.assertEqual(len(result["equity_companies"][0]["observations"]),2)
+
+    def test_elite_requires_current_matching_venue_session(self):
+        snapshot,item=fixture()
+        elite={**item,"exchange":"BSE","id":2,"status":"SCREEN_MATCH_ONLY","elite_assessment":{
+          "methodology":elite_assessment.VERSION,"status":"SCORE_WITHHELD","qualified":False,
+          "blockers":["FINAL_QUALIFICATION_VALIDATION_REQUIRED"]}}
+        snapshot["steady_momentum"]={"items":[elite]}
+        r=d.summarize(snapshot,TODAY)
+        self.assertEqual(len(r["equity_companies"][0]["observations"]),1)
+        self.assertTrue(r["canonical_projection_complete"])

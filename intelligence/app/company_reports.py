@@ -16,11 +16,13 @@ def entries(snapshot):
         if not isinstance(row,dict) or not exact_isin(row.get("isin")) or row.get("exchange") not in ("NSE","BSE") or type(row.get("id")) is not int or row["id"]<=0:return False
         try:return 1<=(today-date.fromisoformat(row["as_of"])).days<=4
         except (ValueError,TypeError,KeyError):return False
+    current_venues={}
     for section in snapshot.get("sections",[]):
         if section.get("section") not in ("NSE","BSE") or section.get("status")!="READY":continue
         result=section.get("result") or {}
         coverage=result.get("discovery_coverage") or {}
         if coverage.get("calendar_checked_on")!=today.isoformat() or coverage.get("calendar_status")!="PUBLISHED_SESSION":continue
+        current_venues[section["section"]]=coverage.get("expected_session")
         for horizon in HORIZONS:
             group=(result.get("horizons") or {}).get(horizon) or {}
             if group.get("status")!="TECHNICAL_WATCH_ONLY":continue
@@ -30,7 +32,7 @@ def entries(snapshot):
     lists=[screen.get("items",[])]+[screen.get("category_items",{}).get(k,[]) for k in ("LARGE_CAP","MID_CAP","SMALL_CAP")]
     for rows in lists:
         for row in rows[:10]:
-            if valid(row) and row.get("status")=="SCREEN_MATCH_ONLY":yield "ELITE",row
+            if valid(row) and row.get("status")=="SCREEN_MATCH_ONLY" and row["as_of"]==current_venues.get(row["exchange"]):yield "ELITE",row
 
 def grouped(snapshot):
     groups=defaultdict(list)

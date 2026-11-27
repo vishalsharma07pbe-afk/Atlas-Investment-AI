@@ -10,8 +10,9 @@ SPEC.loader.exec_module(a)
 class AdvancedAcceptanceTests(unittest.TestCase):
     def fixture(self):
         d={"methodology":"UNIFIED-DECISION-1","status":"RESEARCH_CONTEXT_AVAILABLE","equity_companies":[],
-           "equity_company_count":0,"equity_review_count":0,"ai_reviewed_company_count":0,"fund_categories":[]}
-        overview={"unified_decision":d,"forward_earnings_validation":{"methodology":"QUARTER-PERSISTENCE-1",
+           "equity_company_count":0,"equity_review_count":0,"ai_reviewed_company_count":0,"fund_categories":[],
+           "canonical_projection_complete":True,"missing_canonical_watch_count":0}
+        overview={"unified_decision":d,"stock_qualification":{"horizons":{h:{"selection":{"watch_refs":[]}} for h in a.DAILY_HORIZONS}},"forward_earnings_validation":{"methodology":"QUARTER-PERSISTENCE-1",
           "status":"AWAITING_PUBLICATIONS","calibrated":False,"quarter_cohorts":[],"pending_count":0},
           "score_calibration":{"calibrated":False,"horizons":{h:{"temporal_diagnostics":{"calibrated":False}} for h in a.DAILY_HORIZONS}}}
         readiness={"research_jobs":{"jobs":[{"job":j,"status":"PENDING"} for j in a.ADVANCED_JOBS]}}
@@ -31,3 +32,12 @@ class AdvancedAcceptanceTests(unittest.TestCase):
         self.assertNotIn("PRIVATE_MARKER",json.dumps(out))
         args[1]["score_calibration"]["calibrated"]=True
         self.assertEqual(a.advanced_audit(*args)["checks"]["temporal_validation_contract"],"BLOCKED")
+
+    def test_missing_canonical_projection_blocks_even_if_self_counts_agree(self):
+        args=self.fixture()
+        args[1]["stock_qualification"]["horizons"]["SWING"]["selection"]["watch_refs"]=[{
+            "exchange":"NSE","id":1,"isin":"INE002A01018"}]
+        out=a.advanced_audit(*args)
+        self.assertEqual(out["checks"]["canonical_decision_projection"],"BLOCKED")
+        self.assertEqual(out["status"],"BLOCKED")
+        self.assertNotIn("INE002A01018",json.dumps(out))
