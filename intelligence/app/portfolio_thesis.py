@@ -159,6 +159,61 @@ def _items(snapshot):
     return [item for item,_ in company.identify(snapshot)]
 
 
+def _reuse_public_company_reports(db_connect,active_isins,instant):
+    """One-way local reuse of independently collected public evidence.
+
+    Read-only public connection. Never publish held identities or select provider
+    requests from this function. Preserve private claims, failures and cooldowns.
+    """
+    if not active_isins or not company.permitted():
+        return 0
+    path=Path(os.getenv("ATLAS_RESEARCH_SNAPSHOT_DB","/app/ingestion-data/research_snapshots.sqlite3")).resolve()
+    if not path.is_file():
+        return 0
+    lower=(instant-timedelta(hours=24)).isoformat()
+    upper=instant.isoformat()
+    try:
+        # Query public reports by freshness, filter exact held identities in
+        # memory rather than persist any held-derived selection in public storage.
+        with closing(sqlite3.connect(path.as_uri()+"?mode=ro",uri=True,timeout=2)) as public:
+            public.row_factory=sqlite3.Row
+            if not public.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='automatic_company_evidence'").fetchone():
+                return 0
+            reports=[]
+            for row in public.execute("""SELECT isin,attempted_at,next_attempt_at,status,payload
+                    FROM automatic_company_evidence WHERE status IN ('AVAILABLE','PARTIAL') AND attempted_at BETWEEN ? AND ?""",(lower,upper)):
+                if row["isin"] not in active_isins or not row["payload"]:
+                    continue
+                try:
+                    report=json.loads(row["payload"])
+                    stamp=datetime.fromisoformat(report["retrieved_at"])
+                    if (report.get("isin")!=row["isin"] or stamp.tzinfo is None
+                        or not instant-timedelta(hours=24)<=stamp<=instant
+                        or report.get("normalization_version")!=company.NORMALIZATION_VERSION
+                        or not isinstance(report.get("sections"),dict)
+                        or not any(isinstance(s,dict) and s.get("status")=="AVAILABLE" and s.get("data") for s in report["sections"].values())):
+                        continue
+                    next_attempt=min(max(datetime.fromisoformat(row["next_attempt_at"]),instant),instant+timedelta(hours=24))
+                    reports.append((row["isin"],row["attempted_at"],next_attempt.isoformat(),row["status"],row["payload"]))
+                except (ValueError,KeyError,TypeError,AttributeError,OverflowError):
+                    continue
+        with closing(db_connect()) as db,db:
+            company._table(db)
+            reused=0
+            for record in reports:
+                # Do not replace a private in-progress attempt, failure/cooldown
+                # record, or newer report. Import only exact public evidence.
+                reused+=db.execute("""INSERT INTO automatic_company_evidence VALUES(?,?,?,?,?)
+                    ON CONFLICT(isin) DO UPDATE SET attempted_at=excluded.attempted_at,
+                    next_attempt_at=max(automatic_company_evidence.next_attempt_at,excluded.next_attempt_at),
+                    status=excluded.status,payload=excluded.payload
+                    WHERE automatic_company_evidence.status IN ('AVAILABLE','PARTIAL')
+                    AND automatic_company_evidence.attempted_at<excluded.attempted_at""",record).rowcount
+            return reused
+    except (sqlite3.Error,OSError):
+        return 0
+
+
 def refresh(db_connect=connect,loader=backend_json,runner=ai_failover.grounded_research,instant=None):
     if not enabled():
         return
@@ -189,6 +244,8 @@ def refresh(db_connect=connect,loader=backend_json,runner=ai_failover.grounded_r
         for row in db.execute("SELECT instrument_key FROM automatic_news_state").fetchall():
             if row["instrument_key"] not in active_keys:
                 db.execute("DELETE FROM automatic_news_state WHERE instrument_key=?",(row["instrument_key"],))
+    # Reuse fresh public evidence before spending the private provider budget.
+    _reuse_public_company_reports(db_connect,active_isins,instant)
     # Reuse the existing bounded adapters with an isolated private cache.
     company.refresh(snapshot,db_connect,instant=instant)
     news.refresh(snapshot,db_connect,instant=instant)

@@ -122,3 +122,24 @@ class PortfolioThesisTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT count(*) FROM portfolio_local_ai").fetchone()[0],0)
         with public._connect() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM automatic_company_annual_archive").fetchone()[0],1)
+
+    def test_reuses_only_fresh_exact_public_reports_without_public_writes(self):
+        from app import autonomous_research as public
+        import json
+        now=datetime.now(timezone.utc)
+        identity=self.rows[0]["isin"]
+        def payload(isin,stamp):
+            return json.dumps({"isin":isin,"retrieved_at":stamp.isoformat(),"normalization_version":company.NORMALIZATION_VERSION,
+                "sections":{"ratios":{"status":"AVAILABLE","data":[{"name":"P/E","company_value":20}]}}})
+        with public._connect() as db:
+            company._table(db)
+            for isin,stamp in ((identity,now-timedelta(hours=1)),("INE009A01021",now-timedelta(days=2)),("INE000A01019",now)):
+                db.execute("INSERT INTO automatic_company_evidence VALUES(?,?,?,?,?)",(isin,stamp.isoformat(),(stamp+timedelta(hours=24)).isoformat(),"AVAILABLE",payload(isin,stamp)))
+        with patch.object(company,"permitted",return_value=True):
+            self.assertEqual(thesis._reuse_public_company_reports(thesis.connect,{identity,"INE009A01021"},now),1)
+            self.assertEqual(thesis._reuse_public_company_reports(thesis.connect,{identity},now),0)
+        with thesis.connect() as db:
+            rows=db.execute("SELECT isin,status FROM automatic_company_evidence").fetchall()
+            self.assertEqual([tuple(r) for r in rows],[(identity,"AVAILABLE")])
+        with public._connect() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM automatic_company_evidence").fetchone()[0],3)
