@@ -40,10 +40,8 @@ public class IntradayResearchService {
     WITH liquid AS (
       SELECT i.id,m.instrument_key,c.close*c.volume AS turnover
       FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
-      JOIN LATERAL (SELECT instrument_key FROM upstox_instrument_map
-        WHERE exchange_code=e.code AND trading_symbol=i.symbol AND isin=i.isin
-          AND instrument_type IN ('EQ','EQUITY') AND instrument_key LIKE e.code||'_EQ|%'
-        ORDER BY instrument_key LIMIT 1) m ON true
+      JOIN discovery_quote_universe m ON m.instrument_id=i.id AND m.isin=i.isin AND m.exchange=e.code
+      LEFT JOIN discovery_security_context sc ON sc.instrument_id=m.instrument_id AND sc.isin=m.isin AND sc.instrument_key=m.instrument_key
       JOIN LATERAL (SELECT c.close,c.volume FROM market_candles c
         WHERE c.instrument_id=i.id AND c.timeframe='1d' AND c.is_complete
           AND c.quality_status='PROVIDER_VALIDATED'
@@ -51,6 +49,7 @@ public class IntradayResearchService {
         ORDER BY c.candle_time DESC LIMIT 1) c ON true
       WHERE e.code=? AND i.active AND i.listing_status='ACTIVE' AND i.series='EQ'
         AND i.instrument_type IN ('EQ','EQUITY','STOCK') AND c.close*c.volume>=10000000
+        AND coalesce(sc.security_state,'UNKNOWN') IN ('NORMAL','UNKNOWN')
       ORDER BY turnover DESC,i.id LIMIT 8
     )
     SELECT l.id,l.instrument_key FROM liquid l LEFT JOIN intraday_research_attempts a ON a.instrument_id=l.id
@@ -81,17 +80,24 @@ public class IntradayResearchService {
 
  public Map<String,Object> current(){
   Instant now=Instant.now();
-  List<Map<String,Object>> candidates=new ArrayList<>(),warnings=new ArrayList<>();
+  List<Map<String,Object>> candidates=new ArrayList<>(),warnings=new ArrayList<>(),observations=new ArrayList<>();
   int examined=0,eligible=0;List<String> open=new ArrayList<>();
   if(permitted())for(String exchange:List.of("NSE","BSE")){
    if(!calendar.isMarketOpen(exchange,now))continue;
    open.add(exchange);
    // Only scheduler-collected, completed provider bars for this exact session.
    var rows=jdbc.queryForList("""
-     SELECT i.id,i.symbol,i.isin,e.code AS exchange,c.candle_time,c.open,c.high,c.low,c.close,c.volume
+     SELECT i.id,i.symbol,i.isin,e.code AS exchange,c.candle_time,c.open,c.high,c.low,c.close,c.volume,
+       coalesce(sc.security_state,'UNKNOWN') AS security_state,
+       q.observed_at AS quote_observed_at,q.response_at AS quote_response_at,
+       q.last_price AS quote_price,q.spread_percent AS quote_spread_percent,q.turnover_proxy AS quote_turnover
      FROM intraday_research_attempts a JOIN instruments i ON i.id=a.instrument_id
      JOIN exchanges e ON e.id=i.exchange_id JOIN market_candles c ON c.instrument_id=i.id
      JOIN data_sources ds ON ds.id=c.source_id
+     JOIN discovery_quote_universe m ON m.instrument_id=i.id AND m.isin=i.isin AND m.exchange=e.code
+     LEFT JOIN discovery_security_context sc ON sc.instrument_id=m.instrument_id AND sc.isin=m.isin AND sc.instrument_key=m.instrument_key
+     LEFT JOIN discovery_quote_screen q ON q.instrument_id=m.instrument_id AND q.isin=m.isin AND q.instrument_key=m.instrument_key
+       AND q.state IN ('PRIORITY','OBSERVED')
      WHERE e.code=? AND i.active AND i.series='EQ' AND i.listing_status='ACTIVE'
        AND a.status='SUCCESS' AND a.attempted_at>=now()-interval '15 minutes'
        AND c.timeframe='15minute' AND c.is_complete AND c.quality_status='PROVIDER_VALIDATED'
@@ -106,13 +112,19 @@ public class IntradayResearchService {
     examined++;
     var finding=evaluate(group,now);
     if(finding==null)continue;
+    var evidence=group.getLast();
+    finding.put("security_state",evidence.getOrDefault("security_state","UNKNOWN"));
+    var quote=IntradayVenueEvidence.quote(evidence,now);
+    if(quote!=null)finding.put("venue_quote",quote);
+    observations.add(finding);
+    if(IntradayVenueEvidence.restricted(finding))continue;
     eligible++;
     if("FAILED_BREAKOUT_WATCH".equals(finding.get("pattern")))warnings.add(finding);
     else if("VOLUME_BREAKOUT_WATCH".equals(finding.get("pattern")))candidates.add(finding);
    }
   }
   String status=!permitted()?"NOT_AUTHORIZED":open.isEmpty()?"SESSION_CLOSED_OR_UNVERIFIED":"RESEARCH_ONLY";
-  var selection=select(candidates,warnings,status);
+  var selection=select(candidates,warnings,status,observations,now);
   return Map.of("status",status,"generated_at",now.toString(),"open_exchanges",open,
     "examined",examined,"eligible",eligible,"candidates",selection.get("candidates"),
     "warnings",selection.get("warnings"),"qualification",selection.get("qualification"),
@@ -121,12 +133,18 @@ public class IntradayResearchService {
 
  static final List<String> QUALIFICATION_GAPS=List.of("LIVE_SPREAD_AND_EXECUTION_LIQUIDITY_REQUIRED",
    "VALIDATED_EXECUTION_COSTS_REQUIRED","VERIFIED_MATERIAL_EVENT_AND_RISK_ASSESSMENT_REQUIRED",
+   "OFFICIAL_ASM_GSM_ESM_AND_TRADE_RESTRICTIONS_REQUIRED",
    "INTRADAY_HISTORICAL_AND_PROSPECTIVE_VALIDATION_REQUIRED","FINAL_QUALIFICATION_VALIDATION_REQUIRED");
 
  /** Consolidate exact public identities without transferring levels between venues.
   * Preserve the observed failed-breakout warning rather than promote a conflicting watch.
   */
  static Map<String,Object> select(List<Map<String,Object>> candidates,List<Map<String,Object>> warnings,String status){
+  return select(candidates,warnings,status,List.of(),Instant.EPOCH);
+ }
+
+ static Map<String,Object> select(List<Map<String,Object>> candidates,List<Map<String,Object>> warnings,String status,
+     List<Map<String,Object>> observations,Instant now){
   Map<String,List<Map<String,Object>>> byCompany=new TreeMap<>();
   int unidentified=0;
   List<Map<String,Object>> input=new ArrayList<>(candidates);input.addAll(warnings);
@@ -141,7 +159,10 @@ public class IntradayResearchService {
     .thenComparing(row->String.valueOf(row.get("exchange")))
     .thenComparingLong(row->((Number)row.get("id")).longValue());
   List<Map<String,Object>> positive=new ArrayList<>(),negative=new ArrayList<>();
-  int crossVenue=0,conflicts=0;
+  int crossVenue=0,conflicts=0,reviewCount=0;
+  Map<String,List<Map<String,Object>>> observedByCompany=new HashMap<>();
+  for(var row:observations)if(row.get("isin") instanceof String isin&&isin.matches("INE[A-Z0-9]{9}"))
+   observedByCompany.computeIfAbsent(isin,k->new ArrayList<>()).add(row);
   for(var entries:byCompany.values()){
    var venues=entries.stream().map(row->String.valueOf(row.get("exchange"))).distinct().sorted().toList();
    if(venues.size()>1)crossVenue++;
@@ -150,9 +171,19 @@ public class IntradayResearchService {
    boolean conflict=!failed.isEmpty()&&!breakout.isEmpty();
    if(conflict)conflicts++;
    if(failed.isEmpty()&&breakout.isEmpty())continue;
-   var representative=new LinkedHashMap<>(failed.isEmpty()?breakout.getFirst():failed.getFirst());
-   List<String> findings=conflict?List.of("CROSS_VENUE_FAILED_BREAKOUT_REVIEW"):
-      failed.isEmpty()?List.of():List.of("FAILED_BREAKOUT_REVIEW");
+   // A warning always wins over a positive pattern. Venue preference cannot
+   // turn a failed breakout into a positive watch or switch to a nonmatch.
+   var matching=failed.isEmpty()?breakout:failed;
+   var observed=observedByCompany.getOrDefault(String.valueOf(entries.getFirst().get("isin")),entries);
+   var choice=IntradayVenueEvidence.choose(matching,observed,now);
+   if(choice==null){conflicts++;reviewCount++;continue;}
+   var representative=new LinkedHashMap<>(choice.row());
+   representative.put("company_venue_context",choice.context());
+   List<String> findings=new ArrayList<>();
+   if(conflict)findings.add("CROSS_VENUE_FAILED_BREAKOUT_REVIEW");
+   else if(!failed.isEmpty())findings.add("FAILED_BREAKOUT_REVIEW");
+   findings.addAll(IntradayVenueEvidence.restrictionFindings(observed));
+   if(!findings.isEmpty())reviewCount++;
    representative.put("stock_qualification",Map.of(
       "status",findings.isEmpty()?"WITHHELD_EVIDENCE_GAPS":"WITHHELD_REVIEW_REQUIRED",
       "horizon","INTRADAY","blockers",QUALIFICATION_GAPS,"review_findings",findings,
@@ -165,7 +196,7 @@ public class IntradayResearchService {
   qualification.put("status",!"RESEARCH_ONLY".equals(status)?"AWAITING_RESEARCH":
        byCompany.isEmpty()?"NO_IDENTIFIED_TECHNICAL_WATCHES":"NO_QUALIFIED_IN_REVIEWED_SAMPLE");
   qualification.put("reviewed_count",byCompany.size());
-  qualification.put("review_required_count",negative.size());
+  qualification.put("review_required_count",reviewCount);
   qualification.put("qualified_count","RESEARCH_ONLY".equals(status)&&!byCompany.isEmpty()?0:null);
   qualification.put("recommendations",List.of());
   qualification.put("unidentified_listing_count",unidentified);
