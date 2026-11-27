@@ -43,7 +43,7 @@ def build(candidates,source_rows,category,fit,today,rolling_context):
             if not 1092<=(last-first).days<=1095 or w["last_date"]!=f.nav_date or not 0<=(today-last).days<=7:continue
         except (ValueError,TypeError,KeyError):continue
         rolling=rolling_context(r)
-        if not rolling or not num(w.get("cagr_percent"),-100,1e6) or not num(w.get("drawdown_percent"),-100,0) or not num(f.worst_rolling_return,-100,1e6) or not num(f.volatility,0,1e6):continue
+        if not rolling or not num(rolling.get("above_median_percent"),0,100) or not num(w.get("cagr_percent"),-100,1e6) or not num(w.get("drawdown_percent"),-100,0) or not num(f.worst_rolling_return,-100,1e6) or not num(f.volatility,0,1e6):continue
         values=(w["cagr_percent"],f.worst_rolling_return,w["drawdown_percent"],-f.volatility)
         cohorts[(w["first_date"],w["last_date"],w["date_digest"])].append((f,isin,values,rolling))
         report["eligible_count"]+=1
@@ -89,8 +89,8 @@ def quality_watch(candidates,portfolios,category,fit,today):
     counts=Counter(p.get("scheme_code") for p in portfolios if isinstance(p,dict))
     for p in portfolios:
         if not isinstance(p,dict):continue
-        code=p.get("scheme_code");f=funds.get(code)
-        if not f or counts[code]!=1 or p.get("status")!="SECONDARY_COMPOSITION_ONLY":continue
+        code=p.get("scheme_code");f=funds.get(code) if isinstance(code,str) else None
+        if not f or counts[code]!=1 or p.get("status")!="SECONDARY_COMPOSITION_ONLY" or f.plan!="DIRECT" or f.option!="GROWTH":continue
         try:
             day=date.fromisoformat(p["portfolio_date"])
             if not 0<=(today-day).days<=60:continue

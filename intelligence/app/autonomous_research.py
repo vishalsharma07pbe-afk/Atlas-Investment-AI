@@ -199,6 +199,15 @@ def fund_snapshot(category):
         "category", "coverage", "top_performers", "growth_outlook",
         "recommendation_status", "blockers", "notice", "filters", "historical_coverage")}
     snapshot["qualification_counts"]=_fund_qualification_counts(result.get("qualification_summary"))
+    # Keep only the bounded public shortlist, never the full report or
+    # arbitrary secondary source payload. Qualification lists stay separate.
+    shortlist=result.get("historical_research_shortlist") or {}
+    if shortlist.get("methodology")=="MF-MATCHED-PEER-1" and shortlist.get("category")==category:
+        snapshot["historical_research_shortlist"]={k:shortlist.get(k) for k in
+            ("methodology","category","status","eligible_count","matched_count","cohort_count","first_date","last_date","notice")}
+        snapshot["historical_research_shortlist"]["items"]=[
+            {k:r.get(k) for k in ("identifier","name","nav_date","score","weekly_cagr_percent","relative_risk","status","qualified")}
+            for r in shortlist.get("items",[])[:5] if isinstance(r,dict) and r.get("qualified") is False and r.get("status")=="HISTORICAL_RESEARCH_ONLY"]
     return snapshot
 
 
@@ -244,6 +253,13 @@ def _published_evidence_current(section, result, today):
         for key in ("items", "risk_adjusted_items"):
             if any(not fresh(item["nav_date"], 0, 7) or item["nav_date"] != history.get("comparison_date")
                    for item in history.get(key, [])):
+                return False
+        shortlist=result.get("historical_research_shortlist") or {}
+        if shortlist.get("items"):
+            if shortlist.get("category")!=section or shortlist.get("methodology")!="MF-MATCHED-PEER-1" or shortlist.get("last_date")!=history.get("comparison_date"):
+                return False
+            if any(not fresh(item["nav_date"],0,7) or item["nav_date"]!=shortlist["last_date"] or item.get("qualified") is not False
+                   for item in shortlist["items"]):
                 return False
         # The current strict catalog cannot qualify recommendations without
         # evidence, but recheck dates defensively if qualified picks are stored.

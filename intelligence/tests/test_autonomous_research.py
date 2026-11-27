@@ -50,6 +50,23 @@ class AutonomousResearchTests(unittest.TestCase):
         self.assertEqual(research._fund_qualification_counts({"evaluated_count":0,"top_eligible_count":0,
             "growth_eligible_count":0,"excluded":[]})["top_missing_gate_counts"],{})
 
+    def test_fund_shortlist_snapshot_is_bounded_and_dates_rechecked(self):
+        payload={key:None for key in ("category","coverage","top_performers","growth_outlook",
+            "recommendation_status","blockers","notice","filters","historical_coverage")}
+        payload.update(category="LARGE_CAP",top_performers=[],growth_outlook=[],
+            historical_coverage={"comparison_date":"2026-11-26","items":[]},
+            historical_research_shortlist={"methodology":"MF-MATCHED-PEER-1","category":"LARGE_CAP","last_date":"2026-11-26",
+                "items":[{"identifier":"123456","name":"Fund","nav_date":"2026-11-26","score":75,"qualified":False,
+                          "status":"HISTORICAL_RESEARCH_ONLY","private_marker":"DO_NOT_PERSIST"}]})
+        with patch.object(research,"dashboard",return_value=payload):
+            snapshot=research.fund_snapshot("LARGE_CAP")
+        self.assertNotIn("DO_NOT_PERSIST",str(snapshot))
+        self.assertEqual(len(snapshot["historical_research_shortlist"]["items"]),1)
+        self.assertTrue(research._published_evidence_current("LARGE_CAP",snapshot,date(2026,11,27)))
+        self.assertFalse(research._published_evidence_current("LARGE_CAP",snapshot,date(2026,12,4)))
+        snapshot["historical_research_shortlist"]["items"][0]["qualified"]=True
+        self.assertFalse(research._published_evidence_current("LARGE_CAP",snapshot,date(2026,11,27)))
+
     def test_failure_retains_last_good_but_marks_failed(self):
         research.refresh_once(lambda exchange: {"exchange": exchange}, lambda category: {"category": category})
         def failed(exchange):
