@@ -205,6 +205,11 @@ def fund_snapshot(category):
             "items":[{k:row.get(k) for k in ("identifier","name","portfolio_date","quarter","nav_date","joint_coverage_weight_percent",
                 "joint_growth_weight_percent","review_weight_percent","state","qualified","forecast_return_percent")}
                 for row in drivers.get("items",[])[:5] if isinstance(row,dict) and row.get("qualified") is False]}
+    # Only aggregate public source coverage. Never persist source URLs or holdings.
+    for key,fields in (("official_tri_coverage",("configured_count","available_count")),("official_amc_coverage",("matched_schemes",))):
+        block=result.get(key)
+        if isinstance(block,dict):
+            snapshot[key]={k:block[k] for k in fields if type(block.get(k)) is int and 0<=block[k]<=40}
     prospective=result.get("prospective_validation") or {}
     if isinstance(prospective.get("status"),str):
         snapshot["prospective_validation"]={"status":prospective["status"]}
@@ -317,6 +322,9 @@ def _read_sections(section_names,enabled,interval,current):
             error_code = "INVALID_STORED_RESEARCH_SNAPSHOT"
         if section in CATEGORIES and isinstance(result,dict) and (not fund_portfolios.permitted() or not automatic_company_evidence.permitted()):
             result.pop("growth_driver_review",None)
+        if section in CATEGORIES and isinstance(result,dict):
+            if not official_tri.permitted():result.pop("official_tri_coverage",None)
+            if not official_amc_factsheet.permitted():result.pop("official_amc_coverage",None)
         sections.append({"section": section, "status": status,
                          "generated_at": row["generated_at"], "attempted_at": row["attempted_at"],
                          "result": result, "error_code": error_code})

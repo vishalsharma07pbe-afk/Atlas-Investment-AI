@@ -380,7 +380,94 @@ def qualification_audit(overview,readiness=None,intraday=None):
     return {"status":"EVIDENCE_AUDIT_ONLY","stocks":stocks,"funds":funds,"company_acquisition":company_audit,
             "notice":"Counts describe bounded existing snapshots; null means unavailable, not zero. No new data acquisition, investment recommendation or certification."}
 
-def collect(request,include_qualification_audit=False):
+ADVANCED_JOBS=("OFFICIAL_TRI_DOWNLOAD","OFFICIAL_AMC_FACTSHEETS","NSE_FINANCIAL_FILINGS",
+    "FUND_AI_REVIEW","FUND_WATCH_OUTCOMES","FORWARD_EARNINGS_BASELINE","WATCH_OUTCOMES","STRATEGY_REPLAY")
+def advanced_audit(readiness,overview,review,intraday):
+    """Read-only bounded aggregate acceptance; distinguish contracts from evidence.
+    No user rows, provider URLs, raw messages, IDs, symbols or money in output.
+    """
+    checks={};evidence={}
+    def check(k,v):checks[k]="PASS" if v else "BLOCKED"
+    d=_obj(overview.get("unified_decision"))
+    companies=d.get("equity_companies")
+    seen=set();observations=set();reviews=ai_count=0
+    ok=(d.get("methodology")=="UNIFIED-DECISION-1" and d.get("status") in ("RESEARCH_CONTEXT_AVAILABLE","AWAITING_EVIDENCE")
+        and isinstance(companies,list) and len(companies)<=55)
+    if ok:
+        for c in companies:
+            c=_obj(c);isin=c.get("isin");rows=c.get("observations")
+            if not isinstance(isin,str) or not re.fullmatch(r"INE[A-Z0-9]{9}",isin) or isin in seen or c.get("qualified") is not False or not isinstance(rows,list) or not rows or len(rows)>20:
+                ok=False;break
+            seen.add(isin);required=reviewed=False
+            for row in rows:
+                row=_obj(row);key=_ref(row);h=row.get("horizon")
+                if key is None or key[2]!=isin or h not in (*DAILY_HORIZONS,"ELITE") or (h,key) in observations or row.get("qualified") is not False or row.get("state") not in ("WATCH_ONLY","REVIEW_REQUIRED") or "FINAL_QUALIFICATION_VALIDATION_REQUIRED" not in _list(row.get("blockers")):
+                    ok=False;break
+                observations.add((h,key));required=required or row["state"]=="REVIEW_REQUIRED"
+                count=_obj(row.get("ai")).get("reviewed_count")
+                if count is not None and (type(count) is not int or not 1<=count<=5):ok=False;break
+                reviewed=reviewed or count is not None
+            if c.get("state")!=("REVIEW_REQUIRED" if required else "WATCH_ONLY") or c.get("ai_reviewed") is not reviewed:ok=False
+            reviews+=required;ai_count+=reviewed
+        counts=(d.get("equity_company_count"),d.get("equity_review_count"),d.get("ai_reviewed_company_count"))
+        ok=ok and (counts==(len(companies),reviews,ai_count) or not companies and counts==(None,None,None))
+    check("unified_equity_decisions",ok)
+    evidence["unified_company_count"]=len(seen) if ok else None
+    evidence["ai_reviewed_company_count"]=ai_count if ok else None
+    funds=d.get("fund_categories");seen_categories=set()
+    fund_ok=isinstance(funds,list) and len(funds)<=len(SECTIONS)-2
+    if fund_ok:
+        for f in funds:
+            f=_obj(f);cat=f.get("category");w=f.get("historical_watches")
+            if cat not in SECTIONS-{"NSE","BSE"} or cat in seen_categories or not isinstance(w,list) or len(w)>5 or any(_obj(row).get("qualified") is not False for row in w):
+                fund_ok=False;break
+            seen_categories.add(cat)
+            counts=[f.get(k) for k in ("reviewed_count","top_withheld_count","growth_withheld_count")]
+            if not (all(x is None for x in counts) or all(_count(x) for x in counts) and max(counts[1:])<=counts[0]<=40):
+                fund_ok=False;break
+    check("unified_fund_decisions",fund_ok)
+    holdings=review.get("holdings");summary=_obj(review.get("portfolio_reassessment"))
+    portfolio_ok=isinstance(holdings,list) and _count(review.get("holding_count")) and review["holding_count"]==len(holdings)
+    states={"REVIEW_REQUIRED":0,"WATCH_ONLY":0,"AWAITING_EVIDENCE":0}
+    scored=0
+    if portfolio_ok:
+        for holding in holdings:
+            h=_obj(holding);decision=_obj(h.get("unified_decision"));a=_obj(h.get("reassessment"));state=decision.get("state")
+            mapping={"REASSESS_EVIDENCE":"REVIEW_REQUIRED","MONITOR_RESEARCH_ONLY":"WATCH_ONLY","COLLECT_EVIDENCE":"AWAITING_EVIDENCE"}
+            if decision.get("scope")!="OWNER_LOCAL" or decision.get("methodology")!="UNIFIED-DECISION-1" or decision.get("qualified") is not False or a.get("qualified") is not False or state not in states or mapping.get(a.get("review_state"))!=state:
+                portfolio_ok=False;break
+            states[state]+=1
+            score=a.get("score")
+            if score is not None:
+                if type(score) not in (int,float) or not 0<=score<=100 or a.get("status")!="PRELIMINARY_SCORE_ONLY":portfolio_ok=False;break
+                scored+=1
+            elif a.get("status")!="SCORE_WITHHELD":portfolio_ok=False;break
+        portfolio_ok=portfolio_ok and summary.get("holding_count")==len(holdings) and summary.get("scored_count")==scored and summary.get("reassess_count")==states["REVIEW_REQUIRED"] and summary.get("monitor_count")==states["WATCH_ONLY"] and summary.get("evidence_needed_count")==states["AWAITING_EVIDENCE"]
+    check("owner_local_reassessment",portfolio_ok)
+    evidence["populated_portfolio_contract"]="OBSERVED" if portfolio_ok and holdings else "NOT_OBSERVED"
+    session=_obj(intraday.get("unified_decision"))
+    check("intraday_decision_scope",session.get("methodology")=="UNIFIED-DECISION-1" and session.get("scope")=="CURRENT_SESSION" and session.get("qualified") is False and session.get("state") in states)
+    jobs=_list(_obj(readiness.get("research_jobs")).get("jobs"))
+    check("advanced_jobs_registered",all(sum(_obj(j).get("job")==name for j in jobs)==1 for name in ADVANCED_JOBS))
+    evidence["jobs"]={name:next((_obj(j).get("status") for j in jobs if _obj(j).get("job")==name and _obj(j).get("status") in ("PENDING","RUNNING","PASS_COMPLETED","WAITING_EVIDENCE","FAILED","DISABLED_OR_NOT_AUTHORIZED","INTERRUPTED")),None) for name in ADVANCED_JOBS}
+    forward=_obj(overview.get("forward_earnings_validation"))
+    check("forward_validation_contract",forward.get("methodology")=="QUARTER-PERSISTENCE-1" and forward.get("calibrated") is False and forward.get("status") in ("DISABLED_OR_NOT_AUTHORIZED","AWAITING_PUBLICATIONS","PROSPECTIVE_EXPERIMENT") and isinstance(forward.get("quarter_cohorts"),list))
+    evidence["pending_earnings_publications"]=_bounded_count(forward.get("pending_count"),5000)
+    calibration=_obj(overview.get("score_calibration"));horizons=_obj(calibration.get("horizons"))
+    check("temporal_validation_contract",calibration.get("calibrated") is False and all(_obj(_obj(horizons.get(h)).get("temporal_diagnostics")).get("calibrated") is False for h in DAILY_HORIZONS))
+    sources={}
+    for section in _list(overview.get("sections")):
+        section=_obj(section);cat=section.get("section")
+        if cat not in SECTIONS-{"NSE","BSE"} or section.get("status")!="READY":continue
+        r=_obj(section.get("result"));tri=_obj(r.get("official_tri_coverage"));amc=_obj(r.get("official_amc_coverage"))
+        sources[cat]={"tri_available_count":_bounded_count(tri.get("available_count"),20),
+                      "amc_matched_schemes":_bounded_count(amc.get("matched_schemes"),40)}
+    evidence["official_fund_sources"]=sources
+    return {"status":"PASS" if all(v=="PASS" for v in checks.values()) else "BLOCKED","checks":checks,
+            "observed_evidence":evidence,"investment_qualification":"NOT_CERTIFIED",
+            "notice":"Contract audit only. Empty or disabled evidence is not a verified provider or investment result."}
+
+def collect(request,include_qualification_audit=False,include_advanced_audit=False):
     readiness=request("/intelligence/api/v1/intelligence/data-readiness")
     overview=request("/intelligence/api/v1/intelligence/research/overview")
     review=request("/api/v1/portfolio/review")
@@ -396,6 +483,8 @@ def collect(request,include_qualification_audit=False):
     final=assess_final_contracts(intraday,personal,journal,review)
     result["checks"].update(final.pop("checks"))
     result.update(final)
+    if include_advanced_audit:
+        result["advanced_audit"]=advanced_audit(readiness,overview,review,intraday)
     if include_qualification_audit:
         result["qualification_audit"]=qualification_audit(overview,readiness,intraday)
     if workflows["workflow_runtime"]!="PASS" or final["final_runtime"]!="PASS":
@@ -407,6 +496,7 @@ def main():
     parser.add_argument("--base-url",choices=BASES,default=BASES[0])
     parser.add_argument("--require-live",action="store_true",help="Require a fresh tick during an expected live trading session")
     parser.add_argument("--qualification-audit",action="store_true",help="Include redacted stock and fund evidence gap counts")
+    parser.add_argument("--advanced-audit",action="store_true",help="Audit advanced decision and validation contracts; require them to pass")
     args=parser.parse_args()
     session=LocalSession(args.base_url)
     result=None
@@ -422,7 +512,7 @@ def main():
         session.token=token
         del login,token
         session.request("/api/v1/auth/me")
-        result=collect(session.request,include_qualification_audit=args.qualification_audit)
+        result=collect(session.request,include_qualification_audit=args.qualification_audit,include_advanced_audit=args.advanced_audit)
     except (RuntimeError,ValueError,TypeError,KeyError,AttributeError):
         print(json.dumps({"runtime":"BLOCKED","reason":"LOCAL_ACCEPTANCE_REQUEST_OR_CONTRACT_FAILED"}))
         return 1
@@ -433,7 +523,7 @@ def main():
                 if result is not None:result["runtime"]="BLOCKED";result["checks"]["session_logout"]="BLOCKED"
             finally:session.token=None
     print(json.dumps(result,indent=2,sort_keys=True))
-    return 0 if result["runtime"]==result["stored_provider_evidence"]=="PASS" and (not args.require_live or result["live_feed"]=="OBSERVED") else 1
+    return 0 if result["runtime"]==result["stored_provider_evidence"]=="PASS" and (not args.require_live or result["live_feed"]=="OBSERVED") and (not args.advanced_audit or result["advanced_audit"]["status"]=="PASS") else 1
 
 if __name__=="__main__":
     raise SystemExit(main())
