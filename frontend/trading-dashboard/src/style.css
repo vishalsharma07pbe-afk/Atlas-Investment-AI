@@ -30,7 +30,7 @@ button { cursor: pointer; }
   --warning: #ffc779;
   position: relative;
   min-height: 100dvh;
-  overflow: hidden;
+  overflow-x: clip;
   background: var(--canvas-base);
   color: var(--ink);
   color-scheme: dark;
@@ -875,7 +875,8 @@ footer { padding: 12px 0 25px; color: var(--ink-muted); font-size: 10px; letter-
 @media(max-width:680px){.appearance-panel { inset: 12px; width: auto; }.atlas-notification-panel { top: 62px; right: 12px; bottom: 12px; width: calc(100vw - 24px); }}
 
 /* Centered adaptive overlays: content-sized until their viewport cap is reached. */
-html:has(.appearance-panel),html:has(.atlas-notification-panel),body:has(.appearance-panel),body:has(.atlas-notification-panel){overflow:hidden;overscroll-behavior:none}
+/* Appearance is a non-modal live preview; only the notification modal locks the document. */
+html:has(.atlas-notification-panel),body:has(.atlas-notification-panel){overflow:hidden;overscroll-behavior:none}
 .appearance-scrim,.atlas-notification-backdrop{
   background:rgba(3,7,20,.46);
   -webkit-backdrop-filter:blur(12px) saturate(.78);

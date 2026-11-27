@@ -170,3 +170,17 @@ it("keeps the briefing first and evidence in expandable sections without duplica
  expect(navigate).toHaveBeenCalledWith("SWING");
  expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+it("consolidates empty research and hides unavailable global panels without inventing results",async()=>{
+ const fund=(section:string)=>({section,status:"READY",generated_at:null,result:{growth_outlook:[],historical_coverage:{items:[{scheme_code:section.length,scheme_name:section+" fund",cagr_3y_percent:9,nav_date:"2026-11-26"}]}}});
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[{section:"NSE",status:"READY",generated_at:null,result:{eligible_count:0,universe_size:126,skipped:{NO_HISTORY:126}}},fund("LARGE_CAP"),fund("MID_CAP"),fund("SMALL_CAP")],daily_briefing:{status:"PARTIAL",ready_sections:4,total_sections:4,market:{eligible_histories:0,sampled_instruments:126,outlook_status:"UNAVAILABLE"},horizons:{},funds:{growth_pick_count:0,historical_watch_count:3,ready_categories:3,total_categories:3},institutional:{status:"UNAVAILABLE"},leading_evidence_gaps:[],notice:"Research only"},global_context:{status:"UNAVAILABLE",available_count:0,total_count:17,groups:[],notice:"No data"},global_markets:{status:"UNAVAILABLE",items:[],notice:"No data"}})})));
+ render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}}>{null}</AutonomousOverview>);
+ expect(await screen.findByText("Equity research is not ready")).toBeTruthy();
+ expect(screen.queryByLabelText("Research coverage summary")).toBeNull();
+ expect(screen.queryByRole("region",{name:"International indices and metals"})).toBeNull();
+ expect(screen.getByText("View full fund list (3 categories with observations)")).toBeTruthy();
+ expect(screen.queryByText("MID_CAP fund")).toBeNull();
+ const diagnostics=screen.getByText("Research coverage & missing data").closest("details")!;
+ diagnostics.open=true;fireEvent(diagnostics,new Event("toggle"));
+ expect(await screen.findByText("Insufficient daily history")).toBeTruthy();
+});

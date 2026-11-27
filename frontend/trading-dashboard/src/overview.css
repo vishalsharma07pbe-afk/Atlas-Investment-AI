@@ -46,3 +46,9 @@
 }
 .overview-horizon-card li { flex-wrap: wrap; align-items: flex-start; }
 .overview-report-link { min-height: 36px; max-width: 100%; white-space: normal; }
+
+/* Keep overview previews bounded to a balanced pair of columns. */
+.overview-empty-research{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:14px;border:1px solid var(--row-line);border-radius:10px;background:var(--terminal-raised)}
+.overview-empty-research>div{flex:1 1 240px;min-width:0}.overview-empty-research p{margin:4px 0 0;color:var(--ink-soft);font-size:13px}
+.autonomous-grid{align-items:start}.autonomous-section{min-width:0}.overview-full-list{width:100%;margin-top:8px;white-space:normal}
+.overview-coverage{display:grid;gap:10px;min-width:0}.overview-coverage h3{margin:4px 0}.overview-coverage article{padding:12px;border:1px solid var(--row-line);border-radius:9px;min-width:0}.overview-coverage article>small{display:block;color:var(--ink-muted)}.overview-coverage ul{list-style:none;margin:0;padding:0}.overview-coverage li{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:7px 0;border-bottom:1px solid var(--row-line);font-size:12px}.overview-coverage li strong{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}

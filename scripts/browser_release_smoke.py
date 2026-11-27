@@ -73,6 +73,19 @@ def run():
                 assert panel.evaluate("(el)=>{const r=el.getBoundingClientRect();return r.left>=-1 && r.right<=innerWidth+1 && r.top>=-1 && r.bottom<=innerHeight+1}"),"appearance drawer outside viewport"
                 panel.get_by_role("group",name="Theme").get_by_role("button",name=re.compile(theme,re.I)).click()
                 expect(page.locator(".dashboard")).to_have_attribute("data-theme",theme)
+                # Appearance is a live preview, not a page-scroll lock.
+                for opacity,blur in ((0,0),(65,20),(100,40)):
+                    panel.locator("#panel-opacity").fill(str(opacity))
+                    panel.locator("#panel-blur").fill(str(blur))
+                    assert page.evaluate("getComputedStyle(document.documentElement).overflowY !== 'hidden' && getComputedStyle(document.body).overflowY !== 'hidden'"),"appearance must not lock page scrolling"
+                    page.evaluate("window.scrollTo(0,0)")
+                    page.mouse.move(20,850)
+                    page.mouse.wheel(0,350)
+                    # Main document may be shorter than the viewport on empty fixtures.
+                    if page.evaluate("document.scrollingElement.scrollHeight > innerHeight + 20"):
+                        page.wait_for_function("window.scrollY > 0")
+                panel.locator("#panel-opacity").fill("72")
+                panel.locator("#panel-blur").fill("20")
                 page.keyboard.press("Escape")
                 page.screenshot(path=f"browser-preview/overview-{theme}.png",timeout=5000)
             # Verify navigation and overlay controls on narrow and desktop layouts.
