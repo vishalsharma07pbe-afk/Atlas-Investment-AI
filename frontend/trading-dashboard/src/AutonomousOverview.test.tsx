@@ -184,3 +184,12 @@ it("consolidates empty research and hides unavailable global panels without inve
  diagnostics.open=true;fireEvent(diagnostics,new Event("toggle"));
  expect(await screen.findByText("Insufficient daily history")).toBeTruthy();
 });
+
+it("renders only qualifying steady momentum screen matches in the dedicated card",async()=>{
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[],steady_momentum:{status:"SCREEN_MATCHES_AVAILABLE",notice:"Reported evidence only",items:[{id:1,isin:"INE002A01018",symbol:"SCREENMATCH",exchange:"NSE",as_of:"2026-11-26",cap_category:"LARGE_CAP",average_cap_cr:10000,cap_as_of:"2026-06-30",median_daily_turnover_cr:10,return_60_percent:12,positive_day_percent:60,earnings_growth_percent:20,eps_growth_percent:15,reported_pe:18,reported_sector_pe:25,financial_period:"2026-03",status:"SCREEN_MATCH_ONLY"},{id:2,isin:"INE009A01021",symbol:"REJECTED_STOCK",status:"WITHHELD"}]}})})));
+ render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}}>{null}</AutonomousOverview>);
+ expect(await screen.findByRole("region",{name:"Steady momentum stock screen"})).toBeTruthy();
+ expect(screen.getByText("SCREENMATCH")).toBeTruthy();
+ expect(screen.queryByText("REJECTED_STOCK")).toBeNull();
+ expect(screen.getByText(/Not TradingView ratings/)).toBeTruthy();
+});

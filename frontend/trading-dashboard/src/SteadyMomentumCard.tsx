@@ -1,6 +1,5 @@
-import type {WatchReportTarget} from "./HorizonResearch";
 export type SteadyScreen={status:string;sampled_count?:number;technical_count?:number;reviewed_count?:number;matched_count?:number;notice:string;exclusions?:{reason:string;count:number}[];items:{id:number;isin:string;symbol:string;exchange:string;as_of:string;close:number;cap_category:string;average_cap_cr:number;cap_as_of:string;return_60_percent:number;positive_day_percent:number;earnings_growth_percent:number;eps_growth_percent:number;reported_pe:number;reported_sector_pe:number;median_daily_turnover_cr:number;financial_period:string;status:string}[]};
-export default function SteadyMomentumCard({report,onSettings,onOpen}:{report:SteadyScreen;onSettings:()=>void;onOpen?:(target:WatchReportTarget)=>void}){
+export default function SteadyMomentumCard({report,onSettings}:{report:SteadyScreen;onSettings:()=>void}){
  const items=report.items.filter(i=>i.status==="SCREEN_MATCH_ONLY").slice(0,10);
  const fmt=(n:number)=>Number.isFinite(n)?n.toLocaleString("en-IN",{maximumFractionDigits:2}):"—";
  return <section className="autonomous-result steady-momentum-card" aria-label="Steady momentum stock screen"><header><div><small className="section-kicker">QUALITY &amp; EARLY MOMENTUM</small><h3>Frog in the Pan · Stock opportunities</h3></div><span>{items.length?items.length+" screen matches":"Awaiting qualifying evidence"}</span></header>

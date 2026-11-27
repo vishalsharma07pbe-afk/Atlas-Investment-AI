@@ -94,6 +94,10 @@ def summarize(snapshot,connect,instant):
     if not snapshot.get("enabled"):
         out["status"]="DISABLED"
         return out
+    if not automatic_company_evidence.permitted():
+        out["status"]="AWAITING_EVIDENCE"
+        out["exclusions"]=[{"reason":"COMPANY_EVIDENCE_NOT_AUTHORIZED","count":1}]
+        return out
     caps=amfi_equity_caps.read(connect,today)
     excluded=Counter()
     candidates=[]
