@@ -20,6 +20,8 @@ class ValuationScenariosTest(unittest.TestCase):
         self.assertEqual(result["status"],"HYPOTHETICAL_CASH_STREAM_ONLY")
         self.assertEqual(result["operating_cash_anchor_cr"],105)
         self.assertEqual(len(result["scenarios"]),3)
+        self.assertEqual(len(result["discount_sensitivity"]),4)
+        self.assertGreater(result["discount_sensitivity"][0]["values"][2]["hypothetical_cash_stream_pv_cr"],result["discount_sensitivity"][-1]["values"][2]["hypothetical_cash_stream_pv_cr"])
         self.assertIsNone(result["intrinsic_value"]);self.assertIsNone(result["margin_of_safety_percent"]);self.assertFalse(result["qualified"])
         self.assertLess(result["scenarios"][0]["hypothetical_cash_stream_pv_cr"],result["scenarios"][2]["hypothetical_cash_stream_pv_cr"])
     def test_negative_stale_mismatched_scope_and_source(self):
@@ -31,3 +33,12 @@ class ValuationScenariosTest(unittest.TestCase):
         self.assertFalse(v.summarize(fixture(),NOW+timedelta(hours=25))["scenarios"])
         report=fixture();report["sections"]["cash_flow"]["data"]["statement_type"]="standalone"
         self.assertFalse(v.summarize(report,NOW)["scenarios"])
+
+    def test_fund_coverage_keeps_unassessed_weights_and_never_aggregates_values(self):
+        other="INE009A01021"
+        rows=[{"isin":ISIN,"weight_percent":60},{"isin":other,"weight_percent":20}]
+        result=v.fund_coverage(rows,{ISIN:fixture()},NOW)
+        self.assertEqual(result["positive_history_weight_percent"],60)
+        self.assertEqual(result["unassessed_fund_weight_percent"],40)
+        self.assertIsNone(result["intrinsic_valuation_weight_percent"])
+        self.assertEqual(v.fund_coverage([rows[0],rows[0]],{},NOW)["status"],"INVALID_HOLDING_IDENTITIES")

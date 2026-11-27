@@ -32,7 +32,7 @@ def pv(cash,growth,discount,terminal,years=5):
 def summarize(report,instant):
     from zoneinfo import ZoneInfo
     today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
-    out={"methodology":VERSION,"status":"AWAITING_MATCHED_HISTORY","historical_periods":[],"scenarios":[],
+    out={"methodology":VERSION,"status":"AWAITING_MATCHED_HISTORY","historical_periods":[],"scenarios":[],"discount_sensitivity":[],
         "intrinsic_value":None,"margin_of_safety_percent":None,"qualified":False,"blockers":list(BLOCKERS),"notice":NOTICE}
     try:
         stamp=datetime.fromisoformat(report["retrieved_at"])
@@ -64,7 +64,34 @@ def summarize(report,instant):
             out["scenarios"].append({"case":name,"cash_fraction_percent":100*retention,"annual_growth_percent":growth,
                 "discount_percent":discount,"terminal_growth_percent":terminal,"years":5,
                 "hypothetical_start_cash_cr":round(stream,4),**pv(stream,growth/100,discount/100,terminal/100)})
+        # Isolate the discount-rate and growth assumptions from the cash
+        # fraction (50%) and terminal growth (3%). No implied share value.
+        for discount in (10,12,14,16):
+            out["discount_sensitivity"].append({"discount_percent":discount,"values":[
+                {"annual_growth_percent":growth,**pv(anchor*.5,growth/100,discount/100,.03)}
+                for growth in (-5,0,5,10)]})
         out["status"]="HYPOTHETICAL_CASH_STREAM_ONLY"
         return out
     except (ValueError,TypeError,KeyError,AttributeError,OverflowError,ZeroDivisionError):
-        out.update(status="AWAITING_MATCHED_HISTORY",scenarios=[]);return out
+        out.update(status="AWAITING_MATCHED_HISTORY",scenarios=[],discount_sensitivity=[]);return out
+
+def fund_coverage(equities,reports,instant):
+    """Original weights only. Never aggregate hypothetical present values."""
+    seen=set();total=eligible=review=covered=0.
+    for h in equities:
+        isin,w=h.get("isin"),h.get("weight_percent")
+        import re
+        if not isinstance(isin,str) or not re.fullmatch(r"INE[A-Z0-9]{9}",isin) or isin in seen or type(w) not in (int,float) or not isfinite(w) or not 0<w<=100:
+            return {"status":"INVALID_HOLDING_IDENTITIES","notice":NOTICE}
+        seen.add(isin);total+=w
+        raw=reports.get(isin)
+        if not isinstance(raw,dict) or raw.get("isin")!=isin:continue
+        assessment=summarize(raw,instant)
+        if assessment["status"]=="HYPOTHETICAL_CASH_STREAM_ONLY":eligible+=w;covered+=w
+        elif assessment["status"]=="HISTORICAL_DETERIORATION_REVIEW":review+=w;covered+=w
+    if total>100.5000001:return {"status":"INVALID_HOLDING_IDENTITIES","notice":NOTICE}
+    return {"status":"HISTORICAL_CASH_COVERAGE_ONLY" if covered else "AWAITING_EVIDENCE",
+        "exact_equity_weight_percent":round(total,4),"assessed_weight_percent":round(covered,4),
+        "positive_history_weight_percent":round(eligible,4),"deterioration_review_weight_percent":round(review,4),
+        "unassessed_fund_weight_percent":round(max(0,100-covered),4),"intrinsic_valuation_weight_percent":None,
+        "notice":"Original reported fund weights with matched historical operating cash/profit observations. No aggregate present value, fund NAV forecast or intrinsic valuation coverage."}

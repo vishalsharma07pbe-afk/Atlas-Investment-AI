@@ -27,7 +27,7 @@ it("shows comparable fundamentals and valuation without claiming fair value",()=
  expect(screen.getByText("3 up / 0 down / 0 flat")).toBeTruthy();
  expect(screen.getByText("0.4x")).toBeTruthy();
  expect(screen.getByText("FY2025: 15%")).toBeTruthy();
- expect(screen.getByText(/Fair value and valuation scenarios withheld/)).toBeTruthy();
+ expect(screen.getByText(/Intrinsic value and margin of safety withheld/)).toBeTruthy();
 });
 
 it("renders bounded peer comparisons without implying sector leadership",()=>{

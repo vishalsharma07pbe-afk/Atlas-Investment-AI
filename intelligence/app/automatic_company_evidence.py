@@ -527,7 +527,7 @@ def cached_action_reports(connect,identities,instant):
         return {}
 
 
-def _enrich(report,today):
+def _enrich(report,today,instant=None):
     report["financial_trends"]=financial_trends(report,today.year,as_of=today)
     report["quarterly_financials"]=quarterly_financials.summarize(report,today)
     report["reported_earnings"]=earnings_evidence(report,today)
@@ -535,12 +535,9 @@ def _enrich(report,today):
     report["financial_strength"]=financial_strength(report,today)
     report["earnings_quality"]=earnings_quality(report,today)
     from . import valuation_scenarios
-    # Capture timestamp supplies the reference, not an assumed filing date.
-    try:
-        stamp=datetime.fromisoformat(report["retrieved_at"])
-        if stamp.tzinfo is not None and stamp.astimezone(ZoneInfo("Asia/Kolkata")).date()==today:
-            report["valuation_sensitivity"]=valuation_scenarios.summarize(report,stamp)
-    except (ValueError,TypeError,KeyError):pass
+    report.pop("valuation_sensitivity",None)
+    if instant is not None:
+        report["valuation_sensitivity"]=valuation_scenarios.summarize(report,instant)
     report["ownership_research"]=shareholding_research.summarize(report,today)
     return report
 
@@ -602,7 +599,7 @@ def attach(snapshot,connect,instant=None):
         try:
             report=json.loads(row["payload"])
             if report.get("isin")==isin and peer_research.fresh_sector(report,instant):
-                cohort[isin]=(key,_enrich(report,today))
+                cohort[isin]=(key,_enrich(report,today,instant))
         except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
             continue
     # Enrich only primary identities and their explicitly selected one-hop peers.
@@ -617,7 +614,7 @@ def attach(snapshot,connect,instant=None):
                 report=json.loads(row["payload"])
                 stamp=datetime.fromisoformat(report["retrieved_at"])
                 if report.get("isin")==isin and stamp.tzinfo and instant-timedelta(hours=24)<=stamp<=instant:
-                    reports[isin]=_enrich(report,today)
+                    reports[isin]=_enrich(report,today,instant)
             except (ValueError,TypeError,AttributeError,KeyError,OverflowError):
                 continue
     for isin in {isin for _,isin in primary}:
