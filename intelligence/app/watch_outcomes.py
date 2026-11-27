@@ -161,7 +161,9 @@ def evaluate(row, payload, today, calendar=None, *, action_report=None, instant=
         return "EVIDENCE_GAP",None
     start=publication.astimezone(IST).date()
     maturity=date.fromisoformat(row["maturity_date"])
-    if maturity!=start+timedelta(days=HORIZONS[row["horizon"]]):
+    if row["horizon"] not in (*HORIZONS,"FIP"):
+        return "EVIDENCE_GAP",None
+    if maturity!=start+timedelta(days=60 if row["horizon"]=="FIP" else HORIZONS[row["horizon"]]):
         return "EVIDENCE_GAP",None
     if today<=maturity:
         return "PENDING", None

@@ -7,7 +7,7 @@ from .horizon_research import evaluate, summarize, MIN_HISTORY as HORIZON_MIN_HI
 from .price_structure import analyze as price_structure
 from .corporate_action_normalization import preview as action_preview, reported_crossings
 from .replay_evidence import fingerprint, exact_isin
-from . import price_volume_pressure, steady_momentum, relative_strength, company_venues, sector_price_context, score_calibration
+from . import price_volume_pressure, steady_momentum, relative_strength, company_venues, sector_price_context, score_calibration, fip_research
 
 MIN_HISTORY = 21
 MAX_INSTRUMENTS = 20
@@ -20,7 +20,7 @@ def report_close_history(candles):
             "points": [{"date": c.date, "close": round(c.close, 4)} for c in candles[-30:]]}
 
 
-def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit=MAX_INSTRUMENTS, include_horizons=False, *, batch_loaded=False, expected_session=None, action_reports=None, instant=None):
+def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit=MAX_INSTRUMENTS, include_horizons=False, *, batch_loaded=False, expected_session=None, action_reports=None, instant=None, fip_dates=()):
     limit = max(1, min(200 if batch_loaded else 60, universe_limit))
     today = as_of or date.today()
     rows = []
@@ -187,6 +187,9 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                     identity["security_state"]=row["security_state"]
                     if row["adjustment_status"]=="ADJUSTED" and row["security_state"] not in sector_price_context.SPECIAL:
                         identity["comparative_price_windows"]=comparative
+                        if fip_dates and fip_dates[-1]==row["as_of"]:
+                            fip=fip_research.observe(raw,fip_dates,today)
+                            if fip is not None:identity["fip_research"]=fip
                 company_research_universe.append(identity)
                 if instrument["id"] in venue_observations:
                     venue_observations[instrument["id"]]=company_venues.observation(instrument,candles)

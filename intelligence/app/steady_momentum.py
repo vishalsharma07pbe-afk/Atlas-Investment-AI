@@ -159,6 +159,16 @@ def summarize(snapshot,connect,instant):
             coverage=result.get("discovery_coverage") or {}
             if coverage.get("calendar_checked_on")==today.isoformat() and coverage.get("calendar_status")=="PUBLISHED_SESSION":
                 out["eligible_history_count"]+=result.get("eligible_count",0)
+    from . import fip_research
+    out["fip_research"]=fip_research.rank(snapshot,instant)
+    out["fip_research"]["prospective"]=fip_research.prospective(connect,instant)
+    replay=snapshot.get("fip_replay_sample") or {}
+    out["fip_research"]["replay_sample_count"]=replay.get("sample_count",0)
+    for item in out["fip_research"]["items"]:
+        matches=[r for r in replay.get("items",[]) if r.get("isin")==item["isin"] and r.get("exchange")==item["exchange"] and r.get("id")==item["id"] and r.get("as_of")==item["as_of"] and r.get("replay_evidence_hash") and r["replay_evidence_hash"]==item.get("replay_evidence_hash")]
+        if len(matches)==1:item["historical_replay"]=matches[0]
+    # Do not return unbounded internal replay rows through the public overview.
+    snapshot.pop("fip_replay_sample",None)
     observations=company_venues.collect(snapshot,instant)
     out["company_coverage"]={"observed_distinct_isins":len(observations),
         "observed_listings":sum(len(rows) for rows in observations.values()),

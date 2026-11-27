@@ -16,7 +16,7 @@ import sqlite3
 from urllib.parse import urlencode
 
 from .market_client import backend_json
-from . import steady_momentum, amfi_equity_caps, company_reports, nse_surveillance, nse_pledge_filings, nse_financial_filings, sector_price_context, sector_benchmarks, score_calibration
+from . import steady_momentum, amfi_equity_caps, company_reports, nse_surveillance, nse_pledge_filings, nse_financial_filings, sector_price_context, sector_benchmarks, score_calibration, fip_research
 from .screener import screen
 from . import discovery_scan
 from .mutual_fund_recommendations import CATEGORIES, dashboard
@@ -70,12 +70,17 @@ def _save(section, result=None):
 
 def market_snapshot(exchange):
     if os.getenv("ATLAS_BROAD_DISCOVERY_ENABLED","false").lower()=="true":
-        return discovery_scan.scan(exchange,backend_json,_market_page,now)
+        # One local calendar read for the whole sweep; failed calendar
+        # affects FIP evidence only, not the established discovery workflow.
+        try:calendar=backend_json(f"/api/v1/market-data/strategy-calendar?exchange={exchange}")
+        except Exception:calendar=None
+        dates=fip_research.calendar_suffix(calendar,exchange,now().astimezone(ZoneInfo("Asia/Kolkata")).date())
+        return discovery_scan.scan(exchange,backend_json,lambda e,rows,cutoff:_market_page(e,rows,cutoff,fip_dates=dates),now)
     instruments = backend_json("/api/v1/market-data/discovery-universe?" + urlencode({"exchange": exchange}))
     return _market_page(exchange,instruments)
 
 
-def _market_page(exchange,instruments,cutoff=None):
+def _market_page(exchange,instruments,cutoff=None,*,fip_dates=()):
     if not isinstance(instruments, list) or len(instruments)>200:
         raise ValueError("INVALID_REGISTRY")
     if any(not isinstance(row,dict) or row.get("exchange")!=exchange or row.get("active") is not True
@@ -123,7 +128,7 @@ def _market_page(exchange,instruments,cutoff=None):
     action_reports=automatic_company_evidence.cached_action_reports(_connect,[r.get("isin") for r in instruments],instant)
     result = screen(instruments, lambda identifier:{"candles":histories[identifier]}, as_of=today,
                     universe_limit=200, max_age_days=4, include_horizons=True, batch_loaded=True, expected_session=expected_session,
-                    action_reports=action_reports,instant=instant)
+                    action_reports=action_reports,instant=instant,fip_dates=fip_dates)
     result["discovery_coverage"]={"recent_registry_count":recent_count,"selected_count":len(ids),
         "selection_limit":200,"selection_method":"EXPECTED_SESSION_THEN_DAILY_TRADED_VALUE",
         "expected_session_count":matching if expected_session else None,
@@ -518,6 +523,7 @@ def _execute_job(job):
     # Previously published mature watches still need outcome evaluation even
     # when today's discovery failed; new publication uses READY sections only.
     if job=="WATCH_OUTCOMES":
+        fip_research.publish(snapshot,_connect,now())
         watch_outcomes.refresh(snapshot,_connect)
         return "PASS_COMPLETED"
     if not any(s["section"] in ("NSE","BSE") and s["status"]=="READY" for s in snapshot["sections"]):
