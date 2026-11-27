@@ -191,9 +191,13 @@ class AuthIsolationIntegrationTest {
     mvc.perform(get("/api/v1/portfolio/history/performance").header("Authorization",a))
       .andExpect(status().isOk()).andExpect(jsonPath("$.xirr_status").value("AVAILABLE"))
       .andExpect(jsonPath("$.xirr_percent").value(org.hamcrest.Matchers.closeTo(10.0,0.2)))
-      .andExpect(jsonPath("$.maximum_drawdown_percent").value(-10.0));
+      .andExpect(jsonPath("$.maximum_drawdown_percent").value(-10.0))
+      .andExpect(jsonPath("$.valuation_history.length()").value(3))
+      .andExpect(jsonPath("$.valuation_history[0].date").value(start.toString()))
+      .andExpect(jsonPath("$.valuation_history[2].value").value(1100));
     mvc.perform(get("/api/v1/portfolio/history/performance").header("Authorization",b))
       .andExpect(status().isOk()).andExpect(jsonPath("$.transaction_count").value(0))
+      .andExpect(jsonPath("$.valuation_history.length()").value(0))
       .andExpect(jsonPath("$.xirr_status").value("UNAVAILABLE_REQUIRES_EXTERNAL_CASH_FLOWS_AND_VALUATION"));
   }
 
@@ -216,7 +220,8 @@ class AuthIsolationIntegrationTest {
       .andExpect(status().isOk()).andExpect(jsonPath("$.xirr_percent").value(org.hamcrest.Matchers.closeTo(10.0,0.1)))
       .andExpect(jsonPath("$.valuation_through").value(terminal.toString()))
       .andExpect(jsonPath("$.external_flows_after_valuation").value(1))
-      .andExpect(jsonPath("$.future_snapshot_count").value(1));
+      .andExpect(jsonPath("$.future_snapshot_count").value(1))
+      .andExpect(jsonPath("$.valuation_history.length()").value(2));
     mvc.perform(post("/api/v1/portfolio/history/transactions").header("Authorization",a)
       .contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(Map.of(
         "symbol","CASH","assetType","CASH","transactionType","WITHDRAWAL",
@@ -232,7 +237,8 @@ class AuthIsolationIntegrationTest {
     jdbc.update("UPDATE portfolio_valuation_snapshots SET unpriced_positions=1 WHERE user_id=? AND valuation_date=?",user,terminal);
     mvc.perform(get("/api/v1/portfolio/history/performance").header("Authorization",a))
       .andExpect(status().isOk()).andExpect(jsonPath("$.xirr_status").value("UNAVAILABLE_INCOMPLETE_TERMINAL_VALUATION"))
-      .andExpect(jsonPath("$.drawdown_status").value("UNAVAILABLE_INCOMPLETE_VALUATION_HISTORY"));
+      .andExpect(jsonPath("$.drawdown_status").value("UNAVAILABLE_INCOMPLETE_VALUATION_HISTORY"))
+      .andExpect(jsonPath("$.valuation_history[1].value").value(org.hamcrest.Matchers.nullValue()));
   }
 
   @Test void rollingPortfolioEstimatesAreOwnerScopedAndIndependentOfOldGaps()throws Exception{

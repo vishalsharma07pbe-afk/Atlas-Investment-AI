@@ -92,6 +92,7 @@ export default function PortfolioPerformanceHistory({revision=0}:{revision?:numb
       <div><small>XIRR</small><strong>{percent(performance.xirr_percent)}</strong><span>{performance.external_cash_flow_count??performance.transaction_count} cash-flow records</span>{performance.xirr_percent==null&&<span>{statusText(performance.xirr_status)}</span>}</div>
       <div><small>MAX DRAWDOWN</small><strong>{percent(performance.maximum_drawdown_percent)}</strong><span>{performance.snapshot_count} dated valuations</span>{performance.maximum_drawdown_percent==null&&<span>{statusText(performance.drawdown_status)}</span>}</div>
     </div>
+    <details className="terminal-performance-details"><summary>Detailed returns, benchmark, risk and cash-flow tools</summary>
     {performance.flow_adjusted_status&&<section aria-label="Cash-flow-adjusted performance">
       <h3>Cash-flow-adjusted performance estimate</h3>
       <div className="portfolio-history-metrics">
@@ -133,6 +134,6 @@ export default function PortfolioPerformanceHistory({revision=0}:{revision?:numb
       <button type="submit" disabled={busy||!amount}>Save cash flow</button>
     </form>
     {message&&<p className="muted tiny" role="status">{message}</p>}
-    <p className="muted tiny">{performance.methodology||"XIRR and drawdown remain unavailable until enough dated, user-owned records exist."}</p>
+    <p className="muted tiny">{performance.methodology||"XIRR and drawdown remain unavailable until enough dated, user-owned records exist."}</p></details>
   </section>;
 }

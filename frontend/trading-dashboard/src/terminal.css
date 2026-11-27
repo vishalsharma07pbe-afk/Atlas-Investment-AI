@@ -252,3 +252,5 @@
 .dashboard .portfolio-history-metrics strong{overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
 .dashboard :is(.terminal-chart-toolbar,.mf-category-tabs,.p2-tabs,.mf-nav) button:focus-visible,.dashboard :is(.terminal-coverage-details,.terminal-stock-tool)>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media(max-width:540px){.dashboard .horizon-card dl{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard .terminal-tiles-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard .p2-tabs button{flex-basis:42%}.dashboard .horizon-card{padding:12px}}
+
+.terminal-performance-details{border:1px solid var(--row-line);border-radius:8px;padding:12px;margin-top:14px;min-width:0}.terminal-performance-details>summary{font-weight:650;cursor:pointer;overflow-wrap:anywhere}.terminal-performance-details[open]>summary{margin-bottom:12px}#fund-research-report,#active-holdings{scroll-margin-top:24px}

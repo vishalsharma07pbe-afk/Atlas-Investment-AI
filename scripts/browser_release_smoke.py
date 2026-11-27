@@ -44,9 +44,19 @@ def run():
                 expect(button).to_be_visible()
                 button.click()
                 expect(page.get_by_role("heading",name=title,exact=True,level=1)).to_be_visible()
+            Path("browser-preview").mkdir(exist_ok=True)
             for title in PAGES:
                 go(title)
                 expect(navigation.get_by_role("button",name=title,exact=True)).to_have_attribute("aria-current","page")
+                page.screenshot(path="browser-preview/desktop-"+title.lower().replace(" ","-")+".png",timeout=5000)
+            page.set_viewport_size({"width":375,"height":900})
+            for title in PAGES:
+                go(title)
+                expect(page.locator("main.content")).to_be_visible()
+                assert page.locator("main.content").evaluate("(el)=>{const r=el.getBoundingClientRect();return r.left>=-1 && r.right<=innerWidth+1}"),f"workspace overflows viewport: {title}"
+                if title in ("Overview","Mutual Funds","Swing Trading","AI Research","Settings"):
+                    page.screenshot(path="browser-preview/mobile-"+title.lower().replace(" ","-")+".png",timeout=5000)
+            page.set_viewport_size({"width":1440,"height":900})
             go("Overview")
             expect(page.get_by_role("region",name="Portfolio attention summary")).to_be_visible()
             expect(page.get_by_role("region",name="Automatic research overview")).to_be_visible()
@@ -55,11 +65,19 @@ def run():
             assert page.locator(".dashboard").evaluate("(el)=>getComputedStyle(el).getPropertyValue('--terminal-surface').trim().length > 0"),"terminal stylesheet not applied"
             Path("browser-preview").mkdir(exist_ok=True)
             page.screenshot(path="browser-preview/overview-desktop.png",timeout=5000)
+            # Verify both saved theme variants on the actual application.
+            for theme in ("dark","light"):
+                page.get_by_role("button",name="Open appearance settings").click()
+                page.get_by_role("group",name="Theme").get_by_role("button",name=re.compile(theme,re.I)).click()
+                expect(page.locator(".dashboard")).to_have_attribute("data-theme",theme)
+                page.keyboard.press("Escape")
+                page.screenshot(path=f"browser-preview/overview-{theme}.png",timeout=5000)
             # Verify navigation and overlay controls on narrow and desktop layouts.
             for width in (768,320,1440):
                 page.set_viewport_size({"width":width,"height":900})
                 go("My Portfolio")
                 expect(page.get_by_role("region",name="Recorded portfolio charts")).to_be_visible()
+                expect(page.get_by_role("region",name="Recorded valuation history")).to_be_visible()
                 assert page.locator(".terminal-portfolio-visuals").evaluate("(el)=>{const r=el.getBoundingClientRect();return r.left>=-1 && r.right<=innerWidth+1}"),f"portfolio charts overflow viewport {width}"
                 if width in (320,1440):
                     page.screenshot(path=f"browser-preview/portfolio-{width}.png",timeout=5000)
