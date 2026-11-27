@@ -66,6 +66,7 @@ class PortfolioRefreshServiceTest {
     var result=new PortfolioRefreshService(jdbc,provider).refreshDue(100);
     assertEquals(0,result.get("total"));
     verify(jdbc).queryForList(contains("RETURNING h.id,h.user_id"),eq(false),eq(10));
-    verifyNoInteractions(provider);
+    verify(provider).hasConfiguredMarketToken();
+    verifyNoMoreInteractions(provider);
   }
 }
