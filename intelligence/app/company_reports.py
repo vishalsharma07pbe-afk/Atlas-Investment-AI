@@ -3,6 +3,7 @@ from collections import defaultdict
 from datetime import date,datetime,timedelta
 from zoneinfo import ZoneInfo
 from .replay_evidence import exact_isin
+from . import company_venues
 
 HORIZONS=("SWING","SHORT_TERM","LONG_TERM")
 NOTICE="Shared reported company evidence and exact dated venue/horizon observations. No transfer of price levels, replay or execution clearance between venues. Current sampled research only; not a full registry or a qualified recommendation."
@@ -38,11 +39,13 @@ def grouped(snapshot):
 
 def attach(snapshot,instant):
     reports={}
+    venues=company_venues.collect(snapshot,instant)
     for isin,items in grouped(snapshot).items():
         observations={}
         conflict=False
         company=[]
         reviews=[]
+        news=[]
         findings=set()
         for horizon,row in items:
             key=(horizon,row["exchange"],row["id"],row["as_of"])
@@ -59,6 +62,12 @@ def attach(snapshot,instant):
                 if evidence.get("isin")==isin and captured.tzinfo and instant-timedelta(hours=24)<=captured<=instant:
                     company.append(evidence)
             except (TypeError,ValueError,KeyError):pass
+            headline=row.get("news_evidence") or {}
+            if headline.get("isin")==isin and headline.get("source_instrument_key")=="NSE_EQ|"+isin:
+                try:
+                    captured=datetime.fromisoformat(headline["retrieved_at"])
+                    if captured.tzinfo and instant-timedelta(hours=2)<=captured<=instant:news.append(headline)
+                except (TypeError,ValueError,KeyError):pass
             review=row.get("ai_review") or {}
             if review.get("company_isin")==isin:reviews.append(review)
         # Same capture must carry the same source sections. Prefer the enriched
@@ -74,10 +83,15 @@ def attach(snapshot,instant):
         if conflict:
             findings.add("CONFLICTING_LISTING_OBSERVATIONS")
             continue
+        other=venues.get(isin,[])
+        findings.update("REPORTED_"+r["security_state"]+"_AT_"+r["exchange"] for r in other if r.get("security_state") in company_venues.SPECIAL)
+        shared_news=news[0] if news and all(r==news[0] for r in news) else None
+        if news and shared_news is None:findings.add("CONFLICTING_COMPANY_NEWS_CAPTURE")
         reports[isin]={"isin":isin,"status":"REVIEW_REQUIRED" if findings else "RESEARCH_ONLY",
             "observations":[observations[k] for k in sorted(observations)],
-            "observed_venues":sorted({r["exchange"] for r in observations.values()}),
-            "review_findings":sorted(findings),"company_evidence":shared,"ai_review":review,
+            "observed_venues":sorted({r["exchange"] for r in observations.values()}|{r["exchange"] for r in other}),
+            "venue_observations":[{**r,"quote":company_venues.fresh_quote(r,instant)} for r in sorted(other,key=lambda r:(r["exchange"],r["id"]))],
+            "review_findings":sorted(findings),"company_evidence":shared,"news_evidence":shared_news,"ai_review":review,
             "qualified":False,"notice":NOTICE}
     snapshot["company_reports"]={"status":"AVAILABLE" if reports else "AWAITING_EVIDENCE","items":reports,"notice":NOTICE}
     return snapshot

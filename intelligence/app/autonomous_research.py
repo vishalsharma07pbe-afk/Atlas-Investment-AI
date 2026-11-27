@@ -330,10 +330,6 @@ def read_snapshot(include_ai=True):
         except (ValueError, OSError, sqlite3.Error):
             snapshot["automatic_company_status"] = "UNAVAILABLE"
         try:
-            automatic_news.attach(snapshot, _connect)
-        except (ValueError, OSError, sqlite3.Error):
-            snapshot["automatic_news_status"] = "UNAVAILABLE"
-        try:
             snapshot["research_reliability"] = research_reliability.read(_connect,current) if enabled else {"status":"DISABLED"}
         except (ValueError, OSError, sqlite3.Error):
             snapshot["research_reliability"] = {"status":"UNAVAILABLE"}
@@ -356,6 +352,10 @@ def read_snapshot(include_ai=True):
             snapshot["steady_momentum"] = steady_momentum.summarize(snapshot,_connect,current)
         except (ValueError,TypeError,OSError,sqlite3.Error):
             snapshot["steady_momentum"]={"status":"AWAITING_EVIDENCE","items":[],"notice":steady_momentum.NOTICE}
+        try:
+            automatic_news.attach(snapshot,_connect,current)
+        except (ValueError, OSError, sqlite3.Error):
+            snapshot["automatic_news_status"]="UNAVAILABLE"
         try:
             automatic_ai_review.attach(snapshot, _connect)
         except (ValueError, OSError, sqlite3.Error):

@@ -215,10 +215,10 @@ def _company_candidates(snapshot,selected):
         root["listing_observations"]=[]
         for p in ordered:
             listing={k:p[k] for k in ("symbol","exchange","as_of","horizon","adjustment","observations")}
-            for k in ("historical_replay","news_topics","benchmark_regime","market_flows"):
+            for k in ("historical_replay","benchmark_regime","market_flows"):
                 if k in p:listing[k]=p[k]
             root["listing_observations"].append(listing)
-        for k in ("financial_trends","ownership_context","peer_valuation","global_changes","benchmark_regime","market_flows"):
+        for k in ("financial_trends","ownership_context","peer_valuation","news_topics","global_changes","benchmark_regime","market_flows"):
             root.pop(k,None)
             available=[p[k] for p in ordered if k in p]
             if available and all(v==available[0] for v in available):
@@ -271,7 +271,10 @@ def refresh(snapshot, connect, runner=ai_failover.grounded_research):
     now=datetime.now(timezone.utc)
     # Up to two calls per pass, one evidence pack; up to five permitted
     # providers across passes. Keep valid reviews while retrying missing roles.
+    seen=set()
     for _,pack,key in candidates(snapshot,selected):
+        if key in seen:continue
+        seen.add(key)
         previous=_claim(connect,key,now)
         if previous is None:
             continue

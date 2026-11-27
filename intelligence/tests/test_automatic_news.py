@@ -66,3 +66,21 @@ class AutomaticNewsTests(unittest.TestCase):
             result=p1_research.company_news([self.key,other])
         self.assertEqual(result["count"],2)
         self.assertEqual(set(result["returned_keys"]),{self.key,other})
+
+    def test_exact_isin_headline_shared_across_public_venues(self):
+        from zoneinfo import ZoneInfo
+        today=self.now.astimezone(ZoneInfo("Asia/Kolkata")).date()
+        as_of=(today-timedelta(days=1)).isoformat()
+        self.item.update(id=1,as_of=as_of)
+        b={**self.item,"id":2,"exchange":"BSE"}
+        data={"enabled":True,"scope":"PUBLIC_MARKET_RESEARCH_ONLY","research_date":today.isoformat(),"sections":[]}
+        for row in (self.item,b):
+            data["sections"].append({"section":row["exchange"],"status":"READY","result":{
+                "discovery_coverage":{"calendar_checked_on":today.isoformat(),"calendar_status":"PUBLISHED_SESSION","expected_session":as_of},
+                "horizons":{"SWING":{"status":"TECHNICAL_WATCH_ONLY","candidates":[row]}}}})
+        news.refresh(data,research._connect,self.report,self.now)
+        news.attach(data,research._connect,self.now)
+        self.assertEqual(b["news_evidence"]["source_exchange"],"NSE")
+        self.assertEqual(b["news_evidence"]["isin"],b["isin"])
+        self.assertEqual(b["news_evidence"],self.item["news_evidence"])
+        self.assertEqual(len(data["recent_company_news"]),1)
