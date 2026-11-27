@@ -168,6 +168,11 @@ public class PortfolioHistoryController {
     result.put("flow_adjusted_from",adjusted.from());
     result.put("flow_adjusted_through",adjusted.through());
     result.put("flow_adjusted_methodology","Linked Modified Dietz estimate, not exact time-weighted return. Dated external flows are weighted by remaining calendar days; first-date flows are opening capital, end-date flows occur after returns. Intervals over seven days, incomplete valuations and invalid capital bases are withheld. Externally paid fees follow the existing negative investor-flow convention. Holdings-only valuations and recorded ledger flows may omit cash, fees and transactions. Drawdown uses the estimated wealth index at observation dates.");
+    // Owner-scoped recorded observations; incomplete dates remain explicit gaps.
+    result.put("valuation_history",dated.stream().map(row->{
+      Map<String,Object> point=new LinkedHashMap<>();point.put("date",day(row.get("valuation_date")).toString());
+      point.put("value",complete(row)?row.get("total_value"):null);return point;
+    }).toList());
     result.put("transaction_count",transactions.size());result.put("snapshot_count",snapshots.size());
     result.put("external_cash_flow_count",externalCount);result.put("external_flows_after_valuation",afterTerminal);
     result.put("incomplete_snapshot_count",incomplete);result.put("future_snapshot_count",snapshots.size()-dated.size());

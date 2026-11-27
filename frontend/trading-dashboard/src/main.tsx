@@ -265,10 +265,8 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
           <PortfolioDoctor compact revision={portfolioRevision} onOpenPortfolio={()=>navigate(9)} onSettings={()=>navigate(6)}/>
           <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)} onHorizon={navigateHorizon}><ResearchHome holdings={holdings} revision={portfolioRevision} onReviewHoldings={()=>navigate(9)} onOpenExplorer={()=>navigate(7)} onOpenDataHealth={()=>navigate(6)}/></AutonomousOverview>
         </> : tab === 9 ? <>
-          <PortfolioVisuals holdings={holdings}/>
-          <PortfolioIntelligence holdings={holdings} analysis={analysis}/>
-          <PortfolioDoctor revision={portfolioRevision} onSettings={()=>navigate(6)}/>
-          <GoalMonitor/>
+          <div className="terminal-overview-grid"><PortfolioSummary analysis={analysis} onOpen={()=>document.getElementById("active-holdings")?.scrollIntoView({block:"start"})}/><PortfolioVisuals holdings={holdings}/></div>
+          <section className="panel glass terminal-performance-panel"><PortfolioPerformanceHistory revision={portfolioRevision}/></section>
           <AdvancedSection title="Add or update an investment" description="Search a stock or fund, save a holding or set up an SIP"><HoldingEditor busy={loading} onSave={submitHolding} onSaveSip={submitSip}/></AdvancedSection>
           <AdvancedSection title="Advanced portfolio tools" description="Stress tests, allocation, goals, journal, fees and concentration">
             <PortfolioStress revision={portfolioRevision}/>
@@ -278,13 +276,15 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
             <ResearchJournal/>
             <FeeImpact/>
             <PortfolioConcentration revision={portfolioRevision}/>
-            <PortfolioPerformanceHistory revision={portfolioRevision}/>
             <PersonalAlerts/>
           </AdvancedSection>
-          <section className="panel glass holdings-panel"><div className="sectionhead"><div><small className="section-kicker">CURRENT INVESTMENTS</small><h2>Active holdings</h2></div><label className="upload">Import CSV <input type="file" accept=".csv,text/csv" hidden disabled={loading} onChange={e => { const file = e.target.files?.[0]; if (file) importCsv(file); e.target.value = ""; }}/></label></div><p className="muted tiny">Only investments you still own appear here. One-day change uses the previous provider close or previous published NAV when available.</p><div className="tablewrap"><table><thead><tr><th>INVESTMENT</th><th>TYPE</th><th>QTY</th><th>AVG COST</th><th>CURRENT*</th><th>VALUE*</th><th>OVERALL P&amp;L*</th><th>1 DAY*</th><th/></tr></thead><tbody>
+          <section id="active-holdings" className="panel glass holdings-panel"><div className="sectionhead"><div><small className="section-kicker">CURRENT INVESTMENTS</small><h2>Active holdings</h2></div><label className="upload">Import CSV <input type="file" accept=".csv,text/csv" hidden disabled={loading} onChange={e => { const file = e.target.files?.[0]; if (file) importCsv(file); e.target.value = ""; }}/></label></div><p className="muted tiny">Only investments you still own appear here. One-day change uses the previous provider close or previous published NAV when available.</p><div className="tablewrap"><table><thead><tr><th>INVESTMENT</th><th>TYPE</th><th>QTY</th><th>AVG COST</th><th>CURRENT*</th><th>VALUE*</th><th>OVERALL P&amp;L*</th><th>1 DAY*</th><th/></tr></thead><tbody>
             {holdings.map(holding => <tr key={holding.id}><td className="symbol">{holding.asset_type==="MUTUAL_FUND"&&holding.notes?<>{holding.notes}<small>Scheme {holding.symbol}</small></>:holding.symbol}</td><td><span className="asset-pill">{holding.asset_type}</span></td><td>{holding.quantity}</td><td>{fmt(holding.average_cost)}</td><td>{fmt(holding.last_price)}{holding.valuation_status&&<small className="muted tiny" style={{display:"block"}}>{holding.valuation_status.toLowerCase().replace(/_/g," ")}</small>}</td><td>{fmt(holding.market_value)}</td><td className={(holding.unrealized_pnl || 0) >= 0 ? "positive" : "negative"}>{fmt(holding.unrealized_pnl)}</td><td className={(holding.one_day_change||0)>=0?"positive":"negative"}>{fmt(holding.one_day_change)}</td><td><button className="danger" onClick={() => remove(holding.id)}>Delete</button></td></tr>)}
             {!holdings.length && <tr><td colSpan={9} className="empty">No active holdings yet. Open Add or update an investment above.</td></tr>}
           </tbody></table></div></section>
+          <PortfolioIntelligence holdings={holdings} analysis={analysis}/>
+          <PortfolioDoctor revision={portfolioRevision} onSettings={()=>navigate(6)}/>
+          <GoalMonitor/>
           <AdvancedSection title="Past investments" description="Review closed holdings and realized performance"><HistoricalInvestments activeHoldings={holdings}/></AdvancedSection>
         </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : (tab === 2 || tab === 3 || tab === 4 || tab === 5) ? <HorizonResearch key={tab} horizon={tab===2?"INTRADAY":tab===3?"SWING":tab===4?"SHORT_TERM":"LONG_TERM"} reportTarget={tab===2?undefined:reportTarget} onSettings={()=>navigate(6)}>{tab===5?<EquityResearchDashboard/>:<><MarketIntelligence/><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/></>}</HorizonResearch> : tab === 8 ? <P2ResearchWorkspace/> : tab === 7 ? <StockExplorer/> : tab === 10 ? <>
           <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)} onHorizon={navigateHorizon}><MarketIntelligence/></AutonomousOverview>

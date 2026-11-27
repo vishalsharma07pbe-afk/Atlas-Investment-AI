@@ -1,5 +1,6 @@
 import {useEffect,useState} from "react";
 import FundHistoricalWatch from "./FundHistoricalWatch";
+import {EvidenceBars} from "./TerminalCharts";
 import FundHurdleSensitivity, {type WeeklyHurdleSensitivity} from "./FundHurdleSensitivity";
 import FundShortHorizonRisk, {type ShortHorizonNavRisk} from "./FundShortHorizonRisk";
 
@@ -88,7 +89,7 @@ function FundResearchReport({report,disclosure,portfolio}:{report:FundReport;dis
 
 function PickList({title,subtitle,items,reportIds,onReport}:{title:string;subtitle:string;items:FundPick[];reportIds?:Set<string>;onReport?:(identifier:string)=>void}){
   return <section className="mf-ranking-list"><header><div><h3>{title}</h3><p>{subtitle}</p></div><span>{items.length}/5 qualified</span></header>
-    {items.length?<div className="mf-picks">{items.map(item=><article key={item.fund.identifier}><b>#{item.rank}</b><div><h4>{item.fund.name}</h4><p>{item.fund.plan} · {item.fund.benchmark??item.fund.category}</p></div><dl><div><dt>ATLAS rating</dt><dd>{item.atlas_research_rating}</dd></div><div><dt>Confidence</dt><dd>{item.evidence_confidence}</dd></div><div><dt>1Y / 3Y / 5Y</dt><dd>{[item.fund.returns_1y,item.fund.returns_3y,item.fund.returns_5y].map(x=>x===null?"—":x.toFixed(2)+"%").join(" / ")}</dd></div></dl><p><strong>Why:</strong> {item.qualification_reason}<br/><strong>Risk:</strong> {item.key_risk}</p>{reportIds?.has(item.fund.identifier)&&onReport&&<button type="button" className="secondary" onClick={()=>onReport(item.fund.identifier)}>View fund research report</button>}</article>)}</div>
+    {items.length?<div className="mf-picks">{items.map(item=><article key={item.fund.identifier}><b>#{item.rank}</b><div><h4>{item.fund.name}</h4><p>{item.fund.plan} · {item.fund.benchmark??item.fund.category}</p></div><dl><div><dt>ATLAS rating</dt><dd>{item.atlas_research_rating}</dd></div><div><dt>Confidence</dt><dd>{item.evidence_confidence}</dd></div><div><dt>1Y / 3Y / 5Y</dt><dd>{[item.fund.returns_1y,item.fund.returns_3y,item.fund.returns_5y].map(x=>x===null?"—":x.toFixed(2)+"%").join(" / ")}</dd></div></dl><EvidenceBars title="Reported historical returns" rows={[{label:"1Y",value:item.fund.returns_1y},{label:"3Y",value:item.fund.returns_3y},{label:"5Y",value:item.fund.returns_5y}]}/><p className="terminal-fund-nav"><span>Recorded NAV</span><strong>{item.fund.nav??"Unavailable"}</strong><small>{item.fund.nav_date??"Date unavailable"} · Riskometer: {item.fund.riskometer??"Unavailable"}</small></p><details><summary>Qualification and key risk</summary><p><strong>Why:</strong> {item.qualification_reason}<br/><strong>Risk:</strong> {item.key_risk}</p></details>{reportIds?.has(item.fund.identifier)&&onReport&&<button type="button" className="secondary" onClick={()=>onReport(item.fund.identifier)}>View fund research report</button>}</article>)}</div>
     :<div className="mf-ranking-empty"><strong>No fund currently qualifies</strong><p>ATLAS found discovery candidates, but none has enough verified evidence for this list. This is safer than ranking incomplete records.</p></div>}
   </section>;
 }
