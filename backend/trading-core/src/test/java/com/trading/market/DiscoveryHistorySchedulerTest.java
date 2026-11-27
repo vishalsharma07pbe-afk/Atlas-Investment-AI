@@ -8,6 +8,14 @@ import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 
 class DiscoveryHistorySchedulerTest {
+  @Test void prioritizesOverdueExistingHistoriesWithSeparateExpansionBudget(){
+    JdbcTemplate db=mock(JdbcTemplate.class);
+    DiscoveryHistoryScheduler scheduler=new DiscoveryHistoryScheduler(db,mock(UpstoxFeedService.class),mock(MarketCalendarService.class));
+    LocalDate end=LocalDate.of(2026,11,26);
+    scheduler.refreshExchange("NSE",end);
+    verify(db).queryForList(argThat(sql->sql.contains("h.candle_count>=25 AND h.latest_date<?")&&sql.contains("workload=0 AND position<=8")&&sql.contains("workload=1 AND position<=2")&&sql.contains("ORDER BY workload,position LIMIT 10")),eq("NSE"),eq(end.minusMonths(12)),eq(end),eq(end),eq(end.minusMonths(12)),eq(end),eq(end),eq("NSE"),eq(200),eq(end));
+  }
+
   @Test void requiresAllPermissionGates(){
     JdbcTemplate db=mock(JdbcTemplate.class);
     UpstoxFeedService stocks=mock(UpstoxFeedService.class);
@@ -24,7 +32,7 @@ class DiscoveryHistorySchedulerTest {
     DiscoveryHistoryScheduler scheduler=new DiscoveryHistoryScheduler(db,stocks,mock(MarketCalendarService.class));
     scheduler.accessToken="test-only";
     LocalDate end=LocalDate.of(2026,11,20);
-    when(db.queryForList(contains("LIMIT 2"),eq("NSE"),eq(end.minusMonths(12)),eq(end),eq(end.minusMonths(12)),eq(end),eq(end),eq("NSE"),eq(200),eq(end))).thenReturn(List.of(
+    when(db.queryForList(contains("LIMIT 10"),eq("NSE"),eq(end.minusMonths(12)),eq(end),eq(end),eq(end.minusMonths(12)),eq(end),eq(end),eq("NSE"),eq(200),eq(end))).thenReturn(List.of(
       Map.of("id",7L,"instrument_key","NSE_EQ|TEST","candle_count",0L)));
     when(db.update(contains("INSERT INTO discovery_history_attempts"),eq(7L))).thenReturn(1);
     when(stocks.discoveryDailyCandles("test-only","NSE_EQ|TEST",end.minusMonths(12),end)).thenReturn(100);
@@ -39,7 +47,7 @@ class DiscoveryHistorySchedulerTest {
     DiscoveryHistoryScheduler scheduler=new DiscoveryHistoryScheduler(db,stocks,mock(MarketCalendarService.class));
     scheduler.accessToken="test-only";
     LocalDate end=LocalDate.of(2026,11,20);
-    when(db.queryForList(contains("h.candle_count<?"),eq("NSE"),eq(end.minusMonths(12)),eq(end),eq(end.minusMonths(12)),eq(end),eq(end),eq("NSE"),eq(200),eq(end))).thenReturn(List.of(
+    when(db.queryForList(contains("h.candle_count<?"),eq("NSE"),eq(end.minusMonths(12)),eq(end),eq(end),eq(end.minusMonths(12)),eq(end),eq(end),eq("NSE"),eq(200),eq(end))).thenReturn(List.of(
       Map.of("id",7L,"instrument_key","NSE_EQ|TEST","candle_count",120L,"latest_date",end)));
     when(db.update(contains("INSERT INTO discovery_history_attempts"),eq(7L))).thenReturn(1);
     when(stocks.discoveryDailyCandles("test-only","NSE_EQ|TEST",end.minusMonths(12),end)).thenReturn(230);
@@ -53,7 +61,7 @@ class DiscoveryHistorySchedulerTest {
     DiscoveryHistoryScheduler scheduler=new DiscoveryHistoryScheduler(db,stocks,mock(MarketCalendarService.class));
     scheduler.accessToken="test-only";
     LocalDate end=LocalDate.of(2026,11,20);
-    when(db.queryForList(contains("LIMIT 2"),eq("NSE"),eq(end.minusMonths(12)),eq(end),eq(end.minusMonths(12)),eq(end),eq(end),eq("NSE"),eq(200),eq(end))).thenReturn(List.of(
+    when(db.queryForList(contains("LIMIT 10"),eq("NSE"),eq(end.minusMonths(12)),eq(end),eq(end),eq(end.minusMonths(12)),eq(end),eq(end),eq("NSE"),eq(200),eq(end))).thenReturn(List.of(
       Map.of("id",7L,"instrument_key","NSE_EQ|TEST","candle_count",220L,"latest_date",end.minusDays(2))));
     when(db.update(contains("INSERT INTO discovery_history_attempts"),eq(7L))).thenReturn(1);
     when(stocks.discoveryDailyCandles("test-only","NSE_EQ|TEST",end.minusDays(1),end)).thenReturn(2);
@@ -67,7 +75,7 @@ class DiscoveryHistorySchedulerTest {
     DiscoveryHistoryScheduler scheduler=new DiscoveryHistoryScheduler(db,stocks,mock(MarketCalendarService.class));
     scheduler.accessToken="test-only";
     LocalDate end=LocalDate.of(2026,11,20),missing=end.minusDays(9);
-    when(db.queryForList(contains("g.first_missing_date IS NOT NULL"),eq("NSE"),eq(end.minusMonths(12)),eq(end),
+    when(db.queryForList(contains("g.first_missing_date IS NOT NULL"),eq("NSE"),eq(end.minusMonths(12)),eq(end),eq(end),
       eq(end.minusMonths(12)),eq(end),eq(end),eq("NSE"),eq(200),eq(end)))
       .thenReturn(List.of(Map.of("id",7L,"instrument_key","NSE_EQ|TEST","candle_count",220L,
         "latest_date",end,"first_missing_date",java.sql.Date.valueOf(missing))));
@@ -94,7 +102,7 @@ class DiscoveryHistorySchedulerTest {
     DiscoveryHistoryScheduler scheduler=new DiscoveryHistoryScheduler(db,stocks,mock(MarketCalendarService.class));
     scheduler.accessToken="test-only";
     LocalDate end=LocalDate.of(2026,11,20);
-    when(db.queryForList(contains("LIMIT 2"),eq("NSE"),eq(end.minusMonths(12)),eq(end),eq(end.minusMonths(12)),eq(end),eq(end),eq("NSE"),eq(200),eq(end)))
+    when(db.queryForList(contains("LIMIT 10"),eq("NSE"),eq(end.minusMonths(12)),eq(end),eq(end),eq(end.minusMonths(12)),eq(end),eq(end),eq("NSE"),eq(200),eq(end)))
       .thenReturn(List.of(Map.of("id",7L,"instrument_key","NSE_EQ|FIRST","candle_count",0L),
         Map.of("id",8L,"instrument_key","NSE_EQ|SECOND","candle_count",0L)));
     when(db.update(contains("INSERT INTO discovery_history_attempts"),eq(7L))).thenReturn(1);
@@ -111,7 +119,7 @@ class DiscoveryHistorySchedulerTest {
     DiscoveryHistoryScheduler scheduler=new DiscoveryHistoryScheduler(db,stocks,mock(MarketCalendarService.class));
     scheduler.accessToken="test-only";
     LocalDate end=LocalDate.of(2026,11,20);
-    when(db.queryForList(contains("LIMIT 2"),eq("NSE"),eq(end.minusMonths(12)),eq(end),eq(end.minusMonths(12)),eq(end),eq(end),eq("NSE"),eq(200),eq(end)))
+    when(db.queryForList(contains("LIMIT 10"),eq("NSE"),eq(end.minusMonths(12)),eq(end),eq(end),eq(end.minusMonths(12)),eq(end),eq(end),eq("NSE"),eq(200),eq(end)))
       .thenReturn(List.of(Map.of("id",7L,"instrument_key","NSE_EQ|TEST","candle_count",0L)));
     when(db.update(contains("INSERT INTO discovery_history_attempts"),eq(7L))).thenReturn(1);
     scheduler.refreshExchange("NSE",end);
@@ -124,7 +132,7 @@ class DiscoveryHistorySchedulerTest {
     UpstoxFeedService stocks=mock(UpstoxFeedService.class);
     DiscoveryHistoryScheduler scheduler=new DiscoveryHistoryScheduler(db,stocks,mock(MarketCalendarService.class));
     LocalDate end=LocalDate.of(2026,11,20);
-    when(db.queryForList(contains("LIMIT 2"),eq("BSE"),eq(end.minusMonths(12)),eq(end),eq(end.minusMonths(12)),eq(end),eq(end),eq("BSE"),eq(200),eq(end))).thenReturn(List.of(
+    when(db.queryForList(contains("LIMIT 10"),eq("BSE"),eq(end.minusMonths(12)),eq(end),eq(end),eq(end.minusMonths(12)),eq(end),eq(end),eq("BSE"),eq(200),eq(end))).thenReturn(List.of(
       Map.of("id",7L,"instrument_key","BSE_EQ|TEST","candle_count",0L)));
     scheduler.refreshExchange("BSE",end);
     verifyNoInteractions(stocks);

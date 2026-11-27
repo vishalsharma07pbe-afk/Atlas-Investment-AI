@@ -16,6 +16,15 @@ SELECT e.code AS exchange,count(*) AS calendar_rows,
        max(s.session_date) FILTER(WHERE s.is_trading_day AND s.session_type='REGULAR' AND s.session_date<(now() AT TIME ZONE 'Asia/Kolkata')::date) AS latest_regular
 FROM market_sessions s JOIN exchanges e ON e.id=s.exchange_id
 WHERE e.code IN ('NSE','BSE') GROUP BY e.code ORDER BY e.code;
+WITH latest AS (
+ SELECT i.exchange_id,i.id,max((c.candle_time AT TIME ZONE 'Asia/Kolkata')::date) AS latest_date,count(*) AS bars
+ FROM instruments i JOIN market_candles c ON c.instrument_id=i.id
+ WHERE c.timeframe='1d' AND c.is_complete AND c.quality_status IN ('VALIDATED_MANUAL','PROVIDER_VALIDATED')
+ GROUP BY i.exchange_id,i.id
+)
+SELECT e.code AS exchange,l.latest_date,count(*) AS instruments,count(*) FILTER(WHERE l.bars>=25) AS with_25_bars
+FROM latest l JOIN exchanges e ON e.id=l.exchange_id
+WHERE e.code IN ('NSE','BSE') GROUP BY e.code,l.latest_date ORDER BY e.code,l.latest_date DESC;
 SELECT e.code AS exchange,a.status,count(*) AS attempts,max(a.attempted_at) AS last_attempt,sum(a.rows_written) AS written,min(a.next_attempt_at) AS next_attempt
 FROM discovery_history_attempts a JOIN instruments i ON i.id=a.instrument_id JOIN exchanges e ON e.id=i.exchange_id
 GROUP BY e.code,a.status ORDER BY e.code,a.status;
@@ -28,7 +37,7 @@ docker compose exec -T intelligence python - <<'PY'
 import os,sqlite3,json
 from datetime import datetime,timezone
 from pathlib import Path
-flags=("MARKET_DATA_USAGE_RIGHTS_CONFIRMED","MARKET_DATA_ENTITLEMENT_CONFIRMED","ATLAS_AUTONOMOUS_RESEARCH_ENABLED","ATLAS_GLOBAL_FX_ENABLED","ATLAS_GLOBAL_YIELDS_ENABLED","ATLAS_GLOBAL_OIL_ENABLED","ATLAS_ECONOMIC_CALENDAR_ENABLED")
+flags=("MARKET_DATA_USAGE_RIGHTS_CONFIRMED","MARKET_DATA_ENTITLEMENT_CONFIRMED","ATLAS_AUTONOMOUS_RESEARCH_ENABLED","ATLAS_GLOBAL_FX_ENABLED","ATLAS_GLOBAL_YIELDS_ENABLED","ATLAS_GLOBAL_OIL_ENABLED","ATLAS_ECONOMIC_CALENDAR_ENABLED","ATLAS_MF_DISCLOSURE_AUTO_REFRESH_ENABLED")
 for key in flags:
     print(key, "enabled" if os.getenv(key,"").lower()=="true" else "off")
 for key in ("UPSTOX_ACCESS_TOKEN","FRED_API_KEY","TWELVE_DATA_API_KEY","EIA_API_KEY","ATLAS_GLOBAL_MARKETS_SERIES","ATLAS_GLOBAL_RELEASES_SOURCES"):
