@@ -20,7 +20,7 @@ from . import steady_momentum, amfi_equity_caps, company_reports, nse_surveillan
 from .screener import screen
 from . import discovery_scan
 from .mutual_fund_recommendations import CATEGORIES, dashboard
-from . import official_amc_factsheet, official_tri, fund_ai_review, unified_decision, stock_qualification, market_regime, release_reconciliation, economic_calendar, global_releases, global_context, global_markets, global_macro, global_fx, automatic_deals, fund_portfolios, fund_disclosures, fund_prospective, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
+from . import forward_earnings, official_amc_factsheet, official_tri, fund_ai_review, unified_decision, stock_qualification, market_regime, release_reconciliation, economic_calendar, global_releases, global_context, global_markets, global_macro, global_fx, automatic_deals, fund_portfolios, fund_disclosures, fund_prospective, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
 
 SECTIONS = ("NSE", "BSE", *CATEGORIES)
 DEFAULT_INTERVAL = 900
@@ -434,6 +434,10 @@ def read_snapshot(include_ai=True):
         snapshot["daily_briefing"] = daily_briefing.summarize(snapshot)
         company_reports.attach(snapshot,current)
         try:
+            snapshot["forward_earnings_validation"]=forward_earnings.summary(_connect,current) if enabled else {"status":"DISABLED"}
+        except (ValueError,TypeError,OSError,sqlite3.Error):
+            snapshot["forward_earnings_validation"]={"status":"UNAVAILABLE"}
+        try:
             snapshot["unified_decision"]=unified_decision.summarize(snapshot,current.astimezone(ZoneInfo("Asia/Kolkata")).date())
         except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
             # An invalid optional decision projection must not break the existing research endpoint.
@@ -530,6 +534,13 @@ def _execute_job(job):
         if not automatic_deals.permitted():
             return "DISABLED_OR_NOT_AUTHORIZED"
         return "PASS_COMPLETED" if automatic_deals.refresh(_connect) else "WAITING_EVIDENCE"
+    if job=="FORWARD_EARNINGS_BASELINE":
+        if not automatic_company_evidence.permitted():return "DISABLED_OR_NOT_AUTHORIZED"
+        enabled,interval=config()
+        if not enabled:return "DISABLED_OR_NOT_AUTHORIZED"
+        current=now()
+        forward_earnings.refresh(_read_sections(("NSE","BSE"),enabled,interval,current),_connect,current)
+        return "PASS_COMPLETED"
     if job=="FUND_WATCH_OUTCOMES":
         enabled,interval=config()
         if not enabled:return "DISABLED_OR_NOT_AUTHORIZED"
@@ -628,7 +639,7 @@ def run_one_job(interval):
         outcome=_execute_job(job)
     except Exception:
         outcome="FAILED"
-    research_jobs.finish(_connect,job,token,now().timestamp(),(research_calendar.POLL_SECONDS if job=="CALENDAR_CONTEXT" else economic_calendar.INTERVAL if job=="ECONOMIC_CALENDAR" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_releases.INTERVAL if job in global_releases.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_markets.INTERVAL if job in global_markets.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_macro.INTERVAL if job in global_macro.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_fx.INTERVAL if job=="GLOBAL_FX" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else 900 if job=="OFFICIAL_TRI_DOWNLOAD" else sector_benchmarks.INTERVAL if job=="SECTOR_BENCHMARKS" else nse_financial_filings.INTERVAL if job=="NSE_FINANCIAL_FILINGS" else nse_pledge_filings.INTERVAL if job=="NSE_PLEDGE_FILINGS" else nse_surveillance.INTERVAL if job=="NSE_SURVEILLANCE" else amfi_equity_caps.INTERVAL if job=="AMFI_EQUITY_CAP" else fund_disclosures.INTERVAL if job in ("FUND_DISCLOSURES","FUND_PORTFOLIOS") and outcome!="DISABLED_OR_NOT_AUTHORIZED" else interval),outcome)
+    research_jobs.finish(_connect,job,token,now().timestamp(),(research_calendar.POLL_SECONDS if job=="CALENDAR_CONTEXT" else economic_calendar.INTERVAL if job=="ECONOMIC_CALENDAR" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_releases.INTERVAL if job in global_releases.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_markets.INTERVAL if job in global_markets.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_macro.INTERVAL if job in global_macro.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_fx.INTERVAL if job=="GLOBAL_FX" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else 3600 if job=="FORWARD_EARNINGS_BASELINE" else 900 if job=="OFFICIAL_TRI_DOWNLOAD" else sector_benchmarks.INTERVAL if job=="SECTOR_BENCHMARKS" else nse_financial_filings.INTERVAL if job=="NSE_FINANCIAL_FILINGS" else nse_pledge_filings.INTERVAL if job=="NSE_PLEDGE_FILINGS" else nse_surveillance.INTERVAL if job=="NSE_SURVEILLANCE" else amfi_equity_caps.INTERVAL if job=="AMFI_EQUITY_CAP" else fund_disclosures.INTERVAL if job in ("FUND_DISCLOSURES","FUND_PORTFOLIOS") and outcome!="DISABLED_OR_NOT_AUTHORIZED" else interval),outcome)
     return True
 
 
