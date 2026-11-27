@@ -26,12 +26,12 @@ def candidates(snapshot,selected=None):
         for row in review.get("items",[])[:5]:
             code=row.get("identifier")
             if not isinstance(code,str) or not re.fullmatch(r"[1-9][0-9]{5,8}",code) or row.get("qualified") is not False or row.get("forecast_return_percent") is not None:continue
-            if not fresh(row.get("portfolio_date"),today,60) or not fresh(row.get("quarter"),today,150):continue
+            if not fresh(row.get("portfolio_date"),today,60) or not fresh(row.get("quarter"),today,150) or not fresh(row.get("nav_date"),today,7):continue
             keys=("joint_coverage_weight_percent","joint_growth_weight_percent","review_weight_percent")
             if not all(num(row.get(k)) and 0<=row[k]<=100.5 for k in keys):continue
             if not 70<=row[keys[0]] or row[keys[1]]>row[keys[0]]:continue
             pack={"version":VERSION,"fund":{"scheme_code":code,"category":cat,"portfolio_date":row["portfolio_date"],
-                "quarter":row["quarter"],**{k:row[k] for k in keys}},"missing":LIMITS}
+                "quarter":row["quarter"],"nav_date":row["nav_date"],**{k:row[k] for k in keys}},"missing":LIMITS}
             yield row,pack,ai.identity(pack,selected)
 def attach(snapshot,connect):
     for section in snapshot.get("sections",[]):

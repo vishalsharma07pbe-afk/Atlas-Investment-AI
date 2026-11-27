@@ -90,9 +90,11 @@ def readiness(category,reports,portfolios,today):
     indexed=defaultdict(list)
     for r in reports:indexed[r.get("identifier")].append(r)
     seen=set()
+    portfolio_counts=defaultdict(int)
+    for p in portfolios:portfolio_counts[p.get("scheme_code")]+=1
     for p in portfolios:
         code=p.get("scheme_code");r=indexed.get(code,[])
-        if code in seen or len(r)!=1 or r[0].get("category")!=category or r[0].get("plan")!="DIRECT" or r[0].get("option")!="GROWTH":continue
+        if code in seen or portfolio_counts[code]!=1 or len(r)!=1 or r[0].get("category")!=category or r[0].get("plan")!="DIRECT" or r[0].get("option")!="GROWTH":continue
         if p.get("status")!="SECONDARY_COMPOSITION_ONLY":continue
         try:
             from datetime import date
@@ -107,7 +109,7 @@ def readiness(category,reports,portfolios,today):
         if not all(num(v) for v in (growth,review)) or not 0<=growth<=coverage<=100.5 or not 0<=review<=100.5:continue
         seen.add(code)
         out["items"].append({"identifier":code,"name":r[0].get("name"),"portfolio_date":p["portfolio_date"],
-            "quarter":c["period"],"joint_coverage_weight_percent":coverage,"joint_growth_weight_percent":growth,
+            "quarter":c["period"],"nav_date":r[0]["nav_date"],"joint_coverage_weight_percent":coverage,"joint_growth_weight_percent":growth,
             "review_weight_percent":review,"state":"DRIVER_REVIEW_REQUIRED" if review>20 or growth<50 else "POSITIVE_HISTORICAL_DRIVERS_ONLY",
             "qualified":False,"forecast_return_percent":None,"blockers":["INDEPENDENT_OFFICIAL_HOLDINGS_REQUIRED",
               "DATED_FORWARD_EARNINGS_ESTIMATES_REQUIRED","DATED_INTRINSIC_VALUATION_REQUIRED","PROSPECTIVE_GROWTH_VALIDATION_REQUIRED"]})

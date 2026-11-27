@@ -178,10 +178,10 @@ def _review(pack, provider, runner, role="TECHNICAL_EVIDENCE"):
     if pack.get("version")=="AUTO-FUND-GROUNDED-1":
         prompt=("Review the supplied public mutual fund's historical quarterly earnings exposure, not private holdings. "
                 "Return one to eight findings using the existing findings schema. Each statement must be a JSON string "
-                "with exactly keys path and value, for example {\\\"path\\\":\\\"/OBS/quarter\\\",\\\"value\\\":\\\"2026-09-30\\\"}. "
+                "with exactly keys path and value, for example {\"path\":\"/OBS/quarter\",\"value\":\"2026-09-30\"}. "
                 "Cite exactly OBS or LIMITS as appropriate. Use exact scalar values only; do not extrapolate, predict NAV, "
                 "infer recommendations, or treat original fund weight as company earnings growth. "
-                "All statements are checked against the supplied evidence.\\n"+json.dumps(supplied,ensure_ascii=True,separators=(",",":")))
+                "All statements are checked against the supplied evidence.\n"+json.dumps(supplied,ensure_ascii=True,separators=(",",":")))
     result = runner(prompt, list(supplied), providers=[provider])
     response = result.get("response")
     if result.get("status") != "MODEL_GROUNDED" or result.get("provider") != provider or not isinstance(response, dict):

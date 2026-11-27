@@ -202,7 +202,7 @@ def fund_snapshot(category):
     drivers=result.get("growth_driver_review") or {}
     if drivers.get("methodology")=="MF-QUARTERLY-DRIVERS-1":
         snapshot["growth_driver_review"]={"methodology":drivers["methodology"],"status":drivers.get("status"),
-            "items":[{k:row.get(k) for k in ("identifier","name","portfolio_date","quarter","joint_coverage_weight_percent",
+            "items":[{k:row.get(k) for k in ("identifier","name","portfolio_date","quarter","nav_date","joint_coverage_weight_percent",
                 "joint_growth_weight_percent","review_weight_percent","state","qualified","forecast_return_percent")}
                 for row in drivers.get("items",[])[:5] if isinstance(row,dict) and row.get("qualified") is False]}
     prospective=result.get("prospective_validation") or {}
@@ -271,7 +271,7 @@ def _published_evidence_current(section, result, today):
                    for item in shortlist["items"]):
                 return False
         drivers=result.get("growth_driver_review") or {}
-        if any(not fresh(row["portfolio_date"],0,60) or not fresh(row["quarter"],0,150) or row.get("qualified") is not False
+        if any(not fresh(row["portfolio_date"],0,60) or not fresh(row["quarter"],0,150) or not fresh(row["nav_date"],0,7) or row.get("qualified") is not False
                for row in drivers.get("items",[])):
             return False
         # The current strict catalog cannot qualify recommendations without
@@ -315,6 +315,8 @@ def _read_sections(section_names,enabled,interval,current):
             result = None
             status = "FAILED" if enabled else "DISABLED"
             error_code = "INVALID_STORED_RESEARCH_SNAPSHOT"
+        if section in CATEGORIES and isinstance(result,dict) and (not fund_portfolios.permitted() or not automatic_company_evidence.permitted()):
+            result.pop("growth_driver_review",None)
         sections.append({"section": section, "status": status,
                          "generated_at": row["generated_at"], "attempted_at": row["attempted_at"],
                          "result": result, "error_code": error_code})

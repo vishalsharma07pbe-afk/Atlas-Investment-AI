@@ -2,7 +2,7 @@ import unittest,json
 from app import fund_ai_review as f,automatic_ai_review as ai
 class FundAIReviewTests(unittest.TestCase):
     def test_public_pack_excludes_arbitrary_fields_and_never_promotes(self):
-        row={"identifier":"123456","name":"PRIVATE_MARKER","portfolio_date":"2026-10-31","quarter":"2026-09-30",
+        row={"identifier":"123456","name":"PRIVATE_MARKER","portfolio_date":"2026-10-31","quarter":"2026-09-30","nav_date":"2026-11-26",
              "joint_coverage_weight_percent":80,"joint_growth_weight_percent":70,"review_weight_percent":10,
              "qualified":False,"forecast_return_percent":None,"private_marker":"DO_NOT_FORWARD"}
         snapshot={"enabled":True,"scope":"PUBLIC_MARKET_RESEARCH_ONLY","research_date":"2026-11-27","sections":[

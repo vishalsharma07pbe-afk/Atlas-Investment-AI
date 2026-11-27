@@ -50,6 +50,22 @@ class AutonomousResearchTests(unittest.TestCase):
         self.assertEqual(research._fund_qualification_counts({"evaluated_count":0,"top_eligible_count":0,
             "growth_eligible_count":0,"excluded":[]})["top_missing_gate_counts"],{})
 
+    def test_growth_driver_projection_does_not_retain_raw_holdings_or_private_fields(self):
+        payload={key:None for key in ("category","coverage","top_performers","growth_outlook",
+            "recommendation_status","blockers","notice","filters","historical_coverage")}
+        payload.update(category="LARGE_CAP",top_performers=[],growth_outlook=[],
+            growth_driver_review={"methodology":"MF-QUARTERLY-DRIVERS-1","status":"MATCHED_HISTORICAL_DRIVERS",
+                "items":[{"identifier":"123456","name":"Example","portfolio_date":"2026-10-31","quarter":"2026-09-30",
+                    "nav_date":"2026-11-26","joint_coverage_weight_percent":80,"joint_growth_weight_percent":70,
+                    "review_weight_percent":10,"state":"POSITIVE_HISTORICAL_DRIVERS_ONLY","qualified":False,
+                    "forecast_return_percent":None,"raw_holdings":"DO_NOT_PERSIST"}]})
+        with patch.object(research,"dashboard",return_value=payload):
+            snapshot=research.fund_snapshot("LARGE_CAP")
+        self.assertNotIn("DO_NOT_PERSIST",str(snapshot))
+        self.assertEqual(snapshot["growth_driver_review"]["items"][0]["nav_date"],"2026-11-26")
+        self.assertTrue(research._published_evidence_current("LARGE_CAP",snapshot,date(2026,11,27)))
+        self.assertFalse(research._published_evidence_current("LARGE_CAP",snapshot,date(2026,12,5)))
+
     def test_fund_shortlist_snapshot_is_bounded_and_dates_rechecked(self):
         payload={key:None for key in ("category","coverage","top_performers","growth_outlook",
             "recommendation_status","blockers","notice","filters","historical_coverage")}
