@@ -23,6 +23,23 @@ final class PortfolioThesisSummary {
     add(risks,f.asText(),"Local portfolio review");
   if("EQUITY".equals(row.path("asset_type").asText())){
    JsonNode thesis=row.path("thesis_evidence"),company=thesis.path("company_evidence");
+   JsonNode relative=row.path("holding_relative_strength");
+   int relativeCount=0;
+   if("MATCHED_PRICE_INDEX_OBSERVATIONS".equals(relative.path("status").asText())&&
+      "NSE_INDEX|Nifty 50".equals(relative.path("benchmark_key").asText())&&"NSE".equals(row.path("exchange").asText())){
+     for(int horizon:new int[]{20,60,120,252}){
+       JsonNode window=relative.path("windows").path(String.valueOf(horizon));
+       Double stock=number(window,"stock_return_percent"),index=number(window,"index_return_percent"),delta=number(window,"difference_pp");
+       if(stock==null||index==null||delta==null||Math.abs(stock-index-delta)>0.001)continue;
+       relativeCount++;
+       String statement=horizon+" matched sessions: equity "+fmt(stock)+"%, Nifty 50 price index "+fmt(index)+"%, difference "+fmt(delta)+" pp ("+
+         window.path("first_date").asText()+" to "+window.path("last_date").asText()+").";
+       add(observations,statement,"Adjusted local equity and price-index history; not total return or forecast");
+     }
+   }
+   if(relativeCount==0)gaps.add("Exact-session holding benchmark comparison unavailable; no relative-strength verdict.");
+   else if(relativeCount<4)gaps.add("Some benchmark windows lack complete matched evidence.");
+
    JsonNode sections=company.path("sections");
    Map<String,List<JsonNode>> recognized=new TreeMap<>();
    for(JsonNode ratio:sections.path("ratios").path("data")){

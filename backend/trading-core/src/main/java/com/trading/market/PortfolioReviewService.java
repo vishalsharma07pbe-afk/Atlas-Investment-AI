@@ -128,7 +128,19 @@ public class PortfolioReviewService {
       ) mf ON true
       WHERE p.user_id=? ORDER BY p.id
       """,today,today,owner);
-    Map<String,Object> report=assess(rows,today,now);
+    Map<String,Object> relative=Map.of();
+    try{relative=PortfolioHoldingRelativeStrength.collect(jdbc,rows,today);}
+    catch(org.springframework.dao.DataAccessException|IllegalArgumentException ex){/* Optional local evidence. */}
+    List<Map<String,Object>> enrichedRows=new ArrayList<>();
+    for(var row:rows){
+      var copy=new LinkedHashMap<>(row);
+      if("EQUITY".equals(row.get("asset_type"))){
+        String key=row.get("exchange")+":"+row.get("isin")+":"+row.get("instrument_id");
+        copy.put("holding_relative_strength",relative.get(key));
+      }
+      enrichedRows.add(copy);
+    }
+    Map<String,Object> report=assess(enrichedRows,today,now);
     report.put("journal_revision",journalRevision);
     try{report.put("journal_lot_reconciliation",PortfolioJournalLots.collect(jdbc,owner,rows,today));}
     catch(org.springframework.dao.DataAccessException ex){
@@ -237,6 +249,7 @@ public class PortfolioReviewService {
       item.put("exchange",r.get("exchange"));item.put("isin",r.get("isin"));item.put("status",status);item.put("weight_percent",weight);
       item.put("recorded_valuation_recent",Boolean.TRUE.equals(r.get("recorded_valuation_recent")));
       item.put("recorded_market_value",value);item.put("exact_scheme_code",r.get("exact_scheme_code"));item.put("scheme_category",r.get("scheme_category"));item.put("recorded_return_percent",returnPct);item.put("evidence_date",observed==null?null:observed.toString());
+      if(equity&&r.get("holding_relative_strength")!=null)item.put("holding_relative_strength",r.get("holding_relative_strength"));
       item.put("history_count",count);item.put("change_20_observations_percent",momentum);
       item.put("recent_peak_change_percent",drawdown);item.put("findings",findings);item.put("missing_evidence",missing);
       assessments.add(item);
