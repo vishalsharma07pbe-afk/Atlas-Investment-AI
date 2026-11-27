@@ -69,6 +69,60 @@ def _frozen(evidence,horizon,observed):
         if not num(dd,0,100) or not num(vol,0,10000) or risk_band(dd,vol)!=b:return None
     return frozen
 
+def temporal_diagnostics(selected,horizon,today,truncated):
+    """Fixed disjoint publication quarters, not fitted or independent trials.
+
+    Group by publication date first, then weight each date equally. Retain
+    missing selected outcomes, including dates with no observed result.
+    """
+    from . import research_reliability as rel
+    groups=defaultdict(list)
+    for r in selected:
+        day=r[1]
+        groups[(day.year,(day.month-1)//3+1,r[2]["score_band"])].append(r)
+    result=[]
+    for (year,quarter,label),items in sorted(groups.items()):
+        # Only assess completed publication quarters whose last possible
+        # publication has passed the full predeclared maturity allowance.
+        month=quarter*3
+        from calendar import monthrange
+        end=date(year,month,monthrange(year,month)[1])
+        if today<=end+timedelta(days=rel.HORIZONS[horizon]+7):continue
+        by_day=defaultdict(list)
+        for r in items:by_day[r[1]].append(r)
+        observed=[r for r in items if r[3] is not None]
+        complete_dates=0;date_means=[]
+        for day,rows in sorted(by_day.items()):
+            returns=[(1+r[3])*(1-.003)**2-1 for r in rows if r[3] is not None]
+            # Require 80% outcome coverage on a date, not simply a surviving winner.
+            if len(returns)/len(rows)>=.8:
+                date_means.append(mean(returns)*100);complete_dates+=1
+        coverage=len(observed)/len(items)
+        dates_coverage=complete_dates/len(by_day)
+        enough=(not truncated and len(observed)>=30 and len({r[0] for r in observed})>=10 and
+                coverage>=.8 and complete_dates>=10 and dates_coverage>=.8)
+        result.append({"publication_quarter":f"{year}-Q{quarter}","score_band":label,
+            "mature_count":len(items),"observed_count":len(observed),"distinct_isins":len({r[0] for r in observed}),
+            "publication_dates":len(by_day),"covered_dates":complete_dates,"coverage_percent":round(100*coverage,2),
+            "date_coverage_percent":round(100*dates_coverage,2),
+            "equal_date_mean_net_change_percent":round(mean(date_means),4) if enough else None,
+            "positive_date_count":sum(x>0 for x in date_means) if enough else None,
+            "status":"DESCRIPTIVE_QUARTER_ONLY" if enough else "INSUFFICIENT_EVIDENCE"})
+    # Compare fixed top vs bottom bands only in common quarters where both
+    # independently meet the descriptive evidence gate. Never pick cutoffs.
+    contrasts=[]
+    for quarter in sorted({r["publication_quarter"] for r in result}):
+        bands={r["score_band"]:r for r in result if r["publication_quarter"]==quarter}
+        low,high=bands.get(SCORE_BANDS[0]),bands.get(SCORE_BANDS[-1])
+        if low and high and low["status"]==high["status"]=="DESCRIPTIVE_QUARTER_ONLY":
+            contrasts.append({"publication_quarter":quarter,"high_minus_low_pp":round(high["equal_date_mean_net_change_percent"]-low["equal_date_mean_net_change_percent"],4)})
+    return {"status":"DESCRIPTIVE_TEMPORAL_COMPARISON" if len(contrasts)>=2 and not truncated else "AWAITING_COMPARABLE_QUARTERS",
+        "quarter_bands":result,"comparable_quarters":contrasts,
+        "positive_spread_quarters":sum(r["high_minus_low_pp"]>0 for r in contrasts),
+        "calibrated":False,
+        "notice":"Fixed mature calendar publication quarters; 30 bps/side; equal weight per covered publication date. "
+                 "No same-date matching between bands, independence, statistical significance, model fit or confidence."}
+
 def summarize(rows,horizon,today,truncated=False):
     from . import research_reliability as rel
     selected=[];last={};legacy=overlap=immature=invalid=0
@@ -117,6 +171,7 @@ def summarize(rows,horizon,today,truncated=False):
     return {"methodology":VERSION,"horizon":horizon,"status":"DESCRIPTIVE_BAND_EVIDENCE" if any(b["status"]=="DESCRIPTIVE_SAMPLE_AVAILABLE" for b in scored) and not truncated else "AWAITING_CALIBRATION_EVIDENCE",
         "selected_scored_mature":len(selected),"legacy_or_unscored_mature":legacy,"overlap_excluded":overlap,"immature_excluded":immature,
         "invalid_excluded":invalid,"truncated":truncated,"score_bands":scored,"risk_bands":risks,
+        "temporal_diagnostics":temporal_diagnostics(selected,horizon,today,truncated),
         "calibrated":False,"probability":None,"notice":NOTICE}
 
 def read(connect,instant):

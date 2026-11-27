@@ -51,3 +51,20 @@ class ScoreCalibrationTests(unittest.TestCase):
                 evidence=json.loads(db.execute("SELECT evidence FROM watch_outcomes").fetchone()["evidence"])
             self.assertEqual(evidence["score_calibration"]["score"],12)
             self.assertEqual(s.read(research._connect,now)["horizons"]["SWING"]["immature_excluded"],1)
+
+    def test_temporal_bands_require_complete_quarters_and_date_coverage(self):
+        rows=[]
+        # Synthetic distinct identities and dates; these are diagnostics, not a calibrated result.
+        for day_offset in range(12):
+            d=date(2026,4,1)+timedelta(days=day_offset)
+            for i in range(3):
+                rows.append((f"id-{day_offset}-{i}",d,{"score_band":"15_OR_ABOVE"},.05,None))
+                rows.append((f"low-{day_offset}-{i}",d,{"score_band":"BELOW_5"},.01,None))
+        result=s.temporal_diagnostics(rows,"SWING",TODAY,False)
+        self.assertEqual(len(result["comparable_quarters"]),1)
+        self.assertEqual(result["status"],"AWAITING_COMPARABLE_QUARTERS")
+        self.assertGreater(result["comparable_quarters"][0]["high_minus_low_pp"],0)
+        self.assertEqual(s.temporal_diagnostics(rows,"SWING",date(2026,7,1),False)["quarter_bands"],[])
+        self.assertFalse(s.temporal_diagnostics(rows,"SWING",TODAY,True)["comparable_quarters"])
+        missing=[(r[0],r[1],r[2],None if i%3==0 else r[3],r[4]) for i,r in enumerate(rows)]
+        self.assertFalse(s.temporal_diagnostics(missing,"SWING",TODAY,False)["comparable_quarters"])
