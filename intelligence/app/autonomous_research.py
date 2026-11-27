@@ -103,20 +103,21 @@ def _market_page(exchange,instruments,cutoff=None):
     if expected_session is not None and (type(matching) is not int or not 0<=matching<=recent_count):
         raise ValueError("INVALID_SESSION_COVERAGE")
     histories={identifier:[] for identifier in ids}
+    history_limit=253 if cutoff is not None else 250
     # At most ten local batch requests per page; no provider requests.
     for offset in range(0,len(ids),20):
         batch=ids[offset:offset+20]
         params={"exchange":exchange,"ids":batch}
         if cutoff is not None:params["cutoff"]=cutoff
         rows=backend_json("/api/v1/market-data/discovery-candles?"+urlencode(params,doseq=True))
-        if not isinstance(rows,list) or len(rows)>len(batch)*250:
+        if not isinstance(rows,list) or len(rows)>len(batch)*history_limit:
             raise ValueError("INVALID_DISCOVERY_HISTORY")
         for row in rows:
             if not isinstance(row,dict) or type(row.get("instrument_id")) is not int or row["instrument_id"] not in batch:
                 raise ValueError("DISCOVERY_HISTORY_IDENTITY_MISMATCH")
             if str(row["trade_date"])<today.isoformat():
                 histories[row["instrument_id"]].append(row)
-        if any(len(histories[i])>250 for i in batch):
+        if any(len(histories[i])>history_limit for i in batch):
             raise ValueError("DISCOVERY_HISTORY_LIMIT_EXCEEDED")
     instant=now()
     action_reports=automatic_company_evidence.cached_action_reports(_connect,[r.get("isin") for r in instruments],instant)
@@ -126,7 +127,7 @@ def _market_page(exchange,instruments,cutoff=None):
     result["discovery_coverage"]={"recent_registry_count":recent_count,"selected_count":len(ids),
         "selection_limit":200,"selection_method":"EXPECTED_SESSION_THEN_DAILY_TRADED_VALUE",
         "expected_session_count":matching if expected_session else None,
-        "history_batch_size":20,"calendar_status":"PUBLISHED_SESSION" if expected_session else "CALENDAR_UNVERIFIED",
+        "history_batch_size":20,"history_limit":history_limit,"annual_depth_count":result.get("annual_depth_count",0),"calendar_status":"PUBLISHED_SESSION" if expected_session else "CALENDAR_UNVERIFIED",
         "expected_session":expected,"calendar_checked_on":today.isoformat()}
     # Attach registry identity, not ticker-based guesses, for company evidence.
     registry = {row["id"]: row for row in instruments if row.get("active") is True

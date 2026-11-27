@@ -26,6 +26,21 @@ class DiscoveryHistorySchedulerTest {
     verifyNoInteractions(db,stocks,calendar);
   }
 
+  @Test void priorSessionDoesNotSkipUnknownOrUnsupportedNewerDate(){
+    var calendar=mock(MarketCalendarService.class);
+    var scheduler=new DiscoveryHistoryScheduler(mock(JdbcTemplate.class),mock(UpstoxFeedService.class),calendar);
+    LocalDate today=LocalDate.of(2026,11,23);
+    java.util.function.Function<LocalDate,Instant> noon=d->d.atTime(12,0).atZone(MarketCalendarService.IST).toInstant();
+    when(calendar.sessionContext("NSE",noon.apply(today.minusDays(1)))).thenReturn(Map.of("phase","CLOSED"));
+    when(calendar.sessionContext("NSE",noon.apply(today.minusDays(2)))).thenReturn(Map.of("phase","CLOSED"));
+    when(calendar.sessionContext("NSE",noon.apply(today.minusDays(3)))).thenReturn(Map.of("phase","MARKET_HOURS"));
+    org.junit.jupiter.api.Assertions.assertEquals(today.minusDays(3),scheduler.verifiedPriorSession("NSE",today));
+    for(String phase:List.of("CALENDAR_UNVERIFIED","SPECIAL_SESSION_UNSUPPORTED")){
+      when(calendar.sessionContext("NSE",noon.apply(today.minusDays(1)))).thenReturn(Map.of("phase",phase));
+      org.junit.jupiter.api.Assertions.assertNull(scheduler.verifiedPriorSession("NSE",today));
+    }
+  }
+
   @Test void claimsMappedInstrumentAndUsesExistingAdapter()throws Exception{
     JdbcTemplate db=mock(JdbcTemplate.class);
     UpstoxFeedService stocks=mock(UpstoxFeedService.class);

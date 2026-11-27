@@ -54,6 +54,19 @@ class InternalFeedControllerTest {
     verifyNoInteractions(jdbc);
   }
 
+  @Test void pagedDiscoveryReadsAnnualDepthWithoutChangingLegacyBatchLimit() {
+    JdbcTemplate jdbc=mock(JdbcTemplate.class);
+    HttpServletRequest request=mock(HttpServletRequest.class);
+    var api=controller(jdbc,"service-secret");
+    when(request.getHeader("X-Atlas-Service-Token")).thenReturn("service-secret");
+    String cutoff=java.time.Instant.now().minusSeconds(1).toString();
+    var stamp=java.sql.Timestamp.from(java.time.Instant.parse(cutoff));
+    api.discoveryCandles(request,"NSE",List.of(7L));
+    verify(jdbc).queryForList(contains("ORDER BY b.candle_time DESC LIMIT 250"),eq("NSE"),eq(7L));
+    api.discoveryCandles(request,"NSE",List.of(7L),cutoff);
+    verify(jdbc).queryForList(argThat(sql->sql.contains("ORDER BY b.candle_time DESC LIMIT 253")&&sql.contains("b.received_at<=?")),eq(stamp),eq("NSE"),eq(7L));
+  }
+
   @Test void strategyBenchmarkRequiresCredentialAndUsesFixedPublicIndex() {
     JdbcTemplate jdbc=mock(JdbcTemplate.class);
     HttpServletRequest request=mock(HttpServletRequest.class);

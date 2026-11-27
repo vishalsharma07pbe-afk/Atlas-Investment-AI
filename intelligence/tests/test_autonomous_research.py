@@ -229,6 +229,31 @@ class AutonomousResearchTests(unittest.TestCase):
         self.assertEqual([r["id"] for r in result["momentum_leaders"]],[421,420,419,418,417])
         self.assertEqual(result["sample_breadth"]["pairs"][0]["advancing"],total)
 
+    def test_broad_annual_depth_and_legacy_bounds(self):
+        from datetime import date,timedelta
+        instant=datetime(2026,11,24,12,tzinfo=timezone.utc)
+        instruments=[{"id":i,"exchange":"NSE","symbol":f"T{i}","active":True,
+                      "listing_status":"ACTIVE","series":"EQ","instrument_type":"EQ",
+                      "recent_registry_count":2,"expected_session":"2026-11-23",
+                      "expected_session_count":2} for i in (1,2)]
+        last=date(2026,11,23)
+        def rows(depth):
+            return [{"instrument_id":i,"trade_date":(last-timedelta(days=n-1-d)).isoformat(),
+                     "open":100,"high":102,"low":99,"close":101,"volume":100000,
+                     "adjustment_status":"RAW_UNADJUSTED"}
+                    for i,n in ((1,depth),(2,250)) for d in range(n)]
+        with patch.object(research,"now",return_value=instant):
+            with patch.object(research,"backend_json",return_value=rows(253)):
+                result=research._market_page("NSE",instruments,instant.isoformat())
+                self.assertEqual(result["eligible_count"],2)
+                self.assertEqual(result["discovery_coverage"]["annual_depth_count"],1)
+                self.assertEqual(result["discovery_coverage"]["history_limit"],253)
+                with self.assertRaisesRegex(ValueError,"LIMIT_EXCEEDED|INVALID_DISCOVERY_HISTORY"):
+                    research._market_page("NSE",instruments)
+            with patch.object(research,"backend_json",return_value=rows(254)):
+                with self.assertRaisesRegex(ValueError,"LIMIT_EXCEEDED|INVALID_DISCOVERY_HISTORY"):
+                    research._market_page("NSE",instruments,instant.isoformat())
+
     def test_broad_discovery_rejects_missing_duplicate_or_changed_pages(self):
         from app import discovery_scan
         instant=datetime(2026,11,24,12,tzinfo=timezone.utc)

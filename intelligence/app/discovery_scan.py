@@ -30,7 +30,7 @@ def _trap(r): return (not any(e["status"]=="REENTRY_OBSERVED" for e in r["follow
 def merge(out,page):
     if out is None:
         return page
-    for k in ("universe_size","eligible_count"):
+    for k in ("universe_size","eligible_count","annual_depth_count"):
         out[k]+=page[k]
     for key,value in page["skipped"].items():
         out["skipped"][key]=out["skipped"].get(key,0)+value
@@ -103,7 +103,8 @@ def scan(exchange,load,process,clock):
     coverage.update({"selected_count":seen,"recent_registry_count":seen,"selection_limit":None,
         "selection_method":"ALL_LOCALLY_RECENT_HISTORIES_KEYSET_SCAN",
         "scan_complete":True,"page_size":PAGE,"safety_bound":MAX_LISTINGS,
-        "scan_scope":"LOCAL_RECENT_HISTORIES_ONLY","observation_cutoff":cutoff})
+        "scan_scope":"LOCAL_RECENT_HISTORIES_ONLY","observation_cutoff":cutoff,
+        "annual_depth_count":result["annual_depth_count"]})
     result["notice"]="All locally recent active cash-equity histories observed in this completed paged sweep. Not all exchange listings have history; no live or qualified investment ranking is implied."
     result["sample_breadth"]["notice"]="Comparable adjusted histories in the completed local sweep; not official exchange breadth."
     return result

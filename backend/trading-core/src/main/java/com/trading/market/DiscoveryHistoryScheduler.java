@@ -41,11 +41,23 @@ public class DiscoveryHistoryScheduler {
     // Oldest eligible work in each pool is protected from priority starvation.
     // Sequential, paced REST calls; shared operator cooldown remains authoritative.
     for(String exchange:List.of("NSE","BSE")){
-      LocalDate end;
-      try{end=calendar.lastTradingDay(exchange,today);}catch(IllegalStateException ex){continue;}
-      if(end.isBefore(today.minusDays(7)))continue;
-      refreshExchange(exchange,end);
+      LocalDate end=verifiedPriorSession(exchange,today);
+      if(end!=null)refreshExchange(exchange,end);
     }
+  }
+
+  // Match the research calendar policy: a newer unknown or special date
+  // must not be silently skipped to an older regular session.
+  // Keep the prior-day-only policy until same-day publication is validated.
+  LocalDate verifiedPriorSession(String exchange,LocalDate today){
+    for(int i=1;i<=7;i++){
+      LocalDate day=today.minusDays(i);
+      String phase=(String)calendar.sessionContext(exchange,day.atTime(12,0).atZone(MarketCalendarService.IST).toInstant()).get("phase");
+      if("CLOSED".equals(phase))continue;
+      if("MARKET_HOURS".equals(phase)||"POST_MARKET".equals(phase)||"PRE_MARKET".equals(phase)||"BEFORE_PRE_MARKET".equals(phase))return day;
+      return null;
+    }
+    return null;
   }
 
   private static LocalDate localDate(Object raw){

@@ -25,6 +25,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
     today = as_of or date.today()
     rows = []
     steady_candidates=[]
+    annual_depth_count=0
     horizon_evaluations = []
     breadth_pairs={}
     pressure_rows=[]
@@ -105,6 +106,9 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                         action_preview_withheld+=1
                     continue
             ind = compute(candles)
+            # Observation depth only; not verified calendar continuity or adjusted history.
+            if batch_loaded and expected_session is not None and len(candles)>=253:
+                annual_depth_count+=1
             close = candles[-1].close
             previous = candles[-2].close
             change = 100 * (close / previous - 1)
@@ -188,6 +192,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
         "notice": f"Bounded daily sample of up to {limit} registry instruments; not a full-market top-five ranking, live feed, intraday signal or recommendation.",
     }
     if batch_loaded:
+        result["annual_depth_count"]=annual_depth_count
         result["steady_momentum_candidates"]=steady_candidates
         result["company_research_universe"]=company_research_universe
         result["replay_research_universe"]=replay_research_universe

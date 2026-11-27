@@ -174,11 +174,12 @@ public class InternalFeedController {
           AND b.quality_status IN ('VALIDATED_MANUAL','PROVIDER_VALIDATED')
           AND b.candle_time < (now() AT TIME ZONE 'Asia/Kolkata')::date::timestamp AT TIME ZONE 'Asia/Kolkata'
           /* discovery-cutoff */
-        ORDER BY b.candle_time DESC LIMIT 250
+        ORDER BY b.candle_time DESC LIMIT /* discovery-depth */
       ) c
       WHERE e.code=? AND i.active AND i.listing_status='ACTIVE' AND i.series='EQ'
         AND i.instrument_type IN ('EQ','EQUITY','STOCK') AND i.id IN (
-      """.replace("/* discovery-cutoff */",cutoff!=null?"AND b.received_at<=?":"")+placeholders+") ORDER BY i.id,c.trade_date",args.toArray());
+      """.replace("/* discovery-cutoff */",cutoff!=null?"AND b.received_at<=?":"")
+        .replace("/* discovery-depth */",cutoff!=null?"253":"250")+placeholders+") ORDER BY i.id,c.trade_date",args.toArray());
   }
 
   /** Atomic replacement of a dated public classification list, no account data. */
