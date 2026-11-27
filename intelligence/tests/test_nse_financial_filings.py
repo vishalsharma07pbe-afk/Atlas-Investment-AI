@@ -46,3 +46,12 @@ class FinancialFilingTests(unittest.TestCase):
         self.assertEqual(f.compare(e,company)["status"],"WITHIN_ILLUSTRATIVE_TOLERANCE")
         company["quarterly_financials"]["latest_period"]="2026-06-30"
         self.assertEqual(f.compare(e,company)["status"],"NOT_COMPARABLE")
+
+    def test_candidate_index_needs_complete_latest_unambiguous_consolidated_record(self):
+        row={"symbol":"TEST","qe_Date":"30-Sep-2026","consolidated":"Consolidated","ixbrl":URL}
+        def payload(rows,count=None):return {"data":rows,"page":0,"totalCount":len(rows) if count is None else count}
+        self.assertEqual(f.select_index(payload([row]),"TEST",TODAY),(PERIOD,URL))
+        alternate="https://nsearchives.nseindia.com/corporate/ixbrl/INTEGRATED_FILING_INDAS_209924_04112026211009_iXBRL_WEB.html"
+        for data in (payload([row],2),payload([row,{**row,"ixbrl":alternate}]),payload([{**row,"symbol":"OTHER"}]),
+                     payload([{**row,"consolidated":"Standalone"}]),payload([{**row,"ixbrl":"https://evil.test/a"}])):
+            with self.assertRaises(ValueError):f.select_index(data,"TEST",TODAY)

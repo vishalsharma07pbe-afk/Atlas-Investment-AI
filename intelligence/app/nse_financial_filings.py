@@ -1,7 +1,7 @@
 """Source-linked issuer financial observations from authorized NSE archive links.
 
-The exchange website index contract is not live verified. Accept only a local
-public link manifest, fetch and parse automatically; no manual financial values,
+The exchange website index contract is not live verified. Accept a local public
+link manifest or separately authorized candidate index discovery; no manual financial values,
 guessed links, private data, or standalone/consolidated substitutions.
 """
 from calendar import monthrange
@@ -24,6 +24,8 @@ from .company_venues import collect
 
 IST=ZoneInfo("Asia/Kolkata")
 PATH=Path("/app/filing-reports/financial-links.json")
+INDEX="https://www.nseindia.in/api/integrated-filing-results"
+INDEX_METHOD="NSE-INTEGRATED-FINANCIAL-INDEX-1"
 INTERVAL=900
 MAX_BYTES=5_000_000
 DECLARATION="Declaration of unmodified opinion or statement on impact of audit qualification"
@@ -38,6 +40,9 @@ NOTICE=("Issuer-reported consolidated Ind-AS results from the supplied official 
 
 def permitted():
     return os.getenv("ATLAS_NSE_FINANCIAL_FILINGS_ENABLED","false").lower()=="true" and os.getenv("MARKET_DATA_USAGE_RIGHTS_CONFIRMED","false").lower()=="true"
+
+def index_permitted():
+    return permitted() and os.getenv("ATLAS_NSE_FINANCIAL_INDEX_ENABLED","false").lower()=="true"
 
 def valid_url(url):
     if not isinstance(url,str) or len(url)>300:return False
@@ -176,38 +181,96 @@ def load(isin,period,url,today):
     with httpx.Client(timeout=20,follow_redirects=False) as client:raw=fetch(client,url)
     return {**parse(raw,isin,period,today),"source_url":url,"source_sha256":sha256(raw).hexdigest()}
 
+def select_index(obj,symbol,today):
+    """Bounded complete response only; no inferred revision precedence."""
+    if not isinstance(obj,dict) or type(obj.get("totalCount")) is not int or obj.get("page") not in (0,1):
+        raise ValueError("INDEX_SCHEMA")
+    rows=obj.get("data")
+    if not isinstance(rows,list) or not 1<=len(rows)<=40 or len(rows)!=obj["totalCount"]:raise ValueError("INDEX_INCOMPLETE")
+    periods=[]
+    for row in rows:
+        if not isinstance(row,dict) or row.get("symbol")!=symbol or row.get("consolidated") not in ("Consolidated","Standalone"):
+            raise ValueError("INDEX_IDENTITY_OR_SCOPE")
+        day=datetime.strptime(row["qe_Date"],"%d-%b-%Y").date()
+        if day>today or day.month not in (3,6,9,12) or day.day!=monthrange(day.year,day.month)[1]:raise ValueError("INDEX_PERIOD")
+        periods.append((day,row))
+    latest=max(d for d,_ in periods)
+    if not fresh_period(latest,today):raise ValueError("INDEX_STALE")
+    consolidated=[r for d,r in periods if d==latest and r["consolidated"]=="Consolidated"]
+    if not consolidated or any(not valid_url(r.get("ixbrl")) for r in consolidated):raise ValueError("INDEX_ARCHIVE")
+    urls={r["ixbrl"] for r in consolidated}
+    if len(urls)!=1:raise ValueError("INDEX_AMBIGUOUS_REVISION")
+    return latest,next(iter(urls))
+
+def discover(symbol,isin,today,document_loader=load):
+    if not index_permitted() or not re.fullmatch(r"[A-Z0-9._&-]{1,40}",symbol) or not exact_isin(isin):raise ValueError("INDEX_PERMISSION")
+    # Candidate website contract reported by public clients, not a licensed
+    # verified API. Never emulate a browser or circumvent a denied request.
+    with httpx.Client(timeout=20,follow_redirects=False,trust_env=False) as client:
+        raw=fetch(client,INDEX,{"index":"equities","symbol":symbol,"period_ended":"all",
+                                "type":"Integrated Filing- Financials","page":1,"size":40})
+    period,url=select_index(json.loads(raw),symbol,today)
+    e=document_loader(isin,period,url,today)
+    if e.get("isin")!=isin or e.get("period")!=period.isoformat() or e.get("source_url")!=url:
+        raise ValueError("INDEX_DOCUMENT_IDENTITY")
+    return {**e,"acquisition_method":INDEX_METHOD,"index_source":INDEX,"index_sha256":sha256(raw).hexdigest()}
+
 def _table(db):
     db.execute("""CREATE TABLE IF NOT EXISTS nse_financial_filings(
       isin TEXT PRIMARY KEY,period TEXT NOT NULL,source_url TEXT NOT NULL,attempted_at TEXT NOT NULL,next_due TEXT NOT NULL,status TEXT NOT NULL,payload TEXT)""")
 
-def refresh(snapshot,connect,instant,loader=load,path=PATH):
+def refresh(snapshot,connect,instant,loader=load,path=PATH,index_loader=discover):
     if not snapshot.get("enabled") or not permitted():return False
     today=instant.astimezone(IST).date()
     links=read_manifest(today,path)
     observations=collect(snapshot,instant)
-    targets={isin for item,isin in identify_priority(snapshot) if isin in links and any(r.get("as_of")==item.get("as_of") and r.get("id")==item.get("id") and r["exchange"]==item["exchange"] for r in observations.get(isin,[]))}
+    targets={}
+    for item,isin in identify_priority(snapshot):
+        observed=observations.get(isin,[])
+        if not any(r.get("as_of")==item.get("as_of") and r.get("id")==item.get("id") and r["exchange"]==item["exchange"] for r in observed):continue
+        if isin in links:targets[isin]=None;continue
+        if not index_permitted():continue
+        symbols={r.get("symbol") for r in observed if r.get("exchange")=="NSE" and r.get("as_of")==item.get("as_of")}
+        if len(symbols)==1:
+            symbol=next(iter(symbols))
+            if isinstance(symbol,str) and re.fullmatch(r"[A-Z0-9._&-]{1,40}",symbol):targets[isin]=symbol
     stamp=instant.isoformat()
     with closing(connect()) as db,db:
         _table(db);db.execute("BEGIN IMMEDIATE")
         old={r["isin"]:r for r in db.execute("SELECT * FROM nse_financial_filings")}
         if any(r["status"] in ("RUNNING","UNAVAILABLE") and r["attempted_at"]>(instant-timedelta(hours=1)).isoformat() for r in old.values()):return False
-        due=sorted((i for i in targets if i not in old or old[i]["next_due"]<=stamp or (old[i]["period"],old[i]["source_url"])!=(links[i][0].isoformat(),links[i][1])),
+        def changed(i):
+            if i not in old:return True
+            row=old[i]
+            if i in links:return (row["period"],row["source_url"])!=(links[i][0].isoformat(),links[i][1])
+            # Switch from a manual link to automatic discovery when enabled.
+            try:return json.loads(row["payload"] or "{}").get("acquisition_method")!=INDEX_METHOD and row["status"]=="AVAILABLE"
+            except (ValueError,TypeError):return True
+        due=sorted((i for i in targets if i not in old or old[i]["next_due"]<=stamp or changed(i)),
                    key=lambda i:(old[i]["attempted_at"] if i in old else "",i))
         if not due:return bool(targets)
-        isin=due[0];period,url=links[isin]
+        isin=due[0];manual=isin in links
+        period,url=links[isin] if manual else (None,INDEX)
         db.execute("""INSERT INTO nse_financial_filings VALUES(?,?,?,?,?,'RUNNING',NULL)
           ON CONFLICT(isin) DO UPDATE SET period=excluded.period,source_url=excluded.source_url,attempted_at=excluded.attempted_at,next_due=excluded.next_due,status='RUNNING',payload=NULL""",
-          (isin,period.isoformat(),url,stamp,(instant+timedelta(hours=1)).isoformat()))
+          (isin,period.isoformat() if period else "",url,stamp,(instant+timedelta(hours=1)).isoformat()))
     result=None
     try:
-        result=loader(isin,period,url,today)
-        if result.get("isin")!=isin or result.get("period")!=period.isoformat() or result.get("source_url")!=url:result=None
-    except (ValueError,TypeError,KeyError,AttributeError,ArithmeticError,httpx.HTTPError,OSError):pass
+        result=loader(isin,period,url,today) if manual else index_loader(targets[isin],isin,today)
+        if not isinstance(result,dict) or result.get("isin")!=isin:raise ValueError("RESULT_IDENTITY")
+        if manual:
+            if result.get("period")!=period.isoformat() or result.get("source_url")!=url:raise ValueError("RESULT_LINK")
+        else:
+            p=date.fromisoformat(result["period"]);link=result["source_url"]
+            if not fresh_period(p,today) or not valid_url(link) or result.get("acquisition_method")!=INDEX_METHOD or result.get("index_source")!=INDEX or not re.fullmatch(r"[a-f0-9]{64}",result.get("index_sha256","")):
+                raise ValueError("RESULT_INDEX")
+            period,url=p,link
+    except (ValueError,TypeError,KeyError,AttributeError,ArithmeticError,httpx.HTTPError,OSError):result=None
     with closing(connect()) as db,db:
         _table(db)
-        db.execute("UPDATE nse_financial_filings SET status=?,payload=?,next_due=? WHERE isin=? AND attempted_at=? AND status='RUNNING'",
+        db.execute("UPDATE nse_financial_filings SET status=?,payload=?,next_due=?,period=?,source_url=? WHERE isin=? AND attempted_at=? AND status='RUNNING'",
            ("AVAILABLE" if result else "UNAVAILABLE",json.dumps(result,allow_nan=False) if result else None,
-            (instant+timedelta(days=1) if result else instant+timedelta(hours=6)).isoformat(),isin,stamp))
+            (instant+timedelta(days=1) if result else instant+timedelta(hours=6)).isoformat(),period.isoformat() if period else "",url,isin,stamp))
     return result is not None
 
 def compare(report,company):
@@ -239,14 +302,21 @@ def attach(snapshot,connect,instant,path=PATH):
     matched=set()
     for item,isin in identify_priority(snapshot):
         item.pop("independent_financial_evidence",None)
-        if isin not in links or isin not in saved:continue
+        if isin not in saved:continue
         try:
             row=saved[isin];e=json.loads(row["payload"])
-            period,url=links[isin]
+            if isin in links:
+                period,url=links[isin]
+            elif index_permitted():
+                period=date.fromisoformat(row["period"]);url=row["source_url"]
+                stamp=datetime.fromisoformat(row["attempted_at"])
+                if not timedelta(0)<=instant-stamp<=timedelta(hours=24) or not fresh_period(period,today) or not valid_url(url) or e.get("acquisition_method")!=INDEX_METHOD or e.get("index_source")!=INDEX or not re.fullmatch(r"[a-f0-9]{64}",e.get("index_sha256","")):
+                    continue
+            else:continue
             if e["isin"]!=isin or e["period"]!=period.isoformat() or e["source_url"]!=url:continue
         except (ValueError,TypeError,KeyError):continue
         item["independent_financial_evidence"]={**e,"retrieved_at":row["attempted_at"],"status":"REPORTED_CONSOLIDATED_FILING",
             "comparison":compare(e,item.get("company_evidence")),"notice":NOTICE}
         matched.add(isin)
-    summary.update(status="REPORTED_FILINGS_AVAILABLE" if matched else "AWAITING_EVIDENCE" if links else "AWAITING_OFFICIAL_LINKS",matched_companies=len(matched),supplied_links=len(links))
+    summary.update(status="REPORTED_FILINGS_AVAILABLE" if matched else "AWAITING_EVIDENCE" if links or index_permitted() else "AWAITING_OFFICIAL_LINKS",matched_companies=len(matched),supplied_links=len(links))
     return snapshot
