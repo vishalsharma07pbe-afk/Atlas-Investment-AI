@@ -125,7 +125,10 @@ def reports(candidates,source_rows,loaded,today):
         if (today-day(s["ter_date"])).days>90:disclosure.update(ter_date=None,ter_percent=None)
         if (today-day(s["riskometer_date"])).days>60:disclosure.update(riskometer_date=None,riskometer=None)
         index=loaded["indices"].get(s["benchmark"],{})
-        result[f.identifier]={"status":"LOCAL_EXPORT_EVIDENCE_ONLY","disclosure":disclosure,"benchmark_comparison":compare(r,index),
+        comparison=compare(r,index)
+        provenance=(loaded.get("downloaded_tri_provenance") or {}).get(s["benchmark"])
+        if comparison and provenance:comparison={**comparison,"status":"MATCHED_AUTHORIZED_DIRECT_TRI_CSV","source_provenance":provenance}
+        result[f.identifier]={"status":"LOCAL_EXPORT_EVIDENCE_ONLY","disclosure":disclosure,"benchmark_comparison":comparison,
             "input_sha256":loaded["sha256"],"notice":NOTICE}
     return result
 
@@ -143,6 +146,8 @@ def overview(loaded,today):
                     first=max(prior);cagr=annual(values[first],values[last],(last-first).days)
                     if num(cagr,-100,1e6):
                         item.update(status="LOCAL_TRI_EXPORT_OBSERVATION",benchmark=name,period="52 weeks",last_available_date=last.isoformat(),
-                            evidence=["Annualized historical TRI return: "+str(round(cagr,4))+"%","Operator-supplied export; segment proxy only"],blocker=None)
+                            evidence=["Annualized historical TRI return: "+str(round(cagr,4))+"%",
+                                      "Authorized direct CSV; segment proxy only" if name in loaded.get("downloaded_tri_provenance",{}) else "Operator-supplied export; segment proxy only"],blocker=None)
+                        if name in loaded.get("downloaded_tri_provenance",{}):item["status"]="AUTHORIZED_DIRECT_TRI_OBSERVATION"
         result.append(item)
     return result

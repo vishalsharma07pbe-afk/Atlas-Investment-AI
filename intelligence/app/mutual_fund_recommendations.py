@@ -14,7 +14,7 @@ import hashlib
 import json
 import sqlite3
 
-from . import nav_catalog, fund_disclosures, fund_portfolios, fund_peer_shortlist, fund_local_evidence, fund_prospective, fund_growth_drivers
+from . import nav_catalog, fund_disclosures, fund_portfolios, fund_peer_shortlist, fund_local_evidence, fund_prospective, fund_growth_drivers, official_tri
 from .market_client import backend_json
 from .fund_categories import CATEGORIES, LABELS as OFFICIAL_CATEGORY_LABELS, DEBT, SPECIALIZED, COMPARABLE
 
@@ -556,7 +556,8 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
     compositions=fund_portfolios.composition_matches(disclosed)
     portfolios=fund_portfolios.matched(prioritized)
     quality_watch=fund_peer_shortlist.quality_watch(official,portfolios,category,fit,today)
-    local_export=fund_local_evidence.load(today)
+    downloaded_tri=official_tri.read(datetime.now(timezone.utc))
+    local_export=official_tri.combine(fund_local_evidence.load(today),downloaded_tri)
     local_reports=fund_local_evidence.reports(official,source_rows,local_export,today)
     coverage["secondary_portfolio_composition_matches"]=len(compositions)
     coverage["secondary_portfolio_matches"]=len(portfolios)
@@ -606,6 +607,8 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
       "suitability":ranked["suitability"],"blockers":blockers,
       "qualification_summary":{"evaluated_count":len(official),"top_eligible_count":ranked["top_eligible_count"],
           "growth_eligible_count":ranked["growth_eligible_count"],"excluded":ranked["excluded"]},
+      "official_tri_coverage":{"status":downloaded_tri["status"],"configured_count":downloaded_tri["configured_count"],
+          "available_count":len(downloaded_tri["indices"]),"conflicting_series":local_export["tri_conflicts"],"notice":official_tri.NOTICE},
       "market_overview":fund_local_evidence.overview(local_export,today),
       "recommendation_status":"QUALIFIED_RESEARCH_AVAILABLE" if ranked["top_performers"] or ranked["growth_outlook"] else "NO_QUALIFYING_FUNDS_INCOMPLETE_EVIDENCE",
       "notice":"Discovery records are not recommendations. Top Performer and Growth Outlook use independent evidence gates; zero picks is allowed."}
