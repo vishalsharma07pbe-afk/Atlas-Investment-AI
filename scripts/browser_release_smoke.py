@@ -79,7 +79,7 @@ def run():
                     panel.locator("#panel-blur").fill(str(blur))
                     assert page.evaluate("getComputedStyle(document.documentElement).overflowY !== 'hidden' && getComputedStyle(document.body).overflowY !== 'hidden'"),"appearance must not lock page scrolling"
                     page.evaluate("window.scrollTo(0,0)")
-                    page.mouse.move(20,850)
+                    page.mouse.move(500,780)
                     page.mouse.wheel(0,350)
                     # Main document may be shorter than the viewport on empty fixtures.
                     if page.evaluate("document.scrollingElement.scrollHeight > innerHeight + 20"):
