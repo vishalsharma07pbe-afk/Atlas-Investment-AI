@@ -1,3 +1,4 @@
+import {EvidenceBars,MarketTiles} from "./TerminalCharts";
 import {useState} from "react";
 import ExchangePicker from "./ExchangePicker";
 
@@ -35,6 +36,6 @@ export default function MarketIntelligence(){
       {error&&<p role="alert" className="error">{error}</p>}
       {result&&<div role="status" className="muted tiny"><p>Eligible: {result.eligible_count}/{result.universe_size}. Advancing: {result.breadth.advancing} · Declining: {result.breadth.declining} · Unchanged: {result.breadth.unchanged}.</p><p>Excluded: {Object.entries(result.skipped).map(([k,v])=>k.replace(/_/g," ")+": "+v).join(" · ")}.</p><p>{result.notice}</p></div>}
     </section>
-    {result&&<>{table("Top gainers in sample",result.top_gainers)}{table("Top decliners in sample",result.top_losers)}{table("Momentum leaders",result.momentum_leaders)}{table("Relative volume leaders",result.volume_leaders)}{table("Anomaly watch · heuristic candidates",result.anomaly_watch)}</>}
+    {result&&<><section className="panel glass" aria-label="Market sample visualizations"><EvidenceBars title="Observed daily breadth · sampled instruments" unit="" neutral rows={[{label:"Advancing",value:result.breadth.advancing},{label:"Declining",value:result.breadth.declining},{label:"Unchanged",value:result.breadth.unchanged}]}/><MarketTiles title="Daily price movement · selected sample" period="1-day change" items={[...result.top_gainers,...result.top_losers].map(r=>({key:r.exchange+":"+r.id,label:r.symbol,exchange:r.exchange,date:r.as_of,value:r.change_1d_percent}))}/><EvidenceBars title="Relative volume leaders (times)" unit="×" neutral rows={result.volume_leaders.slice(0,8).map(r=>({label:r.symbol,value:r.relative_volume_20}))}/></section>{table("Top gainers in sample",result.top_gainers)}{table("Top decliners in sample",result.top_losers)}{table("Momentum leaders",result.momentum_leaders)}{table("Relative volume leaders",result.volume_leaders)}{table("Anomaly watch · heuristic candidates",result.anomaly_watch)}</>}
   </div>;
 }

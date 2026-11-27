@@ -13,6 +13,7 @@ button { cursor: pointer; }
 .dashboard {
   --panel-alpha: .72;
   --panel-blur: 20px;
+  --canvas-blur: 20px;
   --panel-rgb: 9, 17, 37;
   --glass-border: rgba(190, 215, 255, .2);
   --panel-border-color: var(--glass-border);
@@ -30,7 +31,7 @@ button { cursor: pointer; }
   --warning: #ffc779;
   position: relative;
   min-height: 100dvh;
-  overflow: hidden;
+  overflow-x: clip;
   background: var(--canvas-base);
   color: var(--ink);
   color-scheme: dark;
@@ -78,7 +79,8 @@ button { cursor: pointer; }
 
 .canvas {
   position: fixed;
-  inset: 0;
+  inset: calc(-1 * var(--canvas-blur));
+  filter: blur(var(--canvas-blur));
   overflow: hidden;
   pointer-events: none;
   background:
@@ -97,10 +99,10 @@ button { cursor: pointer; }
   animation: ambient-turn 28s linear infinite;
   will-change: transform;
 }
-.canvas::after {
-  content: "";
-  position: absolute;
+.canvas-texture {
+  position: fixed;
   inset: 0;
+  pointer-events: none;
   background-image:
     linear-gradient(rgba(136, 174, 255, .055) 1px, transparent 1px),
     linear-gradient(90deg, rgba(136, 174, 255, .055) 1px, transparent 1px),
@@ -108,6 +110,10 @@ button { cursor: pointer; }
   background-size: 42px 42px, 42px 42px, 21px 21px;
   mask-image: linear-gradient(to bottom, black, rgba(0, 0, 0, .5));
 }
+
+/* Dark mode uses the original animated gradients without decorative grid/dots. */
+.dashboard[data-theme="dark"] .canvas-texture { display: none; }
+@media (prefers-color-scheme: dark) { .dashboard[data-theme="system"] .canvas-texture { display: none; } }
 
 [data-theme="light"] .canvas {
   background:
@@ -578,8 +584,8 @@ footer { padding: 12px 0 25px; color: var(--ink-muted); font-size: 10px; letter-
   }
   .dashboard .canvas { animation: atlas-ambient 32s ease-in-out infinite alternate; }
   @keyframes atlas-ambient {
-    from { filter: hue-rotate(0deg) brightness(1); }
-    to { filter: hue-rotate(10deg) brightness(1.07); }
+    from { filter: blur(var(--canvas-blur)) hue-rotate(0deg) brightness(1); }
+    to { filter: blur(var(--canvas-blur)) hue-rotate(10deg) brightness(1.07); }
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -875,7 +881,8 @@ footer { padding: 12px 0 25px; color: var(--ink-muted); font-size: 10px; letter-
 @media(max-width:680px){.appearance-panel { inset: 12px; width: auto; }.atlas-notification-panel { top: 62px; right: 12px; bottom: 12px; width: calc(100vw - 24px); }}
 
 /* Centered adaptive overlays: content-sized until their viewport cap is reached. */
-html:has(.appearance-panel),html:has(.atlas-notification-panel),body:has(.appearance-panel),body:has(.atlas-notification-panel){overflow:hidden;overscroll-behavior:none}
+/* Appearance is a non-modal live preview; only the notification modal locks the document. */
+html:has(.atlas-notification-panel),body:has(.atlas-notification-panel){overflow:hidden;overscroll-behavior:none}
 .appearance-scrim,.atlas-notification-backdrop{
   background:rgba(3,7,20,.46);
   -webkit-backdrop-filter:blur(12px) saturate(.78);

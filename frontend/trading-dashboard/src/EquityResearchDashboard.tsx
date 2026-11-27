@@ -10,8 +10,8 @@ type Flows={interval:string;participants:Record<"fii"|"dii",Section>};
 const value=(input:unknown)=>input==null?"—":typeof input==="number"?new Intl.NumberFormat("en-IN",{maximumFractionDigits:2}).format(input):String(input);
 const label=(input:string)=>input.replace(/_/g," ").replace(/\b\w/g,c=>c.toUpperCase());
 
-export default function EquityResearchDashboard(){
- const [query,setQuery]=useState("");const [suggestions,setSuggestions]=useState<Instrument[]>([]);const [selected,setSelected]=useState<Instrument|null>(null);
+export default function EquityResearchDashboard({initialQuery=""}:{initialQuery?:string}={}){
+ const [query,setQuery]=useState(initialQuery);const [suggestions,setSuggestions]=useState<Instrument[]>([]);const [selected,setSelected]=useState<Instrument|null>(null);
  const [report,setReport]=useState<Report|null>(null);const [news,setNews]=useState<Article[]>([]);const [flows,setFlows]=useState<Flows|null>(null);
  const [loading,setLoading]=useState(false);const [error,setError]=useState("");const sequence=useRef(0);
  useEffect(()=>{const term=query.trim();if(!term||selected?.trading_symbol===term.toUpperCase()){setSuggestions([]);return;}const current=++sequence.current;const timer=setTimeout(async()=>{try{const response=await fetch("/api/v1/instruments/search?q="+encodeURIComponent(term));if(!response.ok)throw Error();const rows:Instrument[]=await response.json();if(current===sequence.current)setSuggestions(rows.filter(x=>x.isin).slice(0,10));}catch{if(current===sequence.current)setSuggestions([]);}},180);return()=>clearTimeout(timer);},[query,selected?.trading_symbol]);

@@ -2,7 +2,7 @@ import {useEffect,useRef,type RefObject} from "react";
 
 // Keep the two existing mutually exclusive header overlays keyboard usable.
 // The callback ref avoids restarting focus management on ordinary data renders.
-export function useOverlayFocus(open:boolean,onClose:()=>void):{
+export function useOverlayFocus(open:boolean,onClose:()=>void,modal=true):{
  triggerRef:RefObject<HTMLButtonElement|null>;panelRef:RefObject<HTMLElement|null>
 }{
  const triggerRef=useRef<HTMLButtonElement>(null);
@@ -22,7 +22,7 @@ export function useOverlayFocus(open:boolean,onClose:()=>void):{
   first().focus({preventScroll:true});
   const onKey=(event:KeyboardEvent)=>{
    if(event.key==="Escape"){event.preventDefault();closeRef.current();return;}
-   if(event.key!=="Tab")return;
+   if(event.key!=="Tab"||!modal)return;
    const items=focusable(),active=document.activeElement;
    if(!items.length){event.preventDefault();panel.focus();return;}
    if(!panel.contains(active)||active===panel||!items.includes(active as HTMLElement)){
@@ -39,6 +39,6 @@ export function useOverlayFocus(open:boolean,onClose:()=>void):{
     trigger.focus({preventScroll:true});
    }
   };
- },[open]);
+ },[open,modal]);
  return {triggerRef,panelRef};
 }

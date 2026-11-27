@@ -12,6 +12,12 @@ import org.springframework.transaction.annotation.Transactional;
 @Service public class UpstoxFeedService {
  private final JdbcTemplate jdbc;private final FeedHttp http;private final VersionedVaultReader vault;
  private final ObjectMapper json=new ObjectMapper();
+ @org.springframework.beans.factory.annotation.Value("${UPSTOX_ACCESS_TOKEN:}") String analyticsToken="";
+ @org.springframework.beans.factory.annotation.Value("${MARKET_DATA_USAGE_RIGHTS_CONFIRMED:false}") boolean marketRights;
+ @org.springframework.beans.factory.annotation.Value("${MARKET_DATA_ENTITLEMENT_CONFIRMED:false}") boolean marketEntitlement;
+ boolean hasConfiguredMarketToken(){return marketRights&&marketEntitlement&&analyticsToken!=null&&!analyticsToken.isBlank();}
+ // Market data access is distinct from account-specific holdings sync.
+ private String marketToken(UUID user){return hasConfiguredMarketToken()?analyticsToken:token(user);}
  public UpstoxFeedService(JdbcTemplate jdbc,FeedHttp http,VersionedVaultReader vault){this.jdbc=jdbc;this.http=http;this.vault=vault;}
  private static final String MASTER="https://assets.upstox.com/market-quote/instruments/exchange/";
  enum MasterFailure { INVALID_JSON, INVALID_ENVELOPE, DUPLICATE_KEY, NO_VALID_EQUITIES, REGISTRY_WRITE_FAILED, MAPPING_WRITE_FAILED, IDENTITY_CONFLICT }
@@ -138,7 +144,7 @@ import org.springframework.transaction.annotation.Transactional;
         AND i.instrument_type IN ('EQ','EQUITY','STOCK')
       """,Integer.class,key)))throw new IllegalArgumentException("Exact equity registry mapping required");
   String url="https://api.upstox.com/v3/market-quote/quotes?instrument_key="+URLEncoder.encode(key,StandardCharsets.UTF_8);
-  JsonNode body=json.readTree(http.text(url,token(user),2_000_000));
+  JsonNode body=json.readTree(http.text(url,marketToken(user),2_000_000));
   if(!"success".equals(body.path("status").asText()))throw new IllegalStateException("Provider rejected quote");
   JsonNode data=body.path("data");
   if(!data.isObject()||data.size()!=1)throw new IllegalStateException("Invalid quote response");
@@ -172,10 +178,10 @@ import org.springframework.transaction.annotation.Transactional;
  public int intradayCandles(UUID user,String key,String timeframe,LocalDate from,LocalDate to)throws Exception{
   if(!Set.of("1minute","15minute").contains(timeframe))throw new IllegalArgumentException("Unsupported timeframe");
   if(from.isAfter(to)||from.isBefore(LocalDate.now().minusDays(30)))throw new IllegalArgumentException("Invalid intraday range");
-  return ingestCandles(token(user),key,from,to,timeframe);
+  return ingestCandles(marketToken(user),key,from,to,timeframe);
  }
  public int dailyCandles(UUID user,String key,LocalDate from,LocalDate to)throws Exception{
-  return ingestCandles(token(user),key,from,to,"1d");
+  return ingestCandles(marketToken(user),key,from,to,"1d");
  }
  /** Operator-configured market-data credential only; never exposed through an HTTP endpoint. */
  int discoveryDailyCandles(String accessToken,String key,LocalDate from,LocalDate to)throws Exception{

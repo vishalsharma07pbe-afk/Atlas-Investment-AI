@@ -16,6 +16,7 @@ import sqlite3
 from urllib.parse import urlencode
 
 from .market_client import backend_json
+from . import steady_momentum, amfi_equity_caps
 from .screener import screen
 from .mutual_fund_recommendations import CATEGORIES, dashboard
 from . import stock_qualification, market_regime, release_reconciliation, economic_calendar, global_releases, global_context, global_markets, global_macro, global_fx, automatic_deals, fund_portfolios, fund_disclosures, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
@@ -348,6 +349,10 @@ def read_snapshot(include_ai=True):
         research_reliability.attach_conclusions(snapshot)
         stock_qualification.attach(snapshot,current.astimezone(ZoneInfo("Asia/Kolkata")).date())
         snapshot["daily_briefing"] = daily_briefing.summarize(snapshot)
+        try:
+            snapshot["steady_momentum"] = steady_momentum.summarize(snapshot,_connect,current)
+        except (ValueError,TypeError,OSError,sqlite3.Error):
+            snapshot["steady_momentum"]={"status":"AWAITING_EVIDENCE","items":[],"notice":steady_momentum.NOTICE}
     return snapshot
 
 
@@ -365,6 +370,10 @@ def job_status():
 
 def _execute_job(job):
     """Dispatch existing bounded engines, with explicit evidence/config gates."""
+    if job=="AMFI_EQUITY_CAP":
+        if not amfi_equity_caps.permitted():
+            return "DISABLED_OR_NOT_AUTHORIZED"
+        return "PASS_COMPLETED" if amfi_equity_caps.refresh(_connect,now().astimezone(ZoneInfo("Asia/Kolkata")).date()) else "WAITING_EVIDENCE"
     if job=="PUBLIC_RESEARCH_ALERTS":
         from . import public_alert_history
         snapshot=read_market_snapshot()
@@ -490,7 +499,7 @@ def run_one_job(interval):
         outcome=_execute_job(job)
     except Exception:
         outcome="FAILED"
-    research_jobs.finish(_connect,job,token,now().timestamp(),(research_calendar.POLL_SECONDS if job=="CALENDAR_CONTEXT" else economic_calendar.INTERVAL if job=="ECONOMIC_CALENDAR" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_releases.INTERVAL if job in global_releases.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_markets.INTERVAL if job in global_markets.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_macro.INTERVAL if job in global_macro.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_fx.INTERVAL if job=="GLOBAL_FX" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else fund_disclosures.INTERVAL if job in ("FUND_DISCLOSURES","FUND_PORTFOLIOS") and outcome!="DISABLED_OR_NOT_AUTHORIZED" else interval),outcome)
+    research_jobs.finish(_connect,job,token,now().timestamp(),(research_calendar.POLL_SECONDS if job=="CALENDAR_CONTEXT" else economic_calendar.INTERVAL if job=="ECONOMIC_CALENDAR" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_releases.INTERVAL if job in global_releases.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_markets.INTERVAL if job in global_markets.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_macro.INTERVAL if job in global_macro.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_fx.INTERVAL if job=="GLOBAL_FX" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else amfi_equity_caps.INTERVAL if job=="AMFI_EQUITY_CAP" else fund_disclosures.INTERVAL if job in ("FUND_DISCLOSURES","FUND_PORTFOLIOS") and outcome!="DISABLED_OR_NOT_AUTHORIZED" else interval),outcome)
     return True
 
 

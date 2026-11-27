@@ -1,4 +1,5 @@
-import {useEffect, useState} from "react";
+import {useEffect, useRef, useState} from "react";
+import {EvidenceBars} from "./TerminalCharts";
 
 type Fund = {scheme_code:string;scheme_name:string;nav:string;nav_date:string;nav_date_status:string;as_of:string;freshness_status:string;stale:boolean;source:string};
 type Status = {scheme_count:number;latest_nav_date:string|null;mode:string;automatic_collection_enabled:boolean;blocker:string|null;source:string;last_refresh_at:string|null;last_refresh_status:string;scheduler?:{next_run_at:string|null}};
@@ -26,7 +27,7 @@ export default function NavCatalog() {
   const [version,setVersion]=useState(0);
   const [detail,setDetail]=useState<Detail|null>(null);
   const [detailLoading,setDetailLoading]=useState(false);
-  const [detailError,setDetailError]=useState("");
+  const [detailError,setDetailError]=useState("");const detailRequest=useRef(0);
   useEffect(()=>{
     let cancelled=false;
     fetch(BASE+"/status").then(r=>{if(!r.ok)throw Error("Catalog unavailable");return r.json()})
@@ -67,14 +68,14 @@ export default function NavCatalog() {
     finally{setBusy(false)}
   }
   async function openFund(fund:Fund) {
-    setDetailLoading(true);setDetailError("");setDetail(null);
+    const request=++detailRequest.current;setDetailLoading(true);setDetailError("");setDetail(null);
     try{
       const response=await fetch(BASE+"/details/"+encodeURIComponent(fund.scheme_code));
       const data=await response.json();
       if(!response.ok)throw Error(typeof data.detail==="string"?data.detail:"Fund details unavailable");
-      setDetail(data as Detail);
-    }catch(e){setDetailError(e instanceof Error?e.message:"Fund details unavailable")}
-    finally{setDetailLoading(false)}
+      if(request===detailRequest.current){if(String(data.identifier)!==String(fund.scheme_code))throw Error("Fund details did not match the selected scheme");setDetail(data as Detail);}
+    }catch(e){if(request===detailRequest.current)setDetailError(e instanceof Error?e.message:"Fund details unavailable")}
+    finally{if(request===detailRequest.current)setDetailLoading(false)}
   }
   return <section className="panel glass" aria-label="Mutual fund NAV catalog">
     <div className="sectionhead"><div><h2>Mutual fund NAV explorer</h2>
@@ -104,7 +105,7 @@ export default function NavCatalog() {
       </div>
       <div className="mf-detail-grid">
         <section><h4>Purchase information</h4><dl><div><dt>Purchase available</dt><dd>{detail.trading_terms.purchase_allowed===true?"Yes":detail.trading_terms.purchase_allowed===false?"No":"Not supplied"}</dd></div><div><dt>Redemption available</dt><dd>{detail.trading_terms.redemption_allowed===true?"Yes":detail.trading_terms.redemption_allowed===false?"No":"Not supplied"}</dd></div><div><dt>Minimum purchase</dt><dd>{money(detail.trading_terms.minimum_purchase_amount as number|null)}</dd></div><div><dt>Additional purchase</dt><dd>{money(detail.trading_terms.additional_purchase_amount as number|null)}</dd></div><div><dt>Settlement</dt><dd>{String(detail.trading_terms.settlement_type??"Not supplied")}</dd></div></dl></section>
-        <section><h4>Returns</h4><div className="mf-return-grid">{Object.entries(detail.performance.trailing_returns_percent).map(([period,value])=><div key={period}><span>{period.toUpperCase()}</span><strong>{value===null?"—":`${Number(value).toFixed(2)}%`}</strong></div>)}</div><p>{detail.performance.status==="AVAILABLE"?"Calculated only from stored dated NAV observations.":"ATLAS is collecting daily observations. Longer-period returns will appear only when enough dated history exists."}</p></section>
+        <section><h4>Returns</h4><EvidenceBars title="Stored historical NAV returns" rows={Object.entries(detail.performance.trailing_returns_percent).map(([period,value])=>({label:period.toUpperCase(),value:value!==null&&value.trim()!==""&&Number.isFinite(Number(value))?Number(value):null}))}/><div className="mf-return-grid">{Object.entries(detail.performance.trailing_returns_percent).map(([period,value])=><div key={period}><span>{period.toUpperCase()}</span><strong>{value===null?"—":`${Number(value).toFixed(2)}%`}</strong></div>)}</div><p>{detail.performance.status==="AVAILABLE"?"Calculated only from stored dated NAV observations.":"ATLAS is collecting daily observations. Longer-period returns will appear only when enough dated history exists."}</p></section>
         <section><h4>Portfolio and market-cap mix</h4><div className="mf-missing-evidence"><strong>Not supplied by the connected source</strong><p>Top holdings, sectors and large/mid/small-cap allocation require a verified portfolio-disclosure source.</p></div></section>
         <section><h4>Costs and independent rating</h4><div className="mf-missing-evidence"><strong>No licensed rating or cost feed</strong><p>Expense ratio, exit load and agency rating are not inferred from the fund name or NAV.</p></div></section>
       </div>

@@ -1,9 +1,11 @@
+import {ValueHistory,type ValuePoint} from "./TerminalCharts";
 import PortfolioBenchmarkRisk,{type BenchmarkRisk} from "./PortfolioBenchmarkRisk";
 import {FormEvent,useCallback,useEffect,useState} from "react";
 
 type RollingWindow={days:number;status:string;from:string|null;through:string|null;returnPercent:number|null;drawdownPercent:number|null;benchmarkStatus:string;benchmarkReturnPercent:number|null;relativePercentagePoints:number|null};
 type WeeklyRisk={status:string;weeklyObservations:number;annualizedVolatilityPercent:number|null;annualizedDownsideDeviationPercent:number|null;negativeWeekFrequencyPercent:number|null;from:string|null;through:string|null};
 type Performance={
+  valuation_history?:ValuePoint[];
   benchmark_risk_estimate?:BenchmarkRisk;
   transaction_count:number;
   snapshot_count:number;
@@ -85,10 +87,12 @@ export default function PortfolioPerformanceHistory({revision=0}:{revision?:numb
     <div className="sectionhead"><div><small className="section-kicker">PERFORMANCE HISTORY</small><h2 id="portfolio-history-title">Returns &amp; drawdown</h2></div><button type="button" className="secondary" disabled={busy} onClick={()=>void snapshot()}>Record today&apos;s value</button></div>
     <p className="muted tiny">Record dated valuations and external cash flows to calculate money-weighted return. Buying or selling a holding is not treated as money entering or leaving the portfolio. Record dividends and fees here only when cash crosses the portfolio boundary; do not double count internal cash movements.</p>
     {unavailable&&<p role="alert">Performance data is unavailable. Previously calculated figures have been cleared.</p>}
+    <ValueHistory points={performance.valuation_history??[]}/>
     <div className="portfolio-history-metrics">
       <div><small>XIRR</small><strong>{percent(performance.xirr_percent)}</strong><span>{performance.external_cash_flow_count??performance.transaction_count} cash-flow records</span>{performance.xirr_percent==null&&<span>{statusText(performance.xirr_status)}</span>}</div>
       <div><small>MAX DRAWDOWN</small><strong>{percent(performance.maximum_drawdown_percent)}</strong><span>{performance.snapshot_count} dated valuations</span>{performance.maximum_drawdown_percent==null&&<span>{statusText(performance.drawdown_status)}</span>}</div>
     </div>
+    <details className="terminal-performance-details"><summary>Detailed returns, benchmark, risk and cash-flow tools</summary>
     {performance.flow_adjusted_status&&<section aria-label="Cash-flow-adjusted performance">
       <h3>Cash-flow-adjusted performance estimate</h3>
       <div className="portfolio-history-metrics">
@@ -130,6 +134,6 @@ export default function PortfolioPerformanceHistory({revision=0}:{revision?:numb
       <button type="submit" disabled={busy||!amount}>Save cash flow</button>
     </form>
     {message&&<p className="muted tiny" role="status">{message}</p>}
-    <p className="muted tiny">{performance.methodology||"XIRR and drawdown remain unavailable until enough dated, user-owned records exist."}</p>
+    <p className="muted tiny">{performance.methodology||"XIRR and drawdown remain unavailable until enough dated, user-owned records exist."}</p></details>
   </section>;
 }

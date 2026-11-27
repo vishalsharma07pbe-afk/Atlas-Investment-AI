@@ -10,6 +10,7 @@ import PortfolioSummary from "./PortfolioSummary";
 import AutonomousOverview from "./AutonomousOverview";
 import {AuthGate,type AuthIdentity} from "./AuthGate";
 import StockExplorer from "./StockExplorer";
+import type {EliteTarget} from "./SteadyMomentumCard";
 import PortfolioStress from "./PortfolioStress";
 import PortfolioAllocation from "./PortfolioAllocation";
 import GoalPlanner from "./GoalPlanner";
@@ -88,17 +89,17 @@ const getSavedAppearance = ():Appearance => {
 export function AppearanceControls({value, onChange, open, onOpenChange}:{value:Appearance;onChange:(next:Appearance)=>void;open:boolean;onOpenChange:(open:boolean)=>void}) {
   const update = <K extends keyof Appearance>(key:K, next:Appearance[K]) => onChange({...value, [key]:next});
   useEffect(()=>{const close=()=>onOpenChange(false);window.addEventListener("atlas:close-appearance",close);return()=>window.removeEventListener("atlas:close-appearance",close);},[onOpenChange]);
-  const {triggerRef,panelRef}=useOverlayFocus(open,()=>onOpenChange(false));
+  const {triggerRef,panelRef}=useOverlayFocus(open,()=>onOpenChange(false),false);
   const toggle=()=>{const next=!open;if(next)window.dispatchEvent(new Event("atlas:close-notifications"));onOpenChange(next);};
   return <div className="appearance-shell">
-    <button ref={triggerRef} className="appearance-trigger" type="button" aria-label="Open appearance settings" aria-haspopup="dialog" aria-expanded={open} onClick={toggle}><span className="appearance-spark">✦</span><span>Appearance</span></button>
-    {open && <><button className="appearance-scrim" type="button" tabIndex={-1} aria-label="Close appearance settings" onClick={() => onOpenChange(false)}/><section ref={panelRef} tabIndex={-1} className="appearance-panel" role="dialog" aria-modal="true" aria-label="Appearance settings">
+    <button ref={triggerRef} className="appearance-trigger" type="button" aria-label="Open appearance settings" aria-haspopup="dialog" aria-expanded={open} onClick={toggle}><span className="appearance-spark" aria-hidden="true">✦</span><span className="terminal-action-label">Appearance</span></button>
+    {open && <><section ref={panelRef} tabIndex={-1} className="appearance-panel" role="dialog" aria-label="Appearance settings">
       <div className="appearance-title"><div><small>DISPLAY</small><strong>Liquid Glass</strong></div><button type="button" aria-label="Close appearance settings" onClick={() => onOpenChange(false)}>×</button></div>
       <div className="setting-group"><label>Theme</label><div className="theme-picker" role="group" aria-label="Theme">
         {(["system", "dark", "light"] as Theme[]).map(theme => <button type="button" key={theme} className={value.theme === theme ? "selected" : ""} aria-pressed={value.theme === theme} onClick={() => update("theme", theme)}>{theme === "system" ? "◐" : theme === "dark" ? "☾" : "☀"}<span>{theme === "system" ? "Auto" : theme}</span></button>)}
       </div><p className="theme-help">Auto follows your Mac or browser light/dark appearance.</p></div>
       <div className="setting-group"><div className="setting-label"><label htmlFor="panel-opacity">Panel opacity</label><output>{value.opacity}%</output></div><input id="panel-opacity" type="range" min="0" max="100" value={value.opacity} onChange={event => update("opacity", Number(event.target.value))}/><p>{value.opacity === 0 ? "Perfectly clear · blur disabled" : value.opacity === 100 ? "Fully solid surface" : "Background alpha only"}</p></div>
-      <div className="setting-group"><div className="setting-label"><label htmlFor="panel-blur">Backdrop blur</label><output>{value.blur}px</output></div><input id="panel-blur" type="range" min="0" max="40" value={value.blur} onChange={event => update("blur", Number(event.target.value))}/><p>{value.opacity === 0 && value.blur > 0 ? `Set opacity above 0% to see blur · saved at ${value.blur}px` : value.opacity === 100 ? "Hidden by the fully solid panel" : "Softens the texture visible through each panel"}</p></div>
+      <div className="setting-group"><div className="setting-label"><label htmlFor="panel-blur">Background &amp; backdrop blur</label><output>{value.blur}px</output></div><input id="panel-blur" type="range" min="0" max="40" value={value.blur} onChange={event => update("blur", Number(event.target.value))}/><p>{value.opacity===0?"Background blur stays active; clear panels remain transparent.":"Softens the background and translucent panels."}</p></div>
       <label className="border-toggle"><span><strong>Subtle border</strong><small>Independent of opacity</small></span><input type="checkbox" checked={value.border} onChange={event => update("border", event.target.checked)}/><i aria-hidden="true"/></label>
     </section></>}
   </div>;
@@ -107,9 +108,12 @@ export function AppearanceControls({value, onChange, open, onOpenChange}:{value:
 export function App({identity={id:"preview",email:"Local preview",role:"USER"},onLogout=async()=>{}}:{identity?:AuthIdentity;onLogout?:()=>Promise<void>}) {
   const [tab, setTab] = useState(getSavedTab);
   const [reportTarget,setReportTarget]=useState<WatchReportTarget|undefined>(undefined);
+  const [eliteTarget,setEliteTarget]=useState<EliteTarget|undefined>(undefined);
   const [appearance, setAppearance] = useState(getSavedAppearance);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [holdings, setHoldings] = useState<Holding[]>([]);
+  const [holdingFilter,setHoldingFilter]=useState("ALL");const [holdingSearch,setHoldingSearch]=useState("");const [holdingSort,setHoldingSort]=useState("VALUE");
+  const visibleHoldings=holdings.filter(h=>(holdingFilter==="ALL"||h.asset_type===holdingFilter)&&(!holdingSearch.trim()||(h.symbol+" "+(h.notes??"")).toLowerCase().includes(holdingSearch.trim().toLowerCase()))).sort((a,b)=>{if(holdingSort==="NAME")return a.symbol.localeCompare(b.symbol);const av=holdingSort==="PNL"?a.unrealized_pnl:a.market_value,bv=holdingSort==="PNL"?b.unrealized_pnl:b.market_value;return av==null?(bv==null?a.symbol.localeCompare(b.symbol):1):bv==null?-1:Number(bv)-Number(av)||a.symbol.localeCompare(b.symbol);});
   const [analysis, setAnalysis] = useState<Analysis|null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -121,7 +125,7 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
   const portfolioRequest=useRef(0);
   const portfolioPending=useRef(false);
   const portfolioFingerprint=useRef<string|null>(null);
-  const feedPending=useRef(false);
+  const feedPending=useRef(false);const livePending=useRef(false);const positionFingerprint=useRef<string|null>(null);
 
   async function load(background=false) {
     if(background&&portfolioPending.current)return;
@@ -134,7 +138,9 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
       if(request!==portfolioRequest.current)return;
       const fingerprint=JSON.stringify([nextHoldings,nextAnalysis]);
       if(fingerprint!==portfolioFingerprint.current){
-        portfolioFingerprint.current=fingerprint;setHoldings(nextHoldings);setAnalysis(nextAnalysis);setPortfolioRevision(v=>v+1);
+        portfolioFingerprint.current=fingerprint;setHoldings(nextHoldings);setAnalysis(nextAnalysis);
+        const positions=JSON.stringify(nextHoldings.map(h=>[h.id,h.symbol,h.asset_type,h.quantity,h.average_cost,h.notes]));
+        if(positions!==positionFingerprint.current||!background){positionFingerprint.current=positions;setPortfolioRevision(v=>v+1);}
       }
       setError("");
     } catch (e) { if(request===portfolioRequest.current)setError(String(e)); }
@@ -148,8 +154,8 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
 
   async function refreshFeedState(){
     if(feedPending.current)return;feedPending.current=true;
-    try{const response=await fetch("/intelligence/api/v1/intelligence/providers/upstox/quote-status");if(response.ok)setFeedState(await response.json());}
-    catch{/* Background feed status must not interrupt portfolio use. */}
+    try{const response=await fetch("/intelligence/api/v1/intelligence/providers/upstox/quote-status");if(response.ok)setFeedState(await response.json());else setFeedState(null);}
+    catch{setFeedState(null);/* Background feed status must not interrupt portfolio use. */}
     finally{feedPending.current=false;}
   }
 
@@ -158,10 +164,16 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
       const response=await fetch(`${API}/refresh-prices?includeHistory=${includeHistory}`,{method:"POST"});
       if(!response.ok)return;
       const result=await response.json();
-      const unavailable=Array.isArray(result.skipped)&&result.skipped.some((item:{reason?:string})=>String(item.reason||"").includes("credential unavailable"));
+      const unavailable=Array.isArray(result.skipped)&&result.skipped.some((item:{reason?:string})=>/credential unavailable|REAUTHORIZATION_REQUIRED|ACCESS_REJECTED/.test(String(item.reason||"")));
       setProviderActionRequired(unavailable);
       if(Number(result.updated)>0||Number(result.history_synced)>0)await load();
     }catch{/* Automatic refresh is best-effort; saved data remains usable offline. */}
+  }
+
+  async function refreshLiveValuations(){
+    if(livePending.current||document.visibilityState!=="visible")return;livePending.current=true;
+    try{const result=await fetch(API+"/refresh-live-prices",{method:"POST",cache:"no-store"});if(result.ok)await load(true);}
+    catch{/* Existing recorded values remain labelled as recorded. */}finally{livePending.current=false;}
   }
 
   async function reconcileFeed(){
@@ -179,6 +191,7 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
     document.addEventListener("visibilitychange",poll);
     return()=>{window.clearInterval(timer);document.removeEventListener("visibilitychange",poll);};
   }, []);
+  useEffect(()=>{if(!feedState?.transport_connected)return;void refreshLiveValuations();const timer=window.setInterval(()=>void refreshLiveValuations(),5000);return()=>window.clearInterval(timer);},[feedState?.transport_connected]);
   useEffect(()=>{const poll=()=>{if(document.visibilityState==="visible")void refreshFeedState();};poll();const timer=window.setInterval(poll,10000);document.addEventListener("visibilitychange",poll);return()=>{window.clearInterval(timer);document.removeEventListener("visibilitychange",poll);};},[]);
   useEffect(() => { if(tab === 6) loadHealth(); }, [tab]);
   useEffect(() => { try { localStorage.setItem(TAB_STORAGE_KEY, String(tab)); } catch { /* Storage may be blocked. */ } }, [tab]);
@@ -238,9 +251,10 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
     catch(e){setError(String(e));}finally{setLoading(false);}
   }
 
-  const style = {"--panel-alpha":(appearance.opacity / 100).toFixed(2), "--panel-blur":`${appearance.opacity === 0 ? 0 : appearance.blur}px`, "--panel-border-color":appearance.border ? "var(--glass-border)" : "transparent"} as React.CSSProperties;
+  const style = {"--panel-alpha":(appearance.opacity / 100).toFixed(2), "--canvas-blur":`${appearance.blur}px`, "--panel-blur":`${appearance.opacity === 0 ? 0 : appearance.blur}px`, "--panel-border-color":appearance.border ? "var(--glass-border)" : "transparent"} as React.CSSProperties;
   const activePage = pages[tab] || pages[0];
-  function navigate(id:number){setReportTarget(undefined);setTab(validPage(id));window.scrollTo({top:0,behavior:"auto"});}
+  function navigate(id:number){setEliteTarget(undefined);setReportTarget(undefined);setTab(validPage(id));window.scrollTo({top:0,behavior:"auto"});}
+  function navigateElite(target:EliteTarget){navigate(7);setEliteTarget(target);}
   function navigateHorizon(horizon:Exclude<Horizon,"INTRADAY">,target?:WatchReportTarget){
     navigate(horizon==="SWING"?3:horizon==="SHORT_TERM"?4:5);
     setReportTarget(target);
@@ -248,27 +262,25 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
 
   return <div className="dashboard" data-theme={appearance.theme} data-panel-clear={appearance.opacity === 0 ? "true" : undefined} data-blur-zero={appearance.opacity === 0 || appearance.blur === 0 ? "true" : undefined} data-appearance-open={appearanceOpen ? "true" : undefined} style={style}>
     <a className="skip-link" href="#main-content">Skip to main content</a>
-    <div className="canvas" aria-hidden="true"><i/><i/><i/><i/></div>
+    <div className="canvas" aria-hidden="true"><i/><i/><i/><i/></div><div className="canvas-texture" aria-hidden="true"/>
     <div className="layout">
-      <WorkspaceNavigation page={tab} onNavigate={navigate}/>
+      <WorkspaceNavigation page={tab} onNavigate={navigate} account={identity.email} onLogout={()=>void onLogout()} onHelp={()=>window.dispatchEvent(new Event("atlas:open-onboarding"))}/>
 
       <main className="content" id="main-content" tabIndex={-1}>
-        <header><div><div className="eyebrow"><span/> YOUR PRIVATE RESEARCH TERMINAL</div><h1>{activePage.title}</h1><p>{activePage.description}</p></div><div className="header-actions"><button type="button" className="terminal-search secondary" onClick={()=>navigate(7)}><svg aria-hidden="true" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg>Stock search</button><button type="button" className="help-trigger" onClick={()=>window.dispatchEvent(new Event("atlas:open-onboarding"))}>Help</button><NotificationCenter key={identity.id} includePersonal/><div className={`headerbadge ${feedState?.transport_connected?"feed-live":""}`} role="status" aria-live="polite" title={feedState?.automatic_selection?.missing_symbols?.length?`Unresolved: ${feedState.automatic_selection.missing_symbols.join(", ")}`:undefined}><span/> {feedState?.transport_connected?`LIVE · ${feedState.selected_instruments||0} STOCKS`:feedState?.automatic_selection?.status==="IDLE_NO_EQUITY_HOLDINGS"?"FEED READY · ADD A STOCK":feedState?.automatic_selection?.status==="STARTING"?"MARKET FEED CONNECTING":"MARKET FEED NOT CONNECTED"}</div><div className="account-chip"><span>{identity.email.slice(0,1).toUpperCase()}</span><div><small>SIGNED IN</small><strong>{identity.email}</strong></div><button type="button" onClick={()=>void onLogout()}>Logout</button></div><AppearanceControls value={appearance} onChange={setAppearance} open={appearanceOpen} onOpenChange={setAppearanceOpen}/></div></header>
+        <header className="terminal-page-header"><div><div className="eyebrow"><span/> YOUR PRIVATE RESEARCH TERMINAL</div><h1>{activePage.title}</h1><p>{activePage.description}</p></div><div className="header-actions terminal-utility"><button type="button" className="terminal-search secondary" onClick={()=>navigate(7)}><svg aria-hidden="true" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg><span>Stock search</span></button><NotificationCenter key={identity.id} includePersonal/><AppearanceControls value={appearance} onChange={setAppearance} open={appearanceOpen} onOpenChange={setAppearanceOpen}/></div></header>
         <MarketIndexStrip/>
-        {providerActionRequired&&<div className="provider-action-banner" role="status"><div><strong>Live prices need today’s Upstox authorization</strong><span>Your holdings are safe. Connect the read-only token once, then ATLAS will refresh prices and research automatically.</span></div><button className="secondary" onClick={()=>setTab(6)}>Connect Upstox</button></div>}
+        {providerActionRequired&&!feedState?.transport_connected&&holdings.some(h=>h.asset_type==="EQUITY")&&<div className="provider-action-banner" role="status"><div><strong>Market-data access needs attention</strong><span>Check the existing Analytics Token configuration and data permissions. Account synchronization is optional.</span></div><button className="secondary" onClick={()=>setTab(6)}>Review connection</button></div>}
         <OnboardingGuide onNavigate={navigate}/>
         {loading&&<div className="global-loading" role="status" aria-live="polite"><span/>Saving your changes…</div>}
         {error && <div className="error glass" role="alert">{error} <button type="button" onClick={() => tab === 6 ? loadHealth() : load()}>Retry</button></div>}
 
         {tab === 0 ? <>
-          <div className="terminal-overview-grid"><PortfolioSummary analysis={analysis} onOpen={()=>navigate(9)}/><PortfolioVisuals holdings={holdings}/></div>
+          <div className="terminal-overview-grid"><PortfolioSummary analysis={analysis} holdings={holdings} feedConnected={feedState?.transport_connected===true} onOpen={()=>navigate(9)}/><PortfolioVisuals holdings={holdings}/></div>
           <PortfolioDoctor compact revision={portfolioRevision} onOpenPortfolio={()=>navigate(9)} onSettings={()=>navigate(6)}/>
-          <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)} onHorizon={navigateHorizon}><ResearchHome holdings={holdings} revision={portfolioRevision} onReviewHoldings={()=>navigate(9)} onOpenExplorer={()=>navigate(7)} onOpenDataHealth={()=>navigate(6)}/></AutonomousOverview>
+          <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)} onHorizon={navigateHorizon} onOpenStock={navigateElite}><ResearchHome holdings={holdings} revision={portfolioRevision} onReviewHoldings={()=>navigate(9)} onOpenExplorer={()=>navigate(7)} onOpenDataHealth={()=>navigate(6)}/></AutonomousOverview>
         </> : tab === 9 ? <>
-          <PortfolioVisuals holdings={holdings}/>
-          <PortfolioIntelligence holdings={holdings} analysis={analysis}/>
-          <PortfolioDoctor revision={portfolioRevision} onSettings={()=>navigate(6)}/>
-          <GoalMonitor/>
+          <div className="terminal-overview-grid"><PortfolioSummary analysis={analysis} holdings={holdings} feedConnected={feedState?.transport_connected===true} onOpen={()=>document.getElementById("active-holdings")?.scrollIntoView({block:"start"})}/><PortfolioVisuals holdings={holdings}/></div>
+          <section className="panel glass terminal-performance-panel"><PortfolioPerformanceHistory revision={portfolioRevision}/></section>
           <AdvancedSection title="Add or update an investment" description="Search a stock or fund, save a holding or set up an SIP"><HoldingEditor busy={loading} onSave={submitHolding} onSaveSip={submitSip}/></AdvancedSection>
           <AdvancedSection title="Advanced portfolio tools" description="Stress tests, allocation, goals, journal, fees and concentration">
             <PortfolioStress revision={portfolioRevision}/>
@@ -278,20 +290,23 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
             <ResearchJournal/>
             <FeeImpact/>
             <PortfolioConcentration revision={portfolioRevision}/>
-            <PortfolioPerformanceHistory revision={portfolioRevision}/>
             <PersonalAlerts/>
           </AdvancedSection>
-          <section className="panel glass holdings-panel"><div className="sectionhead"><div><small className="section-kicker">CURRENT INVESTMENTS</small><h2>Active holdings</h2></div><label className="upload">Import CSV <input type="file" accept=".csv,text/csv" hidden disabled={loading} onChange={e => { const file = e.target.files?.[0]; if (file) importCsv(file); e.target.value = ""; }}/></label></div><p className="muted tiny">Only investments you still own appear here. One-day change uses the previous provider close or previous published NAV when available.</p><div className="tablewrap"><table><thead><tr><th>INVESTMENT</th><th>TYPE</th><th>QTY</th><th>AVG COST</th><th>CURRENT*</th><th>VALUE*</th><th>OVERALL P&amp;L*</th><th>1 DAY*</th><th/></tr></thead><tbody>
-            {holdings.map(holding => <tr key={holding.id}><td className="symbol">{holding.asset_type==="MUTUAL_FUND"&&holding.notes?<>{holding.notes}<small>Scheme {holding.symbol}</small></>:holding.symbol}</td><td><span className="asset-pill">{holding.asset_type}</span></td><td>{holding.quantity}</td><td>{fmt(holding.average_cost)}</td><td>{fmt(holding.last_price)}{holding.valuation_status&&<small className="muted tiny" style={{display:"block"}}>{holding.valuation_status.toLowerCase().replace(/_/g," ")}</small>}</td><td>{fmt(holding.market_value)}</td><td className={(holding.unrealized_pnl || 0) >= 0 ? "positive" : "negative"}>{fmt(holding.unrealized_pnl)}</td><td className={(holding.one_day_change||0)>=0?"positive":"negative"}>{fmt(holding.one_day_change)}</td><td><button className="danger" onClick={() => remove(holding.id)}>Delete</button></td></tr>)}
-            {!holdings.length && <tr><td colSpan={9} className="empty">No active holdings yet. Open Add or update an investment above.</td></tr>}
+          <section id="active-holdings" className="panel glass holdings-panel"><div className="sectionhead"><div><small className="section-kicker">CURRENT INVESTMENTS</small><h2>Active holdings</h2></div><label className="upload">Import CSV <input type="file" accept=".csv,text/csv" hidden disabled={loading} onChange={e => { const file = e.target.files?.[0]; if (file) importCsv(file); e.target.value = ""; }}/></label></div><p className="muted tiny">Only investments you still own appear here. One-day change uses the previous provider close or previous published NAV when available.</p><div className="terminal-holdings-toolbar"><div role="group" aria-label="Holdings asset type">{[["ALL","All"],["EQUITY","Stocks"],["MUTUAL_FUND","Mutual funds"]].map(([id,label])=><button type="button" key={id} className={"secondary"+(holdingFilter===id?" selected":"")} aria-pressed={holdingFilter===id} onClick={()=>setHoldingFilter(id)}>{label}</button>)}</div><input aria-label="Search active holdings" placeholder="Search holdings" value={holdingSearch} onChange={e=>setHoldingSearch(e.target.value)}/><select aria-label="Sort holdings" value={holdingSort} onChange={e=>setHoldingSort(e.target.value)}><option value="VALUE">Value: high to low</option><option value="PNL">P&amp;L: high to low</option><option value="NAME">Name: A–Z</option></select></div><p className="muted tiny">{visibleHoldings.length} of {holdings.length} holdings shown</p><div className="tablewrap"><table><thead><tr><th>INVESTMENT</th><th>TYPE</th><th>QTY</th><th>AVG COST</th><th>CURRENT*</th><th>VALUE*</th><th>OVERALL P&amp;L*</th><th>1 DAY*</th><th/></tr></thead><tbody>
+            {visibleHoldings.map(holding => <tr key={holding.id}><td className="symbol">{holding.asset_type==="MUTUAL_FUND"&&holding.notes?<>{holding.notes}<small>Scheme {holding.symbol}</small></>:holding.symbol}</td><td><span className="asset-pill">{holding.asset_type}</span></td><td>{holding.quantity}</td><td>{fmt(holding.average_cost)}</td><td>{fmt(holding.last_price)}{holding.valuation_status&&<small className="muted tiny" style={{display:"block"}}>{holding.valuation_status.toLowerCase().replace(/_/g," ")}</small>}</td><td>{fmt(holding.market_value)}</td><td className={(holding.unrealized_pnl || 0) >= 0 ? "positive" : "negative"}>{fmt(holding.unrealized_pnl)}</td><td className={(holding.one_day_change||0)>=0?"positive":"negative"}>{fmt(holding.one_day_change)}</td><td><button className="danger" onClick={() => remove(holding.id)}>Delete</button></td></tr>)}
+            {!visibleHoldings.length && <tr><td colSpan={9} className="empty">{holdings.length?"No holdings match the selected filters.":"No active holdings yet. Open Add or update an investment above."}</td></tr>}
           </tbody></table></div></section>
+          <PortfolioIntelligence holdings={holdings} analysis={analysis}/>
+          <PortfolioDoctor revision={portfolioRevision} onSettings={()=>navigate(6)}/>
+          <GoalMonitor/>
           <AdvancedSection title="Past investments" description="Review closed holdings and realized performance"><HistoricalInvestments activeHoldings={holdings}/></AdvancedSection>
-        </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : (tab === 2 || tab === 3 || tab === 4 || tab === 5) ? <HorizonResearch key={tab} horizon={tab===2?"INTRADAY":tab===3?"SWING":tab===4?"SHORT_TERM":"LONG_TERM"} reportTarget={tab===2?undefined:reportTarget} onSettings={()=>navigate(6)}>{tab===5?<EquityResearchDashboard/>:<><MarketIntelligence/><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/></>}</HorizonResearch> : tab === 8 ? <P2ResearchWorkspace/> : tab === 7 ? <StockExplorer/> : tab === 10 ? <>
-          <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)} onHorizon={navigateHorizon}><MarketIntelligence/></AutonomousOverview>
+        </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : (tab === 2 || tab === 3 || tab === 4 || tab === 5) ? <HorizonResearch key={tab} horizon={tab===2?"INTRADAY":tab===3?"SWING":tab===4?"SHORT_TERM":"LONG_TERM"} reportTarget={tab===2?undefined:reportTarget} onSettings={()=>navigate(6)}>{tab===5?<EquityResearchDashboard/>:<><MarketIntelligence/><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/></>}</HorizonResearch> : tab === 8 ? <P2ResearchWorkspace/> : tab === 7 ? <StockExplorer initialTarget={eliteTarget}/> : tab === 10 ? <>
+          <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)} onHorizon={navigateHorizon} onOpenStock={navigateElite}><MarketIntelligence/></AutonomousOverview>
           <AdvancedSection title="Company and institutional research" description="Company reports, news and institutional activity"><EquityResearchDashboard/><InstitutionalFlows/></AdvancedSection>
           <AdvancedSection title="Research evidence and history" description="Broker research, source audit, outcome review and evidence ledgers"><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/><FlowLedger/><NewsEvidence/><NewsLedger/></AdvancedSection>
         </> : tab === 6 ? <>
           <UpstoxVaultCard onConnected={()=>refreshPortfolioPrices(true)}/>
+          <section className="panel glass terminal-settings-summary" aria-label="Workspace settings summary"><div className="sectionhead"><div><small className="section-kicker">LOCAL WORKSPACE</small><h2>Connections &amp; system status</h2><p>Manage read-only authorization and investigate data availability without changing your holdings.</p></div></div><div className="terminal-research-metrics"><article><span>Registry instruments</span><strong>{health?.instrumentCount??"—"}</strong></article><article><span>Daily observations</span><strong>{health?.candleCount??"—"}</strong></article><article><span>Unresolved quality events</span><strong>{health?.unresolvedIssueCount??"—"}</strong></article><article><span>Provider mode</span><strong>{health?.providerMode?.replace(/_/g," ")||"—"}</strong></article></div></section>
           <DataReadiness/>
           <AdvancedSection title="Data and AI provider connections" description="Provider setup, authorization and capabilities"><MultiProviderHub/><UpstoxAuthorization/><EntitlementRegistry/><MarketReadiness/></AdvancedSection>
           <AdvancedSection title="Advanced system diagnostics" description="Feed health, ingestion, reliability, data quality and audit records">

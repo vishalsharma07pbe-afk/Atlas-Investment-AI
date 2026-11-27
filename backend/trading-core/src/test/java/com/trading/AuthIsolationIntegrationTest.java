@@ -39,6 +39,7 @@ class AuthIsolationIntegrationTest {
   @Autowired MockMvc mvc;
   @Autowired JdbcTemplate jdbc;
   @Autowired ObjectMapper mapper;
+  @Autowired com.trading.market.PortfolioLiveValuationService liveValuations;
   @Autowired UserAlertEvaluator alertEvaluator;
   @Autowired com.trading.market.PortfolioRiskNotifications riskNotifications;
   @Autowired com.trading.api.PortfolioGoalNotifications goalNotifications;
@@ -50,6 +51,34 @@ class AuthIsolationIntegrationTest {
       .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
     return "Bearer "+mapper.readTree(response).path("access_token").asText();
   }
+  @Test void liveMarketCacheRefreshIsOwnerScopedAndDoesNotOverwriteNewerPrices()throws Exception{
+    String email="live-owner-"+UUID.randomUUID()+"@example.test";
+    String a=create(email),b=create("live-other-"+UUID.randomUUID()+"@example.test");
+    UUID owner=jdbc.queryForObject("SELECT id FROM atlas_users WHERE email=?",UUID.class,email);
+    jdbc.update("""
+      INSERT INTO instruments(exchange_id,symbol,series,source,isin,active,listing_status,instrument_type)
+      VALUES ((SELECT id FROM exchanges WHERE code='NSE'),'LIVETEST','EQ','TEST','INE999Z01019',true,'ACTIVE','EQUITY')
+      ON CONFLICT DO NOTHING
+      """);
+    jdbc.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,isin,trading_symbol,instrument_type) VALUES ('NSE_EQ|INE999Z01019','NSE','INE999Z01019','LIVETEST','EQ') ON CONFLICT DO NOTHING");
+    String holding=mapper.writeValueAsString(Map.of("symbol","LIVETEST","assetType","EQUITY","quantity",2,"averageCost",100,"lastPrice",110));
+    for(String user:java.util.List.of(a,b))mvc.perform(post("/api/v1/portfolio/holdings").header("Authorization",user)
+      .contentType(MediaType.APPLICATION_JSON).content(holding)).andExpect(status().isOk());
+    jdbc.update("UPDATE personal_holdings SET price_as_of=now()-interval '1 day' WHERE user_id=? AND symbol='LIVETEST'",owner);
+    var now=java.time.Instant.now();var stamp=now.minusSeconds(1);
+    var payload=mapper.valueToTree(Map.of("status","AVAILABLE","source","UPSTOX_V3_STREAM","items",java.util.List.of(Map.of(
+      "instrument_key","NSE_EQ|INE999Z01019","price",125,"previous_close",120,"as_of",stamp.toString()))));
+    Map<String,Object> result=org.springframework.test.util.ReflectionTestUtils.invokeMethod(liveValuations,"apply",owner,payload,now);
+    org.junit.jupiter.api.Assertions.assertEquals(1,result.get("updated"));
+    mvc.perform(get("/api/v1/portfolio/holdings").header("Authorization",a)).andExpect(status().isOk())
+      .andExpect(jsonPath("$[0].last_price").value(125)).andExpect(jsonPath("$[0].market_value").value(250)).andExpect(jsonPath("$[0].one_day_change").value(10));
+    mvc.perform(get("/api/v1/portfolio/holdings").header("Authorization",b)).andExpect(status().isOk())
+      .andExpect(jsonPath("$[0].last_price").value(110));
+    Map<String,Object> duplicate=org.springframework.test.util.ReflectionTestUtils.invokeMethod(liveValuations,"apply",owner,payload,now);
+    org.junit.jupiter.api.Assertions.assertEquals(0,duplicate.get("updated"));
+    mvc.perform(post("/api/v1/portfolio/refresh-live-prices")).andExpect(status().isUnauthorized());
+  }
+
   @Test void priceAlertsAreDeliveredOnceAndRemainUserScoped()throws Exception{
     String email="alerts-"+UUID.randomUUID()+"@example.test";
     String authorization=create(email);
@@ -191,9 +220,13 @@ class AuthIsolationIntegrationTest {
     mvc.perform(get("/api/v1/portfolio/history/performance").header("Authorization",a))
       .andExpect(status().isOk()).andExpect(jsonPath("$.xirr_status").value("AVAILABLE"))
       .andExpect(jsonPath("$.xirr_percent").value(org.hamcrest.Matchers.closeTo(10.0,0.2)))
-      .andExpect(jsonPath("$.maximum_drawdown_percent").value(-10.0));
+      .andExpect(jsonPath("$.maximum_drawdown_percent").value(-10.0))
+      .andExpect(jsonPath("$.valuation_history.length()").value(3))
+      .andExpect(jsonPath("$.valuation_history[0].date").value(start.toString()))
+      .andExpect(jsonPath("$.valuation_history[2].value").value(1100));
     mvc.perform(get("/api/v1/portfolio/history/performance").header("Authorization",b))
       .andExpect(status().isOk()).andExpect(jsonPath("$.transaction_count").value(0))
+      .andExpect(jsonPath("$.valuation_history.length()").value(0))
       .andExpect(jsonPath("$.xirr_status").value("UNAVAILABLE_REQUIRES_EXTERNAL_CASH_FLOWS_AND_VALUATION"));
   }
 
@@ -216,7 +249,8 @@ class AuthIsolationIntegrationTest {
       .andExpect(status().isOk()).andExpect(jsonPath("$.xirr_percent").value(org.hamcrest.Matchers.closeTo(10.0,0.1)))
       .andExpect(jsonPath("$.valuation_through").value(terminal.toString()))
       .andExpect(jsonPath("$.external_flows_after_valuation").value(1))
-      .andExpect(jsonPath("$.future_snapshot_count").value(1));
+      .andExpect(jsonPath("$.future_snapshot_count").value(1))
+      .andExpect(jsonPath("$.valuation_history.length()").value(2));
     mvc.perform(post("/api/v1/portfolio/history/transactions").header("Authorization",a)
       .contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(Map.of(
         "symbol","CASH","assetType","CASH","transactionType","WITHDRAWAL",
@@ -232,7 +266,8 @@ class AuthIsolationIntegrationTest {
     jdbc.update("UPDATE portfolio_valuation_snapshots SET unpriced_positions=1 WHERE user_id=? AND valuation_date=?",user,terminal);
     mvc.perform(get("/api/v1/portfolio/history/performance").header("Authorization",a))
       .andExpect(status().isOk()).andExpect(jsonPath("$.xirr_status").value("UNAVAILABLE_INCOMPLETE_TERMINAL_VALUATION"))
-      .andExpect(jsonPath("$.drawdown_status").value("UNAVAILABLE_INCOMPLETE_VALUATION_HISTORY"));
+      .andExpect(jsonPath("$.drawdown_status").value("UNAVAILABLE_INCOMPLETE_VALUATION_HISTORY"))
+      .andExpect(jsonPath("$.valuation_history[1].value").value(org.hamcrest.Matchers.nullValue()));
   }
 
   @Test void rollingPortfolioEstimatesAreOwnerScopedAndIndependentOfOldGaps()throws Exception{

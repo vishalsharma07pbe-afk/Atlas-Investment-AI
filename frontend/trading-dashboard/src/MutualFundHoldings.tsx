@@ -1,4 +1,5 @@
 import {useState} from "react";
+import PortfolioVisuals from "./PortfolioVisuals";
 import MutualFundNavResearch from "./MutualFundNavResearch";
 import MutualFundSchemeSearch from "./MutualFundSchemeSearch";
 import MutualFundSnapshotReview from "./MutualFundSnapshotReview";
@@ -64,6 +65,7 @@ export default function MutualFundHoldings({holdings}:{holdings:FundHolding[]}){
         <article><span>Gain / loss</span><strong className={(gain||0)>=0?"positive":"negative"}>{gain===null?"—":fmt(gain)}</strong><small>{gainPct===null?"Add NAVs to calculate":`${gainPct>=0?"+":""}${gainPct.toFixed(2)}% overall`}</small></article>
         <article><span>Funds owned</span><strong>{funds.length}</strong><small>{unpriced?`${unpriced} needs attention`:"Valuation complete"}</small></article>
       </div>
+      <PortfolioVisuals holdings={funds}/>
       {unpriced>0&&<div role="status" className="mf-attention"><span>!</span><div><strong>Some values are missing</strong><p>Add the latest NAV (price per unit) for {unpriced} fund position{unpriced===1?"":"s"} to see a complete portfolio value and gain/loss.</p></div></div>}
       <section className="mf-card glass">
         <div className="mf-card-head"><div><small className="section-kicker">YOUR INVESTMENTS</small><h2>Your fund holdings</h2></div><span>Saved NAVs · not live</span></div>

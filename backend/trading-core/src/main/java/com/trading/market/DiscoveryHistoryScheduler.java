@@ -23,16 +23,18 @@ public class DiscoveryHistoryScheduler {
   @Value("${MARKET_DATA_USAGE_RIGHTS_CONFIRMED:false}") boolean usageRights;
   @Value("${MARKET_DATA_ENTITLEMENT_CONFIRMED:false}") boolean entitlement;
   @Value("${UPSTOX_ACCESS_TOKEN:}") String accessToken="";
+  @Value("${atlas.discovery.history.request-gap-ms:1000}") long requestGapMs;
   public DiscoveryHistoryScheduler(JdbcTemplate jdbc,UpstoxFeedService stocks,MarketCalendarService calendar){
     this.jdbc=jdbc;this.stocks=stocks;this.calendar=calendar;
   }
 
   @Scheduled(initialDelayString="${atlas.discovery.history.initial-ms:60000}",
-             fixedDelayString="${atlas.discovery.history.poll-ms:300000}")
+             fixedDelayString="${atlas.discovery.history.poll-ms:120000}")
   public void scheduled(){
     if(!enabled||!usageRights||!entitlement||accessToken.isBlank())return;
     LocalDate today=LocalDate.now(MarketCalendarService.IST);
-    // Two requests per exchange per pass at most. No current-day bars.
+    // At most 8 overdue established histories and 2 expansion/repair requests per venue.
+    // Sequential, paced REST calls; shared operator cooldown remains authoritative.
     for(String exchange:List.of("NSE","BSE")){
       LocalDate end;
       try{end=calendar.lastTradingDay(exchange,today);}catch(IllegalStateException ex){continue;}
@@ -65,7 +67,7 @@ public class DiscoveryHistoryScheduler {
             AND x.session_date=s.session_date AND x.is_trading_day AND x.session_type<>'REGULAR')
       ), candidates AS (
       SELECT i.id,m.instrument_key,h.candle_count,h.latest_date,g.first_missing_date,a.attempted_at,
-        CASE WHEN h.candle_count>=200 THEN 0 ELSE 1 END AS workload
+        CASE WHEN h.candle_count>=25 AND h.latest_date<? THEN 0 ELSE 1 END AS workload
       FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
       JOIN LATERAL (
         SELECT instrument_key FROM upstox_instrument_map
@@ -109,8 +111,9 @@ public class DiscoveryHistoryScheduler {
         FROM candidates
       )
       SELECT id,instrument_key,candle_count,latest_date,first_missing_date FROM ranked
-      ORDER BY position,workload LIMIT 2
-      """,exchange,end.minusMonths(BACKFILL_MONTHS),end,end.minusMonths(BACKFILL_MONTHS),end,end,exchange,REQUIRED_DAILY_CANDLES,end);
+      WHERE (workload=0 AND position<=8) OR (workload=1 AND position<=2)
+      ORDER BY workload,position LIMIT 10
+      """,exchange,end.minusMonths(BACKFILL_MONTHS),end,end,end.minusMonths(BACKFILL_MONTHS),end,end,exchange,REQUIRED_DAILY_CANDLES,end);
     for(var row:rows){
       if(OperatorFeedCooldown.blocked(jdbc))return;
       long id=((Number)row.get("id")).longValue();
@@ -128,6 +131,12 @@ public class DiscoveryHistoryScheduler {
         """,id);
       if(claimed==0)continue;
       try{
+        // Pace even incremental requests; cancellation must not launch another provider call.
+        if(requestGapMs>0)Thread.sleep(Math.max(1000,requestGapMs));
+        if(OperatorFeedCooldown.blocked(jdbc)){
+          jdbc.update("UPDATE discovery_history_attempts SET status='FAILED',rows_written=0,next_attempt_at=now()+interval '15 minutes' WHERE instrument_id=?",id);
+          return;
+        }
         LocalDate floor=end.minusMonths(BACKFILL_MONTHS);
         LocalDate from=count<REQUIRED_DAILY_CANDLES||latest==null||latest.isBefore(floor)?floor:latest.plusDays(1);
         // Repair an interior known-session hole even if the latest candle is current.
@@ -139,6 +148,10 @@ public class DiscoveryHistoryScheduler {
           OperatorFeedCooldown.recovered(jdbc);
         }else
           jdbc.update("UPDATE discovery_history_attempts SET status='FAILED',rows_written=0,next_attempt_at=now()+interval '6 hours' WHERE instrument_id=?",id);
+      }catch(InterruptedException ex){
+        Thread.currentThread().interrupt();
+        jdbc.update("UPDATE discovery_history_attempts SET status='FAILED',rows_written=0,next_attempt_at=now()+interval '15 minutes' WHERE instrument_id=?",id);
+        return;
       }catch(Exception ex){
         // Never store provider response bodies, URLs or credentials.
         jdbc.update("UPDATE discovery_history_attempts SET status='FAILED',rows_written=0,next_attempt_at=now()+interval '6 hours' WHERE instrument_id=?",id);

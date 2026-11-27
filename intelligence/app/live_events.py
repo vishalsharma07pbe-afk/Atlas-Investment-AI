@@ -64,3 +64,21 @@ async def changed_events(snapshot,*,interval:float=.25,heartbeat_seconds:float=1
 
 def instrument_snapshot(instrument_key:str) -> dict:
     return quote_worker.cache.snapshot(instrument_key)
+
+def equity_snapshot() -> dict:
+    """Only connected, subscribed, fresh equity observations. No HTTP provider requests."""
+    items=[]
+    if quote_worker.running and quote_worker.cache.connected:
+        for key in sorted(quote_worker.active_keys):
+            if not key.startswith(("NSE_EQ|","BSE_EQ|")):
+                continue
+            snapshot=quote_worker.cache.snapshot(key)
+            q=snapshot.get("quote")
+            if snapshot.get("status")!="LIVE" or not q or q.get("instrument_key")!=key:
+                continue
+            if q.get("age_ms",-1)<0:
+                continue
+            items.append({"instrument_key":key,"price":q["last_traded_price"],
+                          "previous_close":q.get("previous_close"),"as_of":q["traded_at"]})
+    return {"status":"AVAILABLE" if items else "UNAVAILABLE",
+            "source":"UPSTOX_V3_STREAM","items":items}

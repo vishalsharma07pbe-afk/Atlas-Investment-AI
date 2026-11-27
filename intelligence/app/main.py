@@ -789,6 +789,13 @@ def upstox_instrument_quote(instrument_id:int):
         return {"status":"UNAVAILABLE","quote":None,"reason":"PROVIDER_RIGHTS_NOT_VERIFIED"}
     return quote_worker.cache.snapshot(resolution["instrument_key"])
 
+@app.get("/api/v1/internal/live/equity-snapshot")
+async def internal_live_equity_snapshot(request: FastAPIRequest):
+    """Market-only cache; no account identities or credentials."""
+    _require_internal_service(request)
+    from .live_events import equity_snapshot
+    return equity_snapshot()
+
 @app.get("/api/v1/internal/live/market-indices")
 async def internal_live_market_indices(request: FastAPIRequest):
     """Internal push stream; Spring authenticates the browser before relaying it."""

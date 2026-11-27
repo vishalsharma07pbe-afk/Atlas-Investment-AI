@@ -7,7 +7,7 @@ from .horizon_research import evaluate, summarize, MIN_HISTORY as HORIZON_MIN_HI
 from .price_structure import analyze as price_structure
 from .corporate_action_normalization import preview as action_preview, reported_crossings
 from .replay_evidence import fingerprint, exact_isin
-from . import price_volume_pressure
+from . import price_volume_pressure, steady_momentum
 
 MIN_HISTORY = 21
 MAX_INSTRUMENTS = 20
@@ -24,6 +24,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
     limit = max(1, min(200 if batch_loaded else 60, universe_limit))
     today = as_of or date.today()
     rows = []
+    steady_candidates=[]
     horizon_evaluations = []
     breadth_pairs={}
     pressure_rows=[]
@@ -116,6 +117,10 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                 "adjustment_status": candles[-1].adjustment_status,
                 "data_age_calendar_days": age,
             }
+            if include_horizons and batch_loaded and expected_session is not None and exact_isin(instrument.get("isin")):
+                steady=steady_momentum.technical(candles,ind)
+                if steady:
+                    steady_candidates.append({**steady,"report_close_history":report_close_history(candles),"id":row["id"],"symbol":row["symbol"],"exchange":row["exchange"],"isin":instrument["isin"],"as_of":row["as_of"]})
             if include_horizons and batch_loaded:
                 pressure=price_volume_pressure.analyze(candles, calendar_verified=expected_session is not None)
                 row["price_volume_pressure"]=pressure
@@ -178,6 +183,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
         "notice": f"Bounded daily sample of up to {limit} registry instruments; not a full-market top-five ranking, live feed, intraday signal or recommendation.",
     }
     if batch_loaded:
+        result["steady_momentum_candidates"]=steady_candidates
         result["company_research_universe"]=company_research_universe
         result["replay_research_universe"]=replay_research_universe
         result["sample_breadth"]={"as_of":expected_session.isoformat() if expected_session is not None else None,

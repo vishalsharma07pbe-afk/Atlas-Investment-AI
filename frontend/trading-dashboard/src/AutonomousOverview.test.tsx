@@ -8,7 +8,8 @@ describe("automatic research overview",()=>{
    const fetchMock=vi.fn(async()=>({ok:true,json:async()=>({enabled:true,interval_seconds:900,sections:[{section:"NSE",status:"READY",generated_at:"2026-11-24T10:00:00Z",result:{eligible_count:1,universe_size:2,momentum_leaders:[{id:1,symbol:"TCS",exchange:"NSE",as_of:"2026-11-23",momentum_20d_percent:3}]}},{section:"LARGE_CAP",status:"READY",generated_at:null,result:{growth_outlook:[]}}]})}));
    vi.stubGlobal("fetch",fetchMock);
    render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}}><p>Manual research tool</p></AutonomousOverview>);
-   expect(await screen.findByText("TCS")).toBeTruthy();
+   expect(await screen.findByRole("region",{name:"Momentum leaders"})).toBeTruthy();
+   expect(screen.getAllByText("TCS · NSE").length).toBeGreaterThan(0);
    expect(screen.getByText("No growth picks meet the verified evidence requirements.")).toBeTruthy();
    expect(screen.queryByText("Manual research tool")).toBeNull();
    expect(fetchMock.mock.calls.length).toBe(1);
@@ -133,7 +134,7 @@ it("links canonical briefing watches and company evidence review to existing wor
  render(<AutonomousOverview onPortfolio={portfolio} onFunds={()=>{}} onSettings={()=>{}} onHorizon={horizon}>{null}</AutonomousOverview>);
  expect(await screen.findByRole("region",{name:"Today's evidence review"})).toBeTruthy();
  expect(screen.getByText(/0 qualified in the reviewed sample/)).toBeTruthy();
- expect(screen.getByText(/3\/8 dated global indicators/)).toBeTruthy();
+ expect(screen.getByRole("meter",{name:"Dated global indicators"}).getAttribute("aria-valuenow")).toBe("3");
  fireEvent.click(screen.getByText(/TEST · 1 findings/));
  expect(screen.getByText("replay review")).toBeTruthy();
  fireEvent.click(screen.getByRole("button",{name:"Review swing research"}));
@@ -146,7 +147,7 @@ it("links canonical briefing watches and company evidence review to existing wor
 
 it("keeps the briefing first and evidence in expandable sections without duplicate navigation or requests",async()=>{
  const navigate=vi.fn();
- vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[{section:"NSE",status:"READY",generated_at:null,result:{momentum_leaders:[{id:1,symbol:"MOMENTUM",exchange:"NSE",as_of:"2026-11-23",momentum_20d_percent:3}]}}],global_fx:{status:"REFERENCE_RATES_AVAILABLE",items:[],notice:"Reference only."},daily_briefing:{
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[{section:"NSE",status:"READY",generated_at:null,result:{momentum_leaders:[{id:1,symbol:"MOMENTUM",exchange:"NSE",as_of:"2026-11-23",momentum_20d_percent:3}]}}],global_fx:{status:"REFERENCE_RATES_AVAILABLE",items:[{pair:"USD_INR",status:"AVAILABLE",rate:90,as_of:"2026-11-24",changes:[]}],notice:"Reference only."},daily_briefing:{
  status:"PARTIAL",ready_sections:1,total_sections:12,market:{eligible_histories:1,sampled_instruments:2,outlook_status:"MARKET_REGIME_NOT_VALIDATED"},horizons:{},funds:{growth_pick_count:null,historical_watch_count:0,ready_categories:0,total_categories:10},institutional:{status:"UNAVAILABLE"},leading_evidence_gaps:[],notice:"Not a forecast",
  decision_context:{horizons:{SWING:{selected_watches:[{isin:"INE009A01021",id:1,exchange:"NSE",symbol:"TEST",as_of:"2026-11-23",unresolved_requirement_count:2}],qualified_count:0}},review_company_count:0,review_companies:[],regime:{status:"UNAVAILABLE"},global_coverage:null,notice:"Review only."}}})})));
  render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}} onHorizon={navigate}>{null}</AutonomousOverview>);
@@ -169,4 +170,58 @@ it("keeps the briefing first and evidence in expandable sections without duplica
  fireEvent.click(screen.getByRole("button",{name:"Review swing research"}));
  expect(navigate).toHaveBeenCalledWith("SWING");
  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it("consolidates empty research and hides unavailable global panels without inventing results",async()=>{
+ const fund=(section:string)=>({section,status:"READY",generated_at:null,result:{growth_outlook:[],historical_coverage:{items:[{scheme_code:section.length,scheme_name:section+" fund",cagr_3y_percent:9,nav_date:"2026-11-26"}]}}});
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[{section:"NSE",status:"READY",generated_at:null,result:{eligible_count:0,universe_size:126,skipped:{NO_HISTORY:126}}},fund("LARGE_CAP"),fund("MID_CAP"),fund("SMALL_CAP")],daily_briefing:{status:"PARTIAL",ready_sections:4,total_sections:4,market:{eligible_histories:0,sampled_instruments:126,outlook_status:"UNAVAILABLE"},horizons:{},funds:{growth_pick_count:0,historical_watch_count:3,ready_categories:3,total_categories:3},institutional:{status:"UNAVAILABLE"},leading_evidence_gaps:[],notice:"Research only"},global_context:{status:"UNAVAILABLE",available_count:0,total_count:17,groups:[],notice:"No data"},global_markets:{status:"UNAVAILABLE",items:[],notice:"No data"}})})));
+ render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}}>{null}</AutonomousOverview>);
+ expect(await screen.findByText("Equity research is not ready")).toBeTruthy();
+ expect(screen.queryByLabelText("Research coverage summary")).toBeNull();
+ expect(screen.queryByRole("region",{name:"International indices and metals"})).toBeNull();
+ expect(screen.getByText("View full fund list (3 categories with observations)")).toBeTruthy();
+ expect(screen.queryByText("MID_CAP fund")).toBeNull();
+ const diagnostics=screen.getByText("Research coverage & missing data").closest("details")!;
+ diagnostics.open=true;fireEvent(diagnostics,new Event("toggle"));
+ expect(await screen.findByText("Insufficient daily history")).toBeTruthy();
+});
+
+it("renders only qualifying steady momentum screen matches in the dedicated card",async()=>{
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[],steady_momentum:{status:"SCREEN_MATCHES_AVAILABLE",notice:"Reported evidence only",items:[{id:1,isin:"INE002A01018",symbol:"SCREENMATCH",exchange:"NSE",as_of:"2026-11-26",cap_category:"LARGE_CAP",average_cap_cr:10000,cap_as_of:"2026-06-30",median_daily_turnover_cr:10,return_60_percent:12,positive_day_percent:60,earnings_growth_percent:20,eps_growth_percent:15,reported_pe:18,reported_sector_pe:25,financial_period:"2026-03",status:"SCREEN_MATCH_ONLY"},{id:2,isin:"INE009A01021",symbol:"REJECTED_STOCK",status:"WITHHELD"}]}})})));
+ render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}}>{null}</AutonomousOverview>);
+ expect(await screen.findByRole("region",{name:"Steady momentum stock screen"})).toBeTruthy();
+ expect(screen.getByText("SCREENMATCH")).toBeTruthy();
+ expect(screen.queryByText("REJECTED_STOCK")).toBeNull();
+ expect(screen.getByText(/Not TradingView ratings/)).toBeTruthy();
+});
+
+it("keeps the approved Elite layout when no stocks qualify and separates coverage from matches",async()=>{
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[],steady_momentum:{status:"AWAITING_EVIDENCE",sampled_count:400,eligible_history_count:120,technical_count:0,reviewed_count:0,matched_count:0,items:[],notice:"Sample only"}})})));
+ render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}}>{null}</AutonomousOverview>);
+ expect(await screen.findByRole("region",{name:"Steady momentum stock screen"})).toBeTruthy();
+ expect(screen.getByText("Market coverage")).toBeTruthy();
+ expect(screen.getByText("120")).toBeTruthy();
+ expect(screen.getByText("Quality-screened")).toBeTruthy();
+ expect(screen.getByText("Deeply researched")).toBeTruthy();
+ expect(screen.getByText("Qualified opportunities")).toBeTruthy();
+ fireEvent.click(screen.getByRole("button",{name:"Small cap"}));
+ expect(screen.getByRole("button",{name:"Small cap"}).getAttribute("aria-pressed")).toBe("true");
+ expect(screen.queryByText("0% coverage")).toBeNull();
+ expect(screen.queryByText("91/100")).toBeNull();
+});
+
+it("filters actual Elite matches by cap and opens their exact research identity",async()=>{
+ const open=vi.fn();
+ const item={id:1,isin:"INE002A01018",symbol:"LARGE_MATCH",exchange:"NSE",as_of:"2026-11-26",close:110,cap_category:"LARGE_CAP",average_cap_cr:10000,cap_as_of:"2026-06-30",median_daily_turnover_cr:10,return_60_percent:12,positive_day_percent:60,earnings_growth_percent:20,eps_growth_percent:15,reported_pe:18,reported_sector_pe:25,financial_period:"2026-03",status:"SCREEN_MATCH_ONLY",report_close_history:{adjustment_status:"ADJUSTED",as_of:"2026-11-26",points:[{date:"2026-11-25",close:100},{date:"2026-11-26",close:110}]}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[],steady_momentum:{status:"SCREEN_MATCHES_AVAILABLE",notice:"Sample only",items:[item,{...item,id:2,isin:"INE009A01021",symbol:"SMALL_MATCH",cap_category:"SMALL_CAP",report_close_history:undefined}]}})})));
+ render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}} onOpenStock={open}>{null}</AutonomousOverview>);
+ expect(await screen.findByRole("img",{name:"LARGE_MATCH historical close chart"})).toBeTruthy();
+ expect(screen.queryByRole("img",{name:"SMALL_MATCH historical close chart"})).toBeNull();
+ fireEvent.click(screen.getByRole("button",{name:"Small cap"}));
+ expect(screen.queryByText("LARGE_MATCH")).toBeNull();
+ expect(screen.getByText("SMALL_MATCH")).toBeTruthy();
+ fireEvent.click(screen.getByRole("button",{name:/View complete stock research/}));
+ expect(open).toHaveBeenCalledWith({id:2,isin:"INE009A01021",symbol:"SMALL_MATCH",exchange:"NSE"});
+ fireEvent.click(screen.getByRole("button",{name:"Mid cap"}));
+ expect(screen.getByText("No matches in this cap category")).toBeTruthy();
 });

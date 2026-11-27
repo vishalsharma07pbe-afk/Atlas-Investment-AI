@@ -27,7 +27,7 @@ describe("MarketIndexStrip",()=>{
   })} as Response);
   render(<MarketIndexStrip/>);
   expect(await screen.findByText("Upstox authorization expired")).toBeTruthy();
-  expect(screen.getByText(/Daily Upstox sign-in is required/)).toBeTruthy();
+  expect(screen.getByText(/Check the configured Analytics Token/)).toBeTruthy();
  });
 
  it("replaces the snapshot immediately when a pushed quote arrives",async()=>{
@@ -55,7 +55,7 @@ describe("MarketIndexStrip",()=>{
    }]
   });
   expect(await screen.findByText("25,123.45")).toBeTruthy();
-  expect(screen.getByText("UPSTOX_V3_STREAM · live push")).toBeTruthy();
+  expect(screen.getByRole("status",{name:"Market quotes live"})).toBeTruthy();
  });
 });
 
@@ -81,7 +81,7 @@ it("keeps streamed quotes when an older HTTP response completes, then marks them
  expect(await screen.findByText("25,123.45")).toBeTruthy();
  await act(async()=>{finish({ok:true,json:async()=>snapshot("UPSTOX",25000,"2026-11-19T04:30:00Z")} as Response);});
  expect(screen.queryByText("25,000.00")).toBeNull();
- expect(screen.getByText("UPSTOX_V3_STREAM · live push")).toBeTruthy();
+ expect(screen.getByRole("status",{name:"Market quotes live"})).toBeTruthy();
  act(()=>FakeSource.current.onerror?.());
  expect(screen.getByText("LAST OBSERVED")).toBeTruthy();
  expect(screen.queryByText("LIVE")).toBeNull();

@@ -295,3 +295,15 @@ it("shows automatic no-sale monthly contribution research without asking for a b
  expect(screen.getByText("No assumed budget.")).toBeTruthy();
  expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+it("prioritizes non-price business evidence in the compact summary",async()=>{
+ const holding={id:1,symbol:"TEST",asset_type:"EQUITY",exchange:"NSE",status:"REVIEW_REQUIRED",weight_percent:10,recorded_return_percent:-15,evidence_date:null,history_count:0,change_20_observations_percent:null,recent_peak_change_percent:null,findings:["Recorded loss"],missing_evidence:[],thesis_summary:{status:"REVIEW_EVIDENCE",risks:[{statement:"Recorded loss",source:"Local portfolio review"}],review_prompts:[{statement:"Reported operating cash flow fell between matched annual periods.",source:"Dated company statements"}],observations:[],gaps:["Official filing unverified"],notice:"Partial research"}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({holding_count:1,attention_count:1,data_gap_count:1,generated_at:"2026-11-24T10:00:00Z",holdings:[holding]})})));
+ render(<PortfolioDoctor compact revision={0} onSettings={()=>{}}/>);
+ expect(await screen.findByText("Reported operating cash flow fell between matched annual periods.")).toBeTruthy();
+ expect(screen.getByText("Dated company statements")).toBeTruthy();
+ expect(screen.getByText("Official filing unverified")).toBeTruthy();
+ expect(screen.getByText("Business evidence review")).toBeTruthy();
+ expect(screen.getByText("Next research step")).toBeTruthy();
+ expect(screen.queryByText("Recorded loss")).toBeNull();
+});

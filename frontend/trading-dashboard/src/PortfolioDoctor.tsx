@@ -1,3 +1,5 @@
+import {EvidenceBars} from "./TerminalCharts";
+import {CoverageMeter,ObservationChart,finite} from "./ResearchVisuals";
 import PortfolioBenchmarkRisk,{type BenchmarkRisk} from "./PortfolioBenchmarkRisk";
 import {visiblePolling} from "./visiblePolling";
 import {useEffect,useState} from "react";
@@ -314,9 +316,22 @@ function ThesisDigest({summary}:{summary:ThesisSummary}){
  </div>;
 }
 
+const businessPriority=(item:HoldingReview)=>item.ownership_changes?.some(c=>c.attention==="REVIEW")||item.fund_thesis_changes?.some(c=>c.attention==="REVIEW")||item.thesis_changes?.some(c=>c.current_direction==="NEGATIVE"||c.current_direction==="DECLINING")?3:item.thesis_summary?.review_prompts?.length?2:0;
 const priority=(item:HoldingReview)=>item.status==="REVIEW_REQUIRED"||item.ownership_changes?.some(change=>change.attention==="REVIEW")||item.fund_thesis_changes?.some(change=>change.attention==="REVIEW")||item.thesis_changes?.some(change=>change.current_direction==="NEGATIVE"||change.current_direction==="DECLINING")?3:item.thesis_summary?.status==="REVIEW_EVIDENCE"?2:item.status==="EVIDENCE_GAP"?1:0;
 function reviewLabel(item:HoldingReview){return priority(item)>=2?"Needs review":statuses[item.status];}
-function firstFinding(item:HoldingReview){return item.ownership_changes?.some(change=>change.attention==="REVIEW")?"Reported quarterly ownership declined; verify filings and share counts.":item.fund_thesis_changes?.some(change=>change.attention==="REVIEW")?"Reported fund disclosure changed; review the dated evidence.":item.thesis_changes?.find(change=>change.current_direction==="NEGATIVE"||change.current_direction==="DECLINING")? "Newly observed financial deterioration; open the dated thesis evidence.":item.thesis_summary?.risks[0]?.statement||item.thesis_summary?.review_prompts[0]?.statement||item.findings[0]||item.missing_evidence[0]||"Further evidence is needed.";}
+function nextResearchStep(item:HoldingReview){
+ if(item.ownership_changes?.some(c=>c.attention==="REVIEW"))return "Compare share counts and ownership percentages with the previous quarter; check whether dilution or actual selling explains the change.";
+ if(item.fund_thesis_changes?.some(c=>c.attention==="REVIEW"))return "Compare the latest official factsheet with the previous disclosure; reassess the changed costs, risk or portfolio exposure.";
+ const trends=item.thesis_evidence?.company_evidence?.financial_trends?.items??[];
+ const declining=trends.filter(t=>!t.latest_period_may_be_stale&&finite(t.previous_value)&&finite(t.latest_value)&&t.latest_value<t.previous_value);
+ if(declining.some(t=>t.metric==="OPERATING_CASH_FLOW")&&!declining.some(t=>t.metric==="NET_PROFIT"))return "Profit and operating cash flow may be diverging. Examine working capital and cash conversion in the consolidated filings.";
+ if(declining.some(t=>t.metric==="NET_PROFIT"||t.metric==="OPERATING_PROFIT"))return "Check whether falling profit reflects weaker sales, margin compression or nonrecurring items in the latest filing.";
+ if(declining.some(t=>t.metric==="REVENUE"))return "Check demand, pricing and segment revenue in the latest filing; distinguish temporary weakness from a sustained slowdown.";
+ if(item.thesis_summary?.review_prompts?.some(p=>/P\/E|P\/B|sector/i.test(p.statement)))return "Compare earnings growth and valuation with genuinely comparable peers, using the same dated financial periods.";
+ if(businessPriority(item)>0)return "Verify the dated business or ownership change against the filing before changing the investment thesis.";
+ return item.history_count>0?"Review price and exposure risk separately from business quality; obtain current company evidence before deciding.":"Collect dated price and company evidence before drawing a business conclusion.";
+}
+function firstFinding(item:HoldingReview){return item.ownership_changes?.some(change=>change.attention==="REVIEW")?"Reported quarterly ownership declined; verify filings and share counts.":item.fund_thesis_changes?.some(change=>change.attention==="REVIEW")?"Reported fund disclosure changed; review the dated evidence.":item.thesis_changes?.find(change=>change.current_direction==="NEGATIVE"||change.current_direction==="DECLINING")? "Newly observed financial deterioration; open the dated thesis evidence.":item.thesis_summary?.review_prompts[0]?.statement||item.thesis_summary?.risks[0]?.statement||item.findings[0]||item.missing_evidence[0]||"Further evidence is needed.";}
 export default function PortfolioDoctor({revision,onSettings,compact=false,onOpenPortfolio}:{revision:number;onSettings:()=>void;compact?:boolean;onOpenPortfolio?:()=>void}){
  const [review,setReview]=useState<Review|null>(null);
  const [error,setError]=useState(false);
@@ -330,14 +345,26 @@ export default function PortfolioDoctor({revision,onSettings,compact=false,onOpe
   }catch{if(!signal.aborted){setReview(null);setError(true);}}
  },60000),[revision]);
  const ordered=[...(review?.holdings||[])].sort((a,b)=>priority(b)-priority(a)||a.symbol.localeCompare(b.symbol));
- const attention=ordered.filter(item=>priority(item)>=2);
+ const attention=ordered.filter(item=>priority(item)>=2).sort((a,b)=>businessPriority(b)-businessPriority(a)||((b.weight_percent??0)-(a.weight_percent??0))||a.symbol.localeCompare(b.symbol));
+ const business=ordered.filter(item=>businessPriority(item)>0);
+ const evidenceCount=ordered.filter(item=>!!item.thesis_evidence?.company_evidence||!!item.fund_thesis_evidence||!!item.fund_history_evidence).length;
  if(compact)return <section className="panel glass portfolio-doctor doctor-compact" aria-label="Portfolio attention summary">
   <div className="sectionhead"><div><small className="section-kicker">YOUR PORTFOLIO</small><h2>Portfolio attention</h2></div>{onOpenPortfolio&&<button type="button" className="secondary" onClick={onOpenPortfolio}>Open full review</button>}</div>
   {error?<p role="alert">Portfolio review unavailable. <button type="button" className="secondary" onClick={onSettings}>Check connections</button></p>:!review?<p role="status">Loading portfolio review…</p>:!review.holding_count?<p>No holdings recorded yet. Add investments in My Portfolio.</p>:<>
-   <div className="doctor-stats"><div><span>Holdings reviewed</span><strong>{review.holding_count}</strong></div><div><span>Holdings needing review</span><strong>{attention.length}</strong></div><div><span>Core data gaps</span><strong>{review.data_gap_count}</strong></div></div>
-   {attention.length?<ul className="doctor-compact-findings">{attention.slice(0,3).map(item=><li key={item.id}><strong>{item.symbol}</strong><span>{firstFinding(item)}</span></li>)}</ul>:<p>No review flags in the available observations. Missing evidence is not a clean bill of health.</p>}
-   {!!review.portfolio_level_risk?.attention.length&&<p><strong>Portfolio-level review:</strong> {review.portfolio_level_risk.attention.length} benchmark, concentration or fund overlap observations. Open full review for evidence.</p>}
-   {attention.length>3&&<p className="muted tiny">{attention.length-3} more holdings need review in My Portfolio.</p>}
+   <div className="research-visual-grid"><CoverageMeter label="Business / fund evidence" value={evidenceCount} total={review.holding_count}/><div className="research-kpi"><small>Business review priorities</small><strong>{business.length}</strong><small>Financial, ownership or fund changes</small></div>{finite(review.diversification?.top_three_resolved_weight_percent)&&<div className="research-kpi"><small>Top three recorded weights</small><strong>{pct(review.diversification!.top_three_resolved_weight_percent)}</strong></div>}</div>
+   {review.diversification?.exposure_stress?.scenarios?.length?<div className="terminal-portfolio-stress"><h3>Portfolio downside scenarios</h3><EvidenceBars title="Illustrative impact on recorded portfolio value" rows={review.diversification.exposure_stress.scenarios.slice(0,4).map(s=>({label:s.title,value:s.changePercent}))}/></div>:null}
+   {review.equity_correlation?.pairs?.some(p=>p.high_positive_correlation)&&<EvidenceBars title="Highly correlated equity pairs · historical correlation" unit="" rows={review.equity_correlation.pairs.filter(p=>p.high_positive_correlation).slice(0,4).map(p=>({label:p.first_symbol+" / "+p.second_symbol,value:p.correlation}))}/>}
+   {attention.length?<><h3>What to investigate first</h3><div className="terminal-attention-cards">{attention.slice(0,3).map(item=><article key={item.id}><header><strong>{item.symbol}</strong><span className="doctor-warning">{businessPriority(item)>0?"Business evidence review":"Risk flag only"}</span></header><p>{firstFinding(item)}</p>
+    {item.thesis_summary?.review_prompts?.slice(0,2).map((f,i)=><div className="terminal-thesis-finding" key={i}><small>{f.source}</small>{f.statement!==firstFinding(item)&&<p>{f.statement}</p>}</div>)}
+    {item.thesis_changes?.slice(0,1).map(change=><p key={change.metric}><strong>{change.metric.replace(/_/g," ")}</strong> · {change.previous_period} → {change.current_period}: {change.current_direction.toLowerCase()}</p>)}
+    {item.ownership_changes?.filter(change=>change.attention==="REVIEW").slice(0,1).map(change=><ObservationChart key={change.category} title={change.category.replace(/_/g," ")+" ownership · reported"} points={[{date:change.previousDate,value:change.previousPercent},{date:change.currentDate,value:change.currentPercent}]} unit="%" neutral/>)}
+    {item.thesis_evidence?.company_evidence?.financial_trends?.items?.some(m=>!m.latest_period_may_be_stale&&finite(m.change_percent))&&<EvidenceBars title="Reported annual business changes" rows={item.thesis_evidence.company_evidence.financial_trends.items.filter(m=>!m.latest_period_may_be_stale&&finite(m.change_percent)&&["REVENUE","NET_PROFIT","OPERATING_PROFIT","OPERATING_CASH_FLOW"].includes(m.metric)).map(m=>({label:m.metric.replace(/_/g," ").toLowerCase(),value:m.change_percent}))}/>}
+    {item.thesis_evidence?.company_evidence?.fundamental_quality?.multi_year_quality?.metrics?.filter(m=>m.metric==="NET_PROFIT"||m.metric==="OPERATING_CASH_FLOW").slice(0,1).map(m=><ObservationChart key={m.metric} title={m.metric.replace(/_/g," ").toLowerCase()+" · "+m.unit} points={m.observations.map(p=>({date:p.period,value:p.value}))} neutral/>)}
+    <div className="research-action"><strong>Next research step</strong><p>{nextResearchStep(item)}</p></div>
+    <details><summary>Supporting evidence &amp; missing inputs</summary><dl><div><dt>Recorded weight</dt><dd>{pct(item.weight_percent)}</dd></div><div><dt>20-observation change</dt><dd>{pct(item.change_20_observations_percent)}</dd></div></dl>{item.thesis_evidence?.ai_review?.findings?.slice(0,1).map((f,i)=><p key={i}>{f.statement} <small>[{f.evidence_ids.join(", ")}]</small></p>)}<ul>{[...new Set([...item.missing_evidence,...(item.thesis_summary?.gaps??[])])].map(m=><li key={m}>{m}</li>)}</ul></details>
+   </article>)}</div></>:<p>No supported review flags; business evidence coverage is shown above.</p>}
+   {attention.length>3&&onOpenPortfolio&&<button className="secondary" type="button" onClick={onOpenPortfolio}>Review all {attention.length} priorities</button>}
+   {review.data_gap_count>0&&<details><summary>Research evidence still missing · {review.data_gap_count} holdings</summary><p>Missing evidence is not a clean bill of health.</p><button className="secondary" type="button" onClick={onSettings}>Data connections</button></details>}
    <p className="muted tiny">Reviewed {new Date(review.generated_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})} IST · Research only.</p>
   </>}
  </section>;

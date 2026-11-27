@@ -336,27 +336,40 @@ class LiveFeedsDatabaseIntegrationTest {
  void discoveryBalancesExistingCoverageAndExpansion()throws Exception{
   LocalDate end=LocalDate.now(MarketCalendarService.IST).minusDays(1);
   db.update("UPDATE instruments SET active=false WHERE exchange_id=(SELECT id FROM exchanges WHERE code='BSE')");
-  String[] symbols={"MAINTAIN","EXPAND","UNSEEN"};
-  String[] isins={"INE000A01901","INE000A01902","INE000A01903"};
-  for(int i=0;i<symbols.length;i++){
-   db.update("INSERT INTO instruments(exchange_id,symbol,series,source,isin,instrument_type,active) VALUES ((SELECT id FROM exchanges WHERE code='BSE'),?,'EQ','UPSTOX',?,'EQ',true)",symbols[i],isins[i]);
-   db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,instrument_type,isin) VALUES (?,'BSE',?,'EQ',?)","BSE_EQ|"+isins[i],symbols[i],isins[i]);
-   if(i<2)db.update("""
+  // Nine overdue established histories and three new instruments: prove that
+  // the actual database query enforces both reserved budgets and their order.
+  String[] isins=new String[12];
+  for(int i=0;i<isins.length;i++){
+   String symbol="COVERAGE"+i;
+   isins[i]=String.format(java.util.Locale.ROOT,"INE000A%05d",19701+i);
+   db.update("INSERT INTO instruments(exchange_id,symbol,series,source,isin,instrument_type,active) VALUES ((SELECT id FROM exchanges WHERE code='BSE'),?,'EQ','UPSTOX',?,'EQ',true)",symbol,isins[i]);
+   db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,instrument_type,isin) VALUES (?,'BSE',?,'EQ',?)","BSE_EQ|"+isins[i],symbol,isins[i]);
+   if(i<9)db.update("""
      INSERT INTO market_candles(instrument_id,timeframe,candle_time,source_id,open,high,low,close,volume,is_complete,quality_status,adjustment_status)
      SELECT (SELECT id FROM instruments WHERE symbol=?),'1d',(?::date-g)::timestamp AT TIME ZONE 'Asia/Kolkata',
        (SELECT id FROM data_sources WHERE source_code='MANUAL_CSV'),100,105,99,102,200,true,'VALIDATED_MANUAL','RAW_UNADJUSTED'
      FROM generate_series(1,?) g
-     """,symbols[i],end,i==0?210:50);
+     """,symbol,end,i==0?210:50);
    when(http.text(contains("BSE_EQ%7C"+isins[i]),eq("coverage-test-token"),anyInt()))
      .thenReturn("{\"status\":\"success\",\"data\":{\"candles\":[[\""+end+"T09:15:00+05:30\",100,105,99,102,200]]}}");
   }
+  Object oldGap=org.springframework.test.util.ReflectionTestUtils.getField(discovery,"requestGapMs");
   org.springframework.test.util.ReflectionTestUtils.setField(discovery,"accessToken","coverage-test-token");
+  org.springframework.test.util.ReflectionTestUtils.setField(discovery,"requestGapMs",0L);
   try{
    org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"refreshExchange","BSE",end);
-   verify(http).text(contains("BSE_EQ%7C"+isins[0]),eq("coverage-test-token"),anyInt());
-   verify(http).text(contains("BSE_EQ%7C"+isins[1]),eq("coverage-test-token"),anyInt());
-   verify(http,never()).text(contains("BSE_EQ%7C"+isins[2]),eq("coverage-test-token"),anyInt());
-  }finally{org.springframework.test.util.ReflectionTestUtils.setField(discovery,"accessToken","");}
+   var ordered=inOrder(http);
+   for(int i=0;i<8;i++)
+     ordered.verify(http).text(contains("BSE_EQ%7C"+isins[i]),eq("coverage-test-token"),anyInt());
+   for(int i=9;i<11;i++)
+     ordered.verify(http).text(contains("BSE_EQ%7C"+isins[i]),eq("coverage-test-token"),anyInt());
+   verify(http,never()).text(contains("BSE_EQ%7C"+isins[8]),eq("coverage-test-token"),anyInt());
+   verify(http,never()).text(contains("BSE_EQ%7C"+isins[11]),eq("coverage-test-token"),anyInt());
+   verify(http,times(10)).text(anyString(),eq("coverage-test-token"),anyInt());
+  }finally{
+   org.springframework.test.util.ReflectionTestUtils.setField(discovery,"accessToken","");
+   org.springframework.test.util.ReflectionTestUtils.setField(discovery,"requestGapMs",oldGap);
+  }
  }
 
  @Test

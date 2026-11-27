@@ -37,7 +37,7 @@ public class PortfolioRefreshService {
         SELECT h.id FROM personal_holdings h
         WHERE (h.last_auto_refresh_attempt_at IS NULL
           OR h.last_auto_refresh_attempt_at < now()-interval '15 minutes')
-          AND (h.asset_type='MUTUAL_FUND' OR EXISTS(
+          AND (h.asset_type='MUTUAL_FUND' OR ? OR EXISTS(
             SELECT 1 FROM broker_credentials b WHERE b.user_id=h.user_id
             AND b.broker_name='UPSTOX' AND b.token_expires_at>now()))
         ORDER BY h.last_auto_refresh_attempt_at ASC NULLS FIRST,h.id
@@ -45,7 +45,7 @@ public class PortfolioRefreshService {
       )
       UPDATE personal_holdings h SET last_auto_refresh_attempt_at=now()
       FROM due WHERE h.id=due.id RETURNING h.id,h.user_id,h.symbol,h.asset_type
-      """,limit);
+      """,upstox.hasConfiguredMarketToken(),limit);
     return refresh(rows,true);
   }
 
