@@ -40,6 +40,7 @@ class LiveFeedsDatabaseIntegrationTest {
  @Autowired AmfiFeedService funds;
  @Autowired FundHistoryResearchService fundResearch;
  @Autowired DiscoveryHistoryScheduler discovery;
+ @Autowired DiscoveryQuoteScheduler quoteScreen;
  @Autowired ExchangeCalendarSync exchangeCalendar;
  @Autowired MockMvc mvc;
  @MockitoBean FeedHttp http;
@@ -703,5 +704,35 @@ class LiveFeedsDatabaseIntegrationTest {
   assertThat(db.queryForObject("SELECT count(*) FROM market_candles WHERE instrument_id=? AND timeframe='15minute' AND is_complete",Long.class,instrument)).isEqualTo(2L);
   assertThat(db.queryForObject("SELECT count(*) FROM market_candles WHERE instrument_id=? AND (candle_time AT TIME ZONE 'Asia/Kolkata')::time='09:45:00'",Long.class,instrument)).isZero();
   verifyNoInteractions(vault);
+ }
+
+ @Test
+ @org.springframework.transaction.annotation.Transactional
+ void bulkDiscoveryQuoteUsesExactMappingAndStoresOnlyObservedEvidence()throws Exception{
+  long id=seedStock();
+  db.update("UPDATE instruments SET active=false WHERE exchange_id=(SELECT id FROM exchanges WHERE code='NSE') AND id<>?",id);
+  db.update("UPDATE instruments SET active=true,listing_status='ACTIVE' WHERE id=?",id);
+  db.update("DELETE FROM discovery_quote_screen WHERE instrument_id=?",id);
+  db.update("DELETE FROM operator_feed_cooldown WHERE scope='UPSTOX_OPERATOR'");
+  Instant now=Instant.now();
+  var json=new com.fasterxml.jackson.databind.ObjectMapper();
+  var root=json.createObjectNode().put("status","success");
+  var q=root.putObject("data").putObject("NSE_EQ:FEEDTEST");
+  q.put("instrument_token","NSE_EQ|INE000A01001").put("symbol","FEEDTEST")
+   .put("last_trade_time",Long.toString(now.minusSeconds(3).toEpochMilli())).put("timestamp",now.toString())
+   .put("last_price",102).put("prev_close_price",100).put("average_price",101).put("volume",200000);
+  var depth=q.putObject("depth");depth.putArray("buy").addObject().put("price",101.9);depth.putArray("sell").addObject().put("price",102.1);
+  when(http.text(contains("/v3/market-quote/quotes?instrument_key=NSE_EQ%7CINE000A01001"),eq("fixture-quote-token"),anyInt())).thenReturn(root.toString());
+  Object old=org.springframework.test.util.ReflectionTestUtils.getField(quoteScreen,"token");
+  org.springframework.test.util.ReflectionTestUtils.setField(quoteScreen,"token","fixture-quote-token");
+  try{
+   Boolean result=org.springframework.test.util.ReflectionTestUtils.invokeMethod(quoteScreen,"refresh","NSE",now.minusSeconds(3600),now.plusSeconds(3600));
+   assertThat(result).isTrue();
+   assertThat(db.queryForObject("SELECT state FROM discovery_quote_screen WHERE instrument_id=?",String.class,id)).isEqualTo("PRIORITY");
+   assertThat(db.queryForObject("SELECT recent_priority FROM discovery_quote_coverage WHERE exchange='NSE'",Long.class)).isEqualTo(1L);
+   assertThat(db.queryForObject("SELECT last_price FROM discovery_quote_screen WHERE instrument_id=?",BigDecimal.class,id)).isEqualByComparingTo("102");
+   org.springframework.test.util.ReflectionTestUtils.invokeMethod(quoteScreen,"refresh","NSE",now.minusSeconds(3600),now.plusSeconds(3600));
+   verify(http,times(1)).text(contains("/v3/market-quote/quotes?"),eq("fixture-quote-token"),anyInt());
+  }finally{org.springframework.test.util.ReflectionTestUtils.setField(quoteScreen,"token",old);}
  }
 }

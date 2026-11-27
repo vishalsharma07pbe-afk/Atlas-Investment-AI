@@ -108,16 +108,19 @@ public class DiscoveryHistoryScheduler {
         AND NOT coalesce(h.has_adjusted,false)
         AND (h.candle_count<? OR h.latest_date IS NULL OR h.latest_date<? OR g.first_missing_date IS NOT NULL)
         AND (a.next_attempt_at IS NULL OR a.next_attempt_at<=now())
+      ), oldest AS (
+        SELECT *,row_number() OVER (PARTITION BY workload ORDER BY attempted_at ASC NULLS FIRST,candle_count DESC,id) AS oldest_position
+        FROM candidates
       ), ranked AS (
         SELECT *,row_number() OVER (PARTITION BY workload ORDER BY
-          CASE WHEN workload=1 THEN quote_priority ELSE 0 END DESC,attempted_at ASC NULLS FIRST,
+          CASE WHEN workload=1 AND oldest_position=1 THEN 2 WHEN workload=1 THEN quote_priority ELSE 0 END DESC,attempted_at ASC NULLS FIRST,
           candle_count DESC,id) AS position
-        FROM candidates
+        FROM oldest
       )
       SELECT id,instrument_key,candle_count,latest_date,first_missing_date FROM ranked
       WHERE (workload=0 AND position<=8) OR (workload=1 AND position<=2)
       ORDER BY workload,position LIMIT 10
-      """.replace("CASE WHEN workload=1 THEN quote_priority ELSE 0 END DESC,",quoteScreenEnabled?"CASE WHEN workload=1 THEN quote_priority ELSE 0 END DESC,":""),exchange,end.minusMonths(BACKFILL_MONTHS),end,end,end.minusMonths(BACKFILL_MONTHS),end,end,exchange,REQUIRED_DAILY_CANDLES,end);
+      """.replace("CASE WHEN workload=1 AND oldest_position=1 THEN 2 WHEN workload=1 THEN quote_priority ELSE 0 END DESC,",quoteScreenEnabled?"CASE WHEN workload=1 AND oldest_position=1 THEN 2 WHEN workload=1 THEN quote_priority ELSE 0 END DESC,":""),exchange,end.minusMonths(BACKFILL_MONTHS),end,end,end.minusMonths(BACKFILL_MONTHS),end,end,exchange,REQUIRED_DAILY_CANDLES,end);
     for(var row:rows){
       if(OperatorFeedCooldown.blocked(jdbc))return;
       long id=((Number)row.get("id")).longValue();
