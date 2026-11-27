@@ -225,3 +225,15 @@ it("filters actual Elite matches by cap and opens their exact research identity"
  fireEvent.click(screen.getByRole("button",{name:"Mid cap"}));
  expect(screen.getByText("No matches in this cap category")).toBeTruthy();
 });
+
+it("shows distinct company decision coverage and links private review without new calls",async()=>{
+ const portfolio=vi.fn();
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[],unified_decision:{status:"RESEARCH_CONTEXT_AVAILABLE",
+ equity_company_count:1,equity_review_count:1,ai_reviewed_company_count:1,equity_companies:[{isin:"INE002A01018",symbol:"EXAMPLE",state:"REVIEW_REQUIRED",observations:[{exchange:"NSE",horizon:"SWING",as_of:"2026-11-26",blockers:["FINAL_QUALIFICATION_VALIDATION_REQUIRED"],review_findings:["AI_ASSERTIONS_CONTRADICT_SUPPLIED_EVIDENCE"],ai:{status:"CONFLICTING_ASSERTIONS",reviewed_count:2}}]}],fund_categories:[],notice:"Research only"}})})));
+ render(<AutonomousOverview onPortfolio={portfolio} onFunds={()=>{}} onSettings={()=>{}}>{null}</AutonomousOverview>);
+ expect(await screen.findByRole("region",{name:"Unified research decisions"})).toBeTruthy();
+ expect(screen.getByText("Checked observations, not confidence")).toBeTruthy();
+ fireEvent.click(screen.getByRole("button",{name:"Open private portfolio decisions"}));
+ expect(portfolio).toHaveBeenCalledTimes(1);
+ expect(fetch).toHaveBeenCalledTimes(1);
+});

@@ -42,3 +42,12 @@ class UnifiedDecisionTests(unittest.TestCase):
         self.assertFalse(row["historical_watches"][0]["qualified"])
         result["research_reports"].append(fund)
         self.assertFalse(d.summarize(snapshot,TODAY)["fund_categories"][0]["historical_watches"])
+
+    def test_elite_and_daily_watches_count_one_company(self):
+        snapshot,item=fixture()
+        elite={**item,"status":"SCREEN_MATCH_ONLY","elite_assessment":{"methodology":elite_assessment.VERSION,
+          "status":"SCORE_WITHHELD","qualified":False,"blockers":["FINAL_QUALIFICATION_VALIDATION_REQUIRED"]}}
+        snapshot["steady_momentum"]={"items":[elite],"category_items":{"LARGE_CAP":[elite]}}
+        result=d.summarize(snapshot,TODAY)
+        self.assertEqual(result["equity_company_count"],1)
+        self.assertEqual(len(result["equity_companies"][0]["observations"]),2)

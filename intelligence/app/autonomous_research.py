@@ -410,7 +410,11 @@ def read_snapshot(include_ai=True):
         stock_qualification.attach(snapshot,current.astimezone(ZoneInfo("Asia/Kolkata")).date(),current)
         snapshot["daily_briefing"] = daily_briefing.summarize(snapshot)
         company_reports.attach(snapshot,current)
-        snapshot["unified_decision"]=unified_decision.summarize(snapshot,current.astimezone(ZoneInfo("Asia/Kolkata")).date())
+        try:
+            snapshot["unified_decision"]=unified_decision.summarize(snapshot,current.astimezone(ZoneInfo("Asia/Kolkata")).date())
+        except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
+            # An invalid optional decision projection must not break the existing research endpoint.
+            snapshot["unified_decision"]={"methodology":unified_decision.VERSION,"status":"UNAVAILABLE","notice":unified_decision.NOTICE}
     return snapshot
 
 

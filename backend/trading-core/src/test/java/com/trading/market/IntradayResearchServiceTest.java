@@ -44,6 +44,8 @@ class IntradayResearchServiceTest {
   assertEquals(1,warnings.size());
   var chosen=(Map<?,?>)warnings.getFirst();
   assertEquals("BSE",chosen.get("exchange"));assertEquals(100d,chosen.get("close"));
+  var decision=(Map<?,?>)chosen.get("unified_decision");
+  assertEquals("REVIEW_REQUIRED",decision.get("state"));assertEquals(false,decision.get("qualified"));
   var q=(Map<?,?>)selected.get("qualification");
   assertEquals(1,q.get("reviewed_count"));assertEquals(1,q.get("conflicting_company_count"));
   assertEquals(1,q.get("unidentified_listing_count"));assertEquals(0,q.get("qualified_count"));
