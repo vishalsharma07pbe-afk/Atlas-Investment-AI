@@ -74,7 +74,7 @@ def run():
                 panel.get_by_role("group",name="Theme").get_by_role("button",name=re.compile(theme,re.I)).click()
                 expect(page.locator(".dashboard")).to_have_attribute("data-theme",theme)
                 # Dark mode removes texture; light keeps the original design.
-                assert page.locator(".canvas").evaluate("(el)=>getComputedStyle(el,'::after').display") == ("none" if theme=="dark" else "block"),"dark texture toggle failed"
+                assert page.locator(".canvas-texture").evaluate("(el)=>getComputedStyle(el).display") == ("none" if theme=="dark" else "block"),"dark texture toggle failed"
                 # Appearance is a live preview, not a page-scroll lock.
                 for opacity,blur in ((0,0),(0,32),(65,20),(100,40)):
                     panel.locator("#panel-opacity").fill(str(opacity))

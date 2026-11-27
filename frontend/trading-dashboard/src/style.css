@@ -99,10 +99,10 @@ button { cursor: pointer; }
   animation: ambient-turn 28s linear infinite;
   will-change: transform;
 }
-.canvas::after {
-  content: "";
-  position: absolute;
+.canvas-texture {
+  position: fixed;
   inset: 0;
+  pointer-events: none;
   background-image:
     linear-gradient(rgba(136, 174, 255, .055) 1px, transparent 1px),
     linear-gradient(90deg, rgba(136, 174, 255, .055) 1px, transparent 1px),
@@ -112,8 +112,8 @@ button { cursor: pointer; }
 }
 
 /* Dark mode uses the original animated gradients without decorative grid/dots. */
-.dashboard[data-theme="dark"] .canvas::after { display: none; }
-@media (prefers-color-scheme: dark) { .dashboard[data-theme="system"] .canvas::after { display: none; } }
+.dashboard[data-theme="dark"] .canvas-texture { display: none; }
+@media (prefers-color-scheme: dark) { .dashboard[data-theme="system"] .canvas-texture { display: none; } }
 
 [data-theme="light"] .canvas {
   background:

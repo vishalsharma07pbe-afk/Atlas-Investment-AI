@@ -62,3 +62,20 @@ class SteadyMomentumTests(unittest.TestCase):
         output=BytesIO()
         workbook.save(output)
         self.assertEqual(len(parse(output.getvalue())),250)
+
+    def test_coverage_is_not_the_count_of_technical_matches(self):
+        from datetime import datetime,timezone
+        from unittest.mock import patch
+        from app.steady_momentum import summarize
+        now=datetime(2026,11,27,7,tzinfo=timezone.utc)
+        snapshot={"enabled":True,"sections":[
+            {"section":"NSE","status":"READY","result":{"universe_size":200,"eligible_count":120,
+             "discovery_coverage":{"calendar_checked_on":"2026-11-27","calendar_status":"PUBLISHED_SESSION"}}},
+            {"section":"BSE","status":"READY","result":{"universe_size":200,"eligible_count":60,
+             "discovery_coverage":{"calendar_checked_on":"2026-11-26","calendar_status":"PUBLISHED_SESSION"}}}]}
+        with patch("app.automatic_company_evidence.permitted",return_value=False):
+            result=summarize(snapshot,None,now)
+        self.assertEqual(result["sampled_count"],400)
+        self.assertEqual(result["eligible_history_count"],120)
+        self.assertEqual(result["technical_count"],0)
+        self.assertEqual(result["matched_count"],0)

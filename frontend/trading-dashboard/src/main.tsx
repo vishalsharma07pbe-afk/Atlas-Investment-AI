@@ -262,7 +262,7 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
 
   return <div className="dashboard" data-theme={appearance.theme} data-panel-clear={appearance.opacity === 0 ? "true" : undefined} data-blur-zero={appearance.opacity === 0 || appearance.blur === 0 ? "true" : undefined} data-appearance-open={appearanceOpen ? "true" : undefined} style={style}>
     <a className="skip-link" href="#main-content">Skip to main content</a>
-    <div className="canvas" aria-hidden="true"><i/><i/><i/><i/></div>
+    <div className="canvas" aria-hidden="true"><i/><i/><i/><i/></div><div className="canvas-texture" aria-hidden="true"/>
     <div className="layout">
       <WorkspaceNavigation page={tab} onNavigate={navigate} account={identity.email} onLogout={()=>void onLogout()} onHelp={()=>window.dispatchEvent(new Event("atlas:open-onboarding"))}/>
 

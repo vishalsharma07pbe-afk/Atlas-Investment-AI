@@ -209,3 +209,19 @@ it("keeps the approved Elite layout when no stocks qualify and separates coverag
  expect(screen.queryByText("0% coverage")).toBeNull();
  expect(screen.queryByText("91/100")).toBeNull();
 });
+
+it("filters actual Elite matches by cap and opens their exact research identity",async()=>{
+ const open=vi.fn();
+ const item={id:1,isin:"INE002A01018",symbol:"LARGE_MATCH",exchange:"NSE",as_of:"2026-11-26",close:110,cap_category:"LARGE_CAP",average_cap_cr:10000,cap_as_of:"2026-06-30",median_daily_turnover_cr:10,return_60_percent:12,positive_day_percent:60,earnings_growth_percent:20,eps_growth_percent:15,reported_pe:18,reported_sector_pe:25,financial_period:"2026-03",status:"SCREEN_MATCH_ONLY",report_close_history:{adjustment_status:"ADJUSTED",as_of:"2026-11-26",points:[{date:"2026-11-25",close:100},{date:"2026-11-26",close:110}]}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[],steady_momentum:{status:"SCREEN_MATCHES_AVAILABLE",notice:"Sample only",items:[item,{...item,id:2,isin:"INE009A01021",symbol:"SMALL_MATCH",cap_category:"SMALL_CAP",report_close_history:undefined}]}})})));
+ render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}} onOpenStock={open}>{null}</AutonomousOverview>);
+ expect(await screen.findByRole("img",{name:"LARGE_MATCH historical close chart"})).toBeTruthy();
+ expect(screen.queryByRole("img",{name:"SMALL_MATCH historical close chart"})).toBeNull();
+ fireEvent.click(screen.getByRole("button",{name:"Small cap"}));
+ expect(screen.queryByText("LARGE_MATCH")).toBeNull();
+ expect(screen.getByText("SMALL_MATCH")).toBeTruthy();
+ fireEvent.click(screen.getByRole("button",{name:/View complete stock research/}));
+ expect(open).toHaveBeenCalledWith({id:2,isin:"INE009A01021",symbol:"SMALL_MATCH",exchange:"NSE"});
+ fireEvent.click(screen.getByRole("button",{name:"Mid cap"}));
+ expect(screen.getByText("No matches in this cap category")).toBeTruthy();
+});

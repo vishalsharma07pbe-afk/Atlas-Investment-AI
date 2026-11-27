@@ -40,3 +40,20 @@ describe("chart-first stock terminal",()=>{
   await waitFor(()=>expect(screen.getByText("Company lookup: TEST")).toBeTruthy());
  });
 });
+
+it("opens only the exact registry identity from the Elite research card",async()=>{
+ const fetchMock=vi.fn(async(url:string)=>({ok:true,json:async()=>url.startsWith("/api/v1/instruments?")?[{...item,id:99},item]:url.endsWith("/summary")?{research:null,notice:"test"}:url.includes("/resolve?")?{subscription_ready:false}:{instrument:item,status:"AVAILABLE",as_of:"2026-11-25",candles,indicators:{},patterns:[]}}));
+ vi.stubGlobal("fetch",fetchMock);
+ render(<StockExplorer initialTarget={{id:1,isin:item.isin,symbol:item.symbol,exchange:item.exchange}}/>);
+ await screen.findByRole("region",{name:"Selected stock overview"});
+ await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith("/intelligence/api/v1/intelligence/technical/1"));
+ expect(fetchMock).not.toHaveBeenCalledWith("/intelligence/api/v1/intelligence/technical/99");
+});
+it("withholds a preselected stock whose exact identity does not match",async()=>{
+ const fetchMock=vi.fn(async()=>({ok:true,json:async()=>[{...item,isin:"INE000000002"}]}));
+ vi.stubGlobal("fetch",fetchMock);
+ render(<StockExplorer initialTarget={{id:1,isin:item.isin,symbol:item.symbol,exchange:item.exchange}}/>);
+ expect(await screen.findByText(/Selected research instrument could not be verified/)).toBeTruthy();
+ expect(screen.queryByRole("region",{name:"Selected stock overview"})).toBeNull();
+ expect(fetchMock).toHaveBeenCalledTimes(1);
+});
