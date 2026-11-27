@@ -6,8 +6,8 @@ are versioned research heuristics. Read cached data only on dashboard requests.
 from collections import Counter
 from contextlib import closing
 from datetime import date, datetime, timedelta
-from math import isfinite
-from statistics import median
+from math import isfinite,sqrt
+from statistics import median,stdev
 from zoneinfo import ZoneInfo
 import json
 from .replay_evidence import exact_isin
@@ -19,6 +19,39 @@ NOTICE="ATLAS rule-based screen, not TradingView Strong Buy or investment qualif
 
 def numeric(v):
     return type(v) in (int,float) and isfinite(v)
+
+def window_observations(candles):
+    """Multi-window path statistics, not a forecast or strategy validation."""
+    result={}
+    for n in (20,60,120,252):
+        if len(candles)<n+1:continue
+        sample=candles[-n-1:]
+        prices=[c.close for c in sample]
+        if any(not numeric(v) or v<=0 for v in prices):continue
+        if len({c.adjustment_status for c in sample})!=1:continue
+        try:
+            days=[date.fromisoformat(c.date) for c in sample]
+        except (TypeError,ValueError):continue
+        if any(not 1<=(b-a).days<=7 for a,b in zip(days,days[1:])):continue
+        returns=[b/a-1 for a,b in zip(prices,prices[1:])]
+        if not all(numeric(v) for v in returns):continue
+        cumulative=prices[-1]/prices[0]-1
+        up=sum(v>0 for v in returns);down=sum(v<0 for v in returns)
+        positive=sum(max(v,0) for v in returns)
+        peak=prices[0];drawdown=0.
+        for p in prices:
+            peak=max(peak,p);drawdown=min(drawdown,p/peak-1)
+        volatility=stdev(returns)*sqrt(252)*100
+        if not all(numeric(v) for v in (cumulative,volatility,drawdown,positive)):continue
+        result[str(n)]={"return_percent":round(cumulative*100,4),
+            "positive_day_percent":round(up/n*100,4),
+            "information_discreteness":round((down-up)/n*(1 if cumulative>0 else -1),4) if cumulative!=0 else None,
+            "largest_gain_share_percent":round(max(returns)/positive*100,4) if positive>0 else None,
+            "maximum_close_drawdown_percent":round(-drawdown*100,4),
+            "annualized_daily_volatility_percent":round(volatility,4),
+            "first_date":sample[0].date,"last_date":sample[-1].date,
+            "adjustment_status":sample[-1].adjustment_status}
+    return result
 
 def technical(candles,ind):
     if len(candles)<201:
@@ -50,7 +83,8 @@ def technical(candles,ind):
             "positive_day_percent":round(up/60*100,2),"information_discreteness":round((down-up)/60,4),
             "largest_up_day_percent":round(max(r)*100,2),"largest_gain_share_percent":round(concentration*100,2),
             "median_daily_turnover_cr":round(turnover/10_000_000,2),"rsi":round(rsi,2),
-            "history_count":len(candles),"close":close,"adjustment_status":candles[-1].adjustment_status}
+            "history_count":len(candles),"close":close,"adjustment_status":candles[-1].adjustment_status,
+            "momentum_windows":window_observations(candles)}
 
 def fundamentals(report,today):
     income,_=_block(report,"income_statement")
@@ -86,11 +120,24 @@ def fundamentals(report,today):
             "reported_sector_pe":pe["sector"],"ratio_period":"UNVERIFIED",
             "earnings_basis":"UPSTOX_REPORTED_CONSOLIDATED_ANNUAL"},None
 
+CAP_GROUPS=("LARGE_CAP","MID_CAP","SMALL_CAP")
+
+def ranked_shortlists(candidates):
+    ordered=sorted(candidates,key=lambda x:(-x["positive_day_percent"],x["largest_gain_share_percent"],
+                     -x["median_daily_turnover_cr"],-x["earnings_growth_percent"],x["isin"],x["exchange"]))
+    seen=set()
+    distinct=[]
+    for row in ordered:
+        if row["isin"] not in seen:
+            seen.add(row["isin"]);distinct.append(row)
+    return distinct[:10],{k:[row for row in distinct if row["cap_category"]==k][:10] for k in CAP_GROUPS},len(distinct)
+
 def summarize(snapshot,connect,instant):
     from . import automatic_company_evidence, amfi_equity_caps
     today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
     out={"methodology":VERSION,"status":"AWAITING_EVIDENCE","items":[],"reviewed_count":0,
-         "technical_count":0,"sampled_count":0,"eligible_history_count":0,"matched_count":0,"exclusions":[],"notice":NOTICE}
+         "technical_count":0,"sampled_count":0,"eligible_history_count":0,"matched_count":0,
+         "qualified_count":0,"category_items":{k:[] for k in CAP_GROUPS},"exclusions":[],"notice":NOTICE}
     if not snapshot.get("enabled"):
         out["status"]="DISABLED"
         return out
@@ -153,6 +200,8 @@ def summarize(snapshot,connect,instant):
                     excluded["RAW_ACTION_EVIDENCE_MISSING"]+=1
                     continue
                 evidence,reason=fundamentals(report,today)
+                from .quarterly_financials import summarize as quarterly_summary
+                quarter=quarterly_summary(report,today)
             except (KeyError,TypeError,ValueError,AttributeError,OverflowError):
                 excluded["COMPANY_EVIDENCE_MISSING"]+=1
                 continue
@@ -160,17 +209,9 @@ def summarize(snapshot,connect,instant):
             if reason:
                 excluded[reason]+=1
                 continue
-            candidates.append({**row,**evidence,**cap,"status":"SCREEN_MATCH_ONLY"})
-    # Rank gradual positive-day consistency first, then turnover and growth.
-    candidates.sort(key=lambda x:(-x["positive_day_percent"],x["largest_gain_share_percent"],
-                                    -x["median_daily_turnover_cr"],-x["earnings_growth_percent"],x["isin"],x["exchange"]))
-    seen=set()
-    for row in candidates:
-        if row["isin"] not in seen:
-            seen.add(row["isin"])
-            out["items"].append(row)
-    out["matched_count"]=len(out["items"])
-    out["items"]=out["items"][:10]
+            candidates.append({**row,**evidence,**cap,"quarterly_financials":quarter,"status":"SCREEN_MATCH_ONLY"})
+    # Category tabs rank the entire deduplicated matched cohort independently.
+    out["items"],out["category_items"],out["matched_count"]=ranked_shortlists(candidates)
     out["exclusions"]=[{"reason":k,"count":v} for k,v in excluded.most_common()]
     out["status"]="SCREEN_MATCHES_AVAILABLE" if out["items"] else "NO_SCREEN_MATCHES" if out["technical_count"] else "AWAITING_EVIDENCE"
     return out
