@@ -13,6 +13,7 @@ button { cursor: pointer; }
 .dashboard {
   --panel-alpha: .72;
   --panel-blur: 20px;
+  --canvas-blur: 20px;
   --panel-rgb: 9, 17, 37;
   --glass-border: rgba(190, 215, 255, .2);
   --panel-border-color: var(--glass-border);
@@ -78,7 +79,8 @@ button { cursor: pointer; }
 
 .canvas {
   position: fixed;
-  inset: 0;
+  inset: calc(-1 * var(--canvas-blur));
+  filter: blur(var(--canvas-blur));
   overflow: hidden;
   pointer-events: none;
   background:
@@ -108,6 +110,10 @@ button { cursor: pointer; }
   background-size: 42px 42px, 42px 42px, 21px 21px;
   mask-image: linear-gradient(to bottom, black, rgba(0, 0, 0, .5));
 }
+
+/* Dark mode uses the original animated gradients without decorative grid/dots. */
+.dashboard[data-theme="dark"] .canvas::after { display: none; }
+@media (prefers-color-scheme: dark) { .dashboard[data-theme="system"] .canvas::after { display: none; } }
 
 [data-theme="light"] .canvas {
   background:
@@ -578,8 +584,8 @@ footer { padding: 12px 0 25px; color: var(--ink-muted); font-size: 10px; letter-
   }
   .dashboard .canvas { animation: atlas-ambient 32s ease-in-out infinite alternate; }
   @keyframes atlas-ambient {
-    from { filter: hue-rotate(0deg) brightness(1); }
-    to { filter: hue-rotate(10deg) brightness(1.07); }
+    from { filter: blur(var(--canvas-blur)) hue-rotate(0deg) brightness(1); }
+    to { filter: blur(var(--canvas-blur)) hue-rotate(10deg) brightness(1.07); }
   }
 }
 @media (prefers-reduced-motion: reduce) {

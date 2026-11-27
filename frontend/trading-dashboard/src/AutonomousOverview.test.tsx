@@ -194,3 +194,18 @@ it("renders only qualifying steady momentum screen matches in the dedicated card
  expect(screen.queryByText("REJECTED_STOCK")).toBeNull();
  expect(screen.getByText(/Not TradingView ratings/)).toBeTruthy();
 });
+
+it("keeps the approved Elite layout when no stocks qualify and separates coverage from matches",async()=>{
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[],steady_momentum:{status:"AWAITING_EVIDENCE",sampled_count:400,eligible_history_count:120,technical_count:0,reviewed_count:0,matched_count:0,items:[],notice:"Sample only"}})})));
+ render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}}>{null}</AutonomousOverview>);
+ expect(await screen.findByRole("region",{name:"Steady momentum stock screen"})).toBeTruthy();
+ expect(screen.getByText("Market coverage")).toBeTruthy();
+ expect(screen.getByText("120")).toBeTruthy();
+ expect(screen.getByText("Quality-screened")).toBeTruthy();
+ expect(screen.getByText("Deeply researched")).toBeTruthy();
+ expect(screen.getByText("Qualified opportunities")).toBeTruthy();
+ fireEvent.click(screen.getByRole("button",{name:"Small cap"}));
+ expect(screen.getByRole("button",{name:"Small cap"}).getAttribute("aria-pressed")).toBe("true");
+ expect(screen.queryByText("0% coverage")).toBeNull();
+ expect(screen.queryByText("91/100")).toBeNull();
+});

@@ -90,10 +90,18 @@ def summarize(snapshot,connect,instant):
     from . import automatic_company_evidence, amfi_equity_caps
     today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
     out={"methodology":VERSION,"status":"AWAITING_EVIDENCE","items":[],"reviewed_count":0,
-         "technical_count":0,"sampled_count":0,"exclusions":[],"notice":NOTICE}
+         "technical_count":0,"sampled_count":0,"eligible_history_count":0,"matched_count":0,"exclusions":[],"notice":NOTICE}
     if not snapshot.get("enabled"):
         out["status"]="DISABLED"
         return out
+    # Distinguish sampled coverage from passing the technical screen.
+    for section in snapshot.get("sections",[]):
+        if section.get("section") in ("NSE","BSE") and section.get("status")=="READY":
+            result=section.get("result") or {}
+            out["sampled_count"]+=result.get("universe_size",0)
+            coverage=result.get("discovery_coverage") or {}
+            if coverage.get("calendar_checked_on")==today.isoformat() and coverage.get("calendar_status")=="PUBLISHED_SESSION":
+                out["eligible_history_count"]+=result.get("eligible_count",0)
     if not automatic_company_evidence.permitted():
         out["status"]="AWAITING_EVIDENCE"
         out["exclusions"]=[{"reason":"COMPANY_EVIDENCE_NOT_AUTHORIZED","count":1}]
@@ -111,7 +119,6 @@ def summarize(snapshot,connect,instant):
         if venue not in ("NSE","BSE") or section.get("status")!="READY":
             continue
         result=section.get("result") or {}
-        out["sampled_count"]+=result.get("universe_size",0)
         coverage=result.get("discovery_coverage") or {}
         if coverage.get("calendar_checked_on")!=today.isoformat() or coverage.get("calendar_status")!="PUBLISHED_SESSION":
             continue

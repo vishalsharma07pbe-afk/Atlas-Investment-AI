@@ -73,10 +73,14 @@ def run():
                 assert panel.evaluate("(el)=>{const r=el.getBoundingClientRect();return r.left>=-1 && r.right<=innerWidth+1 && r.top>=-1 && r.bottom<=innerHeight+1}"),"appearance drawer outside viewport"
                 panel.get_by_role("group",name="Theme").get_by_role("button",name=re.compile(theme,re.I)).click()
                 expect(page.locator(".dashboard")).to_have_attribute("data-theme",theme)
+                # Dark mode removes texture; light keeps the original design.
+                assert page.locator(".canvas").evaluate("(el)=>getComputedStyle(el,'::after').display") == ("none" if theme=="dark" else "block"),"dark texture toggle failed"
                 # Appearance is a live preview, not a page-scroll lock.
-                for opacity,blur in ((0,0),(65,20),(100,40)):
+                for opacity,blur in ((0,0),(0,32),(65,20),(100,40)):
                     panel.locator("#panel-opacity").fill(str(opacity))
                     panel.locator("#panel-blur").fill(str(blur))
+                    page.wait_for_function("(blur)=>getComputedStyle(document.querySelector('.canvas')).filter.includes('blur('+blur+'px)')",arg=blur)
+
                     assert page.evaluate("getComputedStyle(document.documentElement).overflowY !== 'hidden' && getComputedStyle(document.body).overflowY !== 'hidden'"),"appearance must not lock page scrolling"
                     page.evaluate("window.scrollTo(0,0)")
                     page.mouse.move(500,780)

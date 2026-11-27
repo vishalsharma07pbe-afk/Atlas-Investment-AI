@@ -1,4 +1,5 @@
 import {useEffect,useRef,useState} from "react";
+import type {EliteTarget} from "./SteadyMomentumCard";
 import BacktestPanel from "./BacktestPanel";
 import RiskQualification from "./RiskQualification";
 import ResearchAlerts from "./ResearchAlerts";
@@ -59,8 +60,9 @@ function MarketChart({data,toggles,mode,sessions,volumeVisible,expanded}:{data:T
  return <><div className="terminal-ohlc" aria-label="Daily candle values"><span>{candle.trade_date}</span>{([["O",candle.open],["H",candle.high],["L",candle.low],["C",candle.close]] as const).map(([label,value])=><span key={label}><small>{label}</small> {price(value)}</span>)}<span><small>Vol</small> {candle.volume==null?"—":Number(candle.volume).toLocaleString("en-IN")}</span></div><div className={"market-chart terminal-stock-canvas"+(expanded?" is-expanded":"")} ref={ref} aria-label="Interactive daily price chart"/>{failed&&<p role="status" className="notice">Chart rendering is unavailable. The recorded price and candle values remain visible.</p>}</>;
 }
 
-export default function StockExplorer(){
-  const [query,setQuery]=useState("");const [exchange,setExchange]=useState("");const [results,setResults]=useState<Instrument[]>([]);const [selected,setSelected]=useState<Instrument|null>(null);
+export default function StockExplorer({initialTarget}:{initialTarget?:EliteTarget}={}){
+  const [query,setQuery]=useState(initialTarget?.symbol??"");const [exchange,setExchange]=useState(initialTarget?.exchange??"");
+  const pendingTarget=useRef(initialTarget);const [results,setResults]=useState<Instrument[]>([]);const [selected,setSelected]=useState<Instrument|null>(null);
   const [technical,setTechnical]=useState<Technical|null>(null);const [summary,setSummary]=useState<Summary|null>(null);const [loading,setLoading]=useState(false);const [error,setError]=useState("");
   const [toggles,setToggles]=useState(new Set(["sma_20","sma_50","ema_20"]));
   const [liveQuote,setLiveQuote]=useState<{status:string;quote:{last_traded_price:number;traded_at:string;age_ms:number}|null;reason:string|null}|null>(null);
@@ -78,7 +80,7 @@ export default function StockExplorer(){
       const response=await fetch("/api/v1/instruments?"+params);
       if(!response.ok)throw Error("Instrument search failed");
       const items:Instrument[]=await response.json();
-      if(sequence===searchSeq.current){setResults(items);setError("");}
+      if(sequence===searchSeq.current){setResults(items);setError("");const target=pendingTarget.current;if(target){pendingTarget.current=undefined;const match=items.find(x=>x.id===target.id&&x.isin===target.isin&&x.exchange===target.exchange&&x.symbol===target.symbol);if(match)void choose(match);else setError("Selected research instrument could not be verified. Choose a matching registry record.");}}
     }catch(e){if(sequence===searchSeq.current){setResults([]);setError(String(e));}}
     finally{if(sequence===searchSeq.current)setLoading(false);}
   }
@@ -116,7 +118,7 @@ export default function StockExplorer(){
   function toggle(key:string){const next=new Set(toggles);next.has(key)?next.delete(key):next.add(key);setToggles(next);}
   const latest=technical?.candles?.[technical.candles.length-1];const change=technical?dailyPriceChange(technical.candles):null;
   return <div className="explorer terminal-stock-explorer">
-    <section className="panel glass explorer-search"><div className="sectionhead"><div><small className="section-kicker">VALIDATED DAILY DATA</small><h2>Stock Explorer</h2></div><span className="tag">RESEARCH ONLY</span></div><div className="searchbar exchange-searchbar"><ExchangePicker value={exchange} onChange={setExchange}/><input aria-label="Instrument search" value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>e.key==="Enter"&&search()} placeholder="Type stock name, ticker or ISIN — searches automatically"/><button className="primary" onClick={search} disabled={loading}>Search</button></div>
+    <section className="panel glass explorer-search"><div className="sectionhead"><div><small className="section-kicker">VALIDATED DAILY DATA</small><h2>Stock Explorer</h2></div><span className="tag">RESEARCH ONLY</span></div><div className="searchbar exchange-searchbar"><ExchangePicker value={exchange} onChange={v=>{pendingTarget.current=undefined;setExchange(v);}}/><input aria-label="Instrument search" value={query} onChange={e=>{pendingTarget.current=undefined;setQuery(e.target.value);}} onKeyDown={e=>e.key==="Enter"&&search()} placeholder="Type stock name, ticker or ISIN — searches automatically"/><button className="primary" onClick={search} disabled={loading}>Search</button></div>
       {loading&&<p className="muted tiny" role="status">Loading validated market records…</p>}{error&&<div className="error">{error}</div>}<div className="instrument-results">{results.map(x=><button key={x.id} onClick={()=>choose(x)} className={selected?.id===x.id?"selected":""}><strong>{x.exchange}:{x.symbol}</strong><span>{x.security_name||x.isin||"Name unavailable"}</span><small>{x.listing_status} · {x.source}</small></button>)}{!results.length&&!loading&&<p className="muted tiny">The production registry is empty until a lawfully sourced instrument file is imported.</p>}</div></section>
     {selected&&<section className="panel glass terminal-stock-header" aria-label="Selected stock overview">
       <div className="terminal-stock-identity"><small className="section-kicker">{selected.exchange} · {selected.series||"Listed equity"}</small><h2>{selected.symbol}</h2><p>{selected.security_name||selected.isin||"Company name unavailable"}</p></div>

@@ -10,6 +10,7 @@ import PortfolioSummary from "./PortfolioSummary";
 import AutonomousOverview from "./AutonomousOverview";
 import {AuthGate,type AuthIdentity} from "./AuthGate";
 import StockExplorer from "./StockExplorer";
+import type {EliteTarget} from "./SteadyMomentumCard";
 import PortfolioStress from "./PortfolioStress";
 import PortfolioAllocation from "./PortfolioAllocation";
 import GoalPlanner from "./GoalPlanner";
@@ -98,7 +99,7 @@ export function AppearanceControls({value, onChange, open, onOpenChange}:{value:
         {(["system", "dark", "light"] as Theme[]).map(theme => <button type="button" key={theme} className={value.theme === theme ? "selected" : ""} aria-pressed={value.theme === theme} onClick={() => update("theme", theme)}>{theme === "system" ? "◐" : theme === "dark" ? "☾" : "☀"}<span>{theme === "system" ? "Auto" : theme}</span></button>)}
       </div><p className="theme-help">Auto follows your Mac or browser light/dark appearance.</p></div>
       <div className="setting-group"><div className="setting-label"><label htmlFor="panel-opacity">Panel opacity</label><output>{value.opacity}%</output></div><input id="panel-opacity" type="range" min="0" max="100" value={value.opacity} onChange={event => update("opacity", Number(event.target.value))}/><p>{value.opacity === 0 ? "Perfectly clear · blur disabled" : value.opacity === 100 ? "Fully solid surface" : "Background alpha only"}</p></div>
-      <div className="setting-group"><div className="setting-label"><label htmlFor="panel-blur">Backdrop blur</label><output>{value.blur}px</output></div><input id="panel-blur" type="range" min="0" max="40" value={value.blur} onChange={event => update("blur", Number(event.target.value))}/><p>{value.opacity === 0 && value.blur > 0 ? `Set opacity above 0% to see blur · saved at ${value.blur}px` : value.opacity === 100 ? "Hidden by the fully solid panel" : "Softens the texture visible through each panel"}</p></div>
+      <div className="setting-group"><div className="setting-label"><label htmlFor="panel-blur">Background &amp; backdrop blur</label><output>{value.blur}px</output></div><input id="panel-blur" type="range" min="0" max="40" value={value.blur} onChange={event => update("blur", Number(event.target.value))}/><p>{value.opacity===0?"Background blur stays active; clear panels remain transparent.":"Softens the background and translucent panels."}</p></div>
       <label className="border-toggle"><span><strong>Subtle border</strong><small>Independent of opacity</small></span><input type="checkbox" checked={value.border} onChange={event => update("border", event.target.checked)}/><i aria-hidden="true"/></label>
     </section></>}
   </div>;
@@ -107,6 +108,7 @@ export function AppearanceControls({value, onChange, open, onOpenChange}:{value:
 export function App({identity={id:"preview",email:"Local preview",role:"USER"},onLogout=async()=>{}}:{identity?:AuthIdentity;onLogout?:()=>Promise<void>}) {
   const [tab, setTab] = useState(getSavedTab);
   const [reportTarget,setReportTarget]=useState<WatchReportTarget|undefined>(undefined);
+  const [eliteTarget,setEliteTarget]=useState<EliteTarget|undefined>(undefined);
   const [appearance, setAppearance] = useState(getSavedAppearance);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [holdings, setHoldings] = useState<Holding[]>([]);
@@ -249,9 +251,10 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
     catch(e){setError(String(e));}finally{setLoading(false);}
   }
 
-  const style = {"--panel-alpha":(appearance.opacity / 100).toFixed(2), "--panel-blur":`${appearance.opacity === 0 ? 0 : appearance.blur}px`, "--panel-border-color":appearance.border ? "var(--glass-border)" : "transparent"} as React.CSSProperties;
+  const style = {"--panel-alpha":(appearance.opacity / 100).toFixed(2), "--canvas-blur":`${appearance.blur}px`, "--panel-blur":`${appearance.opacity === 0 ? 0 : appearance.blur}px`, "--panel-border-color":appearance.border ? "var(--glass-border)" : "transparent"} as React.CSSProperties;
   const activePage = pages[tab] || pages[0];
-  function navigate(id:number){setReportTarget(undefined);setTab(validPage(id));window.scrollTo({top:0,behavior:"auto"});}
+  function navigate(id:number){setEliteTarget(undefined);setReportTarget(undefined);setTab(validPage(id));window.scrollTo({top:0,behavior:"auto"});}
+  function navigateElite(target:EliteTarget){navigate(7);setEliteTarget(target);}
   function navigateHorizon(horizon:Exclude<Horizon,"INTRADAY">,target?:WatchReportTarget){
     navigate(horizon==="SWING"?3:horizon==="SHORT_TERM"?4:5);
     setReportTarget(target);
@@ -274,7 +277,7 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
         {tab === 0 ? <>
           <div className="terminal-overview-grid"><PortfolioSummary analysis={analysis} holdings={holdings} feedConnected={feedState?.transport_connected===true} onOpen={()=>navigate(9)}/><PortfolioVisuals holdings={holdings}/></div>
           <PortfolioDoctor compact revision={portfolioRevision} onOpenPortfolio={()=>navigate(9)} onSettings={()=>navigate(6)}/>
-          <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)} onHorizon={navigateHorizon}><ResearchHome holdings={holdings} revision={portfolioRevision} onReviewHoldings={()=>navigate(9)} onOpenExplorer={()=>navigate(7)} onOpenDataHealth={()=>navigate(6)}/></AutonomousOverview>
+          <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)} onHorizon={navigateHorizon} onOpenStock={navigateElite}><ResearchHome holdings={holdings} revision={portfolioRevision} onReviewHoldings={()=>navigate(9)} onOpenExplorer={()=>navigate(7)} onOpenDataHealth={()=>navigate(6)}/></AutonomousOverview>
         </> : tab === 9 ? <>
           <div className="terminal-overview-grid"><PortfolioSummary analysis={analysis} holdings={holdings} feedConnected={feedState?.transport_connected===true} onOpen={()=>document.getElementById("active-holdings")?.scrollIntoView({block:"start"})}/><PortfolioVisuals holdings={holdings}/></div>
           <section className="panel glass terminal-performance-panel"><PortfolioPerformanceHistory revision={portfolioRevision}/></section>
@@ -297,8 +300,8 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
           <PortfolioDoctor revision={portfolioRevision} onSettings={()=>navigate(6)}/>
           <GoalMonitor/>
           <AdvancedSection title="Past investments" description="Review closed holdings and realized performance"><HistoricalInvestments activeHoldings={holdings}/></AdvancedSection>
-        </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : (tab === 2 || tab === 3 || tab === 4 || tab === 5) ? <HorizonResearch key={tab} horizon={tab===2?"INTRADAY":tab===3?"SWING":tab===4?"SHORT_TERM":"LONG_TERM"} reportTarget={tab===2?undefined:reportTarget} onSettings={()=>navigate(6)}>{tab===5?<EquityResearchDashboard/>:<><MarketIntelligence/><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/></>}</HorizonResearch> : tab === 8 ? <P2ResearchWorkspace/> : tab === 7 ? <StockExplorer/> : tab === 10 ? <>
-          <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)} onHorizon={navigateHorizon}><MarketIntelligence/></AutonomousOverview>
+        </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : (tab === 2 || tab === 3 || tab === 4 || tab === 5) ? <HorizonResearch key={tab} horizon={tab===2?"INTRADAY":tab===3?"SWING":tab===4?"SHORT_TERM":"LONG_TERM"} reportTarget={tab===2?undefined:reportTarget} onSettings={()=>navigate(6)}>{tab===5?<EquityResearchDashboard/>:<><MarketIntelligence/><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/></>}</HorizonResearch> : tab === 8 ? <P2ResearchWorkspace/> : tab === 7 ? <StockExplorer initialTarget={eliteTarget}/> : tab === 10 ? <>
+          <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)} onHorizon={navigateHorizon} onOpenStock={navigateElite}><MarketIntelligence/></AutonomousOverview>
           <AdvancedSection title="Company and institutional research" description="Company reports, news and institutional activity"><EquityResearchDashboard/><InstitutionalFlows/></AdvancedSection>
           <AdvancedSection title="Research evidence and history" description="Broker research, source audit, outcome review and evidence ledgers"><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/><FlowLedger/><NewsEvidence/><NewsLedger/></AdvancedSection>
         </> : tab === 6 ? <>
