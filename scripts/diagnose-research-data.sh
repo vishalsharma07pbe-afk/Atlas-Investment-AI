@@ -30,6 +30,7 @@ FROM discovery_history_attempts a JOIN instruments i ON i.id=a.instrument_id JOI
 GROUP BY e.code,a.status ORDER BY e.code,a.status;
 SELECT failure_code,failure_count,blocked_until,blocked_until>now() AS blocked FROM operator_feed_cooldown;
 SELECT * FROM discovery_quote_coverage ORDER BY exchange;
+SELECT * FROM discovery_cap_coverage ORDER BY exchange,category;
 SELECT source_code,count(DISTINCT scheme_code) AS schemes,max(nav_date) AS latest FROM mutual_fund_nav GROUP BY source_code ORDER BY source_code;
 COMMIT;
 SQL

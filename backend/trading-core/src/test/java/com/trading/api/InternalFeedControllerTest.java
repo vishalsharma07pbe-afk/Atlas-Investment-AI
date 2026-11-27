@@ -121,4 +121,28 @@ class InternalFeedControllerTest {
     assertThatThrownBy(()->api.amfiEquityCaps(request,body)).isInstanceOf(ResponseStatusException.class);
     verifyNoInteractions(jdbc);
   }
+
+  @Test void capPublicationValidatesAllRowsBeforeReplacingAndRejectsOlderEvidence(){
+    JdbcTemplate jdbc=mock(JdbcTemplate.class);
+    HttpServletRequest request=mock(HttpServletRequest.class);
+    when(request.getHeader("X-Atlas-Service-Token")).thenReturn("service-secret");
+    var api=controller(jdbc,"service-secret");api.capUsageRights=true;
+    var today=java.time.LocalDate.now(com.trading.market.MarketCalendarService.IST);
+    var period=java.time.LocalDate.of(today.getYear(),6,30);
+    if(!period.isBefore(today))period=java.time.LocalDate.of(today.getYear()-1,12,31);
+    if(today.getMonthValue()==12&&today.getDayOfMonth()==31)period=java.time.LocalDate.of(today.getYear(),6,30);
+    var body=new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode().put("as_of",period.toString());
+    var items=body.putArray("items");
+    for(int i=0;i<251;i++)items.addObject().put("isin",String.format(java.util.Locale.ROOT,"INE000A%05d",i+1))
+      .put("category",i<100?"LARGE_CAP":i<250?"MID_CAP":"SMALL_CAP").put("average_cap_cr",2000-i);
+    when(jdbc.queryForObject(contains("as_of>?"),eq(Boolean.class),eq(period))).thenReturn(false,true);
+    assertThat(api.amfiEquityCaps(request,body)).containsEntry("count",251).containsEntry("as_of",period.toString());
+    verify(jdbc).update("DELETE FROM discovery_amfi_cap");
+    verify(jdbc).batchUpdate(eq("INSERT INTO discovery_amfi_cap(isin,category,average_cap_cr,as_of) VALUES (?,?,?,?)"),org.mockito.ArgumentMatchers.<List<Object[]>>any());
+    assertThatThrownBy(()->api.amfiEquityCaps(request,body)).isInstanceOf(ResponseStatusException.class);
+    verify(jdbc,times(1)).update("DELETE FROM discovery_amfi_cap");
+    items.add(items.get(0));
+    assertThatThrownBy(()->api.amfiEquityCaps(request,body)).isInstanceOf(ResponseStatusException.class);
+    verify(jdbc,times(1)).update("DELETE FROM discovery_amfi_cap");
+  }
 }
