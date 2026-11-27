@@ -98,7 +98,7 @@ def _breadth(snapshot,report,today):
     fields=("advancing","declining","unchanged")
     values=[pairs[0].get(k) for k in fields]
     selected=coverage.get("selected_count")
-    if any(type(v) is not int or v<0 for v in values) or type(selected) is not int or not 1<=selected<=200:
+    if any(type(v) is not int or v<0 for v in values) or type(selected) is not int or not 1<=selected<=20000:
         return result
     total=sum(values)
     if not 0<total<=selected:

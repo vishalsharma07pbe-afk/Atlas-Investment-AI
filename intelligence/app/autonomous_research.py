@@ -18,6 +18,7 @@ from urllib.parse import urlencode
 from .market_client import backend_json
 from . import steady_momentum, amfi_equity_caps
 from .screener import screen
+from . import discovery_scan
 from .mutual_fund_recommendations import CATEGORIES, dashboard
 from . import stock_qualification, market_regime, release_reconciliation, economic_calendar, global_releases, global_context, global_markets, global_macro, global_fx, automatic_deals, fund_portfolios, fund_disclosures, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
 
@@ -68,7 +69,13 @@ def _save(section, result=None):
 
 
 def market_snapshot(exchange):
+    if os.getenv("ATLAS_BROAD_DISCOVERY_ENABLED","false").lower()=="true":
+        return discovery_scan.scan(exchange,backend_json,_market_page,now)
     instruments = backend_json("/api/v1/market-data/discovery-universe?" + urlencode({"exchange": exchange}))
+    return _market_page(exchange,instruments)
+
+
+def _market_page(exchange,instruments):
     if not isinstance(instruments, list) or len(instruments)>200:
         raise ValueError("INVALID_REGISTRY")
     if any(not isinstance(row,dict) or row.get("exchange")!=exchange or row.get("active") is not True

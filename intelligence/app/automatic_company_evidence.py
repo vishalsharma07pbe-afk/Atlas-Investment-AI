@@ -56,10 +56,10 @@ def identify_sample(snapshot,instant):
             continue
         result=section.get("result") or {}
         rows=result.get("company_research_universe")
-        if not isinstance(rows,list) or len(rows)>200:
+        if not isinstance(rows,list) or len(rows)>20000:
             continue
         count=result.get("eligible_count")
-        if type(count) is not int or not len(rows)<=count<=200:
+        if type(count) is not int or not len(rows)<=count<=20000:
             continue
         ids=[r.get("id") for r in rows if isinstance(r,dict)]
         if any(type(i) is not int or i<=0 for i in ids) or len(ids)!=len(rows) or len(set(ids))!=len(ids):

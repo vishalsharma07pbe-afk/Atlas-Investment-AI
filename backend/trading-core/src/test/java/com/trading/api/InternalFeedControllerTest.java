@@ -145,4 +145,17 @@ class InternalFeedControllerTest {
     assertThatThrownBy(()->api.amfiEquityCaps(request,body)).isInstanceOf(ResponseStatusException.class);
     verify(jdbc,times(1)).update("DELETE FROM discovery_amfi_cap");
   }
+
+  @Test void discoveryPagesRequireCredentialKnownVenueAndNonnegativeCursor(){
+    JdbcTemplate jdbc=mock(JdbcTemplate.class);
+    HttpServletRequest request=mock(HttpServletRequest.class);
+    var api=controller(jdbc,"service-secret");
+    assertThatThrownBy(()->api.discoveryUniversePage(request,"NSE",0)).isInstanceOf(ResponseStatusException.class);
+    when(request.getHeader("X-Atlas-Service-Token")).thenReturn("service-secret");
+    assertThatThrownBy(()->api.discoveryUniversePage(request,"OTHER",0)).isInstanceOf(ResponseStatusException.class);
+    assertThatThrownBy(()->api.discoveryUniversePage(request,"NSE",-1)).isInstanceOf(ResponseStatusException.class);
+    verifyNoInteractions(jdbc);
+    when(jdbc.queryForList(contains("WHERE id>? ORDER BY id LIMIT 200"),eq("NSE"),eq("NSE"),eq(200L))).thenReturn(List.of(Map.of("id",201L)));
+    assertThat(api.discoveryUniversePage(request,"NSE",200)).hasSize(1);
+  }
 }

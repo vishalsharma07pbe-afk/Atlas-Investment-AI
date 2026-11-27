@@ -61,7 +61,21 @@ public class InternalFeedController {
   public List<Map<String,Object>> discoveryUniverse(HttpServletRequest request,@RequestParam String exchange) {
     requireServiceToken(request.getHeader("X-Atlas-Service-Token"));
     requireExchange(exchange);
-    return jdbc.queryForList("""
+    return discoveryUniverseRows(exchange,null);
+  }
+
+  /** Keyset pages over locally observed histories. Existing route remains compatible. */
+  @GetMapping("/discovery-universe-page")
+  public List<Map<String,Object>> discoveryUniversePage(HttpServletRequest request,@RequestParam String exchange,
+      @RequestParam(defaultValue="0") long afterId) {
+    requireServiceToken(request.getHeader("X-Atlas-Service-Token"));
+    requireExchange(exchange);
+    if(afterId<0)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid discovery cursor");
+    return discoveryUniverseRows(exchange,afterId);
+  }
+
+  private List<Map<String,Object>> discoveryUniverseRows(String exchange,Long afterId) {
+    String query="""
       WITH days AS (
         SELECT (now() AT TIME ZONE 'Asia/Kolkata')::date-g.n AS day
         FROM generate_series(1,14) AS g(n)
@@ -107,6 +121,9 @@ public class InternalFeedController {
       CROSS JOIN calendar
       WHERE e.code=? AND i.active AND i.listing_status='ACTIVE' AND i.series='EQ'
         AND i.instrument_type IN ('EQ','EQUITY','STOCK')
+      """;
+    if(afterId!=null)return jdbc.queryForList("SELECT * FROM ("+query+") universe WHERE id>? ORDER BY id LIMIT 200",exchange,exchange,afterId);
+    return jdbc.queryForList(query+"""
       ORDER BY CASE WHEN calendar.expected_session IS NOT NULL AND
         (latest.candle_time AT TIME ZONE e.timezone)::date=calendar.expected_session THEN 0 ELSE 1 END,
         latest.close*latest.volume DESC NULLS LAST,i.id LIMIT 200

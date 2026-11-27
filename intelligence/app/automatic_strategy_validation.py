@@ -30,7 +30,7 @@ def _ready_ids(snapshot,exchange,registry,today):
         result=section.get("result") or {}
         rows=result.get("replay_research_universe")
         count=result.get("eligible_count")
-        if not isinstance(rows,list) or type(count) is not int or not 0<=len(rows)<=count<=200:
+        if not isinstance(rows,list) or type(count) is not int or not 0<=len(rows)<=count<=20000:
             return set()
         ids=set()
         seen=set()

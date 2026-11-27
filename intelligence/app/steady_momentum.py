@@ -122,7 +122,7 @@ def summarize(snapshot,connect,instant):
         coverage=result.get("discovery_coverage") or {}
         if coverage.get("calendar_checked_on")!=today.isoformat() or coverage.get("calendar_status")!="PUBLISHED_SESSION":
             continue
-        for row in result.get("steady_momentum_candidates",[])[:200]:
+        for row in result.get("steady_momentum_candidates",[]):
             if row.get("exchange")!=venue or not exact_isin(row.get("isin")) or row.get("as_of")!=coverage.get("expected_session"):
                 continue
             try:

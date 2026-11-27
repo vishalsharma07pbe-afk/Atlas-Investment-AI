@@ -7,6 +7,8 @@ from .config import settings
 from .fund_categories import CATEGORIES
 
 def _internal_path(path:str)->str:
+    if path.startswith("/api/v1/market-data/discovery-universe-page?"):
+        return "/api/v1/internal/feed/discovery-universe-page?"+path.split("?",1)[1]
     if path.startswith("/api/v1/market-data/discovery-universe?"):
         return "/api/v1/internal/feed/discovery-universe?"+path.split("?",1)[1]
     if path.startswith("/api/v1/market-data/discovery-candles?"):
