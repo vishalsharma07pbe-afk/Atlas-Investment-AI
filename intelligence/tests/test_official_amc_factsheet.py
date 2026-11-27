@@ -51,3 +51,14 @@ class AMCSourceTests(unittest.TestCase):
         self.assertEqual(f.discover(body,NOW.date()),URL)
         with self.assertRaises(ValueError):f.discover(b"<a href='https://evil.test/abc'>bad</a>",NOW.date())
         self.assertIsNone(f.parse(html().replace(b"Base Expense Ratio (As on last business day of the month)",b"Unspecified fee"),URL,NOW.date())[NAME]["base_expense_percent"])
+
+    def test_publisher_allocation_is_reconciled_not_a_holding_map(self):
+        rows=[[k,"0%"] for k in f.ALLOCATION_LABELS]
+        rows[0][1]="75%";rows[2][1]="25%"
+        result=f.allocation(rows)
+        self.assertEqual(result["reported_total_percent"],100)
+        self.assertEqual(result["weights_percent"]["CORE_EQUITY"],75)
+        self.assertNotIn("holdings",result)
+        self.assertIsNone(f.allocation(rows+rows))
+        rows[2][1]="20%"
+        self.assertIsNone(f.allocation(rows))

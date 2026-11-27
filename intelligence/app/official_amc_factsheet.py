@@ -69,7 +69,7 @@ class Sections(HTMLParser):
     """Extract only exact scheme heading sections and table rows, no script execution."""
     def __init__(self):
         super().__init__(convert_charrefs=True)
-        self.active=None;self.head=None;self.rows={};self.row=None;self.cell=None;self.count=0;self.ignored=0;self.base_labels=set()
+        self.active=None;self.head=None;self.rows={};self.row=None;self.cell=None;self.count=0;self.ignored=0;self.base_labels=set();self.allocation_labels=set()
     def handle_starttag(self,tag,attrs):
         if tag in ("script","style"):self.ignored+=1
         if self.ignored:return
@@ -79,6 +79,7 @@ class Sections(HTMLParser):
     def handle_data(self,data):
         if self.ignored:return
         if self.active and " ".join(data.split())=="Base Expense Ratio (As on last business day of the month)":self.base_labels.add(self.active)
+        if self.active and " ".join(data.split())=="Allocation of Net Asset by Asset Class":self.allocation_labels.add(self.active)
         for parts in (self.head,self.cell):
             if parts is not None:
                 if sum(map(len,parts))+len(data)>20000:raise ValueError("CELL_LIMIT")
@@ -119,6 +120,32 @@ def risk(value):
     if value not in local.RISKOMETERS:raise ValueError("RISK")
     return value
 
+ALLOCATION_LABELS={
+    "Core Equity":"CORE_EQUITY","Arbitrage and Special Situations":"ARBITRAGE_SPECIAL_SITUATIONS",
+    "Overseas Securities, IDRs and ADRs":"OVERSEAS_SECURITIES",
+    "Units issued by REITs & InvITs":"REITS_INVITS","Certificate of Deposit":"CERTIFICATES_OF_DEPOSIT",
+    "Commercial Paper":"COMMERCIAL_PAPER","Mutual Fund Units":"FUND_UNITS",
+    "TREPS, Net receivables & Payables and Net Current Asset":"TREPS_NET_CURRENT_ASSETS","Treasury Bills":"TREASURY_BILLS"}
+def allocation(rows):
+    # Exact contiguous observed nine-row Flexi Cap table. No name-to-ISIN
+    # mapping or inference from the separate list of named securities.
+    blocks=[]
+    for start in range(len(rows)):
+        block={}
+        for row in rows[start:start+len(ALLOCATION_LABELS)]:
+            if len(row)!=2:break
+            label=re.sub(r"^[\s^{}@]+","",row[0]).strip()
+            key=ALLOCATION_LABELS.get(label)
+            if key is None or key in block:break
+            try:block[key]=number(row[1],True)
+            except (ValueError,InvalidOperation):break
+        if len(block)==len(ALLOCATION_LABELS) and Decimal("99.5")<=sum(block.values())<=Decimal("100.5"):
+            blocks.append(block)
+    if len(blocks)!=1:return None
+    return {"status":"PUBLISHER_ASSET_ALLOCATION_ONLY","weights_percent":{k:float(n) for k,n in blocks[0].items()},
+            "reported_total_percent":float(sum(blocks[0].values())),
+            "notice":"Publisher category weights only; no independent exact-ISIN holding evidence or equity valuation."}
+
 def parse(raw,url,today):
     end=month(url,today)
     if not isinstance(raw,bytes) or not 0<len(raw)<=MAX_BYTES:raise ValueError("SIZE")
@@ -154,6 +181,7 @@ def parse(raw,url,today):
             output[name]={"scheme_name":name,"category":NAMES[name],"portfolio_date":end.isoformat(),
                 "nav_date":nav_date.isoformat(),"nav":str(number(navs[0])),"benchmark":benchmark,
                 "riskometer":scheme_risk,"benchmark_riskometer":benchmark_risk,"base_expense_percent":base,
+                "asset_allocation":allocation(rows) if name=="Parag Parikh Flexi Cap Fund" and name in p.allocation_labels else None,
                 "ter_percent":None,"source_url":url,"source_sha256":sha256(raw).hexdigest(),"methodology":VERSION}
         except (ValueError,KeyError,TypeError,IndexError,InvalidOperation):continue
     if not output:raise ValueError("NO_SUPPORTED_SCHEMES")
