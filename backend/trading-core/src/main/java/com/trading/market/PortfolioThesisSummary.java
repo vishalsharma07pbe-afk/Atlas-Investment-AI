@@ -147,6 +147,32 @@ final class PortfolioThesisSummary {
       }
     }
    }else gaps.add("Comparable complete quarterly ownership reports unavailable.");
+   // Positive source-linked governance observations are supplementary; an
+   // absent or zero reported value never means the company is cleared.
+   JsonNode governance=thesis.path("governance_review");
+   if(isin.matches("IN[A-Z0-9]{10}")&&isin.equals(governance.path("isin").asText())){
+     JsonNode pledge=governance.path("independent_pledge_evidence"),filing=governance.path("independent_financial_evidence");
+     boolean pledgeMatch=isin.equals(pledge.path("isin").asText())&&"REPORTED_QUARTERLY_AGGREGATE".equals(pledge.path("status").asText());
+     boolean filingMatch=isin.equals(filing.path("isin").asText())&&"REPORTED_CONSOLIDATED_FILING".equals(filing.path("status").asText());
+     Set<String> seen=new HashSet<>();
+     for(JsonNode finding:governance.path("findings")){
+       String code=finding.asText();
+       if(!seen.add(code))continue;
+       String statement=switch(code){
+         case "ISSUER_REPORTED_PROMOTER_PLEDGE_REVIEW" -> pledgeMatch?"Issuer reports pledged promoter shares.":null;
+         case "ISSUER_REPORTED_PROMOTER_ENCUMBRANCE_REVIEW" -> pledgeMatch?"Issuer reports encumbered promoter shares.":null;
+         case "ISSUER_REPORTED_AUDIT_QUALIFICATION_REVIEW" -> filingMatch?"Issuer filing reports an audit qualification or modified opinion.":null;
+         case "INDEPENDENT_REVENUE_DIFFERENCE_REVIEW" -> filingMatch?"Matched issuer and provider revenue differ beyond the illustrative tolerance.":null;
+         case "POSITIVE_PROFIT_NEGATIVE_OPERATING_CASH_FLOW_REVIEW" -> filingMatch?"Reported year-to-date profit is positive but operating cash flow is negative.":null;
+         default -> null;
+       };
+       if(statement==null)continue;
+       JsonNode source=code.contains("PROMOTER")?pledge:filing;
+       add(review,statement+" Verify the original filing; not proof of misconduct or an exit instruction.",
+         "NSE issuer-reported filing; period "+source.path("period").asText()+"; "+source.path("source_url").asText());
+     }
+   }
+   gaps.add("Comprehensive exchange restrictions, signed auditor conclusions and independent filing coverage remain incomplete.");
    gaps.add("Official filings, comparable financial periods, intrinsic valuation and company-specific institutional flows remain unverified.");
    gaps.add("Promoter pledges and bulk/block transactions remain unverified; ownership changes do not establish stock-specific trades.");
   }else if("MUTUAL_FUND".equals(row.path("asset_type").asText())){

@@ -254,6 +254,31 @@ def refresh(db_connect=connect,loader=backend_json,runner=ai_failover.grounded_r
     _review(_items(snapshot),db_connect,runner,instant)
 
 
+def _attach_public_filings(snapshot,instant):
+    """Reuse existing independent public filings without writes or acquisition.
+    
+    Held identities only select evidence in memory. Do not call refresh, update
+    public claims, or add holding identities to any public discovery section.
+    """
+    from . import nse_pledge_filings, nse_financial_filings
+    path=Path(os.getenv("ATLAS_RESEARCH_SNAPSHOT_DB","/app/ingestion-data/research_snapshots.sqlite3")).resolve()
+    if not path.is_file():
+        return
+    def readonly():
+        db=sqlite3.connect(path.as_uri()+"?mode=ro",uri=True,timeout=2)
+        db.row_factory=sqlite3.Row
+        return db
+    for adapter,field in ((nse_pledge_filings,"independent_pledge_evidence"),
+                          (nse_financial_filings,"independent_financial_evidence")):
+        try:
+            adapter.attach(snapshot,readonly,instant)
+        except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,AttributeError,OverflowError):
+            # An absent table, incompatible cache or malformed source must not
+            # suppress the existing private review or leave partial attachments.
+            for item in _items(snapshot):
+                item.pop(field,None)
+
+
 def read(rows,db_connect=connect,instant=None):
     if not enabled():
         return {"items":{},"status":"DISABLED"}
@@ -261,6 +286,10 @@ def read(rows,db_connect=connect,instant=None):
     snapshot=selection(rows)
     company.attach(snapshot,db_connect,instant)
     news.attach(snapshot,db_connect,instant)
+    _attach_public_filings(snapshot,instant)
+    from . import governance_review
+    from zoneinfo import ZoneInfo
+    today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
     output={}
     local=_local_enabled()
     with closing(db_connect()) as db:
@@ -271,6 +300,15 @@ def read(rows,db_connect=connect,instant=None):
                     "company_evidence":item.get("company_evidence"),"news_evidence":item.get("news_evidence"),
                     "ai_status":"PENDING_OR_UNAVAILABLE" if local else "LOCAL_MODEL_NOT_CONFIGURED",
                     "ai_review":None}
+            # Company-level filings can follow the exact ISIN across venues.
+            # Venue-specific surveillance is not inferred from company filings.
+            try:
+                governance=governance_review.assess(item,item.get("company_evidence") or {},today)
+                result["governance_review"]={**governance,"isin":item["isin"]}
+                if governance.get("independent_pledge_evidence") or governance.get("independent_financial_evidence"):
+                    result["status"]="EVIDENCE_AVAILABLE"
+            except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
+                result["governance_review"]=None
             pack=_pack(item)
             if local and pack is not None:
                 cached=db.execute("SELECT * FROM portfolio_local_ai WHERE evidence_hash=? AND status='AVAILABLE' AND attempted_at BETWEEN ? AND ?",
