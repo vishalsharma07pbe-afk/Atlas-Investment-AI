@@ -7,7 +7,7 @@ from .horizon_research import evaluate, summarize, MIN_HISTORY as HORIZON_MIN_HI
 from .price_structure import analyze as price_structure
 from .corporate_action_normalization import preview as action_preview, reported_crossings
 from .replay_evidence import fingerprint, exact_isin
-from . import price_volume_pressure, steady_momentum, relative_strength
+from . import price_volume_pressure, steady_momentum, relative_strength, company_venues
 
 MIN_HISTORY = 21
 MAX_INSTRUMENTS = 20
@@ -33,6 +33,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
     trap_eligible=0
     trap_rows=[]
     company_research_universe=[]
+    venue_observations={}
     replay_research_universe=[]
     action_previews=[]
     action_preview_count=0
@@ -46,6 +47,8 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
         skipped["SESSION_MISMATCH"] = 0
         skipped["REPORTED_SUSPENSION"] = 0
     for instrument in instruments[:limit]:
+        if batch_loaded and exact_isin(instrument.get("isin")) and instrument.get("exchange") in ("NSE","BSE") and isinstance(instrument.get("symbol"),str):
+            venue_observations[instrument["id"]]=company_venues.observation(instrument)
         if batch_loaded and instrument.get("security_state")=="SUSPENDED_REPORTED":
             skipped["REPORTED_SUSPENSION"]+=1
             continue
@@ -171,6 +174,8 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
             if batch_loaded and exact_isin(instrument.get("isin")):
                 identity={"id":row["id"],"exchange":row["exchange"],"isin":instrument["isin"],"as_of":row["as_of"]}
                 company_research_universe.append(identity)
+                if instrument["id"] in venue_observations:
+                    venue_observations[instrument["id"]]=company_venues.observation(instrument,candles)
                 # A recent validated adjusted window is a scheduling hint only.
                 # The replay worker still validates its complete 500-row input.
                 if len(candles)>=250 and 1<=age<=4 and fingerprint(raw,today) is not None:
@@ -196,6 +201,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
         result["annual_depth_count"]=annual_depth_count
         result["steady_momentum_candidates"]=steady_candidates
         result["company_research_universe"]=company_research_universe
+        result["venue_observations"]=list(venue_observations.values())
         result["replay_research_universe"]=replay_research_universe
         result["sample_breadth"]={"as_of":expected_session.isoformat() if expected_session is not None else None,
             "adjustment_status":"ADJUSTED","pairs":[{"previous_session":k,**v} for k,v in sorted(breadth_pairs.items())],

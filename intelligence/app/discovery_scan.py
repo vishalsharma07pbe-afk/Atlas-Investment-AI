@@ -36,8 +36,8 @@ def merge(out,page):
         out["skipped"][key]=out["skipped"].get(key,0)+value
     for key,rank in (("top_gainers",_gainer),("top_losers",_loser),("momentum_leaders",_momentum)):
         out[key]=_top(out[key]+page[key],rank)
-    for key in ("company_research_universe","replay_research_universe","steady_momentum_candidates"):
-        out[key].extend(page[key])
+    for key in ("company_research_universe","replay_research_universe","steady_momentum_candidates","venue_observations"):
+        out.setdefault(key,[]).extend(page.get(key,[]))
     for h,g in out["horizons"].items():
         p=page["horizons"][h]
         for key in ("matched_count","evaluated_count"):g[key]+=p[key]

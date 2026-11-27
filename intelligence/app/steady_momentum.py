@@ -13,7 +13,7 @@ import json
 from .replay_evidence import exact_isin
 from .financial_strength import _block, _values, _recent_common
 from .fundamental_quality import _ratio_rows
-from . import elite_assessment
+from . import elite_assessment, company_venues
 
 VERSION="STEADY-MOMENTUM-1"
 NOTICE="ATLAS rule-based screen, not TradingView Strong Buy or investment qualification. Reported earnings and undated sector P/E are preliminary evidence. Historical turnover and AMFI six-month average capitalization are not live execution liquidity or current market cap. Provider security classifications and observed suspension lists are incomplete tradability evidence; absence does not establish unrestricted status. Thresholds not backtested. Coverage is limited to validated daily-history samples."
@@ -123,7 +123,7 @@ def fundamentals(report,today):
 
 CAP_GROUPS=("LARGE_CAP","MID_CAP","SMALL_CAP")
 
-def ranked_shortlists(candidates):
+def ranked_shortlists(candidates,observations=None,instant=None):
     def rank(row):
         assessment=row.get("elite_assessment") or {}
         value=assessment.get("score")
@@ -132,6 +132,8 @@ def ranked_shortlists(candidates):
         scored=assessment.get("methodology")==elite_assessment.VERSION and assessment.get("status")=="PRELIMINARY_SCORE_ONLY" and numeric(value) and 0<=value<=100
         return (not scored,-value if scored else 0,-row["positive_day_percent"],row["largest_gain_share_percent"],
                 -row["median_daily_turnover_cr"],-row["earnings_growth_percent"],row["isin"],row["exchange"])
+    if observations is not None and instant is not None:
+        candidates=company_venues.consolidate(candidates,observations,instant,rank)
     ordered=sorted(candidates,key=rank)
     seen=set()
     distinct=[]
@@ -223,7 +225,12 @@ def summarize(snapshot,connect,instant):
             candidate["elite_assessment"]=elite_assessment.assess(candidate)
             candidates.append(candidate)
     # Category tabs rank the entire deduplicated matched cohort independently.
-    out["items"],out["category_items"],out["matched_count"]=ranked_shortlists(candidates)
+    observations=company_venues.collect(snapshot,instant)
+    out["company_coverage"]={"observed_distinct_isins":len(observations),
+        "observed_listings":sum(len(rows) for rows in observations.values()),
+        "cross_venue_isins":sum(len({r["exchange"] for r in rows})>1 for rows in observations.values()),
+        "notice":company_venues.NOTICE}
+    out["items"],out["category_items"],out["matched_count"]=ranked_shortlists(candidates,observations,instant)
     out["exclusions"]=[{"reason":k,"count":v} for k,v in excluded.most_common()]
     out["status"]="SCREEN_MATCHES_AVAILABLE" if out["items"] else "NO_SCREEN_MATCHES" if out["technical_count"] else "AWAITING_EVIDENCE"
     return out

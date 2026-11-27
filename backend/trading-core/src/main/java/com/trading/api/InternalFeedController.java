@@ -110,6 +110,9 @@ public class InternalFeedController {
              to_char(i.listed_on,'YYYY-MM-DD') AS listed_on,to_char(i.delisted_on,'YYYY-MM-DD') AS delisted_on,
              i.source AS registry_source,i.source_revision AS registry_revision,
              coalesce(quality.security_state,'UNKNOWN') AS security_state,quality.security_evidence_at,
+             to_char(q.observed_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') AS venue_quote_observed_at,
+             to_char(q.response_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') AS venue_quote_response_at,
+             q.last_price AS venue_quote_price,q.spread_percent AS venue_quote_spread_percent,q.turnover_proxy AS venue_quote_turnover,
              count(*) OVER () AS recent_registry_count,calendar.expected_session,
              count(*) FILTER (WHERE (latest.candle_time AT TIME ZONE e.timezone)::date=calendar.expected_session) OVER () AS expected_session_count,
              (SELECT max(a.ex_date) FROM corporate_actions a
@@ -134,6 +137,14 @@ public class InternalFeedController {
       ) latest ON true
       CROSS JOIN calendar
       LEFT JOIN discovery_security_context quality ON quality.instrument_id=i.id AND quality.isin=i.isin
+      LEFT JOIN discovery_quote_universe mapped ON mapped.instrument_id=i.id AND mapped.isin=i.isin
+      LEFT JOIN discovery_quote_screen q ON q.instrument_id=mapped.instrument_id AND q.instrument_key=mapped.instrument_key
+        AND q.isin=mapped.isin AND q.state IN ('PRIORITY','OBSERVED')
+        AND q.observed_at BETWEEN now()-interval '15 minutes' AND now()
+        AND q.response_at BETWEEN q.observed_at AND now()
+        AND EXISTS(SELECT 1 FROM market_sessions live WHERE live.exchange_id=e.id
+          AND live.session_date=(now() AT TIME ZONE e.timezone)::date AND live.session_type='REGULAR'
+          AND live.is_trading_day AND now() BETWEEN live.open_time AND live.close_time)
       WHERE e.code=? AND i.active AND i.listing_status='ACTIVE' AND i.series='EQ'
         AND i.instrument_type IN ('EQ','EQUITY','STOCK')
       """;
