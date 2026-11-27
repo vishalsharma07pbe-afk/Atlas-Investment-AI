@@ -61,8 +61,10 @@ public class PortfolioThesisService {
     h.put("holding_relative_strength",relative);
    }
    h.put("thesis_summary",PortfolioThesisSummary.summarize(h,json));
+   h.put("reassessment",PortfolioReassessment.holding(h,json,java.time.LocalDate.now(MarketCalendarService.IST)));
   }
   var result=new LinkedHashMap<>(review);result.put("holdings",holdings);
+  result.put("portfolio_reassessment",PortfolioReassessment.synthesis(holdings,json));
   var diversification=PortfolioDiversification.summarize(holdings,json);
   diversification.put("look_through",PortfolioLookThrough.assess(holdings,json,java.time.Instant.now()));
   PortfolioLookThrough.stripWorkingWeights(holdings);
