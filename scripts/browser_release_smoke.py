@@ -2,6 +2,8 @@
 """Real Chromium smoke on the disposable CI development stack only."""
 import argparse
 import uuid
+from datetime import date, timedelta
+import re
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
 
@@ -65,6 +67,47 @@ def run():
                 expect(page.get_by_role("dialog",name="Appearance settings")).to_be_visible()
                 page.keyboard.press("Escape")
                 expect(page.get_by_role("dialog",name="Appearance settings")).to_have_count(0)
+            # Exercise the actual chart library in Chromium using a synthetic fixture
+            # intercepted only in this disposable browser context, never in the app.
+            go("Stock Explorer")
+            instrument={"id":987654,"exchange":"NSE","symbol":"UIFIXTURE","series":"EQ",
+                        "isin":"INE000000001","security_name":"Synthetic CI chart fixture",
+                        "listing_status":"ACTIVE","source":"CI_FIXTURE","source_revision":None}
+            candles=[]
+            for i in range(80):
+                day=(date(2026,1,1)+timedelta(days=i)).isoformat()
+                close=100+i*0.6+(i%5-2)*2
+                candles.append({"trade_date":day,"open":close-1,"high":close+2,"low":close-3,
+                    "close":close,"volume":1000+i*15,"adjustment_status":"RAW_UNADJUSTED",
+                    "source_code":"CI_FIXTURE","received_at":day+"T18:00:00Z"})
+            search_pattern=re.compile(r"/api/v1/instruments\?")
+            page.route(search_pattern,lambda route:route.fulfill(json=[instrument]))
+            page.route("**/intelligence/api/v1/intelligence/technical/987654",lambda route:route.fulfill(json={
+                "instrument":instrument,"status":"AVAILABLE","as_of":candles[-1]["trade_date"],
+                "candle_count":len(candles),"candles":candles,"indicators":{},"patterns":[]}))
+            page.route("**/intelligence/api/v1/intelligence/technical/987654/summary",
+                       lambda route:route.fulfill(json={"research":None,"notice":"CI fixture only"}))
+            page.route(re.compile(r"/providers/upstox/resolve\?instrument_id=987654"),
+                       lambda route:route.fulfill(json={"subscription_ready":False,"blocker":"CI_FIXTURE"}))
+            page.get_by_role("textbox",name="Instrument search").fill("UIFIXTURE")
+            page.get_by_role("button",name=re.compile("NSE:UIFIXTURE")).click()
+            chart=page.get_by_role("region",name="Stock price and volume chart")
+            expect(chart.locator("canvas").first).to_be_visible(timeout=10000)
+            expect(chart.get_by_text("Chart rendering is unavailable.",exact=False)).to_have_count(0)
+            page.get_by_role("button",name="1M",exact=True).click()
+            page.get_by_role("button",name="Line",exact=True).click()
+            expect(chart.locator("canvas").first).to_be_visible()
+            expect(chart.get_by_text("Chart rendering is unavailable.",exact=False)).to_have_count(0)
+            page.get_by_role("button",name="Candles",exact=True).click()
+            chart.scroll_into_view_if_needed()
+            page.screenshot(path="browser-preview/stock-chart-CI-fixture-desktop.png",timeout=5000)
+            page.set_viewport_size({"width":375,"height":900})
+            assert chart.evaluate("(el)=>{const r=el.getBoundingClientRect();return r.left>=-1 && r.right<=innerWidth+1}"),"stock chart overflows mobile viewport"
+            chart.scroll_into_view_if_needed()
+            page.screenshot(path="browser-preview/stock-chart-CI-fixture-mobile.png",timeout=5000)
+            page.set_viewport_size({"width":1440,"height":900})
+            page.unroute_all(behavior="wait")
+            go("My Portfolio")
             page.reload(wait_until="domcontentloaded")
             expect(page.get_by_role("heading",name="My Portfolio",exact=True,level=1)).to_be_visible(timeout=20000)
             page.get_by_role("button",name="Logout",exact=True).click()

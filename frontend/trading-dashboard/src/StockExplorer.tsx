@@ -30,7 +30,7 @@ function MarketChart({data,toggles,mode,sessions,volumeVisible,expanded}:{data:T
   setFailed(false);setHovered(null);
   let chart:ReturnType<typeof createChart>|undefined;let observer:MutationObserver|undefined;let media:MediaQueryList|undefined;let applyTheme:(()=>void)|undefined;
   try{
-   const themeOptions=()=>{const styles=getComputedStyle(host);const ink=styles.getPropertyValue("--ink-soft").trim()||"#b9c4dc";const grid=styles.getPropertyValue("--row-line").trim()||"rgba(130,150,200,.12)";return {layout:{background:{type:ColorType.Solid,color:"transparent"},textColor:ink},grid:{vertLines:{color:grid},horzLines:{color:grid}},timeScale:{borderColor:grid},rightPriceScale:{borderColor:grid}};};
+   const themeOptions=()=>{const styles=getComputedStyle(host);const ink=styles.getPropertyValue("--ink-soft").trim()||"#b9c4dc";const grid=styles.getPropertyValue("--row-line").trim()||"rgba(130,150,200,.12)";return {layout:{background:{type:ColorType.Solid as const,color:"transparent"},textColor:ink},grid:{vertLines:{color:grid},horzLines:{color:grid}},timeScale:{borderColor:grid},rightPriceScale:{borderColor:grid}};};
    chart=createChart(host,{autoSize:true,...themeOptions(),crosshair:{mode:0}});
    applyTheme=()=>chart?.applyOptions(themeOptions());
    const dashboard=host.closest(".dashboard");if(dashboard&&typeof MutationObserver!=="undefined"){observer=new MutationObserver(applyTheme);observer.observe(dashboard,{attributes:true,attributeFilter:["data-theme"]});}
@@ -54,7 +54,7 @@ function MarketChart({data,toggles,mode,sessions,volumeVisible,expanded}:{data:T
   return()=>{observer?.disconnect();if(media&&applyTheme)media.removeEventListener?.("change",applyTheme);chart?.remove();};
  },[data,toggles,mode,sessions,volumeVisible]);
  const candle=hovered??data.candles[data.candles.length-1];
- return <><div className="terminal-ohlc" aria-label="Daily candle values"><span>{candle.trade_date}</span>{[["O",candle.open],["H",candle.high],["L",candle.low],["C",candle.close]].map(([label,value])=><span key={label}><small>{label}</small> {price(Number(value))}</span>)}<span><small>Vol</small> {candle.volume==null?"—":Number(candle.volume).toLocaleString("en-IN")}</span></div><div className={"market-chart terminal-stock-canvas"+(expanded?" is-expanded":"")} ref={ref} aria-label="Interactive daily price chart"/>{failed&&<p role="status" className="notice">Chart rendering is unavailable. The recorded price and candle values remain visible.</p>}</>;
+ return <><div className="terminal-ohlc" aria-label="Daily candle values"><span>{candle.trade_date}</span>{([["O",candle.open],["H",candle.high],["L",candle.low],["C",candle.close]] as const).map(([label,value])=><span key={label}><small>{label}</small> {price(value)}</span>)}<span><small>Vol</small> {candle.volume==null?"—":Number(candle.volume).toLocaleString("en-IN")}</span></div><div className={"market-chart terminal-stock-canvas"+(expanded?" is-expanded":"")} ref={ref} aria-label="Interactive daily price chart"/>{failed&&<p role="status" className="notice">Chart rendering is unavailable. The recorded price and candle values remain visible.</p>}</>;
 }
 
 export default function StockExplorer(){
@@ -81,7 +81,8 @@ export default function StockExplorer(){
     finally{if(sequence===searchSeq.current)setLoading(false);}
   }
   useEffect(()=>{
-    if(!query.trim()){searchSeq.current++;setResults([]);setError("");return;}
+    searchSeq.current++;
+    if(!query.trim()){setResults([]);setError("");setLoading(false);return;}
     const handle=setTimeout(()=>{void search();},350);
     return()=>clearTimeout(handle);
   },[query,exchange]);
