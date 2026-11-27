@@ -12,6 +12,7 @@ import re
 from decimal import Decimal, InvalidOperation
 import hashlib
 import json
+import sqlite3
 
 from . import nav_catalog, fund_disclosures, fund_portfolios, fund_peer_shortlist, fund_local_evidence, fund_prospective
 from .market_client import backend_json
@@ -579,11 +580,15 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
     reports=_research_reports(official,ranked,source_rows,disclosed,portfolios,compositions)
     for report in reports:
         if report["identifier"] in local_reports:report["local_export_evidence"]=local_reports[report["identifier"]]
+    try:
+        prospective=fund_prospective.summary(category,today)
+    except (OSError,ValueError,TypeError,sqlite3.Error):
+        prospective={"status":"UNAVAILABLE","bands":[],"notice":fund_prospective.NOTICE}
     payload={"generated_at":generated,"methodology_version":METHODOLOGY_VERSION,"category":category,
       "filters":{"horizon_months":horizon_months,"risk_tolerance":risk_tolerance},"coverage":coverage,
       "top_performers":ranked["top_performers"],"growth_outlook":ranked["growth_outlook"],
       "historical_research_shortlist":shortlist,"holdings_quality_watch":quality_watch,
-      "prospective_validation":fund_prospective.summary(category,today),
+      "prospective_validation":prospective,
       "portfolio_overlap":fund_portfolios.overlap(disclosed),
       "research_reports":reports,
       "local_export_evidence":{"status":local_export["status"],"matched_disclosures":len(local_reports),"matched_tri_comparisons":sum(r["benchmark_comparison"] is not None for r in local_reports.values()),"notice":fund_local_evidence.NOTICE},

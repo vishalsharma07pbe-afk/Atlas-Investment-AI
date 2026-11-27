@@ -42,7 +42,8 @@ def nav(value):
 def valid_score(v):
     return type(v) in (int,float) and isfinite(v) and 50<=v<=100
 
-def publish(snapshot,instant,connect=nav_catalog._connect):
+def publish(snapshot,instant,connect=None):
+    connect=connect or nav_catalog._connect
     if not snapshot.get("enabled") or snapshot.get("scope")!="PUBLIC_MARKET_RESEARCH_ONLY":return 0
     today=instant.astimezone(IST).date();written=0
     with nav_catalog._LOCK,closing(connect()) as db,db:
@@ -99,7 +100,8 @@ def evaluate(row,payload,today):
             "nav_change_percent":round(float(100*(points[end]/points[start]-1)),6),"observed_drawdown_percent":round(float(100*dd),6)}
     except (KeyError,ValueError,TypeError,InvalidOperation,OverflowError,ZeroDivisionError,AttributeError):return None
 
-def refresh(snapshot,instant,connect=nav_catalog._connect,loader=backend_json):
+def refresh(snapshot,instant,connect=None,loader=backend_json):
+    connect=connect or nav_catalog._connect
     publish(snapshot,instant,connect)
     today=instant.astimezone(IST).date()
     with nav_catalog._LOCK,closing(connect()) as db,db:
@@ -123,7 +125,8 @@ def refresh(snapshot,instant,connect=nav_catalog._connect,loader=backend_json):
             _table(db);db.execute("UPDATE mf_prospective_watch SET status=?,outcome=? WHERE isin=? AND observed_date=? AND status='PENDING'",
                 ("OBSERVED" if result else "EVIDENCE_GAP",json.dumps(result,allow_nan=False) if result else None,row["isin"],row["observed_date"]))
 
-def summary(category,today,connect=nav_catalog._connect):
+def summary(category,today,connect=None):
+    connect=connect or nav_catalog._connect
     if category not in COMPARABLE:return {"status":"CATEGORY_SPECIFIC_MODEL_REQUIRED","bands":[],"notice":NOTICE}
     with nav_catalog._LOCK,closing(connect()) as db,db:
         _table(db)
