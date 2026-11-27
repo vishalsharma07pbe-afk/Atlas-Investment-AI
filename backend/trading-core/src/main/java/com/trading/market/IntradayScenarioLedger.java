@@ -41,17 +41,21 @@ final class IntradayScenarioLedger {
    var signal=IntradayVenueEvidence.instant(row.get("bar_end"));
    if(signal==null)continue;
    var prefix=bars(id.longValue(),isin,exchange,symbol,day,signal);
-   var fresh=IntradayResearchService.evaluate(prefix,now);
+   Instant published=Instant.now();
+   if(!published.atZone(MarketCalendarService.IST).toLocalDate().equals(day)||!published.isBefore(IntradayScenario.end(day)))continue;
+   var fresh=IntradayResearchService.evaluate(prefix,published);
    if(fresh==null)continue;
-   var p=IntradayScenario.plan(fresh,prefix,now);
+   var p=IntradayScenario.plan(fresh,prefix,published);
    if(p==null||!Objects.equals(raw.get("prefix_sha256"),p.get("prefix_sha256")))continue;
    // Publication must not use a stale/unknown quote as evidence of execution.
    // Quote is only contextual; never a fill or independent clearance.
    jdbc.update("""
     INSERT INTO intraday_scenario_watch(session_date,isin,instrument_id,exchange,symbol,published_at,expiry,evidence)
-    VALUES (?,?,?,?,?,?,?,CAST(? AS jsonb)) ON CONFLICT(session_date,isin) DO NOTHING
-    """,day,isin,id.longValue(),exchange,symbol,java.sql.Timestamp.from(now),
-      java.sql.Timestamp.from(Instant.parse((String)p.get("expiry"))),encode(p));
+    SELECT ?,?,?,?,?,?,?,CAST(? AS jsonb) WHERE clock_timestamp()<?
+    ON CONFLICT(session_date,isin) DO NOTHING
+    """,day,isin,id.longValue(),exchange,symbol,java.sql.Timestamp.from(published),
+      java.sql.Timestamp.from(Instant.parse((String)p.get("expiry"))),encode(p),
+      java.sql.Timestamp.from(Instant.parse((String)p.get("entry_bar_start"))));
   }
  }
  void settle(Instant now){

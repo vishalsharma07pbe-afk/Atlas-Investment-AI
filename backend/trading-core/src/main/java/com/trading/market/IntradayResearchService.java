@@ -29,18 +29,77 @@ public class IntradayResearchService {
   Instant now=Instant.now();
   boolean open=false;
   for(String exchange:List.of("NSE","BSE"))if(calendar.isMarketOpen(exchange,now)){open=true;refreshExchange(exchange,now);}
-  // No provider requests for scenario validation. GET is read-only.
+  // Scenario validation is local; final capture is separately bounded.
+  // GET is read-only.
   try{
    Instant captured=Instant.now();
    if(open)scenarios.publish(current(captured,false),captured);
-   scenarios.settle(captured);
-   if(!open)scenarios.replayOne(captured);
+   if(!open)for(String exchange:List.of("NSE","BSE"))refreshAfterClose(exchange,captured);
+   scenarios.settle(Instant.now());
+   var local=captured.atZone(MarketCalendarService.IST).toLocalTime();
+   if(!open&&!local.isBefore(LocalTime.of(15,30))&&local.isBefore(LocalTime.of(17,0)))scenarios.replayOne(captured);
   }catch(org.springframework.dao.DataAccessException|IllegalStateException ex){
    // Optional scenario evidence must not break the existing feed.
    org.slf4j.LoggerFactory.getLogger(IntradayResearchService.class).warn("Intraday scenario evidence unavailable: {}",ex.getClass().getSimpleName());
   }
  }
 
+ /** Complete the final bar only for the already collected daily sample.
+  * One call per venue/pass, at most eight listings and two attempts each;
+  * no historical backfill, no bypass of the shared credential cooldown.
+  */
+ void refreshAfterClose(String exchange,Instant now){
+  if(!permitted())return;
+  LocalDate day=now.atZone(MarketCalendarService.IST).toLocalDate();
+  Instant close=IntradayScenario.end(day);
+  if(now.isBefore(close.plusSeconds(60))||!now.isBefore(close.plusSeconds(2700)))return;
+  if(!IntradayScenario.regular(calendar.sessionContext(exchange,now),day)||OperatorFeedCooldown.blocked(jdbc))return;
+  var due=jdbc.queryForList("""
+    WITH sampled AS (
+     SELECT a.instrument_id,m.instrument_key,
+       EXISTS(SELECT 1 FROM intraday_scenario_watch w WHERE w.session_date=? AND w.instrument_id=a.instrument_id) AS watched
+     FROM intraday_research_attempts a JOIN discovery_quote_universe m ON m.instrument_id=a.instrument_id
+     LEFT JOIN discovery_security_context sc ON sc.instrument_id=m.instrument_id AND sc.isin=m.isin AND sc.instrument_key=m.instrument_key
+     WHERE m.exchange=? AND a.status='SUCCESS'
+       AND a.attempted_at>=? AND a.attempted_at<?
+       AND coalesce(sc.security_state,'UNKNOWN') IN ('NORMAL','UNKNOWN')
+     ORDER BY watched DESC,a.instrument_id LIMIT 8
+    )
+    SELECT s.instrument_id,s.instrument_key FROM sampled s
+    LEFT JOIN intraday_final_capture f ON f.instrument_id=s.instrument_id AND f.session_date=?
+    WHERE (f.instrument_id IS NULL OR (f.attempts<2 AND f.next_attempt_at<=now() AND f.status<>'COMPLETE'))
+     AND NOT EXISTS (
+       SELECT 1 FROM market_candles c JOIN data_sources ds ON ds.id=c.source_id
+       WHERE c.instrument_id=s.instrument_id AND c.timeframe='15minute' AND c.candle_time=?
+        AND c.is_complete AND c.quality_status='PROVIDER_VALIDATED' AND c.adjustment_status='RAW_UNADJUSTED' AND ds.source_code='UPSTOX')
+    ORDER BY s.watched DESC,f.next_attempt_at NULLS FIRST,s.instrument_id LIMIT 1
+    """,day,exchange,java.sql.Timestamp.from(IntradayScenario.start(day)),java.sql.Timestamp.from(close),day,java.sql.Timestamp.from(close.minusSeconds(900)));
+  for(var row:due){
+   long id=((Number)row.get("instrument_id")).longValue();
+   int claimed=jdbc.update("""
+     INSERT INTO intraday_final_capture(instrument_id,session_date,attempts,next_attempt_at,status)
+     VALUES (?,?,1,now()+interval '10 minutes','RUNNING')
+     ON CONFLICT(instrument_id,session_date) DO UPDATE SET attempts=intraday_final_capture.attempts+1,
+       next_attempt_at=now()+interval '10 minutes',status='RUNNING'
+     WHERE intraday_final_capture.attempts<2 AND intraday_final_capture.next_attempt_at<=now() AND intraday_final_capture.status<>'COMPLETE'
+     """,id,day);
+   if(claimed!=1)continue;
+   try{
+    int written=stocks.discoveryIntradayCandles(token,(String)row.get("instrument_key"),now);
+    boolean complete=Boolean.TRUE.equals(jdbc.queryForObject("""
+      SELECT EXISTS(SELECT 1 FROM market_candles c JOIN data_sources ds ON ds.id=c.source_id
+       WHERE c.instrument_id=? AND c.timeframe='15minute' AND c.candle_time=? AND c.is_complete
+        AND c.quality_status='PROVIDER_VALIDATED' AND c.adjustment_status='RAW_UNADJUSTED' AND ds.source_code='UPSTOX')
+      """,Boolean.class,id,java.sql.Timestamp.from(close.minusSeconds(900))));
+    jdbc.update("UPDATE intraday_final_capture SET status=? WHERE instrument_id=? AND session_date=? AND status='RUNNING'",
+       complete?"COMPLETE":"MISSING_FINAL_BAR",id,day);
+    if(written>0)OperatorFeedCooldown.recovered(jdbc);
+   }catch(Exception ex){
+    jdbc.update("UPDATE intraday_final_capture SET status='FAILED' WHERE instrument_id=? AND session_date=? AND status='RUNNING'",id,day);
+    OperatorFeedCooldown.record(jdbc,ex);
+   }
+  }
+ }
  void refreshExchange(String exchange,Instant now){
   if(OperatorFeedCooldown.blocked(jdbc))return;
   LocalDate today=now.atZone(MarketCalendarService.IST).toLocalDate();

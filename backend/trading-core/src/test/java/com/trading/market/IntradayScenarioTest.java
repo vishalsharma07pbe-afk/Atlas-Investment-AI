@@ -39,6 +39,13 @@ class IntradayScenarioTest {
   for(Object c:(List<?>)out.get("cases"))assertEquals("NO_ENTRY_INTERVENING_TOUCH",((Map<?,?>)c).get("status"));
   rows.remove(20);assertEquals("EVIDENCE_GAP",IntradayScenario.replay(rows,DAY).get("status"));
  }
+ @Test void lateSessionScenarioNeverCrossesClose(){
+  var rows=rows();
+  var signal=START.plusSeconds(21*900L);
+  var prefix=rows.subList(0,21);
+  var finding=new HashMap<String,Object>(Map.of("pattern","VOLUME_BREAKOUT_WATCH","bar_end",signal.toString(),"close",103d,"prior_session_high_so_far",102d,"opening_range_high",102d,"opening_range_low",95d,"mean_bar_range_percent",1d));
+  assertNull(IntradayScenario.plan(finding,prefix,signal));
+ }
  @Test void calendarMustBeExact(){
   assertTrue(IntradayScenario.regular(Map.of("session_date",DAY.toString(),"open_at",START.toString(),"close_at",IntradayScenario.end(DAY).toString(),"phase","POST_MARKET"),DAY));
   assertFalse(IntradayScenario.regular(Map.of("session_date",DAY.toString(),"open_at",START.toString(),"close_at",IntradayScenario.end(DAY).minusSeconds(900).toString(),"phase","POST_MARKET"),DAY));

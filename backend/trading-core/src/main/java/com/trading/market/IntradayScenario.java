@@ -74,9 +74,9 @@ final class IntradayScenario {
  }
  static Map<String,Object> outcome(Map<String,Object> p,List<Map<String,Object>> rows,LocalDate day){
   Instant first=start(day),entry=IntradayVenueEvidence.instant(p.get("entry_bar_start")),expiry=IntradayVenueEvidence.instant(p.get("expiry")),signal=IntradayVenueEvidence.instant(p.get("bar_end"));
-  if(entry==null||expiry==null||signal==null||!entry.isAfter(signal.minusNanos(1))||!expiry.equals(entry.plusSeconds(900L*HOLD))||expiry.isAfter(end(day))||!valid(rows,first))return gap();
+  if(entry==null||expiry==null||signal==null||!entry.isAfter(signal)||!expiry.equals(entry.plusSeconds(900L*HOLD))||expiry.isAfter(end(day))||!valid(rows,first))return gap();
   int n=(int)Duration.between(first,signal).toSeconds()/900,i=(int)Duration.between(first,entry).toSeconds()/900;
-  if(n<6||i<n||i+HOLD>rows.size()||!first.plusSeconds(900L*n).equals(signal)||!first.plusSeconds(900L*i).equals(entry)||
+  if(n<6||i<=n||i+HOLD>rows.size()||!first.plusSeconds(900L*n).equals(signal)||!first.plusSeconds(900L*i).equals(entry)||
      !Objects.equals(p.get("prefix_sha256"),hash(rows.subList(0,n))))return gap();
   double low=num(p,"lower_reference"),high=num(p,"upper_projection"),stress=num(p,"stress_gap_percent");
   if(!Double.isFinite(low+high+stress)||!(0<low&&low<high&&stress>=.5&&stress<100))return gap();

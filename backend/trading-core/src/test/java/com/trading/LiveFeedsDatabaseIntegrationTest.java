@@ -56,6 +56,24 @@ class LiveFeedsDatabaseIntegrationTest {
  }
  @Test
  @org.springframework.transaction.annotation.Transactional
+ void intradayScenarioPublicationCannotBeReplacedOrRewritten(){
+  long id=seedStock();
+  LocalDate day=LocalDate.of(2026,11,25);
+  var published=java.sql.Timestamp.from(day.atTime(11,0).atZone(MarketCalendarService.IST).toInstant());
+  var expiry=java.sql.Timestamp.from(published.toInstant().plusSeconds(3600));
+  String insert="""
+    INSERT INTO intraday_scenario_watch(session_date,isin,instrument_id,exchange,symbol,published_at,expiry,evidence)
+    VALUES (?,'INE000A01001',?,'NSE','FEEDTEST',?,?,CAST(? AS jsonb))
+    ON CONFLICT(session_date,isin) DO NOTHING
+    """;
+  assertThat(db.update(insert,day,id,published,expiry,"{\"score\":1}")).isEqualTo(1);
+  assertThat(db.update(insert,day,id,published,expiry,"{\"score\":9}")).isZero();
+  assertThat(db.queryForObject("SELECT evidence->>'score' FROM intraday_scenario_watch WHERE session_date=? AND isin='INE000A01001'",String.class,day)).isEqualTo("1");
+  assertThat(db.update("UPDATE intraday_scenario_watch SET status='OBSERVED_CASES',outcome='{}'::jsonb WHERE session_date=? AND isin='INE000A01001'",day)).isEqualTo(1);
+  assertThatThrownBy(()->db.update("UPDATE intraday_scenario_watch SET outcome='{\"changed\":true}'::jsonb WHERE session_date=? AND isin='INE000A01001'",day)).isInstanceOf(org.springframework.dao.DataAccessException.class);
+ }
+ @Test
+ @org.springframework.transaction.annotation.Transactional
  void dateSpecificCalendarPersistsWithoutOverwritingExistingSessions()throws Exception{
   LocalDate day=LocalDate.of(2024,7,17);
   db.update("DELETE FROM market_sessions WHERE session_date=?",day);
