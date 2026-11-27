@@ -1,3 +1,4 @@
+import {MarketTiles} from "./TerminalCharts";
 import {visiblePolling} from "./visiblePolling";
 import "./overview.css";
 import type {WatchReportTarget} from "./HorizonResearch";
@@ -53,6 +54,7 @@ export default function AutonomousOverview({children,onPortfolio,onFunds,onSetti
    {error&&<p role="alert" className="notice warning-notice">Research service unavailable. Previously displayed observations may be outdated. <button type="button" className="secondary" onClick={onSettings}>Check connections</button></p>}
    {!data&&!error&&<p role="status">Loading the latest saved research…</p>}
    {data?.enabled===false&&<p className="notice warning-notice">Background research is disabled. Check the local configuration in Settings.</p>}
+   {readyMarkets.length>0&&<MarketTiles title="Market momentum watch · sampled daily histories" items={readyMarkets.flatMap(row=>(row.result?.momentum_leaders??[]).slice(0,5)).map(c=>({key:c.exchange+":"+c.id,label:c.symbol,exchange:c.exchange,date:c.as_of,value:c.momentum_20d_percent}))} period="20-day momentum"/>}
    {briefing&&<DailyBriefing report={briefing} onFunds={onFunds} onSettings={onSettings} onPortfolio={onPortfolio} onHorizon={onHorizon}/>}
    {onHorizon&&!briefing?.decision_context&&<div className="research-shortcuts" aria-label="Automatic equity research shortcuts">{horizonLinks.map(({id,title})=>{const groups=readyMarkets.flatMap(row=>row.result?.horizons?.[id]?[row.result.horizons[id]!]:[]);const count=groups.reduce((n,group)=>n+(group.status==="TECHNICAL_WATCH_ONLY"?group.candidates.length:0),0);return <button key={id} type="button" className="research-shortcut" onClick={()=>onHorizon(id)}><strong>{title}</strong><span>{groups.length?`${count} technical watches`:"Current research pending"}</span><small>Open research →</small></button>;})}</div>}
    <OverviewGroup compact={compact} title="Market and fund observation details" description="Momentum samples, all fund categories and their current evidence status">
