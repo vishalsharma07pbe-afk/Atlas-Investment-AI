@@ -341,7 +341,9 @@ def summarize(equities,instant,reports=None):
     multi=_multi_year_exposure(multi_year)
     multi["exact_equity_weight_percent"]=round(exact_weight,4)
     multi["unassessed_exact_equity_weight_percent"]=round(max(0.0,exact_weight-multi["assessed_weight_percent"]),4)
+    from . import fund_growth_drivers
     return {"status":"REPORTED_HISTORICAL_DRIVERS_ONLY" if covered or historical_cache_weight else "COLLECTING_COMPANY_EVIDENCE",
+        "quarterly_growth_drivers":fund_growth_drivers.summarize(equities,reports,instant),
         "multi_year_quality":multi,
         "cached_report_weight_percent":round(covered,4),
         "annual_history_cache_weight_percent":round(historical_cache_weight,4),
