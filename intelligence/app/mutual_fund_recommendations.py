@@ -583,7 +583,17 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
     for report in reports:
         if report["identifier"] in local_reports:report["local_export_evidence"]=local_reports[report["identifier"]]
         if report["identifier"] in publisher_reports:
-            report["publisher_factsheet_evidence"]=publisher_reports[report["identifier"]]
+            e=publisher_reports[report["identifier"]]
+            # A publisher-reported current benchmark is a descriptive comparison
+            # only, not evidence of the benchmark mandate over the full history.
+            idx=local_export.get("indices",{}).get(e["benchmark"],{})
+            matches=[r for r in source_rows if str(r.get("scheme_code"))==report["identifier"]]
+            if len(matches)==1 and idx:
+                comparison=fund_local_evidence.compare(matches[0],idx)
+                if comparison:
+                    e={**e,"historical_tri_context":comparison,
+                       "tri_provenance":local_export.get("downloaded_tri_provenance",{}).get(e["benchmark"])}
+            report["publisher_factsheet_evidence"]=e
     try:
         prospective=fund_prospective.summary(category,today)
     except (OSError,ValueError,TypeError,sqlite3.Error):

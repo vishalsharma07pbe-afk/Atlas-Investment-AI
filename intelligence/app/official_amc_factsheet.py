@@ -11,7 +11,7 @@ from decimal import Decimal,InvalidOperation
 from hashlib import sha256
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit,urljoin
 from zoneinfo import ZoneInfo
 import json
 import os
@@ -21,9 +21,11 @@ import stat
 import time
 import httpx
 from . import nav_catalog,fund_local_evidence as local
+from .market_client import backend_json
 
 VERSION="PPFAS-FACTSHEET-1"
 PATH=Path("/app/fund-evidence/amc-factsheet-sources.json")
+INDEX="https://amc.ppfas.com/downloads/factsheet/"
 IST=ZoneInfo("Asia/Kolkata")
 MAX_BYTES=5_000_000
 NAMES={"Parag Parikh Flexi Cap Fund":"FLEXI_CAP","Parag Parikh Large Cap Fund":"LARGE_CAP"}
@@ -61,13 +63,13 @@ def sources(today,path=PATH):
         d=month(url,today)
         if d in result:raise ValueError("DUPLICATE_MONTH")
         result[d]=url
-    return result
+    return result,obj.get("discover_latest") is True
 
 class Sections(HTMLParser):
     """Extract only exact scheme heading sections and table rows, no script execution."""
     def __init__(self):
         super().__init__(convert_charrefs=True)
-        self.active=None;self.head=None;self.rows={};self.row=None;self.cell=None;self.count=0;self.ignored=0
+        self.active=None;self.head=None;self.rows={};self.row=None;self.cell=None;self.count=0;self.ignored=0;self.base_labels=set()
     def handle_starttag(self,tag,attrs):
         if tag in ("script","style"):self.ignored+=1
         if self.ignored:return
@@ -76,6 +78,7 @@ class Sections(HTMLParser):
         if tag in ("td","th") and self.row is not None:self.cell=[]
     def handle_data(self,data):
         if self.ignored:return
+        if self.active and " ".join(data.split())=="Base Expense Ratio (As on last business day of the month)":self.base_labels.add(self.active)
         for parts in (self.head,self.cell):
             if parts is not None:
                 if sum(map(len,parts))+len(data)>20000:raise ValueError("CELL_LIMIT")
@@ -146,7 +149,7 @@ def parse(raw,url,today):
             fee=[r[1:] for r in rows if len(r)==3 and r[0]=="Direct Plan:"]
             displayed=[r[1] for r in rows if len(r)==2 and r[0]=="Direct Plan:"]
             base=None
-            if len(fee)==1 and len(displayed)==1 and number(fee[0][1],True)==number(displayed[0],True):
+            if name in p.base_labels and len(fee)==1 and len(displayed)==1 and number(fee[0][1],True)==number(displayed[0],True):
                 base=float(number(fee[0][1],True))
             output[name]={"scheme_name":name,"category":NAMES[name],"portfolio_date":end.isoformat(),
                 "nav_date":nav_date.isoformat(),"nav":str(number(navs[0])),"benchmark":benchmark,
@@ -157,7 +160,8 @@ def parse(raw,url,today):
     return output
 
 def fetch(url,today):
-    month(url,today);data=bytearray();deadline=time.monotonic()+30
+    if url!=INDEX:month(url,today)
+    data=bytearray();deadline=time.monotonic()+30
     with httpx.Client(timeout=15,follow_redirects=False,trust_env=False) as client:
         with client.stream("GET",url,headers={"Accept":"text/html","User-Agent":"ATLAS-Research/2.0"}) as response:
             response.raise_for_status()
@@ -166,6 +170,30 @@ def fetch(url,today):
                 data.extend(part)
     return bytes(data)
 
+class IndexLinks(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True);self.hrefs=[]
+    def handle_starttag(self,tag,attrs):
+        if tag=="a":
+            href=dict(attrs).get("href")
+            if href and len(href)<=250:
+                self.hrefs.append(href)
+                if len(self.hrefs)>10000:raise ValueError("LINK_LIMIT")
+
+def discover(raw,today):
+    if not isinstance(raw,bytes) or not 0<len(raw)<=MAX_BYTES:raise ValueError("INDEX_SIZE")
+    p=IndexLinks();p.feed(raw.decode("utf-8-sig"));p.close()
+    links={}
+    for href in p.hrefs:
+        url=urljoin(INDEX,href)
+        try:d=month(url,today)
+        except (ValueError,TypeError):continue
+        # index.php and directory refer to the same allowed document.
+        canonical=url.removesuffix("index.php")
+        links.setdefault(d,set()).add(canonical)
+    if not links or len(links[max(links)])!=1:raise ValueError("LATEST_LINK_UNAVAILABLE")
+    return next(iter(links[max(links)]))
+
 def _table(db):
     db.execute("""CREATE TABLE IF NOT EXISTS official_amc_factsheets(
       url TEXT PRIMARY KEY,attempted_at TEXT NOT NULL,status TEXT NOT NULL,payload TEXT)""")
@@ -173,8 +201,26 @@ def _table(db):
 def refresh(instant,*,path=PATH,loader=fetch,connect=None):
     if not permitted():return False
     connect=connect or nav_catalog._connect;today=instant.astimezone(IST).date()
-    try:links=sources(today,path)
+    try:links,automatic=sources(today,path)
     except (OSError,ValueError,TypeError,KeyError):return False
+    if automatic:
+        # Cache the actual publisher link separately; no URL construction from date.
+        with nav_catalog._LOCK,closing(connect()) as db:
+            _table(db);index=db.execute("SELECT * FROM official_amc_factsheets WHERE url=?",(INDEX,)).fetchone()
+        if not index or index["attempted_at"]<=(instant-timedelta(hours=24)).isoformat():
+            selected=None
+            try:selected=discover(loader(INDEX,today),today)
+            except (ValueError,TypeError,OSError,httpx.HTTPError):pass
+            with nav_catalog._LOCK,closing(connect()) as db,db:
+                _table(db);db.execute("""INSERT INTO official_amc_factsheets VALUES(?,?,?,?) ON CONFLICT(url) DO UPDATE SET
+                  attempted_at=excluded.attempted_at,status=excluded.status,payload=excluded.payload
+                  WHERE excluded.attempted_at>=official_amc_factsheets.attempted_at""",
+                  (INDEX,instant.isoformat(),"AVAILABLE" if selected else "UNAVAILABLE",json.dumps(selected) if selected else None))
+            if not selected:return False
+            links[month(selected,today)]=selected
+        else:
+            if index["status"]!="AVAILABLE":return False
+            selected=json.loads(index["payload"]);links[month(selected,today)]=selected
     if not links:return False
     url=links[max(links)]
     with nav_catalog._LOCK,closing(connect()) as db,db:
@@ -192,37 +238,49 @@ def refresh(instant,*,path=PATH,loader=fetch,connect=None):
         db.execute("DELETE FROM official_amc_factsheets WHERE attempted_at<?",((instant-timedelta(days=90)).isoformat(),))
     return bool(result)
 
-def matched(candidates,source_rows,instant,*,path=PATH,connect=None):
-    """No fuzzy names, no provider calls; exact code/ISIN and AMFI NAV history."""
+def matched(candidates,source_rows,instant,*,path=PATH,connect=None,loader=backend_json):
+    """No fuzzy names or external provider calls; use existing local AMFI read model."""
     if not permitted():return {}
     connect=connect or nav_catalog._connect;today=instant.astimezone(IST).date()
     try:
-        links=sources(today,path)
-        if not links:return {}
-        url=links[max(links)]
-        result={}
+        links,automatic=sources(today,path)
         with nav_catalog._LOCK,closing(connect()) as db:
-            _table(db);saved=db.execute("SELECT * FROM official_amc_factsheets WHERE url=? AND status='AVAILABLE'",(url,)).fetchone()
+            _table(db)
+            if automatic:
+                index=db.execute("SELECT * FROM official_amc_factsheets WHERE url=? AND status='AVAILABLE'",(INDEX,)).fetchone()
+                if not index or not timedelta(0)<=instant-datetime.fromisoformat(index["attempted_at"])<=timedelta(hours=48):return {}
+                selected=json.loads(index["payload"]);links[month(selected,today)]=selected
+            if not links:return {}
+            url=links[max(links)]
+            saved=db.execute("SELECT * FROM official_amc_factsheets WHERE url=? AND status='AVAILABLE'",(url,)).fetchone()
             if not saved:return {}
             stamp=datetime.fromisoformat(saved["attempted_at"])
             if not timedelta(0)<=instant-stamp<=timedelta(hours=48):return {}
             observed=json.loads(saved["payload"])
-            for f in candidates:
-                if f.plan!="DIRECT" or f.option!="GROWTH":continue
-                matches=[r for r in source_rows if str(r.get("scheme_code"))==f.identifier]
-                if len(matches)!=1:continue
-                row=matches[0];isin=row.get("isin_growth")
-                if not isinstance(isin,str) or not re.fullmatch(r"INF[A-Z0-9]{9}",isin) or row.get("amfi_plan")!="DIRECT" or row.get("amfi_option")!="GROWTH":continue
-                name=" ".join(f.name.casefold().replace("-"," ").split())
-                keys=[k for k in NAMES if name in (k.casefold()+" direct plan growth",k.casefold()+" direct growth")]
-                if len(keys)!=1:continue
-                e=observed.get(keys[0])
-                if not e or e.get("category")!=f.category or e.get("source_url")!=url or e.get("methodology")!=VERSION:continue
-                identity=db.execute("SELECT isin_growth FROM nav_schemes WHERE scheme_code=? AND source='AMFI'",(int(f.identifier),)).fetchone()
-                if not identity or identity[0]!=isin:continue
-                nav=db.execute("SELECT nav FROM nav_history WHERE scheme_code=? AND nav_date=? AND source='AMFI'",(int(f.identifier),e["nav_date"])).fetchone()
-                if not nav or Decimal(nav[0])!=Decimal(e["nav"]):continue
-                result[f.identifier]={**e,"scheme_code":f.identifier,"isin_growth":isin,"retrieved_at":saved["attempted_at"],
-                    "status":"PUBLISHER_FACTSHEET_NAV_RECONCILED","qualified":False,"notice":NOTICE}
+        result={}
+        for f in candidates[:40]:
+            if f.plan!="DIRECT" or f.option!="GROWTH":continue
+            matches=[r for r in source_rows if str(r.get("scheme_code"))==f.identifier]
+            if len(matches)!=1:continue
+            row=matches[0];isin=row.get("isin_growth")
+            if not isinstance(isin,str) or not re.fullmatch(r"INF[A-Z0-9]{9}",isin) or row.get("amfi_plan")!="DIRECT" or row.get("amfi_option")!="GROWTH":continue
+            if not isinstance(f.identifier,str) or not re.fullmatch(r"[1-9][0-9]{0,8}",f.identifier):continue
+            name=" ".join(f.name.casefold().replace("-"," ").split())
+            keys=[k for k in NAMES if name in (k.casefold()+" direct plan growth",k.casefold()+" direct growth")]
+            if len(keys)!=1:continue
+            e=observed.get(keys[0])
+            if not e or e.get("category")!=f.category or e.get("source_url")!=url or e.get("methodology")!=VERSION:continue
+            if e.get("portfolio_date")!=month(url,today).isoformat() or not re.fullmatch(r"[a-f0-9]{64}",e.get("source_sha256","")):continue
+            nav_day=local.day(e["nav_date"])
+            if not 0<=(month(url,today)-nav_day).days<=7:continue
+            try:
+                payload=loader("/api/v1/mutual-funds/outcome-window?schemeCode="+f.identifier+"&from="+e["nav_date"]+"&through="+e["nav_date"])
+                identity=payload.get("identity") or {}
+                if payload.get("status")!="LOCAL_AMFI_OBSERVATIONS" or str(identity.get("scheme_code"))!=f.identifier or identity.get("isin_growth")!=isin or identity.get("amfi_plan")!="DIRECT" or identity.get("amfi_option")!="GROWTH" or not 0<=(today-local.day(identity["amfi_metadata_date"])).days<=7:continue
+                points=payload.get("rows")
+                if not isinstance(points,list) or len(points)!=1 or points[0].get("nav_date")!=e["nav_date"] or points[0].get("source_code")!="AMFI" or Decimal(str(points[0]["nav"]))!=Decimal(e["nav"]):continue
+            except Exception:continue # unavailable local evidence cannot establish a match
+            result[f.identifier]={**e,"scheme_code":f.identifier,"isin_growth":isin,"retrieved_at":saved["attempted_at"],
+                "status":"PUBLISHER_FACTSHEET_NAV_RECONCILED","qualified":False,"notice":NOTICE}
         return result
     except (OSError,ValueError,TypeError,KeyError,AttributeError,InvalidOperation,sqlite3.Error):return {}
