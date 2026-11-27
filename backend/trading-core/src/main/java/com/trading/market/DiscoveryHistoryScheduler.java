@@ -13,9 +13,11 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class DiscoveryHistoryScheduler {
-  // Align ingestion with all existing daily research horizons (long term: 200 sessions).
-  private static final int REQUIRED_DAILY_CANDLES=200;
-  private static final int BACKFILL_MONTHS=12;
+  // Acquisition target, not a qualification rule: 252 daily return intervals need
+  // 253 closes. A 15-month window leaves room for exchange holidays and gaps.
+  // Keep existing per-pass request budgets and raw/adjusted separation.
+  private static final int REQUIRED_DAILY_CANDLES=253;
+  private static final int BACKFILL_MONTHS=15;
   private final JdbcTemplate jdbc;
   private final UpstoxFeedService stocks;
   private final MarketCalendarService calendar;
