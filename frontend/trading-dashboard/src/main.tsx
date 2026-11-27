@@ -123,7 +123,7 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
   const portfolioRequest=useRef(0);
   const portfolioPending=useRef(false);
   const portfolioFingerprint=useRef<string|null>(null);
-  const feedPending=useRef(false);
+  const feedPending=useRef(false);const livePending=useRef(false);const positionFingerprint=useRef<string|null>(null);
 
   async function load(background=false) {
     if(background&&portfolioPending.current)return;
@@ -136,7 +136,9 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
       if(request!==portfolioRequest.current)return;
       const fingerprint=JSON.stringify([nextHoldings,nextAnalysis]);
       if(fingerprint!==portfolioFingerprint.current){
-        portfolioFingerprint.current=fingerprint;setHoldings(nextHoldings);setAnalysis(nextAnalysis);setPortfolioRevision(v=>v+1);
+        portfolioFingerprint.current=fingerprint;setHoldings(nextHoldings);setAnalysis(nextAnalysis);
+        const positions=JSON.stringify(nextHoldings.map(h=>[h.id,h.symbol,h.asset_type,h.quantity,h.average_cost,h.notes]));
+        if(positions!==positionFingerprint.current||!background){positionFingerprint.current=positions;setPortfolioRevision(v=>v+1);}
       }
       setError("");
     } catch (e) { if(request===portfolioRequest.current)setError(String(e)); }
@@ -160,10 +162,16 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
       const response=await fetch(`${API}/refresh-prices?includeHistory=${includeHistory}`,{method:"POST"});
       if(!response.ok)return;
       const result=await response.json();
-      const unavailable=Array.isArray(result.skipped)&&result.skipped.some((item:{reason?:string})=>String(item.reason||"").includes("credential unavailable"));
+      const unavailable=Array.isArray(result.skipped)&&result.skipped.some((item:{reason?:string})=>/credential unavailable|REAUTHORIZATION_REQUIRED|ACCESS_REJECTED/.test(String(item.reason||"")));
       setProviderActionRequired(unavailable);
       if(Number(result.updated)>0||Number(result.history_synced)>0)await load();
     }catch{/* Automatic refresh is best-effort; saved data remains usable offline. */}
+  }
+
+  async function refreshLiveValuations(){
+    if(livePending.current||document.visibilityState!=="visible")return;livePending.current=true;
+    try{const result=await fetch(API+"/refresh-live-prices",{method:"POST",cache:"no-store"});if(result.ok)await load(true);}
+    catch{/* Existing recorded values remain labelled as recorded. */}finally{livePending.current=false;}
   }
 
   async function reconcileFeed(){
@@ -181,6 +189,7 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
     document.addEventListener("visibilitychange",poll);
     return()=>{window.clearInterval(timer);document.removeEventListener("visibilitychange",poll);};
   }, []);
+  useEffect(()=>{if(!feedState?.transport_connected)return;void refreshLiveValuations();const timer=window.setInterval(()=>void refreshLiveValuations(),5000);return()=>window.clearInterval(timer);},[feedState?.transport_connected]);
   useEffect(()=>{const poll=()=>{if(document.visibilityState==="visible")void refreshFeedState();};poll();const timer=window.setInterval(poll,10000);document.addEventListener("visibilitychange",poll);return()=>{window.clearInterval(timer);document.removeEventListener("visibilitychange",poll);};},[]);
   useEffect(() => { if(tab === 6) loadHealth(); }, [tab]);
   useEffect(() => { try { localStorage.setItem(TAB_STORAGE_KEY, String(tab)); } catch { /* Storage may be blocked. */ } }, [tab]);
@@ -257,17 +266,17 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
       <main className="content" id="main-content" tabIndex={-1}>
         <header className="terminal-page-header"><div><div className="eyebrow"><span/> YOUR PRIVATE RESEARCH TERMINAL</div><h1>{activePage.title}</h1><p>{activePage.description}</p></div><div className="header-actions terminal-utility"><button type="button" className="terminal-search secondary" onClick={()=>navigate(7)}><svg aria-hidden="true" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg><span>Stock search</span></button><NotificationCenter key={identity.id} includePersonal/><AppearanceControls value={appearance} onChange={setAppearance} open={appearanceOpen} onOpenChange={setAppearanceOpen}/></div></header>
         <MarketIndexStrip/>
-        {providerActionRequired&&<div className="provider-action-banner" role="status"><div><strong>Live prices need today’s Upstox authorization</strong><span>Your holdings are safe. Connect the read-only token once, then ATLAS will refresh prices and research automatically.</span></div><button className="secondary" onClick={()=>setTab(6)}>Connect Upstox</button></div>}
+        {providerActionRequired&&!feedState?.transport_connected&&holdings.some(h=>h.asset_type==="EQUITY")&&<div className="provider-action-banner" role="status"><div><strong>Market-data access needs attention</strong><span>Check the existing Analytics Token configuration and data permissions. Account synchronization is optional.</span></div><button className="secondary" onClick={()=>setTab(6)}>Review connection</button></div>}
         <OnboardingGuide onNavigate={navigate}/>
         {loading&&<div className="global-loading" role="status" aria-live="polite"><span/>Saving your changes…</div>}
         {error && <div className="error glass" role="alert">{error} <button type="button" onClick={() => tab === 6 ? loadHealth() : load()}>Retry</button></div>}
 
         {tab === 0 ? <>
-          <div className="terminal-overview-grid"><PortfolioSummary analysis={analysis} onOpen={()=>navigate(9)}/><PortfolioVisuals holdings={holdings}/></div>
+          <div className="terminal-overview-grid"><PortfolioSummary analysis={analysis} holdings={holdings} feedConnected={feedState?.transport_connected===true} onOpen={()=>navigate(9)}/><PortfolioVisuals holdings={holdings}/></div>
           <PortfolioDoctor compact revision={portfolioRevision} onOpenPortfolio={()=>navigate(9)} onSettings={()=>navigate(6)}/>
           <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)} onHorizon={navigateHorizon}><ResearchHome holdings={holdings} revision={portfolioRevision} onReviewHoldings={()=>navigate(9)} onOpenExplorer={()=>navigate(7)} onOpenDataHealth={()=>navigate(6)}/></AutonomousOverview>
         </> : tab === 9 ? <>
-          <div className="terminal-overview-grid"><PortfolioSummary analysis={analysis} onOpen={()=>document.getElementById("active-holdings")?.scrollIntoView({block:"start"})}/><PortfolioVisuals holdings={holdings}/></div>
+          <div className="terminal-overview-grid"><PortfolioSummary analysis={analysis} holdings={holdings} feedConnected={feedState?.transport_connected===true} onOpen={()=>document.getElementById("active-holdings")?.scrollIntoView({block:"start"})}/><PortfolioVisuals holdings={holdings}/></div>
           <section className="panel glass terminal-performance-panel"><PortfolioPerformanceHistory revision={portfolioRevision}/></section>
           <AdvancedSection title="Add or update an investment" description="Search a stock or fund, save a holding or set up an SIP"><HoldingEditor busy={loading} onSave={submitHolding} onSaveSip={submitSip}/></AdvancedSection>
           <AdvancedSection title="Advanced portfolio tools" description="Stress tests, allocation, goals, journal, fees and concentration">

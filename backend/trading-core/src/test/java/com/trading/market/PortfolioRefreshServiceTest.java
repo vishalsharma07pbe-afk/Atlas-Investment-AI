@@ -62,10 +62,10 @@ class PortfolioRefreshServiceTest {
   @Test void boundedBackgroundBatchUsesOwnerFromClaimedRow(){
     JdbcTemplate jdbc=mock(JdbcTemplate.class);
     UpstoxFeedService provider=mock(UpstoxFeedService.class);
-    when(jdbc.queryForList(contains("FOR UPDATE SKIP LOCKED"),eq(10))).thenReturn(List.of());
+    when(jdbc.queryForList(contains("FOR UPDATE SKIP LOCKED"),eq(false),eq(10))).thenReturn(List.of());
     var result=new PortfolioRefreshService(jdbc,provider).refreshDue(100);
     assertEquals(0,result.get("total"));
-    verify(jdbc).queryForList(contains("RETURNING h.id,h.user_id"),eq(10));
+    verify(jdbc).queryForList(contains("RETURNING h.id,h.user_id"),eq(false),eq(10));
     verifyNoInteractions(provider);
   }
 }
