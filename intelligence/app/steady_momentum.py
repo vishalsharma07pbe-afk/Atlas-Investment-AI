@@ -133,7 +133,7 @@ def ranked_shortlists(candidates):
     return distinct[:10],{k:[row for row in distinct if row["cap_category"]==k][:10] for k in CAP_GROUPS},len(distinct)
 
 def summarize(snapshot,connect,instant):
-    from . import automatic_company_evidence, amfi_equity_caps
+    from . import automatic_company_evidence, amfi_equity_caps, relative_strength, governance_review
     today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
     out={"methodology":VERSION,"status":"AWAITING_EVIDENCE","items":[],"reviewed_count":0,
          "technical_count":0,"sampled_count":0,"eligible_history_count":0,"matched_count":0,
@@ -209,7 +209,9 @@ def summarize(snapshot,connect,instant):
             if reason:
                 excluded[reason]+=1
                 continue
-            candidates.append({**row,**evidence,**cap,"quarterly_financials":quarter,"status":"SCREEN_MATCH_ONLY"})
+            candidates.append({**row,**evidence,**cap,"quarterly_financials":quarter,
+                "benchmark_relative_strength":relative_strength.compare(row,snapshot.get("market_regime") or {},today),
+                "governance_review":governance_review.assess(row,report,today),"status":"SCREEN_MATCH_ONLY"})
     # Category tabs rank the entire deduplicated matched cohort independently.
     out["items"],out["category_items"],out["matched_count"]=ranked_shortlists(candidates)
     out["exclusions"]=[{"reason":k,"count":v} for k,v in excluded.most_common()]

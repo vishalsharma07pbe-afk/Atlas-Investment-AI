@@ -64,7 +64,7 @@ public class BenchmarkHistoryService {
 
   public int refresh(long instrument,String token,LocalDate from,LocalDate to)throws Exception{
     LocalDate today=LocalDate.now(MarketCalendarService.IST);
-    if(token==null||token.isBlank()||from.isAfter(to)||from.isBefore(to.minusDays(370))||!to.isBefore(today))
+    if(token==null||token.isBlank()||from.isAfter(to)||from.isBefore(to.minusDays(470))||!to.isBefore(today))
       throw new IllegalArgumentException("Invalid completed index history request");
     var sources=jdbc.query("SELECT id FROM data_sources WHERE source_code='UPSTOX' AND enabled",(rs,n)->rs.getLong(1));
     if(sources.size()!=1)throw new IllegalStateException("Index source not enabled");

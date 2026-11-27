@@ -10,7 +10,7 @@ from datetime import date
 from math import isfinite
 from .horizon_research import HORIZONS, MIN_HISTORY, BLOCKERS, VERSION as TECH_VERSION
 from .replay_evidence import exact_isin
-from . import stock_selection
+from . import stock_selection, governance_review
 
 VERSION="STOCK-QUALIFICATION-1"
 NOTICE=("Strict evidence assessment of the already shortlisted daily watches only. Descriptive, reported and simulated evidence "
@@ -84,6 +84,10 @@ def assess(item,group,coverage,context,horizon,today):
     ownership=company.get("ownership_research") or {} if matched else {}
     gate("OWNERSHIP_AND_INSTITUTIONAL",matched and ownership.get("status")=="COMPARABLE_QUARTERS",
          ["STOCK_LEVEL_TRANSACTION_AND_PLEDGE_EVIDENCE_REQUIRED"])
+    governance=governance_review.assess(item,company if matched else {},today)
+    item["governance_review"]=governance
+    warnings.update(governance["findings"])
+    gate("GOVERNANCE_AND_SURVEILLANCE",governance["provider_security_state"]!="UNKNOWN" or governance["ownership_status"]=="COMPARABLE_QUARTERS",governance["blockers"])
     news=item.get("news_evidence") or {}
     gate("EVENT_RISK",news.get("status")=="REVIEW_AVAILABLE" and bool(news.get("articles")),
          ["VERIFIED_MATERIAL_EVENT_AND_RISK_ASSESSMENT_REQUIRED"])

@@ -243,7 +243,7 @@ public class InternalFeedController {
         AND c.quality_status='PROVIDER_VALIDATED' AND c.adjustment_status='RAW_UNADJUSTED'
         AND ds.enabled AND ds.source_code='UPSTOX'
         AND c.candle_time < (now() AT TIME ZONE 'Asia/Kolkata')::date::timestamp AT TIME ZONE 'Asia/Kolkata'
-        AND c.candle_time >= ((now() AT TIME ZONE 'Asia/Kolkata')::date-400)::timestamp AT TIME ZONE 'Asia/Kolkata'
+        AND c.candle_time >= ((now() AT TIME ZONE 'Asia/Kolkata')::date-480)::timestamp AT TIME ZONE 'Asia/Kolkata'
         AND EXISTS(SELECT 1 FROM market_sessions s WHERE s.exchange_id=i.exchange_id
           AND s.session_date=(c.candle_time AT TIME ZONE 'Asia/Kolkata')::date
           AND s.session_type='REGULAR' AND s.is_trading_day AND s.close_time=c.candle_time

@@ -43,7 +43,7 @@ public class BenchmarkHistoryScheduler {
       """,id);
     if(claimed!=1)return;
     int written=0;
-    try{written=history.refresh(id,token,end.minusDays(370),end);}catch(Exception ex){
+    try{written=history.refresh(id,token,end.minusDays(470),end);}catch(Exception ex){
       // Never persist provider bodies, URLs or credentials.
       OperatorFeedCooldown.record(jdbc,ex);
     }
