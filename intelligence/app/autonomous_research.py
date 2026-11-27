@@ -16,7 +16,7 @@ import sqlite3
 from urllib.parse import urlencode
 
 from .market_client import backend_json
-from . import steady_momentum, amfi_equity_caps, company_reports, nse_surveillance
+from . import steady_momentum, amfi_equity_caps, company_reports, nse_surveillance, nse_pledge_filings
 from .screener import screen
 from . import discovery_scan
 from .mutual_fund_recommendations import CATEGORIES, dashboard
@@ -353,6 +353,10 @@ def read_snapshot(include_ai=True):
         except (ValueError,TypeError,OSError,sqlite3.Error):
             snapshot["exchange_surveillance"]={"status":"UNAVAILABLE","notice":nse_surveillance.NOTICE}
         try:
+            nse_pledge_filings.attach(snapshot,_connect,current)
+        except (ValueError,TypeError,OSError,sqlite3.Error):
+            snapshot["independent_pledge_filings"]={"status":"UNAVAILABLE","notice":nse_pledge_filings.NOTICE}
+        try:
             snapshot["steady_momentum"] = steady_momentum.summarize(snapshot,_connect,current)
         except (ValueError,TypeError,OSError,sqlite3.Error):
             snapshot["steady_momentum"]={"status":"AWAITING_EVIDENCE","items":[],"notice":steady_momentum.NOTICE}
@@ -385,6 +389,9 @@ def job_status():
 
 def _execute_job(job):
     """Dispatch existing bounded engines, with explicit evidence/config gates."""
+    if job=="NSE_PLEDGE_FILINGS":
+        if not nse_pledge_filings.permitted():return "DISABLED_OR_NOT_AUTHORIZED"
+        return "PASS_COMPLETED" if nse_pledge_filings.refresh(read_market_snapshot(),_connect,now()) else "WAITING_EVIDENCE"
     if job=="NSE_SURVEILLANCE":
         if not nse_surveillance.permitted():return "DISABLED_OR_NOT_AUTHORIZED"
         return "PASS_COMPLETED" if nse_surveillance.refresh(_connect,now()) else "WAITING_EVIDENCE"
@@ -520,7 +527,7 @@ def run_one_job(interval):
         outcome=_execute_job(job)
     except Exception:
         outcome="FAILED"
-    research_jobs.finish(_connect,job,token,now().timestamp(),(research_calendar.POLL_SECONDS if job=="CALENDAR_CONTEXT" else economic_calendar.INTERVAL if job=="ECONOMIC_CALENDAR" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_releases.INTERVAL if job in global_releases.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_markets.INTERVAL if job in global_markets.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_macro.INTERVAL if job in global_macro.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_fx.INTERVAL if job=="GLOBAL_FX" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else nse_surveillance.INTERVAL if job=="NSE_SURVEILLANCE" else amfi_equity_caps.INTERVAL if job=="AMFI_EQUITY_CAP" else fund_disclosures.INTERVAL if job in ("FUND_DISCLOSURES","FUND_PORTFOLIOS") and outcome!="DISABLED_OR_NOT_AUTHORIZED" else interval),outcome)
+    research_jobs.finish(_connect,job,token,now().timestamp(),(research_calendar.POLL_SECONDS if job=="CALENDAR_CONTEXT" else economic_calendar.INTERVAL if job=="ECONOMIC_CALENDAR" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_releases.INTERVAL if job in global_releases.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_markets.INTERVAL if job in global_markets.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_macro.INTERVAL if job in global_macro.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_fx.INTERVAL if job=="GLOBAL_FX" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else nse_pledge_filings.INTERVAL if job=="NSE_PLEDGE_FILINGS" else nse_surveillance.INTERVAL if job=="NSE_SURVEILLANCE" else amfi_equity_caps.INTERVAL if job=="AMFI_EQUITY_CAP" else fund_disclosures.INTERVAL if job in ("FUND_DISCLOSURES","FUND_PORTFOLIOS") and outcome!="DISABLED_OR_NOT_AUTHORIZED" else interval),outcome)
     return True
 
 

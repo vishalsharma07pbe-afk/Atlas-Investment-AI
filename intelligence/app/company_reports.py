@@ -46,6 +46,7 @@ def attach(snapshot,instant):
         company=[]
         reviews=[]
         news=[]
+        pledges=[]
         findings=set()
         for horizon,row in items:
             key=(horizon,row["exchange"],row["id"],row["as_of"])
@@ -62,6 +63,10 @@ def attach(snapshot,instant):
                 if evidence.get("isin")==isin and captured.tzinfo and instant-timedelta(hours=24)<=captured<=instant:
                     company.append(evidence)
             except (TypeError,ValueError,KeyError):pass
+            pledge=row.get("independent_pledge_evidence") or {}
+            if pledge.get("isin")==isin and pledge.get("status")=="REPORTED_QUARTERLY_AGGREGATE":
+                pledges.append(pledge)
+                if pledge.get("total_encumbered_shares",0)>0:findings.add("ISSUER_REPORTED_PROMOTER_ENCUMBRANCE_REVIEW")
             headline=row.get("news_evidence") or {}
             if headline.get("isin")==isin and headline.get("source_instrument_key")=="NSE_EQ|"+isin:
                 try:
@@ -88,11 +93,13 @@ def attach(snapshot,instant):
         findings.update(f for r in other for f in (r.get("exchange_surveillance") or {}).get("findings",[]))
         shared_news=news[0] if news and all(r==news[0] for r in news) else None
         if news and shared_news is None:findings.add("CONFLICTING_COMPANY_NEWS_CAPTURE")
+        shared_pledge=pledges[0] if pledges and all(p==pledges[0] for p in pledges) else None
+        if pledges and shared_pledge is None:findings.add("CONFLICTING_PLEDGE_FILING_EVIDENCE")
         reports[isin]={"isin":isin,"status":"REVIEW_REQUIRED" if findings else "RESEARCH_ONLY",
             "observations":[observations[k] for k in sorted(observations)],
             "observed_venues":sorted({r["exchange"] for r in observations.values()}|{r["exchange"] for r in other}),
             "venue_observations":[{**r,"quote":company_venues.fresh_quote(r,instant)} for r in sorted(other,key=lambda r:(r["exchange"],r["id"]))],
-            "review_findings":sorted(findings),"company_evidence":shared,"news_evidence":shared_news,"ai_review":review,
+            "review_findings":sorted(findings),"company_evidence":shared,"news_evidence":shared_news,"independent_pledge_evidence":shared_pledge,"ai_review":review,
             "qualified":False,"notice":NOTICE}
     snapshot["company_reports"]={"status":"AVAILABLE" if reports else "AWAITING_EVIDENCE","items":reports,"notice":NOTICE}
     return snapshot
