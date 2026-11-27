@@ -65,3 +65,21 @@ class CompanyReportTests(unittest.TestCase):
         self.assertEqual(list(ai.candidates(data,["OLLAMA"])),[])
         reports.attach(data,NOW)
         self.assertEqual(data["company_reports"]["items"],{})
+
+    def test_bracket_venue_and_horizon_separation(self):
+        data=fixture()
+        row=data["sections"][0]["result"]["horizons"]["SWING"]["candidates"][0]
+        row["bracket_research"]={"methodology":"BRACKET-SCENARIO-1","status":"STRICT_HISTORICAL_BRACKET",
+          "calendar_status":"STORED_SESSIONS_MATCHED","adjustment_status":"ADJUSTED","horizon":"SWING","as_of":row["as_of"],
+          "first_date":"2026-09-01","reference_close":101,"lower_reference":90,"upper_reference":140,
+          "stress_gap_percent":2,"entry_cases":[],"notice":"Research only","history_fingerprint":"a"*64,"private_balance":987654321}
+        reports.attach(data,NOW)
+        result=data["company_reports"]["items"][ISIN]["bracket_research"]
+        self.assertEqual(len(result),1)
+        self.assertEqual(result[0]["exchange"],"NSE")
+        self.assertNotIn("private_balance",result[0])
+        data["sections"][0]["result"]["horizons"]["SWING"]["candidates"].append({**row,"bracket_research":{**row["bracket_research"],"upper_reference":150}})
+        reports.attach(data,NOW)
+        company=data["company_reports"]["items"][ISIN]
+        self.assertEqual(company["bracket_research"],[])
+        self.assertIn("CONFLICTING_BRACKET_EVIDENCE",company["review_findings"])

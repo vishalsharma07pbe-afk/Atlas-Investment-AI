@@ -50,6 +50,7 @@ def attach(snapshot,instant):
         financial=[]
         comparative={}
         official={}
+        brackets={}
         findings=set()
         for horizon,row in items:
             key=(horizon,row["exchange"],row["id"],row["as_of"])
@@ -84,6 +85,18 @@ def attach(snapshot,instant):
                     findings.add("CONFLICTING_OFFICIAL_SECTOR_BENCHMARK")
                     official[key]=None
                 elif key not in official:official[key]=index
+            bracket=row.get("bracket_research") or {}
+            expected_horizon="SWING" if horizon=="ELITE" else horizon
+            if (bracket.get("methodology")=="BRACKET-SCENARIO-1" and bracket.get("status")=="STRICT_HISTORICAL_BRACKET"
+                    and bracket.get("calendar_status")=="STORED_SESSIONS_MATCHED" and bracket.get("adjustment_status")=="ADJUSTED"
+                    and row.get("adjustment_status")=="ADJUSTED" and bracket.get("as_of")==row["as_of"] and bracket.get("horizon")==expected_horizon):
+                k=(expected_horizon,row["exchange"],row["id"],row["as_of"])
+                value={"exchange":row["exchange"],"id":row["id"],"isin":isin,**{field:bracket.get(field) for field in
+                    ("horizon","as_of","first_date","reference_close","lower_reference","upper_reference","stress_gap_percent","entry_cases","notice","history_fingerprint")}}
+                if k in brackets and brackets[k]!=value:
+                    findings.add("CONFLICTING_BRACKET_EVIDENCE")
+                    brackets[k]=None
+                elif k not in brackets:brackets[k]=value
             filing=row.get("independent_financial_evidence") or {}
             if filing.get("isin")==isin and filing.get("status")=="REPORTED_CONSOLIDATED_FILING":
                 financial.append(filing)
@@ -129,7 +142,7 @@ def attach(snapshot,instant):
             "observations":[observations[k] for k in sorted(observations)],
             "observed_venues":sorted({r["exchange"] for r in observations.values()}|{r["exchange"] for r in other}),
             "venue_observations":[{**r,"quote":company_venues.fresh_quote(r,instant)} for r in sorted(other,key=lambda r:(r["exchange"],r["id"]))],
-            "review_findings":sorted(findings),"company_evidence":shared,"news_evidence":shared_news,"independent_pledge_evidence":shared_pledge,"independent_financial_evidence":shared_financial,"sector_price_context":[comparative[k] for k in sorted(comparative) if comparative[k] is not None],"official_sector_benchmarks":[official[k] for k in sorted(official) if official[k] is not None],"ai_review":review,
+            "review_findings":sorted(findings),"company_evidence":shared,"news_evidence":shared_news,"independent_pledge_evidence":shared_pledge,"independent_financial_evidence":shared_financial,"sector_price_context":[comparative[k] for k in sorted(comparative) if comparative[k] is not None],"official_sector_benchmarks":[official[k] for k in sorted(official) if official[k] is not None],"ai_review":review,"bracket_research":[brackets[k] for k in sorted(brackets) if brackets[k] is not None],
             "qualified":False,"notice":NOTICE}
     snapshot["company_reports"]={"status":"AVAILABLE" if reports else "AWAITING_EVIDENCE","items":reports,"notice":NOTICE}
     return snapshot

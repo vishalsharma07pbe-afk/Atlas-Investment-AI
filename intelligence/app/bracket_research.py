@@ -15,7 +15,7 @@ COSTS=(15,30,60)
 RATIO=2.
 IST=ZoneInfo("Asia/Kolkata")
 NOTICE=("Fixed historical support/resistance scenario, not a live entry, executable target or stop. "
-        "Next regular session open observation only; entry must lie strictly inside bracket and meet illustrative 2:1 stressed geometry. "
+        "Next regular session open observation only; entry must lie strictly inside bracket and meet illustrative 2:1 stressed geometry. An intervening boundary touch invalidates the bracket. "
         "Gap below lower level uses the observed open, gap above upper uses the upper reference; if both levels touched after an inside open, order is unknown and return withheld. "
         "Expiry uses final observed close. Costs and fills are hypothetical; taxes, spread, slippage and intraday liquidity not validated. "
         "No qualification, probability or recommendation promotion.")
@@ -49,6 +49,7 @@ def observe(raw,structure,horizon,expected_dates,today):
     if len(raw)<n or len(expected_dates)<n:return None
     manifest=full_manifest(raw[-n:],today)
     if not manifest or tuple(manifest["observations"])!=tuple(expected_dates[-n:]) or manifest["last_date"]!=g["as_of"]:return None
+    if float(raw[-1]["close"])!=g["reference_close"]:return None
     return {**g,"status":"STRICT_HISTORICAL_BRACKET","calendar_status":"STORED_SESSIONS_MATCHED","adjustment_status":"ADJUSTED",
         "first_date":manifest["first_date"],"history_fingerprint":manifest["digest"],"history_count":n,"source_code":raw[-1]["source_code"]}
 
@@ -58,7 +59,7 @@ def freeze(item,horizon,group,coverage,today):
     if not isinstance(p,dict) or not exact_isin(item.get("isin")) or item.get("adjustment_status")!="ADJUSTED" or item.get("security_state") in ("PCA","SME","RELIST","IPO","SUSPENDED_REPORTED"):return None
     if group.get("methodology")!=TECH or group.get("status")!="TECHNICAL_WATCH_ONLY" or p.get("methodology")!=VERSION or p.get("status")!="STRICT_HISTORICAL_BRACKET" or p.get("horizon")!=horizon:return None
     try:
-        if p["as_of"]!=item["as_of"] or p["reference_close"]!=item["close"] or coverage.get("calendar_checked_on")!=today.isoformat() or coverage.get("calendar_status")!="PUBLISHED_SESSION" or coverage.get("expected_session")!=item["as_of"] or not 1<=(today-date.fromisoformat(p["as_of"])).days<=4:return None
+        if p["as_of"]!=item["as_of"] or not number(item.get("close")) or round(p["reference_close"],4)!=round(item["close"],4) or coverage.get("calendar_checked_on")!=today.isoformat() or coverage.get("calendar_status")!="PUBLISHED_SESSION" or coverage.get("expected_session")!=item["as_of"] or not 1<=(today-date.fromisoformat(p["as_of"])).days<=4:return None
         if p["history_count"]!=price_structure.WINDOWS[horizon] or p["calendar_status"]!="STORED_SESSIONS_MATCHED" or p["adjustment_status"]!="ADJUSTED" or not re.fullmatch(r"[a-f0-9]{64}",p["history_fingerprint"]):return None
         # Recompute from original causal geometry; do not trust a stored ceiling.
         g=_geometry(item.get("price_structure") or {},horizon)
@@ -117,8 +118,13 @@ def evaluate_frozen(p,instrument,raw,expected,calendar,today,action_report,insta
         if instant is not None and reported_crossings(action_report,instrument["isin"],first,end,instant):return None
         future=[r for r in bridge if date.fromisoformat(r["trade_date"]) in set(expected)]
         if [r["trade_date"] for r in future]!=[d.isoformat() for d in expected]:return None
+        # A bracket already touched between signal and first post-publication
+        # open is not a fresh scenario, even when the subsequent open returns
+        # inside it. Do not retrospectively enter on an earlier bar.
+        intervening=[r for r in bridge if signal<date.fromisoformat(r["trade_date"])<expected[0]]
+        invalidated=any(float(r["low"])<=p["lower_reference"] or float(r["high"])>=p["upper_reference"] for r in intervening)
         return {"methodology":VERSION,"status":"OBSERVED_BRACKET_CASES","history_fingerprint":p["history_fingerprint"],
-            "cases":[{"cost_bps_per_side":bps,**simulate(p,future,bps)} for bps in COSTS],"notice":NOTICE}
+            "cases":[{"cost_bps_per_side":bps,**({"status":"NO_ENTRY_INTERVENING_BOUNDARY_TOUCH"} if invalidated else simulate(p,future,bps))} for bps in COSTS],"notice":NOTICE}
     except (KeyError,TypeError,ValueError,OverflowError,AttributeError):return None
 
 def summarize_cases(cases,denominator):
@@ -165,7 +171,7 @@ def prospective(connect,instant):
             for row in rows[:5000]:
                 try:
                     e=json.loads(row["evidence"]);isin=e.get("isin");published=rel._stamp(row["published_at"]);maturity=date.fromisoformat(row["maturity_date"])
-                    if not exact_isin(isin) or e.get("methodology")!=rel.VERSION or e.get("adjustment_status")!="ADJUSTED" or not today-timedelta(days=365)<=published<=today or maturity!=published+timedelta(days=rel.HORIZONS[horizon]):continue
+                    if not exact_isin(isin) or e.get("methodology")!=rel.VERSION or e.get("adjustment_status")!="ADJUSTED" or not today-timedelta(days=365)<=published<=today or not 1<=(published-date.fromisoformat(row["observed_date"])).days<=4 or maturity!=published+timedelta(days=rel.HORIZONS[horizon]):continue
                     if today<=maturity+timedelta(days=7):immature+=1;continue
                     if isin in last and published<=last[isin]:overlap+=1;continue
                     last[isin]=maturity+timedelta(days=7)

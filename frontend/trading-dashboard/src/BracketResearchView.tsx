@@ -4,8 +4,8 @@ type CaseSummary={cost_bps_per_side:number;counts:Record<string,number>;observed
 export type BracketSummary={status:string;selected_mature?:number;signal_count?:number;legacy_uninstrumented?:number;immature?:number;cost_scenarios:CaseSummary[];notice:string};
 const fmt=(n:number|null)=>n==null?"—":n.toLocaleString("en-IN",{maximumFractionDigits:4});
 const words=(s:string)=>s.toLowerCase().replace(/_/g," ");
-export function BracketView({report}:{report:BracketEvidence}){
- return <details><summary>Strict historical entry / exit bracket research</summary><p>Matched stored sessions · {report.first_date} – {report.as_of}</p><dl><div><dt>Observed close</dt><dd>₹{fmt(report.reference_close)}</dd></div><div><dt>Lower reference</dt><dd>₹{fmt(report.lower_reference)}</dd></div><div><dt>Upper reference</dt><dd>₹{fmt(report.upper_reference)}</dd></div><div><dt>Illustrative gap shock</dt><dd>{fmt(report.stress_gap_percent)}%</dd></div></dl>
+export function BracketView({report,label}:{report:BracketEvidence;label?:string}){
+ return <details><summary>Strict historical entry / exit bracket research{label?" · "+label:""}</summary><p>Matched stored sessions · {report.first_date} – {report.as_of}</p><dl><div><dt>Observed close</dt><dd>₹{fmt(report.reference_close)}</dd></div><div><dt>Lower reference</dt><dd>₹{fmt(report.lower_reference)}</dd></div><div><dt>Upper reference</dt><dd>₹{fmt(report.upper_reference)}</dd></div><div><dt>Illustrative gap shock</dt><dd>{fmt(report.stress_gap_percent)}%</dd></div></dl>
  <div className="tablewrap"><table><thead><tr><th>Assumed cost / side</th><th>Stressed 2:1 price ceiling</th><th>Reference meets assumption</th></tr></thead><tbody>{report.entry_cases.map(c=><tr key={c.cost_bps_per_side}><td>{c.cost_bps_per_side} bps</td><td>{c.entry_ceiling==null?"No in-bracket ceiling":"₹"+fmt(c.entry_ceiling)}</td><td>{c.reference_meets_stress?"Yes":"No"}</td></tr>)}</tbody></table></div><p className="muted tiny">{report.notice}</p></details>;
 }
 export function BracketSummaryView({report,title}:{report:BracketSummary;title:string}){

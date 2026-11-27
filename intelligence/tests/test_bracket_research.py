@@ -32,6 +32,9 @@ class BracketTests(unittest.TestCase):
         identity={"exchange":"NSE","isin":"INE002A01018","corporate_action_context":"[]","latest_action_date":None,"action_context_through":days[-1].isoformat()}
         result=b.evaluate_frozen(p,identity,rows,days[-2:],calendar,today,None,None)
         self.assertEqual(result["status"],"OBSERVED_BRACKET_CASES")
+        touched=[dict(r) for r in rows];touched[60]["low"]=89
+        delayed=b.evaluate_frozen(p,identity,touched,days[-1:],calendar,today,None,None)
+        self.assertTrue(all(c["status"]=="NO_ENTRY_INTERVENING_BOUNDARY_TOUCH" for c in delayed["cases"]))
         changed=[dict(r) for r in rows];changed[0]["revision"]=2
         self.assertIsNone(b.evaluate_frozen(p,identity,changed,days[-2:],calendar,today,None,None))
         self.assertIsNone(b.evaluate_frozen(p,identity,rows[:60]+rows[61:],days[-2:],calendar,today,None,None))
