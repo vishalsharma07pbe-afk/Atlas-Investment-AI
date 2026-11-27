@@ -209,6 +209,7 @@ class AutonomousResearchTests(unittest.TestCase):
         calls=[]
         def load(path):
             args=parse_qs(urlsplit(path).query)
+            self.assertEqual(args.get("cutoff"),["2026-11-24T12:00:00+00:00"])
             if "discovery-universe-page?" in path:
                 after=int(args["afterId"][0]);calls.append(after)
                 return [r for r in rows if r["id"]>after][:200]
@@ -237,4 +238,4 @@ class AutonomousResearchTests(unittest.TestCase):
               ([[row],[{**row,"id":2,"recent_registry_count":3}]],"CHANGED")):
             with self.subTest(code=code),patch.object(research,"backend_json",side_effect=pages):
                 with self.assertRaisesRegex(ValueError,code):
-                    discovery_scan.scan("NSE",research.backend_json,lambda e,p:part,lambda:instant)
+                    discovery_scan.scan("NSE",research.backend_json,lambda e,p,cutoff:part,lambda:instant)

@@ -150,12 +150,14 @@ class InternalFeedControllerTest {
     JdbcTemplate jdbc=mock(JdbcTemplate.class);
     HttpServletRequest request=mock(HttpServletRequest.class);
     var api=controller(jdbc,"service-secret");
-    assertThatThrownBy(()->api.discoveryUniversePage(request,"NSE",0)).isInstanceOf(ResponseStatusException.class);
+    String cutoff=java.time.Instant.now().minusSeconds(1).toString();
+    assertThatThrownBy(()->api.discoveryUniversePage(request,"NSE",0,cutoff)).isInstanceOf(ResponseStatusException.class);
     when(request.getHeader("X-Atlas-Service-Token")).thenReturn("service-secret");
-    assertThatThrownBy(()->api.discoveryUniversePage(request,"OTHER",0)).isInstanceOf(ResponseStatusException.class);
-    assertThatThrownBy(()->api.discoveryUniversePage(request,"NSE",-1)).isInstanceOf(ResponseStatusException.class);
+    assertThatThrownBy(()->api.discoveryUniversePage(request,"OTHER",0,cutoff)).isInstanceOf(ResponseStatusException.class);
+    assertThatThrownBy(()->api.discoveryUniversePage(request,"NSE",-1,cutoff)).isInstanceOf(ResponseStatusException.class);
+    assertThatThrownBy(()->api.discoveryUniversePage(request,"NSE",0,"invalid")).isInstanceOf(ResponseStatusException.class);
     verifyNoInteractions(jdbc);
-    when(jdbc.queryForList(contains("WHERE id>? ORDER BY id LIMIT 200"),eq("NSE"),eq("NSE"),eq(200L))).thenReturn(List.of(Map.of("id",201L)));
-    assertThat(api.discoveryUniversePage(request,"NSE",200)).hasSize(1);
+    when(jdbc.queryForList(contains("WHERE id>? ORDER BY id LIMIT 200"),eq("NSE"),eq(java.sql.Timestamp.from(java.time.Instant.parse(cutoff))),eq("NSE"),eq(200L))).thenReturn(List.of(Map.of("id",201L)));
+    assertThat(api.discoveryUniversePage(request,"NSE",200,cutoff)).hasSize(1);
   }
 }

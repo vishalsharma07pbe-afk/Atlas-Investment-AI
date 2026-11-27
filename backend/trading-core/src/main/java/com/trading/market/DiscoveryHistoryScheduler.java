@@ -73,14 +73,7 @@ public class DiscoveryHistoryScheduler {
         coalesce(candidate.priority,0) AS quote_priority,
         CASE WHEN h.candle_count>=25 AND h.latest_date<? THEN 0 ELSE 1 END AS workload
       FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
-      JOIN LATERAL (
-        SELECT instrument_key FROM upstox_instrument_map
-        WHERE exchange_code=e.code AND trading_symbol=i.symbol AND isin=i.isin
-          AND isin ~ '^IN[A-Z0-9]{10}$'
-          AND instrument_key LIKE e.code||'_EQ|%'
-          AND instrument_type IN ('EQ','EQUITY')
-        ORDER BY instrument_key LIMIT 1
-      ) m ON true
+      JOIN discovery_quote_universe m ON m.instrument_id=i.id AND m.exchange=e.code AND m.isin=i.isin
       LEFT JOIN discovery_history_attempts a ON a.instrument_id=i.id
       LEFT JOIN discovery_security_context quality ON quality.instrument_id=i.id AND quality.instrument_key=m.instrument_key AND quality.isin=i.isin
       LEFT JOIN discovery_candidate_queue candidate ON candidate.instrument_id=i.id AND candidate.instrument_key=m.instrument_key AND candidate.isin=i.isin

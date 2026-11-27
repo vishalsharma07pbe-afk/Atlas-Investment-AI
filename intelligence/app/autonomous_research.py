@@ -75,7 +75,7 @@ def market_snapshot(exchange):
     return _market_page(exchange,instruments)
 
 
-def _market_page(exchange,instruments):
+def _market_page(exchange,instruments,cutoff=None):
     if not isinstance(instruments, list) or len(instruments)>200:
         raise ValueError("INVALID_REGISTRY")
     if any(not isinstance(row,dict) or row.get("exchange")!=exchange or row.get("active") is not True
@@ -103,10 +103,12 @@ def _market_page(exchange,instruments):
     if expected_session is not None and (type(matching) is not int or not 0<=matching<=recent_count):
         raise ValueError("INVALID_SESSION_COVERAGE")
     histories={identifier:[] for identifier in ids}
-    # At most ten local batch requests per exchange; no provider requests.
+    # At most ten local batch requests per page; no provider requests.
     for offset in range(0,len(ids),20):
         batch=ids[offset:offset+20]
-        rows=backend_json("/api/v1/market-data/discovery-candles?"+urlencode({"exchange":exchange,"ids":batch},doseq=True))
+        params={"exchange":exchange,"ids":batch}
+        if cutoff is not None:params["cutoff"]=cutoff
+        rows=backend_json("/api/v1/market-data/discovery-candles?"+urlencode(params,doseq=True))
         if not isinstance(rows,list) or len(rows)>len(batch)*250:
             raise ValueError("INVALID_DISCOVERY_HISTORY")
         for row in rows:

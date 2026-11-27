@@ -137,4 +137,13 @@ class DiscoveryHistorySchedulerTest {
     scheduler.refreshExchange("BSE",end);
     verifyNoInteractions(stocks);
   }
+
+  @Test void adaptiveAllocationReservesFairSlotsAndKeepsTotalProviderBudget(){
+    JdbcTemplate db=mock(JdbcTemplate.class);
+    var scheduler=new DiscoveryHistoryScheduler(db,mock(UpstoxFeedService.class),mock(MarketCalendarService.class));
+    scheduler.quoteScreenEnabled=true;
+    LocalDate end=LocalDate.of(2026,11,26);
+    scheduler.refreshExchange("NSE",end);
+    verify(db).queryForList(argThat(sql->sql.contains("JOIN discovery_quote_universe")&&sql.contains("CASE WHEN oldest_position=1 THEN 10")&&sql.contains("workload=1 AND position=1")&&sql.contains("workload=0 AND position<=6")&&sql.contains("workload=1 AND position<=4")&&sql.contains("LIMIT 10")),eq("NSE"),eq(end.minusMonths(12)),eq(end),eq(end),eq(end.minusMonths(12)),eq(end),eq(end),eq("NSE"),eq(200),eq(end));
+  }
 }

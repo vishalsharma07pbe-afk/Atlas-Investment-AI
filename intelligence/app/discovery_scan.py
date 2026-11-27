@@ -65,7 +65,9 @@ def merge(out,page):
 
 def scan(exchange,load,process,clock):
     start=monotonic()
-    checked_day=clock().astimezone(ZoneInfo("Asia/Kolkata")).date()
+    instant=clock()
+    cutoff=instant.isoformat()
+    checked_day=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
     if exchange not in ("NSE","BSE"):raise ValueError("INVALID_EXCHANGE")
     cursor=0
     observed=None
@@ -73,7 +75,7 @@ def scan(exchange,load,process,clock):
     result=None
     while True:
         if monotonic()-start>DEADLINE_SECONDS:raise TimeoutError("DISCOVERY_SCAN_DEADLINE")
-        page=load("/api/v1/market-data/discovery-universe-page?"+urlencode({"exchange":exchange,"afterId":cursor}))
+        page=load("/api/v1/market-data/discovery-universe-page?"+urlencode({"exchange":exchange,"afterId":cursor,"cutoff":cutoff}))
         if not isinstance(page,list) or len(page)>PAGE:raise ValueError("INVALID_DISCOVERY_PAGE")
         if not page:
             if observed is not None and seen!=observed[0]:raise ValueError("DISCOVERY_SCAN_INCOMPLETE")
@@ -88,7 +90,7 @@ def scan(exchange,load,process,clock):
             raise ValueError("DISCOVERY_SCAN_BOUND_OR_COUNT")
         if observed is not None and signature!=observed:raise ValueError("DISCOVERY_UNIVERSE_CHANGED")
         observed=signature
-        part=process(exchange,page)
+        part=process(exchange,page,cutoff)
         if part["discovery_coverage"]["calendar_checked_on"]!=checked_day.isoformat() or part["universe_size"]!=len(page):
             raise ValueError("DISCOVERY_SCAN_SESSION_CHANGED")
         result=merge(result,part)
@@ -96,12 +98,12 @@ def scan(exchange,load,process,clock):
         cursor=ids[-1]
     if clock().astimezone(ZoneInfo("Asia/Kolkata")).date()!=checked_day or monotonic()-start>DEADLINE_SECONDS:
         raise ValueError("DISCOVERY_SCAN_EXPIRED")
-    if result is None:result=process(exchange,[])
+    if result is None:result=process(exchange,[],cutoff)
     coverage=result["discovery_coverage"]
     coverage.update({"selected_count":seen,"recent_registry_count":seen,"selection_limit":None,
         "selection_method":"ALL_LOCALLY_RECENT_HISTORIES_KEYSET_SCAN",
         "scan_complete":True,"page_size":PAGE,"safety_bound":MAX_LISTINGS,
-        "scan_scope":"LOCAL_RECENT_HISTORIES_ONLY"})
+        "scan_scope":"LOCAL_RECENT_HISTORIES_ONLY","observation_cutoff":cutoff})
     result["notice"]="All locally recent active cash-equity histories observed in this completed paged sweep. Not all exchange listings have history; no live or qualified investment ranking is implied."
     result["sample_breadth"]["notice"]="Comparable adjusted histories in the completed local sweep; not official exchange breadth."
     return result

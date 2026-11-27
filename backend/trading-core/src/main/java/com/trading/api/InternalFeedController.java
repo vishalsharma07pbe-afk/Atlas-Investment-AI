@@ -61,28 +61,40 @@ public class InternalFeedController {
   public List<Map<String,Object>> discoveryUniverse(HttpServletRequest request,@RequestParam String exchange) {
     requireServiceToken(request.getHeader("X-Atlas-Service-Token"));
     requireExchange(exchange);
-    return discoveryUniverseRows(exchange,null);
+    return discoveryUniverseRows(exchange,null,null);
   }
 
   /** Keyset pages over locally observed histories. Existing route remains compatible. */
   @GetMapping("/discovery-universe-page")
   public List<Map<String,Object>> discoveryUniversePage(HttpServletRequest request,@RequestParam String exchange,
-      @RequestParam(defaultValue="0") long afterId) {
+      @RequestParam(defaultValue="0") long afterId,@RequestParam String cutoff) {
     requireServiceToken(request.getHeader("X-Atlas-Service-Token"));
     requireExchange(exchange);
     if(afterId<0)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid discovery cursor");
-    return discoveryUniverseRows(exchange,afterId);
+    return discoveryUniverseRows(exchange,afterId,discoveryCutoff(cutoff));
   }
 
-  private List<Map<String,Object>> discoveryUniverseRows(String exchange,Long afterId) {
+  private java.sql.Timestamp discoveryCutoff(String value) {
+    try{
+      Instant stamp=Instant.parse(value),now=Instant.now();
+      if(stamp.isBefore(now.minusSeconds(600))||stamp.isAfter(now.plusSeconds(5)))throw new IllegalArgumentException();
+      return java.sql.Timestamp.from(stamp);
+    }catch(RuntimeException ex){throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid or expired discovery cutoff");}
+  }
+
+  private List<Map<String,Object>> discoveryUniverseRows(String exchange,Long afterId,java.sql.Timestamp cutoff) {
     String query="""
       WITH days AS (
         SELECT (now() AT TIME ZONE 'Asia/Kolkata')::date-g.n AS day
         FROM generate_series(1,14) AS g(n)
       ), calendar_days AS (
         SELECT d.day,CASE
+          WHEN EXISTS(SELECT 1 FROM market_sessions special WHERE special.exchange_id=ex.id AND special.session_date=d.day
+            AND special.is_trading_day AND special.session_type<>'REGULAR') THEN 'UNKNOWN'
           WHEN extract(isodow FROM d.day) IN (6,7) OR h.holiday_date IS NOT NULL THEN 'CLOSED'
-          WHEN s.is_trading_day IS TRUE THEN 'TRADING'
+          WHEN s.is_trading_day IS TRUE AND s.open_time IS NOT NULL AND s.close_time IS NOT NULL
+            AND s.open_time<s.close_time AND (s.open_time AT TIME ZONE 'Asia/Kolkata')::date=d.day
+            AND (s.close_time AT TIME ZONE 'Asia/Kolkata')::date=d.day THEN 'TRADING'
           WHEN s.is_trading_day IS FALSE THEN 'CLOSED'
           ELSE 'UNKNOWN' END AS state
         FROM days d JOIN exchanges ex ON ex.code=?
@@ -117,6 +129,7 @@ public class InternalFeedController {
           AND c.quality_status IN ('VALIDATED_MANUAL','PROVIDER_VALIDATED')
           AND c.candle_time < (now() AT TIME ZONE 'Asia/Kolkata')::date::timestamp AT TIME ZONE 'Asia/Kolkata'
           AND c.candle_time >= ((now() AT TIME ZONE 'Asia/Kolkata')::date-4)::timestamp AT TIME ZONE 'Asia/Kolkata'
+          /* discovery-cutoff */
         ORDER BY c.candle_time DESC LIMIT 1
       ) latest ON true
       CROSS JOIN calendar
@@ -124,7 +137,7 @@ public class InternalFeedController {
       WHERE e.code=? AND i.active AND i.listing_status='ACTIVE' AND i.series='EQ'
         AND i.instrument_type IN ('EQ','EQUITY','STOCK')
       """;
-    if(afterId!=null)return jdbc.queryForList("SELECT * FROM ("+query+") universe WHERE id>? ORDER BY id LIMIT 200",exchange,exchange,afterId);
+    if(afterId!=null)return jdbc.queryForList("SELECT * FROM ("+query.replace("/* discovery-cutoff */","AND c.received_at<=?")+") universe WHERE id>? ORDER BY id LIMIT 200",exchange,cutoff,exchange,afterId);
     return jdbc.queryForList(query+"""
       ORDER BY CASE WHEN calendar.expected_session IS NOT NULL AND
         (latest.candle_time AT TIME ZONE e.timezone)::date=calendar.expected_session THEN 0 ELSE 1 END,
@@ -133,15 +146,20 @@ public class InternalFeedController {
   }
 
   /** Batch reads the same validated history used by the existing single-instrument route. */
+  public List<Map<String,Object>> discoveryCandles(HttpServletRequest request,String exchange,List<Long> ids) {
+    return discoveryCandles(request,exchange,ids,null);
+  }
+
   @GetMapping("/discovery-candles")
   public List<Map<String,Object>> discoveryCandles(HttpServletRequest request,@RequestParam String exchange,
-      @RequestParam List<Long> ids) {
+      @RequestParam List<Long> ids,@RequestParam(required=false) String cutoff) {
     requireServiceToken(request.getHeader("X-Atlas-Service-Token"));
     requireExchange(exchange);
     if(ids==null||ids.isEmpty()||ids.size()>20||new HashSet<>(ids).size()!=ids.size()
         ||ids.stream().anyMatch(id->id==null||id<=0))
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Expected 1-20 distinct positive instrument IDs");
     List<Object> args=new ArrayList<>();
+    if(cutoff!=null)args.add(discoveryCutoff(cutoff));
     args.add(exchange);
     args.addAll(ids);
     // Only the placeholder count varies; all values remain bound SQL parameters.
@@ -155,11 +173,12 @@ public class InternalFeedController {
         WHERE b.instrument_id=i.id AND b.timeframe='1d' AND b.is_complete
           AND b.quality_status IN ('VALIDATED_MANUAL','PROVIDER_VALIDATED')
           AND b.candle_time < (now() AT TIME ZONE 'Asia/Kolkata')::date::timestamp AT TIME ZONE 'Asia/Kolkata'
+          /* discovery-cutoff */
         ORDER BY b.candle_time DESC LIMIT 250
       ) c
       WHERE e.code=? AND i.active AND i.listing_status='ACTIVE' AND i.series='EQ'
         AND i.instrument_type IN ('EQ','EQUITY','STOCK') AND i.id IN (
-      """+placeholders+") ORDER BY i.id,c.trade_date",args.toArray());
+      """.replace("/* discovery-cutoff */",cutoff!=null?"AND b.received_at<=?":"")+placeholders+") ORDER BY i.id,c.trade_date",args.toArray());
   }
 
   /** Atomic replacement of a dated public classification list, no account data. */
