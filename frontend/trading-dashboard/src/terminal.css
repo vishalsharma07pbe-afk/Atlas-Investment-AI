@@ -47,9 +47,14 @@
 .dashboard .account-chip>span{background:var(--terminal-action);border-radius:6px}
 .dashboard .account-chip strong{font-size:11px;max-width:125px}
 .dashboard .headerbadge{font-size:10px;white-space:normal;line-height:1.4;max-width:190px;overflow-wrap:anywhere}
-.dashboard .appearance-panel,.dashboard .atlas-notification-panel{background:var(--terminal-surface);color:var(--ink);border-color:var(--glass-border);max-width:calc(100vw - 24px)}
-.dashboard .atlas-notification-panel{position:fixed;top:72px;right:12px;width:min(420px,calc(100vw - 24px));max-height:calc(100dvh - 90px)}
-.dashboard .appearance-panel{top:12px;right:12px;width:min(350px,calc(100vw - 24px));max-height:calc(100dvh - 24px)}
+/* Reset every inset and transform inherited from the legacy centered overlays.
+   One viewport-anchored drawer geometry in all appearance modes. */
+.dashboard :is(.appearance-panel,.atlas-notification-panel),
+.dashboard:is([data-panel-clear="true"],[data-blur-zero="true"]) :is(.appearance-panel,.atlas-notification-panel){position:fixed;left:auto;right:max(12px,env(safe-area-inset-right));bottom:auto;transform:none;height:auto;box-sizing:border-box;overflow-x:hidden;overflow-y:auto;background:var(--terminal-surface);color:var(--ink);border-color:var(--glass-border);max-width:calc(100vw - 24px);backdrop-filter:none;-webkit-backdrop-filter:none;text-shadow:none}
+.dashboard :is(.atlas-notification-panel),.dashboard:is([data-panel-clear="true"],[data-blur-zero="true"]) .atlas-notification-panel{top:72px;width:min(420px,calc(100vw - 24px));max-height:calc(100dvh - 84px)}
+.dashboard :is(.appearance-panel),.dashboard:is([data-panel-clear="true"],[data-blur-zero="true"]) .appearance-panel{top:max(12px,env(safe-area-inset-top));width:min(380px,calc(100vw - 24px));max-height:calc(100dvh - 24px)}
+.dashboard .theme-picker{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.dashboard .theme-picker button{min-width:0;min-height:54px;border-radius:8px}
 .dashboard .panel,.dashboard .autonomous-overview,.dashboard .research-hero,.dashboard .market-strip{border-radius:12px;box-shadow:none;min-width:0}
 .dashboard .panel{padding:clamp(14px,1.7vw,22px);margin-bottom:16px}
 .dashboard .panel p,.dashboard :is(h1,h2,.stat strong,.symbol,table,.sidebar button,.sidebottom){text-shadow:none}

@@ -68,7 +68,10 @@ def run():
             # Verify both saved theme variants on the actual application.
             for theme in ("dark","light"):
                 page.get_by_role("button",name="Open appearance settings").click()
-                page.get_by_role("group",name="Theme").get_by_role("button",name=re.compile(theme,re.I)).click()
+                panel=page.get_by_role("dialog",name="Appearance settings")
+                expect(panel).to_be_visible()
+                assert panel.evaluate("(el)=>{const r=el.getBoundingClientRect();return r.left>=-1 && r.right<=innerWidth+1 && r.top>=-1 && r.bottom<=innerHeight+1}"),"appearance drawer outside viewport"
+                panel.get_by_role("group",name="Theme").get_by_role("button",name=re.compile(theme,re.I)).click()
                 expect(page.locator(".dashboard")).to_have_attribute("data-theme",theme)
                 page.keyboard.press("Escape")
                 page.screenshot(path=f"browser-preview/overview-{theme}.png",timeout=5000)
@@ -82,7 +85,11 @@ def run():
                 if width in (320,1440):
                     page.screenshot(path=f"browser-preview/portfolio-{width}.png",timeout=5000)
                 page.get_by_role("button",name="Open appearance settings").click()
-                expect(page.get_by_role("dialog",name="Appearance settings")).to_be_visible()
+                panel=page.get_by_role("dialog",name="Appearance settings")
+                expect(panel).to_be_visible()
+                assert panel.evaluate("(el)=>{const r=el.getBoundingClientRect();return r.left>=-1 && r.right<=innerWidth+1 && r.top>=-1 && r.bottom<=innerHeight+1}"),f"appearance drawer outside viewport {width}"
+                panel.get_by_role("group",name="Theme").get_by_role("button",name=re.compile("dark",re.I)).click()
+                expect(page.locator(".dashboard")).to_have_attribute("data-theme","dark")
                 page.keyboard.press("Escape")
                 expect(page.get_by_role("dialog",name="Appearance settings")).to_have_count(0)
             # Exercise the actual chart library in Chromium using a synthetic fixture
