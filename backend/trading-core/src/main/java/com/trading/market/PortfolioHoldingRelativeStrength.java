@@ -60,6 +60,7 @@ final class PortfolioHoldingRelativeStrength {
      if("MATCHED_PRICE_INDEX_OBSERVATIONS".equals(matched.get("status"))){
        var sector=new LinkedHashMap<>(matched);
        sector.put("benchmark_key",key);
+       sector.put("notice","Current provider classification proxy, not index membership. Matched stored NSE sessions and adjusted equity versus named sector price index; not total return, forecast or execution clearance.");
        sectorWindows.put(key,sector);
      }
    });
