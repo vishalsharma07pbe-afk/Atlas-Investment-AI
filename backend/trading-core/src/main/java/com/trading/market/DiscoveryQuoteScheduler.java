@@ -48,6 +48,10 @@ public class DiscoveryQuoteScheduler {
    }catch(InterruptedException ex){Thread.currentThread().interrupt();return;}
   }
  }
+ @Scheduled(initialDelayString="${atlas.discovery.activity.cleanup.initial-ms:120000}",fixedDelayString="${atlas.discovery.activity.cleanup.poll-ms:21600000}")
+ public void pruneActivity(){
+  db.update("DELETE FROM discovery_activity_day WHERE session_date < (now() AT TIME ZONE 'Asia/Kolkata')::date-45");
+ }
  boolean refresh(String exchange,Instant open,Instant close){
   if(!Set.of("NSE","BSE").contains(exchange))throw new IllegalArgumentException("exchange");
   if(OperatorFeedCooldown.blocked(db))return false;
@@ -89,12 +93,28 @@ public class DiscoveryQuoteScheduler {
     JsonNode q=parsed.get(i.key());
     Observation o=q==null?null:parse(q,i,open,close,received);
     if(o==null){finish(Map.of(i.key(),i),attempt,q==null?"MISSING":"INVALID");continue;}
+    boolean lateSession=!o.trade().isBefore(close.minus(Duration.ofMinutes(90)));
+    // Preserve the last valid intraday activity observation per session even
+    // when a later attempt fails. Never use this table as completed OHLCV.
     db.update("""
-      UPDATE discovery_quote_screen SET state=?,observed_at=?,response_at=?,last_price=?,previous_close=?,
-        session_volume=?,turnover_proxy=?,spread_percent=?,day_change_percent=?
-      WHERE instrument_id=? AND instrument_key=? AND isin=? AND attempted_at=? AND state='PENDING'
+      WITH accepted AS (
+        UPDATE discovery_quote_screen SET state=?,observed_at=?,response_at=?,last_price=?,previous_close=?,
+          session_volume=?,turnover_proxy=?,spread_percent=?,day_change_percent=?
+        WHERE instrument_id=? AND instrument_key=? AND isin=? AND attempted_at=? AND state='PENDING'
+        RETURNING instrument_id,instrument_key,isin,observed_at,response_at,session_volume,turnover_proxy,spread_percent,day_change_percent
+      )
+      INSERT INTO discovery_activity_day(instrument_id,instrument_key,isin,session_date,observed_at,response_at,
+        session_volume,turnover_proxy,spread_percent,day_change_percent,late_session)
+      SELECT instrument_id,instrument_key,isin,(observed_at AT TIME ZONE 'Asia/Kolkata')::date,
+        observed_at,response_at,session_volume,turnover_proxy,spread_percent,day_change_percent,?
+      FROM accepted
+      ON CONFLICT(instrument_id,session_date) DO UPDATE SET
+        instrument_key=excluded.instrument_key,isin=excluded.isin,observed_at=excluded.observed_at,
+        response_at=excluded.response_at,session_volume=excluded.session_volume,turnover_proxy=excluded.turnover_proxy,
+        spread_percent=excluded.spread_percent,day_change_percent=excluded.day_change_percent,late_session=excluded.late_session
+      WHERE (excluded.observed_at,excluded.response_at)>(discovery_activity_day.observed_at,discovery_activity_day.response_at)
       """,o.priority()?"PRIORITY":"OBSERVED",Timestamp.from(o.trade()),Timestamp.from(o.response()),o.price(),
-      o.previous(),o.volume(),o.turnover(),o.spread(),o.change(),i.id(),i.key(),i.isin(),attempt);
+      o.previous(),o.volume(),o.turnover(),o.spread(),o.change(),i.id(),i.key(),i.isin(),attempt,lateSession);
    }
    OperatorFeedCooldown.recovered(db);
    return true;

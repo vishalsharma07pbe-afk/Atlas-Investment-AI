@@ -34,7 +34,9 @@ public class DiscoveryHistoryScheduler {
   public void scheduled(){
     if(!enabled||!usageRights||!entitlement||accessToken.isBlank())return;
     LocalDate today=LocalDate.now(MarketCalendarService.IST);
-    // At most 8 overdue established histories and 2 expansion/repair requests per venue.
+    // Up to ten requests per venue; adaptive allocation reserves six maintenance
+    // and four expansion slots when both pools are due, and borrows unused slots.
+    // Oldest eligible work in each pool is protected from priority starvation.
     // Sequential, paced REST calls; shared operator cooldown remains authoritative.
     for(String exchange:List.of("NSE","BSE")){
       LocalDate end;
@@ -68,9 +70,7 @@ public class DiscoveryHistoryScheduler {
             AND x.session_date=s.session_date AND x.is_trading_day AND x.session_type<>'REGULAR')
       ), candidates AS (
       SELECT i.id,m.instrument_key,h.candle_count,h.latest_date,g.first_missing_date,a.attempted_at,
-        CASE WHEN coalesce(quality.security_state,'UNKNOWN') IN ('PCA','SME','RELIST','IPO','SUSPENDED_REPORTED') THEN 0
-          WHEN q.state='PRIORITY' AND q.observed_at>=now()-interval '15 minutes' AND q.response_at>=now()-interval '15 minutes' THEN
-          CASE WHEN cap.average_cap_cr>=1000 THEN 2 WHEN cap.isin IS NULL THEN 1 ELSE 0 END ELSE 0 END AS quote_priority,
+        coalesce(candidate.priority,0) AS quote_priority,
         CASE WHEN h.candle_count>=25 AND h.latest_date<? THEN 0 ELSE 1 END AS workload
       FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
       JOIN LATERAL (
@@ -82,9 +82,8 @@ public class DiscoveryHistoryScheduler {
         ORDER BY instrument_key LIMIT 1
       ) m ON true
       LEFT JOIN discovery_history_attempts a ON a.instrument_id=i.id
-      LEFT JOIN discovery_quote_screen q ON q.instrument_id=i.id AND q.instrument_key=m.instrument_key AND q.isin=i.isin
       LEFT JOIN discovery_security_context quality ON quality.instrument_id=i.id AND quality.instrument_key=m.instrument_key AND quality.isin=i.isin
-      LEFT JOIN discovery_amfi_cap cap ON cap.isin=i.isin AND cap.as_of BETWEEN (now() AT TIME ZONE 'Asia/Kolkata')::date-220 AND (now() AT TIME ZONE 'Asia/Kolkata')::date-1
+      LEFT JOIN discovery_candidate_queue candidate ON candidate.instrument_id=i.id AND candidate.instrument_key=m.instrument_key AND candidate.isin=i.isin
       CROSS JOIN LATERAL (
         SELECT count(DISTINCT (c.candle_time AT TIME ZONE 'Asia/Kolkata')::date)
                  FILTER (WHERE c.candle_time >= ?::date::timestamp AT TIME ZONE 'Asia/Kolkata'
@@ -118,14 +117,20 @@ public class DiscoveryHistoryScheduler {
         FROM candidates
       ), ranked AS (
         SELECT *,row_number() OVER (PARTITION BY workload ORDER BY
-          CASE WHEN workload=1 AND oldest_position=1 THEN 3 WHEN workload=1 THEN quote_priority ELSE 0 END DESC,attempted_at ASC NULLS FIRST,
+          CASE WHEN oldest_position=1 THEN 10 ELSE quote_priority END DESC,attempted_at ASC NULLS FIRST,
           candle_count DESC,id) AS position
         FROM oldest
       )
       SELECT id,instrument_key,candle_count,latest_date,first_missing_date FROM ranked
+      """.replace("CASE WHEN oldest_position=1 THEN 10 ELSE quote_priority END DESC,",quoteScreenEnabled?"CASE WHEN oldest_position=1 THEN 10 ELSE quote_priority END DESC,":"")+(quoteScreenEnabled?"""
+      ORDER BY CASE WHEN workload=1 AND position=1 THEN 0
+                    WHEN workload=0 AND position<=6 THEN 1
+                    WHEN workload=1 AND position<=4 THEN 2 ELSE 3 END,
+        workload,position LIMIT 10
+      """:"""
       WHERE (workload=0 AND position<=8) OR (workload=1 AND position<=2)
       ORDER BY workload,position LIMIT 10
-      """.replace("CASE WHEN workload=1 AND oldest_position=1 THEN 3 WHEN workload=1 THEN quote_priority ELSE 0 END DESC,",quoteScreenEnabled?"CASE WHEN workload=1 AND oldest_position=1 THEN 3 WHEN workload=1 THEN quote_priority ELSE 0 END DESC,":""),exchange,end.minusMonths(BACKFILL_MONTHS),end,end,end.minusMonths(BACKFILL_MONTHS),end,end,exchange,REQUIRED_DAILY_CANDLES,end);
+      """),exchange,end.minusMonths(BACKFILL_MONTHS),end,end,end.minusMonths(BACKFILL_MONTHS),end,end,exchange,REQUIRED_DAILY_CANDLES,end);
     for(var row:rows){
       if(OperatorFeedCooldown.blocked(jdbc))return;
       long id=((Number)row.get("id")).longValue();

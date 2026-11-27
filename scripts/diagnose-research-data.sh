@@ -32,6 +32,7 @@ SELECT failure_code,failure_count,blocked_until,blocked_until>now() AS blocked F
 SELECT * FROM discovery_quote_coverage ORDER BY exchange;
 SELECT * FROM discovery_cap_coverage ORDER BY exchange,category;
 SELECT * FROM discovery_security_coverage ORDER BY exchange,security_state;
+SELECT * FROM discovery_candidate_coverage ORDER BY exchange,category,queue_state;
 SELECT retrieved_at,record_count FROM discovery_suspension_snapshot;
 SELECT source_code,count(DISTINCT scheme_code) AS schemes,max(nav_date) AS latest FROM mutual_fund_nav GROUP BY source_code ORDER BY source_code;
 COMMIT;

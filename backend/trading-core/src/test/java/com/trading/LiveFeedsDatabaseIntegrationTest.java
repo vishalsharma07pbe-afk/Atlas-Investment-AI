@@ -735,4 +735,37 @@ class LiveFeedsDatabaseIntegrationTest {
    verify(http,times(1)).text(contains("/v3/market-quote/quotes?"),eq("fixture-quote-token"),anyInt());
   }finally{org.springframework.test.util.ReflectionTestUtils.setField(quoteScreen,"token",old);}
  }
+
+ @Test
+ @org.springframework.transaction.annotation.Transactional
+ void candidateQueueRetainsDatedActivityAndSeparatesSpecialAndLowActivity(){
+  long id=seedStock();
+  db.update("UPDATE instruments SET active=true,listing_status='ACTIVE' WHERE id=?",id);
+  db.update("DELETE FROM discovery_suspended_listing WHERE exchange='NSE' AND isin='INE000A01001'");
+  db.update("UPDATE upstox_instrument_map SET security_type='NORMAL',security_observed_at=now() WHERE instrument_key='NSE_EQ|INE000A01001'");
+  db.update("DELETE FROM discovery_amfi_cap WHERE isin='INE000A01001'");
+  LocalDate today=LocalDate.now(MarketCalendarService.IST);
+  LocalDate period=LocalDate.of(today.getYear(),6,30);
+  if(!period.isBefore(today))period=LocalDate.of(today.getYear()-1,12,31);
+  db.update("INSERT INTO discovery_amfi_cap(isin,category,average_cap_cr,as_of) VALUES ('INE000A01001','MID_CAP',2000,?)",period);
+  db.update("DELETE FROM discovery_activity_day WHERE instrument_id=?",id);
+  for(int d=1;d<=3;d++){
+   var day=today.minusDays(d);
+   var stamp=java.sql.Timestamp.from(day.atTime(14,45).atZone(MarketCalendarService.IST).toInstant());
+   db.update("""
+    INSERT INTO discovery_activity_day(instrument_id,instrument_key,isin,session_date,observed_at,response_at,
+       session_volume,turnover_proxy,spread_percent,day_change_percent,late_session)
+    VALUES (?,'NSE_EQ|INE000A01001','INE000A01001',?,?,?,10000,1000000,0.4,1,true)
+    """,id,day,stamp,stamp);
+  }
+  assertThat(db.queryForObject("SELECT queue_state FROM discovery_candidate_queue WHERE instrument_id=?",String.class,id)).isEqualTo("REPEATED_LOW_ACTIVITY_REVIEW");
+  db.update("UPDATE discovery_activity_day SET turnover_proxy=25000000 WHERE instrument_id=? AND session_date=?",id,today.minusDays(1));
+  assertThat(db.queryForObject("SELECT swing_activity_hint FROM discovery_candidate_queue WHERE instrument_id=?",Boolean.class,id)).isTrue();
+  assertThat(db.queryForObject("SELECT intraday_activity_hint FROM discovery_candidate_queue WHERE instrument_id=?",Boolean.class,id)).isFalse();
+  db.update("UPDATE upstox_instrument_map SET security_type='PCA' WHERE instrument_key='NSE_EQ|INE000A01001'");
+  assertThat(db.queryForObject("SELECT priority FROM discovery_candidate_queue WHERE instrument_id=?",Integer.class,id)).isZero();
+  db.update("INSERT INTO discovery_suspension_snapshot(singleton,retrieved_at,record_count) VALUES(true,now(),1) ON CONFLICT(singleton) DO UPDATE SET retrieved_at=excluded.retrieved_at,record_count=1");
+  db.update("INSERT INTO discovery_suspended_listing(exchange,isin,instrument_key) VALUES ('NSE','INE000A01001','NSE_EQ|INE000A01001')");
+  assertThat(db.queryForObject("SELECT queue_state FROM discovery_candidate_queue WHERE instrument_id=?",String.class,id)).isEqualTo("SUSPENDED_REPORTED");
+ }
 }
