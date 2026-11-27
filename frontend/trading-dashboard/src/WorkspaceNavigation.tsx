@@ -19,7 +19,7 @@ export function validPage(value:unknown):number {
  const id=Number(value);
  return Number.isInteger(id)&&Object.prototype.hasOwnProperty.call(pages,id)?id:0;
 }
-export default function WorkspaceNavigation({page,onNavigate}:{page:number;onNavigate:(id:number)=>void}){
+export default function WorkspaceNavigation({page,onNavigate,account,onLogout,onHelp}:{page:number;onNavigate:(id:number)=>void;account?:string;onLogout?:()=>void;onHelp?:()=>void}){
  const [expanded,setExpanded]=useState(false);
  function select(id:number){onNavigate(id);setExpanded(false);}
  return <aside className="sidebar glass workspace-sidebar">
@@ -28,6 +28,8 @@ export default function WorkspaceNavigation({page,onNavigate}:{page:number;onNav
   <div className={"workspace-nav-groups"+(expanded?" is-expanded":"")} id="atlas-workspace-nav">
    {groups.map(group=><div key={group.label} className="workspace-nav-group"><div className="navlabel">{group.label}</div><nav aria-label={group.label}>{group.ids.map(id=><button type="button" key={id} aria-current={page===id?"page":undefined} className={page===id?"active":""} onClick={()=>select(id)}><span className="navdot" aria-hidden="true"><NavIcon id={id}/></span><span>{pages[id].title}</span><span className="navarrow" aria-hidden="true">›</span></button>)}</nav></div>)}
   </div>
+  {account&&<div className="terminal-sidebar-account"><span className="terminal-account-avatar" aria-hidden="true">{account.slice(0,1).toUpperCase()}</span><div><strong title={account}>{account.split("@")[0]}</strong><small>Private account</small></div></div>}
+  {onLogout&&<div className="terminal-sidebar-actions"><button type="button" onClick={onHelp}>Help</button><button type="button" onClick={onLogout}>Logout</button></div>}
   <div className="sidebottom"><span className="statusdot"/> PRIVATE · LOCAL MODE<br/><small>Research only · No order execution</small></div>
  </aside>;
 }

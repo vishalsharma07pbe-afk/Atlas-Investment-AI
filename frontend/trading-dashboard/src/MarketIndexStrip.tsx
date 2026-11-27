@@ -10,7 +10,8 @@ export default function MarketIndexStrip(){
  const [data,setData]=useState<IndexResponse|null>(null);
  const [loading,setLoading]=useState(true);
  const [streamState,setStreamState]=useState<"CONNECTING"|"LIVE"|"RECONNECTING"|"UNAVAILABLE">("CONNECTING");
- const request=useRef<AbortController|null>(null);
+ const request=useRef<AbortController|null>(null);const rail=useRef<HTMLDivElement|null>(null);
+ const slide=(direction:number)=>{const el=rail.current;if(!el)return;const first=el.querySelector("article");el.scrollBy({left:direction*((first?.getBoundingClientRect().width??el.clientWidth)+8),behavior:"smooth"});};
  const streamRevision=useRef(0);
  const load=useCallback(async()=>{
   request.current?.abort();
@@ -57,8 +58,8 @@ export default function MarketIndexStrip(){
  const streamedLive=streamState==="LIVE"&&data?.source==="UPSTOX_V3_STREAM"&&data.status==="AVAILABLE";
  const displayFreshness=(item:IndexQuote)=>data?.source==="UPSTOX_V3_STREAM"&&!streamedLive?"LAST OBSERVED":item.freshness==="LIVE"&&!streamedLive?"RECENT SNAPSHOT":item.freshness;
  return <section className={`market-strip glass${data?.status==="UNAVAILABLE"?" unavailable":""}`} aria-label="Market indices">
-  <div className="market-strip-label"><span className={streamedLive?"live-dot":""}/><strong>MARKETS</strong><small>{loading?"Loading…":streamedLive?`${data.source} · live push`:streamState==="RECONNECTING"?"Stream reconnecting…":data?.status==="AVAILABLE"?`${data.source} · snapshot`:`${data?.source||"Provider"} · unavailable`}</small></div>
-  {data?.items.length?<div className="market-strip-quotes">{data.items.map(item=><article key={item.label} title={`${displayFreshness(item)} · ${new Date(item.as_of).toLocaleString("en-IN")}`}><span>{item.label}</span><strong>{number.format(item.price)}</strong><small className={item.change>=0?"positive":"negative"}>{item.change>=0?"+":""}{number.format(item.change)} ({item.change_percent>=0?"+":""}{item.change_percent.toFixed(2)}%)</small><i>{displayFreshness(item)}</i></article>)}</div>:<div className="market-strip-empty"><strong>{loading?"Retrieving verified index snapshots…":reasonText(data?.reason)}</strong><span>{data?.reason==="PROVIDER_ACCESS_REJECTED"?"Daily Upstox sign-in is required before automatic stock and index prices can resume.":"ATLAS will never substitute fabricated index values."}</span></div>}
+  <div className="market-strip-label" role="status" aria-label={streamedLive?"Market quotes live":loading||data?.status==="AVAILABLE"||streamState==="RECONNECTING"?"Market quotes delayed or connecting":"Market quotes unavailable"} title={streamedLive?"Live market quotes":loading||data?.status==="AVAILABLE"||streamState==="RECONNECTING"?"Delayed or connecting":"Unavailable"}><span className={streamedLive?"live-dot":loading||data?.status==="AVAILABLE"||streamState==="RECONNECTING"?"market-dot-wait":"market-dot-off"}/><strong>MARKETS</strong></div>
+  {data?.items.length?<><button className="market-slide" type="button" aria-label="Previous market index" onClick={()=>slide(-1)}>‹</button><div ref={rail} className="market-strip-quotes" tabIndex={0} aria-label="Scrollable market indices">{data.items.map(item=><article key={item.label} title={`${displayFreshness(item)} · ${new Date(item.as_of).toLocaleString("en-IN")}`}><span>{item.label}</span><strong>{number.format(item.price)}</strong><small className={item.change>=0?"positive":"negative"}>{item.change>=0?"+":""}{number.format(item.change)} ({item.change_percent>=0?"+":""}{item.change_percent.toFixed(2)}%)</small><i>{displayFreshness(item)}</i></article>)}</div><button className="market-slide" type="button" aria-label="Next market index" onClick={()=>slide(1)}>›</button></>:<div className="market-strip-empty"><strong>{loading?"Retrieving verified index snapshots…":reasonText(data?.reason)}</strong><span>{data?.reason==="PROVIDER_ACCESS_REJECTED"?"Check the configured Analytics Token and market-data permissions in Settings.":"ATLAS will never substitute fabricated index values."}</span></div>}
   <button type="button" onClick={()=>void load()} disabled={loading} aria-label="Refresh market indices">↻</button>
  </section>;
 }
