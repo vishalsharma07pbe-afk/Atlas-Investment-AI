@@ -534,6 +534,13 @@ def _enrich(report,today):
     report["fundamental_quality"]=fundamental_quality(report,today.year)
     report["financial_strength"]=financial_strength(report,today)
     report["earnings_quality"]=earnings_quality(report,today)
+    from . import valuation_scenarios
+    # Capture timestamp supplies the reference, not an assumed filing date.
+    try:
+        stamp=datetime.fromisoformat(report["retrieved_at"])
+        if stamp.tzinfo is not None and stamp.astimezone(ZoneInfo("Asia/Kolkata")).date()==today:
+            report["valuation_sensitivity"]=valuation_scenarios.summarize(report,stamp)
+    except (ValueError,TypeError,KeyError):pass
     report["ownership_research"]=shareholding_research.summarize(report,today)
     return report
 
