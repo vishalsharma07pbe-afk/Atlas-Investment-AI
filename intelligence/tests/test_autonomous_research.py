@@ -11,7 +11,7 @@ class AutonomousResearchTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.env = patch.dict(os.environ, {"ATLAS_RESEARCH_SNAPSHOT_DB": self.temp.name + "/research.sqlite3",
-            "ATLAS_AUTONOMOUS_RESEARCH_ENABLED": "true"})
+            "ATLAS_AUTONOMOUS_RESEARCH_ENABLED": "true","ATLAS_BROAD_DISCOVERY_ENABLED":"false"})
         self.env.start()
         self.addCleanup(self.temp.cleanup)
         self.addCleanup(self.env.stop)
@@ -197,3 +197,44 @@ class AutonomousResearchTests(unittest.TestCase):
         self.assertFalse(research._published_evidence_current("NSE",result,date(2026,11,25)))
         result["top_gainers"][0]["as_of"]="2026-11-22"
         self.assertFalse(research._published_evidence_current("NSE",result,date(2026,11,24)))
+
+    def test_broad_discovery_crosses_400_and_merges_exact_winners(self):
+        from urllib.parse import parse_qs,urlsplit
+        from datetime import date,timedelta
+        total=421
+        rows=[{"id":i,"exchange":"NSE","symbol":f"S{i:04d}","active":True,
+               "listing_status":"ACTIVE","series":"EQ","instrument_type":"EQ",
+               "recent_registry_count":total,"expected_session":"2026-11-23",
+               "expected_session_count":total} for i in range(1,total+1)]
+        calls=[]
+        def load(path):
+            args=parse_qs(urlsplit(path).query)
+            if "discovery-universe-page?" in path:
+                after=int(args["afterId"][0]);calls.append(after)
+                return [r for r in rows if r["id"]>after][:200]
+            ids=list(map(int,args["ids"]))
+            self.assertLessEqual(len(ids),20)
+            return [{"instrument_id":i,"trade_date":(date(2026,10,31)+timedelta(days=d)).isoformat(),
+              "open":100,"high":200,"low":90,"close":100 if d<23 else 100+i/10,
+              "volume":100000,"adjustment_status":"ADJUSTED","revision":1} for i in ids for d in range(24)]
+        with patch.dict(os.environ,{"ATLAS_BROAD_DISCOVERY_ENABLED":"true"}),patch.object(research,"now",return_value=datetime(2026,11,24,12,tzinfo=timezone.utc)),patch.object(research,"backend_json",side_effect=load):
+            result=research.market_snapshot("NSE")
+        self.assertEqual(calls,[0,200,400,421])
+        self.assertEqual(result["universe_size"],total)
+        self.assertEqual(result["eligible_count"],total)
+        self.assertTrue(result["discovery_coverage"]["scan_complete"])
+        self.assertEqual([r["id"] for r in result["top_gainers"]],[421,420,419,418,417])
+        self.assertEqual([r["id"] for r in result["top_losers"]],[1,2,3,4,5])
+        self.assertEqual([r["id"] for r in result["momentum_leaders"]],[421,420,419,418,417])
+        self.assertEqual(result["sample_breadth"]["pairs"][0]["advancing"],total)
+
+    def test_broad_discovery_rejects_missing_duplicate_or_changed_pages(self):
+        from app import discovery_scan
+        instant=datetime(2026,11,24,12,tzinfo=timezone.utc)
+        row={"id":1,"recent_registry_count":2,"expected_session":"2026-11-23","expected_session_count":2}
+        part={"universe_size":1,"discovery_coverage":{"calendar_checked_on":"2026-11-24"}}
+        for pages,code in (([[row],[]],"INCOMPLETE"),([[row],[row]],"CURSOR"),
+              ([[row],[{**row,"id":2,"recent_registry_count":3}]],"CHANGED")):
+            with self.subTest(code=code),patch.object(research,"backend_json",side_effect=pages):
+                with self.assertRaisesRegex(ValueError,code):
+                    discovery_scan.scan("NSE",research.backend_json,lambda e,p:part,lambda:instant)

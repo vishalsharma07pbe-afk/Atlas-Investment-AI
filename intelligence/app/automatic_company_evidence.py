@@ -45,6 +45,17 @@ def identify(snapshot):
                 isin=item.get("isin")
                 if isinstance(isin,str) and ISIN.fullmatch(isin) and item.get("exchange")==section["section"]:
                     yield item,isin
+        # The Elite screen has stricter early-momentum gates than the general
+        # horizon lists. Prioritize its actual candidates even if they are not
+        # in a displayed horizon top five; preserve existing provider budgets.
+        result=section.get("result") or {}
+        coverage=result.get("discovery_coverage") or {}
+        expected=coverage.get("expected_session")
+        if coverage.get("calendar_status")=="PUBLISHED_SESSION" and expected:
+            for item in result.get("steady_momentum_candidates",[]):
+                isin=item.get("isin")
+                if isinstance(isin,str) and ISIN.fullmatch(isin) and item.get("exchange")==section["section"] and item.get("as_of")==expected:
+                    yield item,isin
 
 
 def identify_sample(snapshot,instant):

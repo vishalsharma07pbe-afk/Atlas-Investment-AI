@@ -167,7 +167,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                     replay_research_universe.append(identity)
         except (KeyError, TypeError, ValueError, OverflowError, ZeroDivisionError):
             skipped["INVALID"] += 1
-    rows.sort(key=lambda x: (-x["change_1d_percent"], x["exchange"], x["symbol"]))
+    rows.sort(key=lambda x: (-x["change_1d_percent"], x["exchange"], x["symbol"],x["id"]))
     result = {
         "status": "RESEARCH_ONLY",
         "timeframe": "1d",
@@ -175,10 +175,10 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
         "eligible_count": len(rows),
         "skipped": skipped,
         "top_gainers": rows[:5],
-        "top_losers": sorted(rows, key=lambda x: (x["change_1d_percent"], x["exchange"], x["symbol"]))[:5],
+        "top_losers": sorted(rows, key=lambda x: (x["change_1d_percent"], x["exchange"], x["symbol"],x["id"]))[:5],
         "momentum_leaders": sorted(
             [x for x in rows if x["momentum_20d_percent"] is not None],
-            key=lambda x: (-x["momentum_20d_percent"], x["symbol"])
+            key=lambda x: (-x["momentum_20d_percent"], x["symbol"],x["id"])
         )[:5],
         "notice": f"Bounded daily sample of up to {limit} registry instruments; not a full-market top-five ranking, live feed, intraday signal or recommendation.",
     }
