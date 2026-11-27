@@ -13,6 +13,7 @@ import json
 from .replay_evidence import exact_isin
 from .financial_strength import _block, _values, _recent_common
 from .fundamental_quality import _ratio_rows
+from . import elite_assessment
 
 VERSION="STEADY-MOMENTUM-1"
 NOTICE="ATLAS rule-based screen, not TradingView Strong Buy or investment qualification. Reported earnings and undated sector P/E are preliminary evidence. Historical turnover and AMFI six-month average capitalization are not live execution liquidity or current market cap. Provider security classifications and observed suspension lists are incomplete tradability evidence; absence does not establish unrestricted status. Thresholds not backtested. Coverage is limited to validated daily-history samples."
@@ -123,8 +124,15 @@ def fundamentals(report,today):
 CAP_GROUPS=("LARGE_CAP","MID_CAP","SMALL_CAP")
 
 def ranked_shortlists(candidates):
-    ordered=sorted(candidates,key=lambda x:(-x["positive_day_percent"],x["largest_gain_share_percent"],
-                     -x["median_daily_turnover_cr"],-x["earnings_growth_percent"],x["isin"],x["exchange"]))
+    def rank(row):
+        assessment=row.get("elite_assessment") or {}
+        value=assessment.get("score")
+        # Comparable complete preliminary rubric first. Preserve old tie-breaks
+        # and keep unscored observations separate from numerical scores.
+        scored=assessment.get("methodology")==elite_assessment.VERSION and assessment.get("status")=="PRELIMINARY_SCORE_ONLY" and numeric(value) and 0<=value<=100
+        return (not scored,-value if scored else 0,-row["positive_day_percent"],row["largest_gain_share_percent"],
+                -row["median_daily_turnover_cr"],-row["earnings_growth_percent"],row["isin"],row["exchange"])
+    ordered=sorted(candidates,key=rank)
     seen=set()
     distinct=[]
     for row in ordered:
@@ -209,9 +217,11 @@ def summarize(snapshot,connect,instant):
             if reason:
                 excluded[reason]+=1
                 continue
-            candidates.append({**row,**evidence,**cap,"quarterly_financials":quarter,
+            candidate={**row,**evidence,**cap,"quarterly_financials":quarter,
                 "benchmark_relative_strength":relative_strength.compare(row,snapshot.get("market_regime") or {},today),
-                "governance_review":governance_review.assess(row,report,today),"status":"SCREEN_MATCH_ONLY"})
+                "governance_review":governance_review.assess(row,report,today),"status":"SCREEN_MATCH_ONLY"}
+            candidate["elite_assessment"]=elite_assessment.assess(candidate)
+            candidates.append(candidate)
     # Category tabs rank the entire deduplicated matched cohort independently.
     out["items"],out["category_items"],out["matched_count"]=ranked_shortlists(candidates)
     out["exclusions"]=[{"reason":k,"count":v} for k,v in excluded.most_common()]

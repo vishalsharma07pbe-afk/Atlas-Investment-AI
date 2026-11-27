@@ -126,7 +126,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
             if include_horizons and batch_loaded and expected_session is not None and exact_isin(instrument.get("isin")):
                 steady=steady_momentum.technical(candles,ind)
                 if steady:
-                    steady_candidates.append({**steady,"adjusted_window_dates":relative_strength.stock_windows(raw,today),"security_state":row["security_state"],"report_close_history":report_close_history(candles),"id":row["id"],"symbol":row["symbol"],"exchange":row["exchange"],"isin":instrument["isin"],"as_of":row["as_of"]})
+                    steady_candidates.append({**steady,"historical_swing_structure":price_structure(candles,ind,"SWING",calendar_verified=True),"adjusted_window_dates":relative_strength.stock_windows(raw,today),"security_state":row["security_state"],"report_close_history":report_close_history(candles),"id":row["id"],"symbol":row["symbol"],"exchange":row["exchange"],"isin":instrument["isin"],"as_of":row["as_of"]})
             if include_horizons and batch_loaded:
                 pressure=price_volume_pressure.analyze(candles, calendar_verified=expected_session is not None)
                 row["price_volume_pressure"]=pressure
