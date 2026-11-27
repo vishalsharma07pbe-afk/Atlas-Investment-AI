@@ -136,3 +136,44 @@
 /* Legacy transform animations create containing blocks for nested dialogs. */
 .dashboard .content > :is(section,article,.panel),.dashboard .content :is(.stat,.panel,.card){animation:none}
 @media(prefers-reduced-motion:reduce){.dashboard *{scroll-behavior:auto!important}}
+
+/* Chart-first stock terminal */
+.dashboard .terminal-stock-explorer{min-width:0}
+.dashboard .terminal-stock-explorer .explorer-search{padding-bottom:12px}
+.dashboard .terminal-stock-explorer .instrument-results{grid-template-columns:repeat(auto-fit,minmax(min(100%,205px),1fr));max-height:180px;gap:8px}
+.dashboard .terminal-stock-explorer .instrument-results button{background:var(--terminal-raised);border-radius:8px;min-width:0;padding:10px}
+.dashboard .terminal-stock-explorer .instrument-results button.selected{border-color:var(--accent)}
+.dashboard .terminal-stock-header{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1.2fr) minmax(0,1fr);gap:20px;align-items:start}
+.terminal-stock-header>div{display:grid;gap:5px;min-width:0;align-content:start}
+.terminal-stock-header h2{font-size:clamp(25px,3vw,36px);margin:0;line-height:1.15;overflow-wrap:anywhere}
+.terminal-stock-header p{margin:0;overflow-wrap:anywhere}
+.terminal-stock-price>span,.terminal-stock-quote>span{font-size:12px;color:var(--ink-soft)}
+.terminal-stock-price>strong,.terminal-stock-quote>strong{font-size:clamp(22px,2.5vw,32px);line-height:1.2;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.terminal-stock-header small{font-size:11px;color:var(--ink-muted);overflow-wrap:anywhere}
+.terminal-stock-quote{border-left:1px solid var(--row-line);padding-left:16px}
+.dashboard .terminal-stock-chart{min-width:0;overflow:hidden}
+.terminal-chart-toolbar{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:8px 0;border-block:1px solid var(--row-line)}
+.terminal-chart-toolbar>div{display:flex;gap:4px;flex-wrap:wrap;min-width:0}
+.terminal-chart-toolbar button,.dashboard .terminal-stock-chart .indicator-toggles button{font-size:12px;padding:7px 10px;min-height:32px;border-radius:6px;background:transparent;color:var(--ink-soft);border:1px solid transparent;line-height:1.2}
+.terminal-chart-toolbar button.on,.dashboard .terminal-stock-chart .indicator-toggles button.on{background:var(--terminal-raised);border-color:var(--glass-border);color:var(--accent)}
+.dashboard .terminal-stock-chart .indicator-toggles button:disabled{opacity:.4;cursor:not-allowed}
+.dashboard .terminal-stock-chart .indicator-toggles{margin:8px 0;gap:4px}
+.terminal-ohlc{display:flex;gap:8px 14px;flex-wrap:wrap;color:var(--ink);font-size:12px;font-variant-numeric:tabular-nums;padding:8px 0}
+.terminal-ohlc small{color:var(--ink-muted);font-size:11px}
+.dashboard .terminal-stock-canvas{height:clamp(300px,52vh,520px);background:var(--terminal-surface);border:1px solid var(--row-line);border-radius:8px;min-width:0}
+.dashboard .terminal-stock-canvas.is-expanded{height:clamp(420px,76vh,900px)}
+.terminal-stock-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:16px;align-items:start}
+.terminal-stock-tool{border:1px solid var(--glass-border);border-radius:9px;background:var(--terminal-surface);min-width:0}
+.terminal-stock-tool>summary{padding:12px;cursor:pointer;font-weight:600;overflow-wrap:anywhere}
+.terminal-stock-tool[open]{grid-column:1/-1}
+.terminal-stock-tool>.panel{margin:0;border:0;border-top:1px solid var(--row-line);border-radius:0 0 9px 9px}
+.dashboard .terminal-stock-explorer :is(.research-grid,.levels)>div{background:var(--terminal-raised);border-radius:8px;min-width:0}
+.dashboard .terminal-stock-explorer :is(.research-grid,.levels) span{font-size:11px}
+.dashboard .terminal-stock-explorer :is(.research-grid,.levels) strong{font-size:15px;overflow-wrap:anywhere}
+.dashboard .terminal-stock-explorer .pattern-list article{background:var(--terminal-raised);border-radius:8px}
+.dashboard .terminal-stock-explorer .pattern-list article strong{font-size:13px;overflow-wrap:anywhere}
+.dashboard .terminal-stock-explorer .pattern-list article p{font-size:12px}
+.dashboard .terminal-company-link>.sectionhead{margin-bottom:0}
+.dashboard .terminal-company-link .p1-research{margin-top:16px;min-width:0}
+@media(max-width:1050px){.dashboard .terminal-stock-header{grid-template-columns:repeat(2,minmax(0,1fr))}.terminal-stock-identity{grid-column:1/-1}.terminal-stock-actions{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:540px){.dashboard .terminal-stock-header{grid-template-columns:1fr;gap:12px}.terminal-stock-quote{border-left:0;border-top:1px solid var(--row-line);padding:12px 0 0}.terminal-stock-actions{grid-template-columns:1fr}.terminal-chart-toolbar button,.dashboard .terminal-stock-chart .indicator-toggles button{padding:7px 8px}.dashboard .terminal-stock-canvas{height:340px}.dashboard .terminal-stock-canvas.is-expanded{height:540px}}
