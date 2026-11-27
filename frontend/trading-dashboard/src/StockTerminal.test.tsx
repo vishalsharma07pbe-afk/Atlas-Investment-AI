@@ -27,7 +27,7 @@ describe("chart-first stock terminal",()=>{
   fireEvent.change(screen.getByRole("textbox",{name:"Instrument search"}),{target:{value:"TEST"}});
   fireEvent.click(await screen.findByRole("button",{name:/NSE:TEST/}));
   const chart=await screen.findByRole("region",{name:"Stock price and volume chart"});
-  expect(chartOptions).toHaveBeenCalledWith(expect.any(HTMLElement),expect.objectContaining({localization:expect.objectContaining({locale:"en-IN"})}));
+  await waitFor(()=>expect(chartOptions).toHaveBeenCalledWith(expect.any(HTMLElement),expect.objectContaining({localization:expect.objectContaining({locale:"en-IN"})})));
   expect(screen.getByText(/10.00%.*previous recorded close/)).toBeTruthy();
   expect(chart.compareDocumentPosition(screen.getByText("Research alerts"))&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   fireEvent.click(screen.getByRole("button",{name:"Line"}));
