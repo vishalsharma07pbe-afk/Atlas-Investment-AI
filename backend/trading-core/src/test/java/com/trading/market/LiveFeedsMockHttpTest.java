@@ -15,11 +15,11 @@ class LiveFeedsMockHttpTest {
   UpstoxFeedService svc=new UpstoxFeedService(db,http,mock(VersionedVaultReader.class));
   try{
    when(db.update(anyString(),any(),any(),any(),any(),any())).thenReturn(1);
-   when(db.update(anyString(),any(),any(),any(),any(),any(),any())).thenReturn(1);
+   when(db.update(anyString(),any(),any(),any(),any(),any(),any(),any())).thenReturn(1);
    when(http.get(contains("NSE.json.gz"),isNull(),anyInt())).thenReturn("[{\"instrument_key\":\"NSE_EQ|INE002A01018\",\"exchange\":\"NSE\",\"instrument_type\":\"EQ\",\"trading_symbol\":\"RELIANCE\",\"name\":\"Reliance Industries Limited\",\"isin\":\"INE002A01018\"}]".getBytes());
    when(http.get(contains("BSE.json.gz"),isNull(),anyInt())).thenReturn("[{\"instrument_key\":\"BSE_EQ|500325\",\"exchange\":\"BSE\",\"exchange_token\":\"500325\",\"instrument_type\":\"A\",\"trading_symbol\":\"RELIANCE\",\"name\":\"Reliance Industries Limited\",\"isin\":\"INE002A01018\"}]".getBytes());
    assertThat(svc.syncMaster()).isEqualTo(2);
-   verify(db,times(2)).update(contains("upstox_instrument_map"),any(),any(),any(),any(),any(),any());
+   verify(db,times(2)).update(contains("upstox_instrument_map"),any(),any(),any(),any(),any(),any(),eq("UNKNOWN"));
   }catch(Exception e){throw new AssertionError(e);}
  }
  @Test void registryFailureCodesIdentifyVenueAndStageWithoutProviderPayload()throws Exception{
@@ -28,7 +28,7 @@ class LiveFeedsMockHttpTest {
   String nse="{\"instrument_key\":\"NSE_EQ|INE002A01018\",\"exchange\":\"NSE\",\"instrument_type\":\"EQ\",\"trading_symbol\":\"RELIANCE\",\"isin\":\"INE002A01018\"}";
   String bse="{\"instrument_key\":\"BSE_EQ|500325\",\"exchange\":\"BSE\",\"exchange_token\":\"500325\",\"instrument_type\":\"A\",\"trading_symbol\":\"RELIANCE\",\"isin\":\"INE002A01018\"}";
   when(db.update(anyString(),any(),any(),any(),any(),any())).thenReturn(1);
-  when(db.update(anyString(),any(),any(),any(),any(),any(),any())).thenReturn(1);
+  when(db.update(anyString(),any(),any(),any(),any(),any(),any(),any())).thenReturn(1);
   when(http.get(contains("NSE.json.gz"),isNull(),anyInt())).thenReturn(("["+nse+"]").getBytes());
   when(http.get(contains("BSE.json.gz"),isNull(),anyInt())).thenReturn(("["+bse+","+bse+"]").getBytes());
   assertThatThrownBy(svc::syncMaster).isInstanceOfSatisfying(UpstoxFeedService.MasterImportException.class,

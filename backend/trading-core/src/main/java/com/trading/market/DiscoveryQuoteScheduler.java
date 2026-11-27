@@ -107,7 +107,7 @@ public class DiscoveryQuoteScheduler {
         session_volume,turnover_proxy,spread_percent,day_change_percent,late_session)
       SELECT instrument_id,instrument_key,isin,(observed_at AT TIME ZONE 'Asia/Kolkata')::date,
         observed_at,response_at,session_volume,turnover_proxy,spread_percent,day_change_percent,?
-      FROM accepted
+      FROM accepted WHERE true
       ON CONFLICT(instrument_id,session_date) DO UPDATE SET
         instrument_key=excluded.instrument_key,isin=excluded.isin,observed_at=excluded.observed_at,
         response_at=excluded.response_at,session_volume=excluded.session_volume,turnover_proxy=excluded.turnover_proxy,
