@@ -426,6 +426,20 @@ public class FundHistoryResearchService {
     result.put("negative_week_percent",round(100.0*negativeWeeks/n));
     result.put("rolling_windows",rolling);
     result.put("weekly_intervals",n);
+    // Compare the same actual weekly NAV observation dates, not merely the
+    // same end date or nominal number of weeks. No interpolation.
+    try{
+      var sha=java.security.MessageDigest.getInstance("SHA-256");
+      for(var p:points)sha.update((p.date().toString()+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      double peak=anchors.getFirst(),dd=0;
+      for(double value:anchors){peak=Math.max(peak,value);dd=Math.min(dd,value/peak-1);}
+      double cagr=100*(Math.pow(anchors.getLast()/anchors.getFirst(),365.2425/ChronoUnit.DAYS.between(points.getFirst().date(),points.getLast().date()))-1);
+      if(Double.isFinite(cagr)&&Double.isFinite(dd))
+        result.put("matched_weekly_comparison",Map.of("methodology","MF-WEEKLY-MATCH-1",
+          "date_digest",java.util.HexFormat.of().formatHex(sha.digest()),"anchor_count",157,
+          "first_date",points.getFirst().date().toString(),"last_date",points.getLast().date().toString(),
+          "cagr_percent",round(cagr),"drawdown_percent",round(100*dd)));
+    }catch(java.security.NoSuchAlgorithmException ex){throw new IllegalStateException(ex);}
     var sensitivity=weeklyHurdleSensitivity(weeklyReturns);
     if(!sensitivity.isEmpty())result.put("weekly_hurdle_sensitivity",sensitivity);
     return result;
