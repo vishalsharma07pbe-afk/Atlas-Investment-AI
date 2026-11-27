@@ -20,7 +20,7 @@ from . import steady_momentum, amfi_equity_caps, company_reports, nse_surveillan
 from .screener import screen
 from . import discovery_scan
 from .mutual_fund_recommendations import CATEGORIES, dashboard
-from . import stock_qualification, market_regime, release_reconciliation, economic_calendar, global_releases, global_context, global_markets, global_macro, global_fx, automatic_deals, fund_portfolios, fund_disclosures, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
+from . import stock_qualification, market_regime, release_reconciliation, economic_calendar, global_releases, global_context, global_markets, global_macro, global_fx, automatic_deals, fund_portfolios, fund_disclosures, fund_prospective, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
 
 SECTIONS = ("NSE", "BSE", *CATEGORIES)
 DEFAULT_INTERVAL = 900
@@ -204,9 +204,9 @@ def fund_snapshot(category):
     shortlist=result.get("historical_research_shortlist") or {}
     if shortlist.get("methodology")=="MF-MATCHED-PEER-1" and shortlist.get("category")==category:
         snapshot["historical_research_shortlist"]={k:shortlist.get(k) for k in
-            ("methodology","category","status","eligible_count","matched_count","cohort_count","first_date","last_date","notice")}
+            ("methodology","category","status","eligible_count","matched_count","cohort_count","first_date","last_date","date_digest","notice")}
         snapshot["historical_research_shortlist"]["items"]=[
-            {k:r.get(k) for k in ("identifier","name","nav_date","score","weekly_cagr_percent","relative_risk","status","qualified")}
+            {k:r.get(k) for k in ("identifier","name","isin_growth","nav","nav_date","score","weekly_cagr_percent","relative_risk","status","qualified")}
             for r in shortlist.get("items",[])[:5] if isinstance(r,dict) and r.get("qualified") is False and r.get("status")=="HISTORICAL_RESEARCH_ONLY"]
     return snapshot
 
@@ -487,6 +487,12 @@ def _execute_job(job):
         if not automatic_deals.permitted():
             return "DISABLED_OR_NOT_AUTHORIZED"
         return "PASS_COMPLETED" if automatic_deals.refresh(_connect) else "WAITING_EVIDENCE"
+    if job=="FUND_WATCH_OUTCOMES":
+        enabled,interval=config()
+        if not enabled:return "DISABLED_OR_NOT_AUTHORIZED"
+        current=now()
+        fund_prospective.refresh(_read_sections(CATEGORIES,enabled,interval,current),current)
+        return "PASS_COMPLETED"
     if job=="FUND_COMPANY_EVIDENCE":
         if not fund_portfolios.permitted() or not automatic_company_evidence.permitted():
             return "DISABLED_OR_NOT_AUTHORIZED"

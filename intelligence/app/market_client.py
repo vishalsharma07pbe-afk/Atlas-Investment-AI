@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from urllib.request import Request,urlopen
 from urllib.error import HTTPError,URLError
 from fastapi import HTTPException
@@ -17,6 +18,8 @@ def _internal_path(path:str)->str:
         return "/api/v1/internal/feed/instruments/"+path.removeprefix("/api/v1/market-data/instruments/")
     if path.startswith("/api/v1/instruments"):
         return "/api/v1/internal/feed/instruments"+path.removeprefix("/api/v1/instruments")
+    if re.fullmatch(r"/api/v1/mutual-funds/outcome-window\?schemeCode=[1-9][0-9]{0,8}&from=\d{4}-\d{2}-\d{2}&through=\d{4}-\d{2}-\d{2}",path):
+        return "/api/v1/internal/feed/fund-outcome-window?"+path.split("?",1)[1]
     if path.startswith("/api/v1/mutual-funds/historical-watch?category="):
         category = path.removeprefix("/api/v1/mutual-funds/historical-watch?category=")
         if category in CATEGORIES:

@@ -217,6 +217,25 @@ public class FundHistoryResearchService {
     return rows.size()==1?rows.getFirst():null;
   }
 
+  /** Bounded public AMFI observations for a frozen research watch, independent
+   * of current category rank. Exact current metadata, no account/holding read.
+   * Current identity does not certify historical scheme-event continuity.
+   */
+  public Map<String,Object> outcomeWindow(long code,LocalDate from,LocalDate through){
+    LocalDate today=LocalDate.now(MarketCalendarService.IST);
+    if(code<1||code>999999999||from==null||through==null||through.isBefore(from)||
+       through.isAfter(today)||from.isBefore(today.minusDays(400))||ChronoUnit.DAYS.between(from,through)>120)
+      throw new IllegalArgumentException("INVALID_OUTCOME_WINDOW");
+    var identity=holdingIdentity(code);
+    if(identity==null)return Map.of("status","IDENTITY_UNAVAILABLE");
+    var rows=jdbc.queryForList("""
+      SELECT nav_date::text AS nav_date,nav,source_code FROM mutual_fund_nav
+      WHERE scheme_code=? AND nav_date BETWEEN ? AND ? AND source_code='AMFI'
+      ORDER BY nav_date LIMIT 122
+      """,code,from,through);
+    return Map.of("status","LOCAL_AMFI_OBSERVATIONS","identity",identity,"rows",rows);
+  }
+
   /** Exact saved scheme only; not a category ranking or forward recommendation. */
   public Map<String,Object> holdingEvidence(long schemeCode){
     LocalDate today=LocalDate.now(MarketCalendarService.IST);

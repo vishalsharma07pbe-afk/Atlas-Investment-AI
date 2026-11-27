@@ -13,7 +13,7 @@ from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 
-from . import nav_catalog, fund_disclosures, fund_portfolios, fund_peer_shortlist, fund_local_evidence
+from . import nav_catalog, fund_disclosures, fund_portfolios, fund_peer_shortlist, fund_local_evidence, fund_prospective
 from .market_client import backend_json
 from .fund_categories import CATEGORIES, LABELS as OFFICIAL_CATEGORY_LABELS, DEBT, SPECIALIZED, COMPARABLE
 
@@ -583,6 +583,7 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
       "filters":{"horizon_months":horizon_months,"risk_tolerance":risk_tolerance},"coverage":coverage,
       "top_performers":ranked["top_performers"],"growth_outlook":ranked["growth_outlook"],
       "historical_research_shortlist":shortlist,"holdings_quality_watch":quality_watch,
+      "prospective_validation":fund_prospective.summary(category,today),
       "portfolio_overlap":fund_portfolios.overlap(disclosed),
       "research_reports":reports,
       "local_export_evidence":{"status":local_export["status"],"matched_disclosures":len(local_reports),"matched_tri_comparisons":sum(r["benchmark_comparison"] is not None for r in local_reports.values()),"notice":fund_local_evidence.NOTICE},
