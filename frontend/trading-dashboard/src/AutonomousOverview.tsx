@@ -1,4 +1,5 @@
 import {MarketTiles} from "./TerminalCharts";
+import SteadyMomentumCard,{type SteadyScreen} from "./SteadyMomentumCard";
 import {visiblePolling} from "./visiblePolling";
 import "./overview.css";
 import type {WatchReportTarget} from "./HorizonResearch";
@@ -24,7 +25,7 @@ type GlobalReleaseContext={status:string;sources:{source:string;label:string;sta
 type ReleaseMatch={status:string;headline?:string;source_url?:string;published_at?:string;notice:string};
 type EconomicCalendar={status:string;source_url:string;retrieved_at?:string;events:{id:string;headline:string;topic:string;scheduled_at:string;status:string;review_window:boolean;release_match?:ReleaseMatch}[];notice:string};
 type RegimeReport={status:string;trend?:string;volatility_regime?:string;as_of?:string;benchmark_change_60_percent?:number;volatility_20_annualized_percent?:number;breadth?:{status:string;advancing?:number;declining?:number;unchanged?:number;matched_count?:number;selected_count?:number;direction?:string};agreement?:string;institutional?:{status:string;fii?:string;dii?:string};global_coverage?:{available_count:number;total_count:number};notice:string};
-type Snapshot={market_regime?:RegimeReport;economic_calendar?:EconomicCalendar;global_releases?:GlobalReleaseContext;global_context?:GlobalContext;global_markets?:GlobalMarketContext;global_macro?:MacroContext;global_fx?:FxContext;daily_briefing?:Briefing;recent_company_news?:Article[];institutional_activity?:InstitutionalActivity;enabled:boolean;interval_seconds:number;sections:{section:string;status:string;generated_at:string|null;attempted_at:string|null;error_code?:string|null;result:Result|null}[]};
+type Snapshot={steady_momentum?:SteadyScreen;market_regime?:RegimeReport;economic_calendar?:EconomicCalendar;global_releases?:GlobalReleaseContext;global_context?:GlobalContext;global_markets?:GlobalMarketContext;global_macro?:MacroContext;global_fx?:FxContext;daily_briefing?:Briefing;recent_company_news?:Article[];institutional_activity?:InstitutionalActivity;enabled:boolean;interval_seconds:number;sections:{section:string;status:string;generated_at:string|null;attempted_at:string|null;error_code?:string|null;result:Result|null}[]};
 const labels:Record<string,string>={NSE:"NSE",BSE:"BSE",LARGE_CAP:"Large cap",MID_CAP:"Mid cap",SMALL_CAP:"Small cap",FLEXI_CAP:"Flexi cap",INDEX:"Index funds",LARGE_MID_CAP:"Large & mid cap",MULTI_CAP:"Multi cap",AGGRESSIVE_HYBRID:"Aggressive hybrid",CORPORATE_BOND:"Corporate bond",SHORT_DURATION:"Short duration"};
 const percent=(value:number|null)=>typeof value!=="number"||!Number.isFinite(value)?"—":(value>0?"+":"")+value.toFixed(2)+"%";
 const stamp=(value:string|null)=>value&&Number.isFinite(Date.parse(value))?new Date(value).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",dateStyle:"medium",timeStyle:"short"})+" IST":"Not yet refreshed";
@@ -60,6 +61,7 @@ export default function AutonomousOverview({children,onPortfolio,onFunds,onSetti
    {error&&<p role="alert" className="notice warning-notice">Research service unavailable. Previously displayed observations may be outdated. <button type="button" className="secondary" onClick={onSettings}>Check connections</button></p>}
    {!data&&!error&&<p role="status">Loading the latest saved research…</p>}
    {data?.enabled===false&&<p className="notice warning-notice">Background research is disabled. Check the local configuration in Settings.</p>}
+   {current&&data?.steady_momentum&&<SteadyMomentumCard report={data.steady_momentum} onSettings={onSettings}/>}
    {momentum.length>0&&<MarketTiles title="Market momentum watch · sampled daily histories" items={momentum.map(c=>({key:c.exchange+":"+c.id,label:c.symbol+" · "+c.exchange,exchange:c.exchange,date:c.as_of,value:c.momentum_20d_percent}))} period="20-day momentum"/>}
    {current&&briefing&&!hasEquityEvidence&&<section className="overview-empty-research" aria-label="Equity research availability"><div><strong>Equity research is not ready</strong><p>{briefing.market.sampled_instruments>0?`${briefing.market.sampled_instruments} sampled histories did not pass the data checks.`:"No eligible completed daily histories have been loaded."} Live quotes alone do not establish historical research eligibility.</p></div><button type="button" className="secondary" onClick={onSettings}>Check data coverage</button></section>}
    {briefing&&<DailyBriefing report={briefing} onFunds={onFunds} onSettings={onSettings} onPortfolio={onPortfolio} onHorizon={onHorizon}/>}
