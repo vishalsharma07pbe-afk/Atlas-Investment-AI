@@ -1,0 +1,13 @@
+type CostCase={cost_bps_per_side:number;entry_ceiling:number|null;reference_meets_stress:boolean};
+export type BracketEvidence={as_of:string;first_date:string;reference_close:number;lower_reference:number;upper_reference:number;stress_gap_percent:number;entry_cases:CostCase[];notice:string};
+type CaseSummary={cost_bps_per_side:number;counts:Record<string,number>;observed_cases:number;eligible_cases:number;return_cases:number;coverage_percent:number;mean_net_change_percent:number|null;worst_net_change_percent:number|null};
+export type BracketSummary={status:string;selected_mature?:number;signal_count?:number;legacy_uninstrumented?:number;immature?:number;cost_scenarios:CaseSummary[];notice:string};
+const fmt=(n:number|null)=>n==null?"—":n.toLocaleString("en-IN",{maximumFractionDigits:4});
+const words=(s:string)=>s.toLowerCase().replace(/_/g," ");
+export function BracketView({report}:{report:BracketEvidence}){
+ return <details><summary>Strict historical entry / exit bracket research</summary><p>Matched stored sessions · {report.first_date} – {report.as_of}</p><dl><div><dt>Observed close</dt><dd>₹{fmt(report.reference_close)}</dd></div><div><dt>Lower reference</dt><dd>₹{fmt(report.lower_reference)}</dd></div><div><dt>Upper reference</dt><dd>₹{fmt(report.upper_reference)}</dd></div><div><dt>Illustrative gap shock</dt><dd>{fmt(report.stress_gap_percent)}%</dd></div></dl>
+ <div className="tablewrap"><table><thead><tr><th>Assumed cost / side</th><th>Stressed 2:1 price ceiling</th><th>Reference meets assumption</th></tr></thead><tbody>{report.entry_cases.map(c=><tr key={c.cost_bps_per_side}><td>{c.cost_bps_per_side} bps</td><td>{c.entry_ceiling==null?"No in-bracket ceiling":"₹"+fmt(c.entry_ceiling)}</td><td>{c.reference_meets_stress?"Yes":"No"}</td></tr>)}</tbody></table></div><p className="muted tiny">{report.notice}</p></details>;
+}
+export function BracketSummaryView({report,title}:{report:BracketSummary;title:string}){
+ return <details><summary>{title} · {words(report.status)}</summary><p>{report.selected_mature!=null?report.selected_mature+" mature instrumented watches · "+(report.legacy_uninstrumented??0)+" legacy/uninstrumented · "+(report.immature??0)+" immature":(report.signal_count??0)+" historical signals"}</p>{report.cost_scenarios.map(c=><section key={c.cost_bps_per_side}><strong>{c.cost_bps_per_side} bps/side</strong><p>{c.observed_cases}/{c.eligible_cases} cases observed · {fmt(c.coverage_percent)}% coverage · {c.return_cases} resolved return cases · mean {fmt(c.mean_net_change_percent)}% · worst {fmt(c.worst_net_change_percent)}%</p><p>{Object.entries(c.counts).map(([k,v])=>words(k)+": "+v).join(" · ")||"No case observations"}</p></section>)}<p className="muted tiny">{report.notice}</p></details>;
+}

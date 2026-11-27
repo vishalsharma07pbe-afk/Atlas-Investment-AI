@@ -66,6 +66,11 @@ def assess(item,group,coverage,context,horizon,today):
         base_cost=[r for r in sensitivity.get("scenarios",[]) if r.get("cost_bps_per_side")==30]
         if len(base_cost)==1 and base_cost[0].get("reference_meets_stressed_ratio") is False:
             warnings.add("ILLUSTRATIVE_GAP_STRESS_RATIO_BELOW_ASSUMPTION")
+    strict=item.get("bracket_research") or {}
+    if horizon=="SWING" and strict.get("status")!="STRICT_HISTORICAL_BRACKET":requirements.append("STRICT_MATCHED_BRACKET_HISTORY_REQUIRED")
+    if strict.get("status")=="STRICT_HISTORICAL_BRACKET":
+        cases=[r for r in strict.get("entry_cases",[]) if r.get("cost_bps_per_side")==30]
+        if len(cases)==1 and cases[0].get("reference_meets_stress") is False:warnings.add("STRICT_BRACKET_REFERENCE_BELOW_STRESSED_RATIO")
     gate("EXECUTION_AND_RISK",geometric,requirements)
 
     company=item.get("company_evidence") or {}

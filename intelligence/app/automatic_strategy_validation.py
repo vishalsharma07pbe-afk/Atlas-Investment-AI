@@ -157,6 +157,11 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
                                 benchmark=None
                             attach_market_benchmark(result,payload,benchmark,today,positions=positions)
                             if audit["status"] in ("OVERLAP_UNCHANGED","NO_COMPARABLE_PRIOR_CAPTURE") and listing["status"]=="RECORDED_LISTING_DATES_CONSISTENT":
+                                from . import bracket_research
+                                bracket=bracket_research.replay(payload,today,positions)
+                                for h,report in bracket.items():
+                                    if h in result["horizons"]:result["horizons"][h]["bracket_replay"]=report
+                            if audit["status"] in ("OVERLAP_UNCHANGED","NO_COMPARABLE_PRIOR_CAPTURE") and listing["status"]=="RECORDED_LISTING_DATES_CONSISTENT":
                                 from . import fip_research
                                 fip=fip_research.replay(payload["candles"],today)
                                 if fip is not None:result["fip_replay"]=fip

@@ -7,7 +7,7 @@ from .horizon_research import evaluate, summarize, MIN_HISTORY as HORIZON_MIN_HI
 from .price_structure import analyze as price_structure
 from .corporate_action_normalization import preview as action_preview, reported_crossings
 from .replay_evidence import fingerprint, exact_isin
-from . import price_volume_pressure, steady_momentum, relative_strength, company_venues, sector_price_context, score_calibration, fip_research
+from . import price_volume_pressure, steady_momentum, relative_strength, company_venues, sector_price_context, score_calibration, fip_research, bracket_research
 
 MIN_HISTORY = 21
 MAX_INSTRUMENTS = 20
@@ -129,7 +129,9 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
             if include_horizons and batch_loaded and expected_session is not None and exact_isin(instrument.get("isin")):
                 steady=steady_momentum.technical(candles,ind)
                 if steady:
-                    steady_candidates.append({**steady,"historical_swing_structure":price_structure(candles,ind,"SWING",calendar_verified=True),"adjusted_window_dates":relative_strength.stock_windows(raw,today),"security_state":row["security_state"],"report_close_history":report_close_history(candles),"id":row["id"],"symbol":row["symbol"],"exchange":row["exchange"],"isin":instrument["isin"],"as_of":row["as_of"]})
+                    swing_structure=price_structure(candles,ind,"SWING",calendar_verified=True)
+                    strict_bracket=bracket_research.observe(raw,swing_structure,"SWING",fip_dates,today) if fip_dates else None
+                    steady_candidates.append({**steady,"bracket_research":strict_bracket,"historical_swing_structure":swing_structure,"adjusted_window_dates":relative_strength.stock_windows(raw,today),"security_state":row["security_state"],"report_close_history":report_close_history(candles),"id":row["id"],"symbol":row["symbol"],"exchange":row["exchange"],"isin":instrument["isin"],"as_of":row["as_of"]})
             if include_horizons and batch_loaded:
                 pressure=price_volume_pressure.analyze(candles, calendar_verified=expected_session is not None)
                 row["price_volume_pressure"]=pressure
@@ -161,6 +163,9 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                         candidate["price_structure"]=price_structure(candles,ind,horizon,
                             calendar_verified=batch_loaded and expected_session is not None)
                         if batch_loaded:
+                            if fip_dates:
+                                bracket=bracket_research.observe(raw,candidate["price_structure"],horizon,fip_dates,today)
+                                if bracket is not None:candidate["bracket_research"]=bracket
                             candidate["security_state"]=row["security_state"]
                             candidate["report_close_history"]=report_close_history(candles)
                             n=score_calibration.WINDOW.get(horizon)
