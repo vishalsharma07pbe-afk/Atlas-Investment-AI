@@ -440,6 +440,9 @@ public class FundHistoryResearchService {
           "first_date",points.getFirst().date().toString(),"last_date",points.getLast().date().toString(),
           "cagr_percent",round(cagr),"drawdown_percent",round(100*dd)));
     }catch(java.security.NoSuchAlgorithmException ex){throw new IllegalStateException(ex);}
+    // Exact observed dates and NAVs for the local TRI comparison. Do not
+    // interpolate or treat a nominal week target as an actual NAV date.
+    result.put("weekly_anchor_series",points.stream().map(p->Map.of("date",p.date().toString(),"nav",p.nav())).toList());
     var sensitivity=weeklyHurdleSensitivity(weeklyReturns);
     if(!sensitivity.isEmpty())result.put("weekly_hurdle_sensitivity",sensitivity);
     return result;

@@ -112,6 +112,7 @@ services:
       ATLAS_NAV_DB_PATH: /app/nav-data/catalog.sqlite3
       ATLAS_MF_NAV_AUTO_REFRESH_ENABLED: ${ATLAS_MF_NAV_AUTO_REFRESH_ENABLED:-true}
       ATLAS_MF_DISCLOSURE_AUTO_REFRESH_ENABLED: ${ATLAS_MF_DISCLOSURE_AUTO_REFRESH_ENABLED:-false}
+      ATLAS_MF_LOCAL_EVIDENCE_ENABLED: ${ATLAS_MF_LOCAL_EVIDENCE_ENABLED:-false}
       ATLAS_AUTONOMOUS_RESEARCH_ENABLED: ${ATLAS_AUTONOMOUS_RESEARCH_ENABLED:-true}
       ATLAS_BROAD_DISCOVERY_ENABLED: ${ATLAS_BROAD_DISCOVERY_ENABLED:-true}
       ATLAS_AUTOMATIC_AI_REVIEW_ENABLED: ${ATLAS_AUTOMATIC_AI_REVIEW_ENABLED:-true}
@@ -152,6 +153,7 @@ services:
       - ./data/entitlements:/app/entitlements:ro
       - ./data/deal-reports:/app/deal-reports:ro
       - ./data/filing-reports:/app/filing-reports:ro
+      - ./data/fund-evidence:/app/fund-evidence:ro
       - ./data/research-journal:/app/journal
       - navcatalog:/app/nav-data
       - ingestionledger:/app/ingestion-data

@@ -13,7 +13,7 @@ from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 
-from . import nav_catalog, fund_disclosures, fund_portfolios, fund_peer_shortlist
+from . import nav_catalog, fund_disclosures, fund_portfolios, fund_peer_shortlist, fund_local_evidence
 from .market_client import backend_json
 from .fund_categories import CATEGORIES, LABELS as OFFICIAL_CATEGORY_LABELS, DEBT, SPECIALIZED, COMPARABLE
 
@@ -555,6 +555,8 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
     compositions=fund_portfolios.composition_matches(disclosed)
     portfolios=fund_portfolios.matched(prioritized)
     quality_watch=fund_peer_shortlist.quality_watch(official,portfolios,category,fit,today)
+    local_export=fund_local_evidence.load(today)
+    local_reports=fund_local_evidence.reports(official,source_rows,local_export,today)
     coverage["secondary_portfolio_composition_matches"]=len(compositions)
     coverage["secondary_portfolio_matches"]=len(portfolios)
     # Public catalog discovery remains separate from exact AMFI scheme evidence.
@@ -574,12 +576,16 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
     if category in SPECIALIZED:
         blockers.append("CATEGORY_SPECIFIC_RISK_MODEL_REQUIRED")
     generated=datetime.now(timezone.utc).isoformat()
+    reports=_research_reports(official,ranked,source_rows,disclosed,portfolios,compositions)
+    for report in reports:
+        if report["identifier"] in local_reports:report["local_export_evidence"]=local_reports[report["identifier"]]
     payload={"generated_at":generated,"methodology_version":METHODOLOGY_VERSION,"category":category,
       "filters":{"horizon_months":horizon_months,"risk_tolerance":risk_tolerance},"coverage":coverage,
       "top_performers":ranked["top_performers"],"growth_outlook":ranked["growth_outlook"],
       "historical_research_shortlist":shortlist,"holdings_quality_watch":quality_watch,
       "portfolio_overlap":fund_portfolios.overlap(disclosed),
-      "research_reports":_research_reports(official,ranked,source_rows,disclosed,portfolios,compositions),
+      "research_reports":reports,
+      "local_export_evidence":{"status":local_export["status"],"matched_disclosures":len(local_reports),"matched_tri_comparisons":sum(r["benchmark_comparison"] is not None for r in local_reports.values()),"notice":fund_local_evidence.NOTICE},
       "portfolio_evidence":{"status":"SECONDARY_COMPOSITION_ONLY" if portfolios else "NOT_AVAILABLE_OR_NOT_AUTHORIZED",
           "items":portfolios,"notice":"Selected fund coverage only. Reported weights and existing cached company evidence are not verified forward earnings or valuation coverage."},
       "disclosure_evidence":{"status":"SECONDARY_REPORTED" if disclosed else "NOT_AVAILABLE_OR_NOT_AUTHORIZED",
@@ -589,13 +595,11 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
           "universe_count":historical["universe_count"],"eligible_count":historical["eligible_count"],
           "sample_count":historical.get("sample_count"),"history_gate_counts":_history_gate_counts(historical),
           "weekly_risk_eligible_count":historical.get("weekly_risk_eligible_count"),
-          "items":historical["items"][:5]},
+          "items":[{k:v for k,v in r.items() if k!="weekly_anchor_series"} for r in historical["items"][:5]]},
       "suitability":ranked["suitability"],"blockers":blockers,
       "qualification_summary":{"evaluated_count":len(official),"top_eligible_count":ranked["top_eligible_count"],
           "growth_eligible_count":ranked["growth_eligible_count"],"excluded":ranked["excluded"]},
-      "market_overview":[{"segment":x,"status":"UNAVAILABLE","benchmark":None,"period":None,
-                          "last_available_date":None,"evidence":[],"blocker":"BENCHMARK_TRI_NOT_CONNECTED"}
-                         for x in ("LARGE_CAP","MID_CAP","SMALL_CAP")],
+      "market_overview":fund_local_evidence.overview(local_export,today),
       "recommendation_status":"QUALIFIED_RESEARCH_AVAILABLE" if ranked["top_performers"] or ranked["growth_outlook"] else "NO_QUALIFYING_FUNDS_INCOMPLETE_EVIDENCE",
       "notice":"Discovery records are not recommendations. Top Performer and Growth Outlook use independent evidence gates; zero picks is allowed."}
     # The observation timestamp is metadata, not research evidence. Excluding it
