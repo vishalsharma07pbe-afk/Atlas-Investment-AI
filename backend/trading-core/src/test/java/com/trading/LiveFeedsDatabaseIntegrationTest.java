@@ -767,5 +767,12 @@ class LiveFeedsDatabaseIntegrationTest {
   db.update("INSERT INTO discovery_suspension_snapshot(singleton,retrieved_at,record_count) VALUES(true,now(),1) ON CONFLICT(singleton) DO UPDATE SET retrieved_at=excluded.retrieved_at,record_count=1");
   db.update("INSERT INTO discovery_suspended_listing(exchange,isin,instrument_key) VALUES ('NSE','INE000A01001','NSE_EQ|INE000A01001')");
   assertThat(db.queryForObject("SELECT queue_state FROM discovery_candidate_queue WHERE instrument_id=?",String.class,id)).isEqualTo("SUSPENDED_REPORTED");
+  db.update("UPDATE discovery_suspension_snapshot SET retrieved_at=now()-interval '80 hours'");
+  db.update("UPDATE upstox_instrument_map SET security_type='NORMAL',security_observed_at=now() WHERE instrument_key='NSE_EQ|INE000A01001'");
+  assertThat(db.queryForObject("SELECT queue_state FROM discovery_candidate_queue WHERE instrument_id=?",String.class,id)).isEqualTo("SUSPENDED_REPORTED");
+  assertThat(db.queryForObject("SELECT security_evidence_at<now()-interval '72 hours' FROM discovery_security_context WHERE instrument_id=?",Boolean.class,id)).isTrue();
+  db.update("DELETE FROM discovery_suspended_listing WHERE instrument_key='NSE_EQ|INE000A01001'");
+  db.update("UPDATE discovery_suspension_snapshot SET retrieved_at=now(),record_count=0");
+  assertThat(db.queryForObject("SELECT security_state FROM discovery_security_context WHERE instrument_id=?",String.class,id)).isEqualTo("NORMAL");
  }
 }

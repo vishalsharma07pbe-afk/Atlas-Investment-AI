@@ -106,9 +106,6 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                         action_preview_withheld+=1
                     continue
             ind = compute(candles)
-            # Observation depth only; not verified calendar continuity or adjusted history.
-            if batch_loaded and expected_session is not None and len(candles)>=253:
-                annual_depth_count+=1
             close = candles[-1].close
             previous = candles[-2].close
             change = 100 * (close / previous - 1)
@@ -167,6 +164,9 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                 counts=breadth_pairs.setdefault(key,{"advancing":0,"declining":0,"unchanged":0})
                 counts["advancing" if close>previous else "declining" if close<previous else "unchanged"]+=1
             rows.append(row)
+            # Observation depth only, not verified continuity or adjusted evidence.
+            if batch_loaded and expected_session is not None and len(candles)>=253:
+                annual_depth_count+=1
             if batch_loaded and exact_isin(instrument.get("isin")):
                 identity={"id":row["id"],"exchange":row["exchange"],"isin":instrument["isin"],"as_of":row["as_of"]}
                 company_research_universe.append(identity)

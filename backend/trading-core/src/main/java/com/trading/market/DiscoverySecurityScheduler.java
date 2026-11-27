@@ -45,7 +45,8 @@ public class DiscoverySecurityScheduler {
    });
   }catch(InterruptedException ex){Thread.currentThread().interrupt();}
   catch(Exception ex){
-   // Retain the last valid snapshot until the explicit freshness cutoff.
+   // Retain the last valid snapshot; positive suspensions continue to block
+   // discovery until a newer valid snapshot replaces them.
    // Never log provider bodies or credential-bearing errors.
   }
  }

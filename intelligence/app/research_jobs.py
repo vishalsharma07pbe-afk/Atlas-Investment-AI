@@ -69,7 +69,9 @@ def finish(connect,job,token,instant,interval,status):
         # Failure never triggers a busy loop; cap backoff at the normal cadence.
         delay=min(interval,60*2**min(failures-1,8)) if failures else interval
         if status=="WAITING_EVIDENCE":
-            delay=min(interval,60)
+            # Semiannual AMFI publication can lag the period boundary. Avoid
+            # minute-by-minute download retries while retaining waiting status.
+            delay=min(interval,21600 if job=="AMFI_EQUITY_CAP" else 60)
         db.execute("""UPDATE research_job_state SET status=?,next_due=?,finished_at=?,
             last_completed_at=CASE WHEN ?='PASS_COMPLETED' THEN ? ELSE last_completed_at END,
             claim_id=NULL,lease_until=NULL,failures=?,error_code=?

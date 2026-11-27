@@ -33,7 +33,26 @@ SELECT * FROM discovery_quote_coverage ORDER BY exchange;
 SELECT * FROM discovery_cap_coverage ORDER BY exchange,category;
 SELECT * FROM discovery_security_coverage ORDER BY exchange,security_state;
 SELECT * FROM discovery_candidate_coverage ORDER BY exchange,category,queue_state;
-SELECT retrieved_at,record_count FROM discovery_suspension_snapshot;
+SELECT retrieved_at,record_count,retrieved_at>=now()-interval '72 hours' AND retrieved_at<=now() AS fresh FROM discovery_suspension_snapshot;
+-- Exact mapped listings and distinct companies, not raw instrument registry.
+WITH depths AS (
+ SELECT u.exchange,u.isin,u.instrument_id,
+   count(DISTINCT (c.candle_time AT TIME ZONE 'Asia/Kolkata')::date) AS completed_dates
+ FROM discovery_quote_universe u
+ LEFT JOIN market_candles c ON c.instrument_id=u.instrument_id AND c.timeframe='1d'
+   AND c.is_complete AND c.quality_status IN ('VALIDATED_MANUAL','PROVIDER_VALIDATED')
+   AND c.candle_time>=((now() AT TIME ZONE 'Asia/Kolkata')::date-interval '15 months') AT TIME ZONE 'Asia/Kolkata'
+   AND c.candle_time<(now() AT TIME ZONE 'Asia/Kolkata')::date::timestamp AT TIME ZONE 'Asia/Kolkata'
+ GROUP BY u.exchange,u.isin,u.instrument_id
+)
+SELECT exchange,count(*) AS mapped_listings,count(DISTINCT isin) AS distinct_isins,
+ count(*) FILTER(WHERE completed_dates>0) AS observed_histories,
+ count(*) FILTER(WHERE completed_dates>=201) AS elite_depth_only,
+ count(*) FILTER(WHERE completed_dates>=253) AS annual_depth_only
+FROM depths GROUP BY exchange ORDER BY exchange;
+SELECT exchange,count(*) AS retained_stale_positive_suspensions
+FROM discovery_security_context WHERE security_state='SUSPENDED_REPORTED'
+ AND security_evidence_at<now()-interval '72 hours' GROUP BY exchange ORDER BY exchange;
 SELECT source_code,count(DISTINCT scheme_code) AS schemes,max(nav_date) AS latest FROM mutual_fund_nav GROUP BY source_code ORDER BY source_code;
 COMMIT;
 SQL
