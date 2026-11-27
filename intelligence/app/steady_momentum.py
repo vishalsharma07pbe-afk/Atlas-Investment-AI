@@ -84,7 +84,7 @@ def technical(candles,ind):
             "positive_day_percent":round(up/60*100,2),"information_discreteness":round((down-up)/60,4),
             "largest_up_day_percent":round(max(r)*100,2),"largest_gain_share_percent":round(concentration*100,2),
             "median_daily_turnover_cr":round(turnover/10_000_000,2),"rsi":round(rsi,2),
-            "history_count":len(candles),"close":close,"adjustment_status":candles[-1].adjustment_status,
+            "history_count":len(candles),"close":close,"atr_percent":round(100*atr/close,4),"adjustment_status":candles[-1].adjustment_status,
             "momentum_windows":window_observations(candles)}
 
 def fundamentals(report,today):
@@ -171,6 +171,10 @@ def summarize(snapshot,connect,instant):
     caps=amfi_equity_caps.read(connect,today)
     excluded=Counter()
     candidates=[]
+    enriched={}
+    for item,isin in automatic_company_evidence.identify(snapshot):
+        report=item.get("company_evidence") or {}
+        if report.get("isin")==isin:enriched[isin]=report
     with closing(connect()) as db:
         automatic_company_evidence._table(db)
         cached={r["isin"]:r["payload"] for r in db.execute(
@@ -217,6 +221,8 @@ def summarize(snapshot,connect,instant):
                 evidence,reason=fundamentals(report,today)
                 from .quarterly_financials import summarize as quarterly_summary
                 quarter=quarterly_summary(report,today)
+                if not reason and (isin not in enriched or enriched[isin].get("retrieved_at")!=report["retrieved_at"]):
+                    enriched[isin]=automatic_company_evidence._enrich(report,today)
             except (KeyError,TypeError,ValueError,AttributeError,OverflowError):
                 excluded["COMPANY_EVIDENCE_MISSING"]+=1
                 continue
@@ -224,7 +230,7 @@ def summarize(snapshot,connect,instant):
             if reason:
                 excluded[reason]+=1
                 continue
-            candidate={**row,**evidence,**cap,"quarterly_financials":quarter,
+            candidate={**row,**evidence,**cap,"quarterly_financials":quarter,"company_evidence":enriched[isin],
                 "benchmark_relative_strength":relative_strength.compare(row,snapshot.get("market_regime") or {},today),
                 "governance_review":governance_review.assess(row,report,today),"status":"SCREEN_MATCH_ONLY"}
             candidate["elite_assessment"]=elite_assessment.assess(candidate)

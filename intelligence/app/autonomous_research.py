@@ -16,7 +16,7 @@ import sqlite3
 from urllib.parse import urlencode
 
 from .market_client import backend_json
-from . import steady_momentum, amfi_equity_caps
+from . import steady_momentum, amfi_equity_caps, company_reports
 from .screener import screen
 from . import discovery_scan
 from .mutual_fund_recommendations import CATEGORIES, dashboard
@@ -353,16 +353,17 @@ def read_snapshot(include_ai=True):
         except (ValueError,OSError,sqlite3.Error):
             snapshot["market_regime"]=market_regime.empty("UNAVAILABLE")
         try:
+            snapshot["steady_momentum"] = steady_momentum.summarize(snapshot,_connect,current)
+        except (ValueError,TypeError,OSError,sqlite3.Error):
+            snapshot["steady_momentum"]={"status":"AWAITING_EVIDENCE","items":[],"notice":steady_momentum.NOTICE}
+        try:
             automatic_ai_review.attach(snapshot, _connect)
         except (ValueError, OSError, sqlite3.Error):
             snapshot["automatic_ai_status"] = "UNAVAILABLE"
         research_reliability.attach_conclusions(snapshot)
         stock_qualification.attach(snapshot,current.astimezone(ZoneInfo("Asia/Kolkata")).date(),current)
         snapshot["daily_briefing"] = daily_briefing.summarize(snapshot)
-        try:
-            snapshot["steady_momentum"] = steady_momentum.summarize(snapshot,_connect,current)
-        except (ValueError,TypeError,OSError,sqlite3.Error):
-            snapshot["steady_momentum"]={"status":"AWAITING_EVIDENCE","items":[],"notice":steady_momentum.NOTICE}
+        company_reports.attach(snapshot,current)
     return snapshot
 
 

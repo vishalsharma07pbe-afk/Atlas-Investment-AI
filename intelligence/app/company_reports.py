@@ -1,0 +1,83 @@
+"""One bounded public company report per exact ISIN. No private data or provider requests."""
+from collections import defaultdict
+from datetime import date,datetime,timedelta
+from zoneinfo import ZoneInfo
+from .replay_evidence import exact_isin
+
+HORIZONS=("SWING","SHORT_TERM","LONG_TERM")
+NOTICE="Shared reported company evidence and exact dated venue/horizon observations. No transfer of price levels, replay or execution clearance between venues. Current sampled research only; not a full registry or a qualified recommendation."
+
+def entries(snapshot):
+    if not snapshot.get("enabled") or snapshot.get("scope")!="PUBLIC_MARKET_RESEARCH_ONLY":return
+    try:today=date.fromisoformat(snapshot["research_date"])
+    except (ValueError,TypeError,KeyError):return
+    def valid(row):
+        if not isinstance(row,dict) or not exact_isin(row.get("isin")) or row.get("exchange") not in ("NSE","BSE") or type(row.get("id")) is not int or row["id"]<=0:return False
+        try:return 1<=(today-date.fromisoformat(row["as_of"])).days<=4
+        except (ValueError,TypeError,KeyError):return False
+    for section in snapshot.get("sections",[]):
+        if section.get("section") not in ("NSE","BSE") or section.get("status")!="READY":continue
+        result=section.get("result") or {}
+        coverage=result.get("discovery_coverage") or {}
+        if coverage.get("calendar_checked_on")!=today.isoformat() or coverage.get("calendar_status")!="PUBLISHED_SESSION":continue
+        for horizon in HORIZONS:
+            group=(result.get("horizons") or {}).get(horizon) or {}
+            if group.get("status")!="TECHNICAL_WATCH_ONLY":continue
+            for row in group.get("candidates",[])[:5]:
+                if valid(row) and row["exchange"]==section["section"] and row["as_of"]==coverage.get("expected_session"):yield horizon,row
+    screen=snapshot.get("steady_momentum") or {}
+    lists=[screen.get("items",[])]+[screen.get("category_items",{}).get(k,[]) for k in ("LARGE_CAP","MID_CAP","SMALL_CAP")]
+    for rows in lists:
+        for row in rows[:10]:
+            if valid(row) and row.get("status")=="SCREEN_MATCH_ONLY":yield "ELITE",row
+
+def grouped(snapshot):
+    groups=defaultdict(list)
+    for horizon,row in entries(snapshot):groups[row["isin"]].append((horizon,row))
+    return groups
+
+def attach(snapshot,instant):
+    reports={}
+    for isin,items in grouped(snapshot).items():
+        observations={}
+        conflict=False
+        company=[]
+        reviews=[]
+        findings=set()
+        for horizon,row in items:
+            key=(horizon,row["exchange"],row["id"],row["as_of"])
+            ref={k:row.get(k) for k in ("id","symbol","exchange","as_of","close","adjustment_status","history_count","security_state")}
+            ref["horizon"]=horizon
+            ref["qualification_status"]=(row.get("stock_qualification") or {}).get("status",row.get("status","WATCH_ONLY"))
+            if key in observations and observations[key]!=ref:conflict=True
+            observations[key]=ref
+            for block in ("stock_qualification","selection_company_context","company_venue_context"):
+                findings.update(v for v in (row.get(block) or {}).get("review_findings",[]) if isinstance(v,str))
+            evidence=row.get("company_evidence") or {}
+            try:
+                captured=datetime.fromisoformat(evidence["retrieved_at"])
+                if evidence.get("isin")==isin and captured.tzinfo and instant-timedelta(hours=24)<=captured<=instant:
+                    company.append(evidence)
+            except (TypeError,ValueError,KeyError):pass
+            review=row.get("ai_review") or {}
+            if review.get("company_isin")==isin:reviews.append(review)
+        # Same capture must carry the same source sections. Prefer the enriched
+        # representation (peer context) without mixing different captures.
+        shared=None
+        if company:
+            latest=max(datetime.fromisoformat(r["retrieved_at"]) for r in company)
+            current=[r for r in company if datetime.fromisoformat(r["retrieved_at"])==latest]
+            if all(r.get("sections")==current[0].get("sections") for r in current):
+                shared=max(current,key=lambda r:len(r))
+            else:findings.add("CONFLICTING_COMPANY_SOURCE_CAPTURE")
+        review=reviews[0] if reviews and all(r==reviews[0] for r in reviews) else None
+        if conflict:
+            findings.add("CONFLICTING_LISTING_OBSERVATIONS")
+            continue
+        reports[isin]={"isin":isin,"status":"REVIEW_REQUIRED" if findings else "RESEARCH_ONLY",
+            "observations":[observations[k] for k in sorted(observations)],
+            "observed_venues":sorted({r["exchange"] for r in observations.values()}),
+            "review_findings":sorted(findings),"company_evidence":shared,"ai_review":review,
+            "qualified":False,"notice":NOTICE}
+    snapshot["company_reports"]={"status":"AVAILABLE" if reports else "AWAITING_EVIDENCE","items":reports,"notice":NOTICE}
+    return snapshot

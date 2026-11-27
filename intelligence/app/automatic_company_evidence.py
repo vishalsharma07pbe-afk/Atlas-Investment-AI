@@ -608,15 +608,17 @@ def attach(snapshot,connect,instant=None):
         if row and row["payload"]:
             try:
                 report=json.loads(row["payload"])
-                if report.get("isin")==isin:
+                stamp=datetime.fromisoformat(report["retrieved_at"])
+                if report.get("isin")==isin and stamp.tzinfo and instant-timedelta(hours=24)<=stamp<=instant:
                     reports[isin]=_enrich(report,today)
             except (ValueError,TypeError,AttributeError,KeyError,OverflowError):
                 continue
-    for item,isin in primary:
+    for isin in {isin for _,isin in primary}:
         report=reports.get(isin)
         if report:
             report["peer_research"]=peer_research.summarize(report,reports)
             report["industry_sample"]=peer_research.industry_sample(report,cohort,instant)
             report["sector_sample"]=peer_research.sector_sample(report,cohort,instant)
-            item["company_evidence"]=report
+    for item,isin in primary:
+        if isin in reports:item["company_evidence"]=reports[isin]
     return snapshot

@@ -14,7 +14,7 @@ import os
 import re
 import sqlite3
 
-from . import ai_failover, ai_public_evidence, ai_claims
+from . import ai_failover, ai_public_evidence, ai_claims, company_reports
 
 VERSION = "AUTO-GROUNDED-5"
 BATCH_SIZE = 2
@@ -46,7 +46,7 @@ def providers():
 
 
 def evidence(candidate, horizon, context=None):
-    if horizon not in HORIZONS or candidate.get("exchange") not in ("NSE", "BSE"):
+    if horizon not in (*HORIZONS,"ELITE") or candidate.get("exchange") not in ("NSE", "BSE"):
         raise ValueError("INVALID_CANDIDATE")
     symbol = candidate.get("symbol")
     if not isinstance(symbol, str) or not SYMBOL.fullmatch(symbol):
@@ -61,7 +61,7 @@ def evidence(candidate, horizon, context=None):
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
             raise ValueError("INVALID_OBSERVATION")
         numeric[key] = value
-    if not {"close", "history_count", "atr_percent"} <= numeric.keys():
+    if not ({"close","history_count"} if horizon=="ELITE" else {"close","history_count","atr_percent"}) <= numeric.keys():
         raise ValueError("INCOMPLETE_OBSERVATIONS")
     adjustment = candidate.get("adjustment_status")
     if adjustment not in ("RAW_UNADJUSTED", "ADJUSTED"):
@@ -170,6 +170,7 @@ def _review(pack, provider, runner, role="TECHNICAL_EVIDENCE"):
               "Cite exactly the top-level evidence ID in evidence_ids. For missing evidence cite a specific LIMITS array entry. "
               "Choose important observations for your role. Do not add prose, invent paths or values, infer recommendations, "
               "predict outcomes, calculate new values or assert that another reviewer agrees. "
+              "Each COMPANY listing observation has its own venue, date and horizon; do not transfer values across them. "
               "Ownership percentages are not transactions; flows are market-level. News topics are unverified. "
               "Peer multiples are undated, global changes are not synchronized, and replay is not forward performance. "
               "The system will validate each assertion against the supplied observations.\n"
@@ -190,7 +191,47 @@ def _review(pack, provider, runner, role="TECHNICAL_EVIDENCE"):
             "claim_audit":{k:v for k,v in audit.items() if k!="findings"}}
 
 
+def _company_candidates(snapshot,selected):
+    # One exact company pack across all current eligible venues and horizons.
+    # Duplicate category/overall Elite references share the same evidence hash.
+    for isin,entries in sorted(company_reports.grouped(snapshot).items()):
+        packs={}
+        targets=[]
+        conflict=False
+        for horizon,item in entries:
+            try:
+                pack=evidence(item,horizon,snapshot)
+            except (ValueError,KeyError,TypeError,OverflowError):continue
+            key=(horizon,item["exchange"],item["id"],pack["as_of"])
+            if key in packs and packs[key]!=pack:conflict=True
+            packs[key]=pack
+            targets.append(item)
+        if conflict or not packs or len(packs)>20:continue
+        ordered=[packs[k] for k in sorted(packs)]
+        # Keep source-specific observations and news/replays explicitly scoped.
+        # Shared company domains appear once, and conflicting values are omitted.
+        root={**ordered[0],"version":"AUTO-COMPANY-GROUNDED-1","company_isin":isin}
+        root.pop("historical_replay",None);root.pop("news_topics",None)
+        root["listing_observations"]=[]
+        for p in ordered:
+            listing={k:p[k] for k in ("symbol","exchange","as_of","horizon","adjustment","observations")}
+            for k in ("historical_replay","news_topics","benchmark_regime","market_flows"):
+                if k in p:listing[k]=p[k]
+            root["listing_observations"].append(listing)
+        for k in ("financial_trends","ownership_context","peer_valuation","global_changes","benchmark_regime","market_flows"):
+            root.pop(k,None)
+            available=[p[k] for p in ordered if k in p]
+            if available and all(v==available[0] for v in available):
+                root[k]=available[0]
+            elif available:
+                root["missing"]=[*root["missing"],"Conflicting shared "+k+" observations"]
+        key=identity(root,selected)
+        for item in targets:yield item,root,key
+
 def candidates(snapshot, selected=None):
+    if snapshot.get("scope")=="PUBLIC_MARKET_RESEARCH_ONLY":
+        yield from _company_candidates(snapshot,selected)
+        return
     for section in snapshot["sections"]:
         if section["section"] not in ("NSE", "BSE") or section["status"]!="READY":
             continue
@@ -251,6 +292,7 @@ def refresh(snapshot, connect, runner=ai_failover.grounded_research):
                 continue
         completed={r["provider"] for r in reviews}
         result={"reviews":reviews,"evidence":pack,"reviewed_at":now.isoformat(),
+                **({"company_isin":pack["company_isin"]} if "company_isin" in pack else {}),
                 "attempted_providers":[p for p in selected if p in attempted],
                 "notice":"Accepted findings are deterministic restatements of matching supplied observations. Incorrect or unsupported assertions are withheld; source truth and investment suitability are not established.",
                 "committee":_committee(pack,selected,reviews,attempted)}
@@ -269,6 +311,8 @@ def attach(snapshot, connect):
                 for item in group.get("candidates",[]):
                     if isinstance(item,dict):
                         item.pop("ai_review",None)
+    for _,item in company_reports.entries(snapshot):
+        item.pop("ai_review",None)
     # Only display reviews for the exact current evidence, model and permitted plan.
     if not snapshot["enabled"] or not enabled():
         snapshot["automatic_ai_status"]="DISABLED"
@@ -277,9 +321,11 @@ def attach(snapshot, connect):
     snapshot["automatic_ai_status"]="ENABLED" if allowed else "NO_CONFIGURED_PROVIDER"
     if not allowed:
         return snapshot
+    cached={}
     for item,pack,key in candidates(snapshot,allowed):
         item.pop("ai_review",None)
-        row=_read(connect,key)
+        if key not in cached:cached[key]=_read(connect,key)
+        row=cached[key]
         if not row or row[1] not in ("COMPLETE","PARTIAL","PENDING_MEMBERS","RUNNING"):
             continue
         result=row[2]
@@ -297,4 +343,6 @@ def _supplied(pack):
     for key,identifier in domains.items():
         if key in pack:
             supplied[identifier]=pack[key]
+    if "company_isin" in pack:
+        supplied["COMPANY"]={"isin":pack["company_isin"],"listing_observations":pack["listing_observations"]}
     return supplied
