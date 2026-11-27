@@ -85,6 +85,50 @@ final class PortfolioThesisSummary {
     boolean reviewMetric=!"REPORTED_LIABILITIES_TO_ASSETS".equals(key)&&(latest<previous||latest<0);
     add(reviewMetric?review:observations,statement,"Upstox matched annual statements; filings unverified");
    }
+   // The shared company adapter has already matched reported consolidated
+   // quarter periods. Preserve its limitations and never infer growth from gaps.
+   JsonNode quarterly=company.path("quarterly_financials");
+   String quarterStatus=quarterly.path("status").asText();
+   int quarterCount=0;
+   String isin=row.path("isin").asText();
+   boolean recentQuarter=false;
+   try{
+     var period=java.time.LocalDate.parse(quarterly.path("latest_period").asText());
+     long age=java.time.temporal.ChronoUnit.DAYS.between(period,java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")));
+     recentQuarter=age>=0&&age<=150&&period.getDayOfMonth()==period.lengthOfMonth();
+   }catch(java.time.DateTimeException ignored){/* No dated quarter. */}
+   if(isin.matches("IN[A-Z0-9]{10}")&&isin.equals(company.path("isin").asText())&&recentQuarter
+       &&Set.of("REPORTED_QUARTERLY_COMPARISONS","PARTIAL_LATEST_QUARTER").contains(quarterStatus)){
+     Map<String,List<JsonNode>> quarterMetrics=new TreeMap<>();
+     for(JsonNode metric:quarterly.path("items")){
+       String key=metric.path("metric").asText();
+       if(Set.of("revenue","operating_profit","net_profit").contains(key))
+         quarterMetrics.computeIfAbsent(key,k->new ArrayList<>()).add(metric);
+     }
+     for(var entry:quarterMetrics.entrySet()){
+       if(entry.getValue().size()!=1)continue;
+       JsonNode metric=entry.getValue().getFirst();
+       Double latest=number(metric,"latest_value"),yoy=number(metric,"year_over_year_growth_percent"),
+         qoq=number(metric,"previous_quarter_growth_percent"),acceleration=number(metric,"growth_acceleration_pp");
+       if(latest==null||Math.abs(latest)>1e12)continue;
+       if(yoy!=null&&(yoy< -100||yoy>1e12))yoy=null;
+       if(qoq!=null&&(qoq< -100||qoq>1e12))qoq=null;
+       if(acceleration!=null&&(Math.abs(acceleration)>2e12||yoy==null))acceleration=null;
+       if(yoy==null&&qoq==null&&latest>=0)continue;
+       quarterCount++;
+       String label=switch(entry.getKey()){case "revenue"->"Revenue";case "operating_profit"->"Operating profit";default->"Net profit";};
+       String statement=label+" quarter ended "+quarterly.path("latest_period").asText()+":";
+       if(yoy!=null)statement+=" YoY "+fmt(yoy)+"%.";
+       if(qoq!=null)statement+=" QoQ "+fmt(qoq)+"%.";
+       if(acceleration!=null)statement+=" YoY growth acceleration "+fmt(acceleration)+" pp.";
+       if(latest<0)statement+=" Negative reported value.";
+       boolean concern=latest<0||(yoy!=null&&yoy<0)||(acceleration!=null&&acceleration<0);
+       add(concern?review:observations,statement+(concern?" Reassess reported earnings direction; not an exit signal.":" Historical observation, not a forecast."),
+           "Upstox consolidated quarterly statements; independent filings unverified");
+     }
+   }
+   if(quarterCount<3||!"REPORTED_QUARTERLY_COMPARISONS".equals(quarterStatus))
+     gaps.add("Recent matched quarterly revenue and profit comparisons are incomplete or unavailable.");
    JsonNode news=thesis.path("news_evidence");
    SortedSet<String> topics=new TreeSet<>();
    for(JsonNode article:news.path("articles"))for(JsonNode topic:article.path("topics"))
