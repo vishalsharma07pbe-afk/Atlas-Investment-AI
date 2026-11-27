@@ -13,12 +13,13 @@ public class IntradayResearchService {
  private final JdbcTemplate jdbc;
  private final UpstoxFeedService stocks;
  private final MarketCalendarService calendar;
+ private final IntradayScenarioLedger scenarios;
  @Value("${ATLAS_INTRADAY_RESEARCH_ENABLED:false}") boolean enabled;
  @Value("${MARKET_DATA_USAGE_RIGHTS_CONFIRMED:false}") boolean rights;
  @Value("${MARKET_DATA_ENTITLEMENT_CONFIRMED:false}") boolean entitlement;
  @Value("${UPSTOX_ACCESS_TOKEN:}") String token="";
  public IntradayResearchService(JdbcTemplate jdbc,UpstoxFeedService stocks,MarketCalendarService calendar){
-  this.jdbc=jdbc;this.stocks=stocks;this.calendar=calendar;
+  this.jdbc=jdbc;this.stocks=stocks;this.calendar=calendar;this.scenarios=new IntradayScenarioLedger(jdbc,calendar);
  }
  boolean permitted(){return enabled&&rights&&entitlement&&!token.isBlank();}
 
@@ -26,7 +27,18 @@ public class IntradayResearchService {
  public void scheduled(){
   if(!permitted())return;
   Instant now=Instant.now();
-  for(String exchange:List.of("NSE","BSE"))if(calendar.isMarketOpen(exchange,now))refreshExchange(exchange,now);
+  boolean open=false;
+  for(String exchange:List.of("NSE","BSE"))if(calendar.isMarketOpen(exchange,now)){open=true;refreshExchange(exchange,now);}
+  // No provider requests for scenario validation. GET is read-only.
+  try{
+   Instant captured=Instant.now();
+   if(open)scenarios.publish(current(captured,false),captured);
+   scenarios.settle(captured);
+   if(!open)scenarios.replayOne(captured);
+  }catch(org.springframework.dao.DataAccessException|IllegalStateException ex){
+   // Optional scenario evidence must not break the existing feed.
+   org.slf4j.LoggerFactory.getLogger(IntradayResearchService.class).warn("Intraday scenario evidence unavailable: {}",ex.getClass().getSimpleName());
+  }
  }
 
  void refreshExchange(String exchange,Instant now){
@@ -78,13 +90,14 @@ public class IntradayResearchService {
   }
  }
 
- public Map<String,Object> current(){
-  Instant now=Instant.now();
+ public Map<String,Object> current(){return current(Instant.now(),true);}
+ Map<String,Object> current(Instant now,boolean includeSummary){
   List<Map<String,Object>> candidates=new ArrayList<>(),warnings=new ArrayList<>(),observations=new ArrayList<>();
   int examined=0,eligible=0;List<String> open=new ArrayList<>();
   if(permitted())for(String exchange:List.of("NSE","BSE")){
    if(!calendar.isMarketOpen(exchange,now))continue;
    open.add(exchange);
+   boolean scenarioCalendar=IntradayScenario.regular(calendar.sessionContext(exchange,now),now.atZone(MarketCalendarService.IST).toLocalDate());
    // Only scheduler-collected, completed provider bars for this exact session.
    var rows=jdbc.queryForList("""
      SELECT i.id,i.symbol,i.isin,e.code AS exchange,c.candle_time,c.open,c.high,c.low,c.close,c.volume,
@@ -118,6 +131,10 @@ public class IntradayResearchService {
     if(quote!=null)finding.put("venue_quote",quote);
     observations.add(finding);
     if(IntradayVenueEvidence.restricted(finding))continue;
+    if(scenarioCalendar){
+     var plan=IntradayScenario.plan(finding,group,now);
+     if(plan!=null)finding.put("scenario_research",plan);
+    }
     eligible++;
     if("FAILED_BREAKOUT_WATCH".equals(finding.get("pattern")))warnings.add(finding);
     else if("VOLUME_BREAKOUT_WATCH".equals(finding.get("pattern")))candidates.add(finding);
@@ -125,10 +142,13 @@ public class IntradayResearchService {
   }
   String status=!permitted()?"NOT_AUTHORIZED":open.isEmpty()?"SESSION_CLOSED_OR_UNVERIFIED":"RESEARCH_ONLY";
   var selection=select(candidates,warnings,status,observations,now);
-  return Map.of("status",status,"generated_at",now.toString(),"open_exchanges",open,
+  Map<String,Object> response=new LinkedHashMap<>(Map.of("status",status,"generated_at",now.toString(),"open_exchanges",open,
     "examined",examined,"eligible",eligible,"candidates",selection.get("candidates"),
     "warnings",selection.get("warnings"),"qualification",selection.get("qualification"),
-    "notice","Completed 15-minute observations in a bounded sample. VWAP and volume comparisons are candle-based proxies, not live order-book liquidity. No validated trading signal, target or stop-loss.");
+    "notice","Completed 15-minute observations in a bounded sample. VWAP and volume comparisons are candle-based proxies, not live order-book liquidity. No validated trading signal, target or stop-loss."));
+  if(includeSummary&&permitted())try{response.put("scenario_validation",scenarios.summary(now));}
+   catch(org.springframework.dao.DataAccessException ex){response.put("scenario_validation",Map.of("status","UNAVAILABLE"));}
+  return response;
  }
 
  static final List<String> QUALIFICATION_GAPS=List.of("LIVE_SPREAD_AND_EXECUTION_LIQUIDITY_REQUIRED",
@@ -183,7 +203,7 @@ public class IntradayResearchService {
    if(conflict)findings.add("CROSS_VENUE_FAILED_BREAKOUT_REVIEW");
    else if(!failed.isEmpty())findings.add("FAILED_BREAKOUT_REVIEW");
    findings.addAll(IntradayVenueEvidence.restrictionFindings(observed));
-   if(!findings.isEmpty())reviewCount++;
+   if(!findings.isEmpty()){reviewCount++;representative.remove("scenario_research");}
    representative.put("stock_qualification",Map.of(
       "status",findings.isEmpty()?"WITHHELD_EVIDENCE_GAPS":"WITHHELD_REVIEW_REQUIRED",
       "horizon","INTRADAY","blockers",QUALIFICATION_GAPS,"review_findings",findings,
