@@ -205,6 +205,14 @@ public class IntradayResearchService {
     "examined",examined,"eligible",eligible,"candidates",selection.get("candidates"),
     "warnings",selection.get("warnings"),"qualification",selection.get("qualification"),
     "notice","Completed 15-minute observations in a bounded sample. VWAP and volume comparisons are candle-based proxies, not live order-book liquidity. No validated trading signal, target or stop-loss."));
+  Object qualification=selection.get("qualification");
+  if(qualification instanceof Map<?,?> q){
+   String decision=!"RESEARCH_ONLY".equals(status)?"AWAITING_EVIDENCE":
+      q.get("review_required_count") instanceof Number n&&n.intValue()>0?"REVIEW_REQUIRED":
+      q.get("reviewed_count") instanceof Number n&&n.intValue()>0?"WATCH_ONLY":"AWAITING_EVIDENCE";
+   response.put("unified_decision",Map.of("methodology","UNIFIED-DECISION-1","scope","CURRENT_SESSION",
+     "state",decision,"qualified",false,"notice","Separate session-specific review; no daily or AI override."));
+  }
   if(includeSummary&&permitted())try{response.put("scenario_validation",scenarios.summary(now));}
    catch(org.springframework.dao.DataAccessException ex){response.put("scenario_validation",Map.of("status","UNAVAILABLE"));}
   return response;
@@ -267,6 +275,10 @@ public class IntradayResearchService {
       "status",findings.isEmpty()?"WITHHELD_EVIDENCE_GAPS":"WITHHELD_REVIEW_REQUIRED",
       "horizon","INTRADAY","blockers",QUALIFICATION_GAPS,"review_findings",findings,
       "notice","Current-session technical evidence only; no execution, event or prospective validation."));
+   representative.put("unified_decision",Map.of("methodology","UNIFIED-DECISION-1","scope","CURRENT_SESSION",
+     "state",findings.isEmpty()?"WATCH_ONLY":"REVIEW_REQUIRED","qualified",false,
+     "blockers",QUALIFICATION_GAPS,"review_findings",findings,
+     "notice","Current-session evidence only; daily research and AI commentary cannot establish intraday clearance."));
    representative.put("observed_pattern_venues",venues);
    (failed.isEmpty()?positive:negative).add(representative);
   }

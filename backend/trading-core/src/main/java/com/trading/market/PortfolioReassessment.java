@@ -88,11 +88,45 @@ final class PortfolioReassessment {
   Double score=complete?Math.round(factors.values().stream().mapToDouble(Double::doubleValue).sum()*100d)/100d:null;
   var thesis=h.path("thesis_summary");
   boolean attention="REVIEW_REQUIRED".equals(h.path("status").asText())||"REVIEW_EVIDENCE".equals(thesis.path("status").asText());
+  attention=attention||changed(h);
   // Research review always takes precedence over even a strong historical score.
   String decision=attention?"REASSESS_EVIDENCE":!complete?"COLLECT_EVIDENCE":"MONITOR_RESEARCH_ONLY";
   var out=new LinkedHashMap<String,Object>();out.put("methodology",method);out.put("status",complete?"PRELIMINARY_SCORE_ONLY":"SCORE_WITHHELD");
   out.put("score",score);out.put("components",components);out.put("missing_factors",missing);out.put("review_state",decision);
   out.put("qualified",false);out.put("notice",NOTICE);return out;
+ }
+ private static boolean changed(JsonNode h){
+  for(String domain:List.of("ownership_changes","fund_thesis_changes","thesis_changes")){
+   for(var item:h.path(domain)){
+    if("REVIEW".equals(item.path("attention").asText())||
+       ("thesis_changes".equals(domain)&&Set.of("NEGATIVE","DECLINING").contains(item.path("current_direction").asText())))return true;
+   }
+  }
+  return false;
+ }
+ /** Run after lifecycle monitors so new adverse changes cannot be hidden by
+  * a previous positive score. All processing stays in the owner-local review. */
+ static Map<String,Object> finalizeReview(Map<String,Object> report,ObjectMapper json,LocalDate today){
+  var out=new LinkedHashMap<>(report);
+  List<Map<String,Object>> holdings=new ArrayList<>();
+  if(report.get("holdings") instanceof List<?> rows)for(Object row:rows){
+   if(!(row instanceof Map<?,?> m))continue;
+   var h=new LinkedHashMap<String,Object>();
+   m.forEach((key,value)->{if(key instanceof String k)h.put(k,value);});
+   var a=holding(h,json,today);
+   h.put("reassessment",a);
+   String state=switch(String.valueOf(a.get("review_state"))){
+    case "REASSESS_EVIDENCE"->"REVIEW_REQUIRED";
+    case "MONITOR_RESEARCH_ONLY"->"WATCH_ONLY";
+    default->"AWAITING_EVIDENCE";
+   };
+   h.put("unified_decision",Map.of("methodology","UNIFIED-DECISION-1","scope","OWNER_LOCAL","state",state,
+     "qualified",false,"notice",NOTICE));
+   holdings.add(h);
+  }
+  out.put("holdings",holdings);
+  out.put("portfolio_reassessment",synthesis(holdings,json));
+  return out;
  }
  static Map<String,Object> synthesis(List<Map<String,Object>> holdings,ObjectMapper json){
   int scored=0,review=0,missing=0,monitor=0;

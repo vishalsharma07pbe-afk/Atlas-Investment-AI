@@ -22,4 +22,12 @@ class PortfolioReassessmentTest {
   assertEquals(1,PortfolioReassessment.synthesis(List.of(row),json).get("scored_count"));
   row.put("exact_scheme_code",654321);assertNull(PortfolioReassessment.holding(row,json,LocalDate.of(2026,11,27)).get("score"));
  }
+ @Test void lifecycleDeteriorationOverridesPriorResearchState(){
+  var row=Map.<String,Object>of("asset_type","EQUITY","status","MONITOR",
+    "thesis_changes",List.of(Map.of("current_direction","DECLINING")));
+  var report=PortfolioReassessment.finalizeReview(Map.of("holdings",List.of(row)),json,LocalDate.of(2026,11,27));
+  var item=(Map<?,?>)((List<?>)report.get("holdings")).getFirst();
+  assertEquals("REVIEW_REQUIRED",((Map<?,?>)item.get("unified_decision")).get("state"));
+  assertEquals(1,((Map<?,?>)report.get("portfolio_reassessment")).get("reassess_count"));
+ }
 }

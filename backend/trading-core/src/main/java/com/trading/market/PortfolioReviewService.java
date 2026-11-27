@@ -165,6 +165,7 @@ public class PortfolioReviewService {
     report=PortfolioThesisChanges.attach(thesis.enrich(report),previous,json,now);
     report=PortfolioFundThesisChanges.attach(report,previous,json,now);
     report=PortfolioOwnershipChanges.attach(report,previous,json,now);
+    report=PortfolioReassessment.finalizeReview(report,json,today);
     report.put("portfolio_level_risk",PortfolioLevelRisk.assess(report,json,today));
     report.put("sale_research",PortfolioSaleResearch.assess(rows,report,json,today));
     report.put("fund_exit_load_research",PortfolioFundExitLoad.assess(report,json,now));
