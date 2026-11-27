@@ -26,7 +26,7 @@ describe("Liquid Glass appearance",()=>{
     const {container}=render(<App/>);
     fireEvent.click(screen.getByRole("button",{name:"Open appearance settings"}));
     const opacity=screen.getByLabelText("Panel opacity");
-    const blur=screen.getByLabelText("Backdrop blur");
+    const blur=screen.getByLabelText("Background & backdrop blur");
     const dashboard=container.querySelector(".dashboard") as HTMLElement;
     for(const value of [0,25,50,75,100]){
       fireEvent.change(opacity,{target:{value:String(value)}});
@@ -34,8 +34,10 @@ describe("Liquid Glass appearance",()=>{
     }
     fireEvent.change(blur,{target:{value:"37"}});
     expect(dashboard.style.getPropertyValue("--panel-blur")).toBe("37px");
+    expect(dashboard.style.getPropertyValue("--canvas-blur")).toBe("37px");
     fireEvent.change(opacity,{target:{value:"0"}});
     expect(dashboard.style.getPropertyValue("--panel-blur")).toBe("0px");
+    expect(dashboard.style.getPropertyValue("--canvas-blur")).toBe("37px");
     expect(dashboard.dataset.panelClear).toBe("true");
   });
 
