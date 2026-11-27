@@ -1,0 +1,10 @@
+export type FilingEvidence={period:string;board_approval_date:string;source_url:string;quarter_start:string;year_to_date_start:string;quarter_audit_status:string;year_to_date_audit_status:string;quarter:Record<string,number>;year_to_date:Record<string,number>;audit_opinion:string;cash_flow_ytd:{operating_cash_flow_cr:number;net_profit_cr:number;cash_to_profit_ratio:number|null}|null;comparison:{status:string;notice:string;difference_cr?:number;tolerance_cr?:number};notice:string};
+const fmt=(n:number)=>n.toLocaleString("en-IN",{maximumFractionDigits:4});
+const words=(s:string)=>s.toLowerCase().replace(/_/g," ");
+export default function FinancialFilingView({report}:{report:FilingEvidence}){
+ return <details><summary>Exchange-filed financial results &amp; audit declaration</summary><p>Consolidated · quarter ended {report.period} · board approval {report.board_approval_date} · <a href={report.source_url} target="_blank" rel="noreferrer">Original NSE filing</a></p>
+ <div className="tablewrap"><table><thead><tr><th>INR crore</th><th>Quarter from {report.quarter_start}</th><th>Year to date from {report.year_to_date_start}</th></tr></thead><tbody>{["revenue","total_income","expenses","profit_before_tax","total_tax","net_profit","owners_profit"].map(k=><tr key={k}><td>{words(k)}</td><td>{fmt(report.quarter[k])}</td><td>{fmt(report.year_to_date[k])}</td></tr>)}</tbody></table></div>
+ <p>Quarter: {report.quarter_audit_status} · YTD: {report.year_to_date_audit_status} · {words(report.audit_opinion)}</p>
+ {report.cash_flow_ytd&&<p>YTD operating cash flow ₹{fmt(report.cash_flow_ytd.operating_cash_flow_cr)} Cr · cash / total profit {report.cash_flow_ytd.cash_to_profit_ratio==null?"—":fmt(report.cash_flow_ytd.cash_to_profit_ratio)+"×"}</p>}
+ <p>Revenue comparison: {words(report.comparison.status)}{report.comparison.difference_cr!=null?" · difference ₹"+fmt(report.comparison.difference_cr)+" Cr":""}.</p><p className="muted tiny">{report.comparison.notice} {report.notice}</p></details>;
+}

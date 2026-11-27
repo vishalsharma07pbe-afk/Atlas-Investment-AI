@@ -76,7 +76,9 @@ def assess(item,group,coverage,context,horizon,today):
     requirements=["INDEPENDENT_DATED_FILING_VERIFICATION_REQUIRED"]
     if not fundamental:requirements.append("MATCHED_MULTI_YEAR_FINANCIAL_HISTORY_REQUIRED")
     if horizon=="LONG_TERM":requirements.append("VERIFIED_BUSINESS_QUALITY_REQUIRED")
-    gate("FUNDAMENTALS",fundamental,requirements)
+    filing=item.get("independent_financial_evidence") or {}
+    filing_observed=exact and filing.get("isin")==item.get("isin") and filing.get("status")=="REPORTED_CONSOLIDATED_FILING"
+    gate("FUNDAMENTALS",fundamental or filing_observed,requirements)
     peer=(company.get("peer_research") or {}).get("valuation_research") or {} if matched else {}
     valuation=matched and peer.get("status")=="UNDATED_PEER_MULTIPLES" and bool(peer.get("metrics"))
     gate("VALUATION",valuation,["DATED_INTRINSIC_VALUATION_REQUIRED"] if horizon!="SWING" else ["VALUATION_AND_DOWNSIDE_CONTEXT_REQUIRED"])

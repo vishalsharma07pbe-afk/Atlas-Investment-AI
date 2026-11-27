@@ -47,6 +47,7 @@ def attach(snapshot,instant):
         reviews=[]
         news=[]
         pledges=[]
+        financial=[]
         findings=set()
         for horizon,row in items:
             key=(horizon,row["exchange"],row["id"],row["as_of"])
@@ -67,6 +68,10 @@ def attach(snapshot,instant):
             if pledge.get("isin")==isin and pledge.get("status")=="REPORTED_QUARTERLY_AGGREGATE":
                 pledges.append(pledge)
                 if pledge.get("total_encumbered_shares",0)>0:findings.add("ISSUER_REPORTED_PROMOTER_ENCUMBRANCE_REVIEW")
+            filing=row.get("independent_financial_evidence") or {}
+            if filing.get("isin")==isin and filing.get("status")=="REPORTED_CONSOLIDATED_FILING":
+                financial.append(filing)
+                findings.update((row.get("governance_review") or {}).get("findings",[]))
             headline=row.get("news_evidence") or {}
             if headline.get("isin")==isin and headline.get("source_instrument_key")=="NSE_EQ|"+isin:
                 try:
@@ -95,11 +100,20 @@ def attach(snapshot,instant):
         if news and shared_news is None:findings.add("CONFLICTING_COMPANY_NEWS_CAPTURE")
         shared_pledge=pledges[0] if pledges and all(p==pledges[0] for p in pledges) else None
         if pledges and shared_pledge is None:findings.add("CONFLICTING_PLEDGE_FILING_EVIDENCE")
+        # Cross-source comparison can differ by view availability; reconcile
+        # the source capture independently of supplementary provider context.
+        source=[{k:v for k,v in r.items() if k!="comparison"} for r in financial]
+        shared_financial=None
+        if source and all(r==source[0] for r in source):
+            shared_financial={**source[0]}
+            from .nse_financial_filings import compare
+            shared_financial["comparison"]=compare(shared_financial,shared)
+        elif source:findings.add("CONFLICTING_FINANCIAL_FILING_EVIDENCE")
         reports[isin]={"isin":isin,"status":"REVIEW_REQUIRED" if findings else "RESEARCH_ONLY",
             "observations":[observations[k] for k in sorted(observations)],
             "observed_venues":sorted({r["exchange"] for r in observations.values()}|{r["exchange"] for r in other}),
             "venue_observations":[{**r,"quote":company_venues.fresh_quote(r,instant)} for r in sorted(other,key=lambda r:(r["exchange"],r["id"]))],
-            "review_findings":sorted(findings),"company_evidence":shared,"news_evidence":shared_news,"independent_pledge_evidence":shared_pledge,"ai_review":review,
+            "review_findings":sorted(findings),"company_evidence":shared,"news_evidence":shared_news,"independent_pledge_evidence":shared_pledge,"independent_financial_evidence":shared_financial,"ai_review":review,
             "qualified":False,"notice":NOTICE}
     snapshot["company_reports"]={"status":"AVAILABLE" if reports else "AWAITING_EVIDENCE","items":reports,"notice":NOTICE}
     return snapshot
