@@ -98,6 +98,7 @@ function DailyBriefing({report,onFunds,onSettings,onPortfolio,onHorizon}:{report
  const words=(value:string)=>value.toLowerCase().replace(/_/g," ");
  return <section className="autonomous-result" aria-label="Daily research briefing">
   <header><strong>Daily research briefing</strong><span>{report.ready_sections}/{report.total_sections} sections current</span></header>
+  <div className="terminal-research-metrics" aria-label="Research coverage summary"><article><span>Daily histories eligible</span><strong>{report.market.eligible_histories}<small> / {report.market.sampled_instruments}</small></strong></article><article><span>Technical watches</span><strong>{watches}</strong></article><article><span>AI reviewed watches</span><strong>{reviewed}</strong></article><article><span>Qualified fund growth picks</span><strong>{report.funds.growth_pick_count??"Pending"}</strong></article></div>
   <p>{report.ready_sections===0?"Research is pending. No current decision evidence yet.":report.market.eligible_histories+" / "+report.market.sampled_instruments+" sampled daily histories eligible. Market regime not yet validated for strategy suitability."}</p>
   <p><strong>Equity:</strong> {watches} displayed horizon watches · {reviewed} with AI commentary · {conflicts} with conflicting evidence. Full investment qualification is not available yet.</p>
   <p><strong>Funds:</strong> {report.funds.growth_pick_count===null?"Research pending":report.funds.growth_pick_count+" growth picks in current categories"} · {report.funds.historical_watch_count} historical watch observations. <button className="secondary" type="button" onClick={onFunds}>Review funds</button></p>
@@ -168,10 +169,18 @@ function MarketRegimePanel({report}:{report:RegimeReport}){
  return <section className="autonomous-result" aria-label="Observed market regime"><header><strong>Observed market regime</strong><span>{words(report.status)}</span></header>
  {report.status==="OBSERVED_BENCHMARK_REGIME"?<><p><strong>Nifty 50 · {words(report.trend??"UNAVAILABLE")}</strong> · {report.as_of} · 60-session price change {percent(report.benchmark_change_60_percent??null)}</p>
  <p>20-session annualized historical volatility: {percent(report.volatility_20_annualized_percent??null)} · {words(report.volatility_regime??"UNAVAILABLE")}</p>
+ {report.breadth?.matched_count!=null&&<BreadthGraphic advancing={report.breadth.advancing} declining={report.breadth.declining} unchanged={report.breadth.unchanged}/>} 
  {report.breadth?.matched_count!=null?<p>Matched adjusted NSE sample: {report.breadth.advancing} advancing · {report.breadth.declining} declining · {report.breadth.unchanged} unchanged · {report.breadth.matched_count}/{report.breadth.selected_count} selected · {words(report.breadth.status)}</p>:<p>Comparable adjusted sample breadth unavailable.</p>}
  <p>Trend / daily breadth context: {words(report.agreement??"UNAVAILABLE")}</p>
  {report.institutional?.fii&&<p>Same latest session, five-session reported flows: FII {words(report.institutional.fii)} · DII {words(report.institutional.dii??"UNAVAILABLE")}</p>}
  </>:<p>Insufficient current calendar-matched benchmark history.</p>}
  {report.global_coverage&&<p>Separate global context: {report.global_coverage.available_count}/{report.global_coverage.total_count} dated indicators. Not synchronized with the Indian close.</p>}
  <p className="muted tiny">{report.notice}</p></section>;
+}
+
+function BreadthGraphic({advancing,declining,unchanged}:{advancing?:number;declining?:number;unchanged?:number}){
+ const values=[advancing,declining,unchanged];
+ if(!values.every(v=>typeof v==="number"&&Number.isFinite(v)&&v>=0))return null;
+ const counts=values as number[];const total=counts.reduce((a,b)=>a+b,0);if(total<=0)return null;
+ return <figure className="terminal-breadth" aria-label="Observed sample breadth"><div className="terminal-breadth-track" aria-hidden="true">{counts.map((n,i)=><span key={i} className={["gain","loss","flat"][i]} style={{flexBasis:(n/total*100)+"%"}}/>)}</div><figcaption>{["Advancing","Declining","Unchanged"].map((label,i)=><span key={label}><i className={["gain","loss","flat"][i]}/>{label} <strong>{counts[i]}</strong></span>)}</figcaption></figure>;
 }

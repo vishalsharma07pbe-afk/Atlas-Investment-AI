@@ -51,6 +51,8 @@ import P2ResearchWorkspace from "./P2ResearchWorkspace";
 import OnboardingGuide from "./OnboardingGuide";
 import UpstoxVaultCard from "./UpstoxVaultCard";
 import HistoricalInvestments from "./HistoricalInvestments";
+import PortfolioVisuals from "./PortfolioVisuals";
+import "./terminal.css";
 
 type Holding = {id:number;symbol:string;asset_type:string;quantity:number;average_cost:number;last_price:number|null;previous_close:number|null;invested:number;market_value:number|null;unrealized_pnl:number|null;one_day_change:number|null;price_as_of:string|null;valuation_status?:string;notes:string|null};
 type Analysis = {holdingCount:number;invested:number;pricedMarketValue:number;pricedCostBasis:number;pricedUnrealizedPnl:number;unpricedHoldings:number;valuationComplete:boolean;recentRecordedHoldings?:number;stalePriceHoldings?:number;undatedPriceHoldings?:number;futureDatedPriceHoldings?:number;recordedReturnPercent?:number|null;valuationFreshnessStatus?:string;valuationFreshnessNotice?:string;riskFlags:string[]};
@@ -251,7 +253,7 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
       <WorkspaceNavigation page={tab} onNavigate={navigate}/>
 
       <main className="content" id="main-content" tabIndex={-1}>
-        <header><div><div className="eyebrow"><span/> YOUR PRIVATE RESEARCH TERMINAL</div><h1>{activePage.title}</h1><p>{activePage.description}</p></div><div className="header-actions"><button type="button" className="help-trigger" onClick={()=>window.dispatchEvent(new Event("atlas:open-onboarding"))}>Help</button><NotificationCenter key={identity.id} includePersonal/><div className={`headerbadge ${feedState?.transport_connected?"feed-live":""}`} role="status" aria-live="polite" title={feedState?.automatic_selection?.missing_symbols?.length?`Unresolved: ${feedState.automatic_selection.missing_symbols.join(", ")}`:undefined}><span/> {feedState?.transport_connected?`LIVE · ${feedState.selected_instruments||0} STOCKS`:feedState?.automatic_selection?.status==="IDLE_NO_EQUITY_HOLDINGS"?"FEED READY · ADD A STOCK":feedState?.automatic_selection?.status==="STARTING"?"MARKET FEED CONNECTING":"MARKET FEED NOT CONNECTED"}</div><div className="account-chip"><span>{identity.email.slice(0,1).toUpperCase()}</span><div><small>SIGNED IN</small><strong>{identity.email}</strong></div><button type="button" onClick={()=>void onLogout()}>Logout</button></div><AppearanceControls value={appearance} onChange={setAppearance} open={appearanceOpen} onOpenChange={setAppearanceOpen}/></div></header>
+        <header><div><div className="eyebrow"><span/> YOUR PRIVATE RESEARCH TERMINAL</div><h1>{activePage.title}</h1><p>{activePage.description}</p></div><div className="header-actions"><button type="button" className="terminal-search secondary" onClick={()=>navigate(7)}><svg aria-hidden="true" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg>Stock search</button><button type="button" className="help-trigger" onClick={()=>window.dispatchEvent(new Event("atlas:open-onboarding"))}>Help</button><NotificationCenter key={identity.id} includePersonal/><div className={`headerbadge ${feedState?.transport_connected?"feed-live":""}`} role="status" aria-live="polite" title={feedState?.automatic_selection?.missing_symbols?.length?`Unresolved: ${feedState.automatic_selection.missing_symbols.join(", ")}`:undefined}><span/> {feedState?.transport_connected?`LIVE · ${feedState.selected_instruments||0} STOCKS`:feedState?.automatic_selection?.status==="IDLE_NO_EQUITY_HOLDINGS"?"FEED READY · ADD A STOCK":feedState?.automatic_selection?.status==="STARTING"?"MARKET FEED CONNECTING":"MARKET FEED NOT CONNECTED"}</div><div className="account-chip"><span>{identity.email.slice(0,1).toUpperCase()}</span><div><small>SIGNED IN</small><strong>{identity.email}</strong></div><button type="button" onClick={()=>void onLogout()}>Logout</button></div><AppearanceControls value={appearance} onChange={setAppearance} open={appearanceOpen} onOpenChange={setAppearanceOpen}/></div></header>
         <MarketIndexStrip/>
         {providerActionRequired&&<div className="provider-action-banner" role="status"><div><strong>Live prices need today’s Upstox authorization</strong><span>Your holdings are safe. Connect the read-only token once, then ATLAS will refresh prices and research automatically.</span></div><button className="secondary" onClick={()=>setTab(6)}>Connect Upstox</button></div>}
         <OnboardingGuide onNavigate={navigate}/>
@@ -259,12 +261,13 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
         {error && <div className="error glass" role="alert">{error} <button type="button" onClick={() => tab === 6 ? loadHealth() : load()}>Retry</button></div>}
 
         {tab === 0 ? <>
-          <PortfolioSummary analysis={analysis} onOpen={()=>navigate(9)}/>
+          <div className="terminal-overview-grid"><PortfolioSummary analysis={analysis} onOpen={()=>navigate(9)}/><PortfolioVisuals holdings={holdings}/></div>
           <PortfolioDoctor compact revision={portfolioRevision} onOpenPortfolio={()=>navigate(9)} onSettings={()=>navigate(6)}/>
           <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)} onHorizon={navigateHorizon}><ResearchHome holdings={holdings} revision={portfolioRevision} onReviewHoldings={()=>navigate(9)} onOpenExplorer={()=>navigate(7)} onOpenDataHealth={()=>navigate(6)}/></AutonomousOverview>
         </> : tab === 9 ? <>
-          <PortfolioDoctor revision={portfolioRevision} onSettings={()=>navigate(6)}/>
+          <PortfolioVisuals holdings={holdings}/>
           <PortfolioIntelligence holdings={holdings} analysis={analysis}/>
+          <PortfolioDoctor revision={portfolioRevision} onSettings={()=>navigate(6)}/>
           <GoalMonitor/>
           <AdvancedSection title="Add or update an investment" description="Search a stock or fund, save a holding or set up an SIP"><HoldingEditor busy={loading} onSave={submitHolding} onSaveSip={submitSip}/></AdvancedSection>
           <AdvancedSection title="Advanced portfolio tools" description="Stress tests, allocation, goals, journal, fees and concentration">

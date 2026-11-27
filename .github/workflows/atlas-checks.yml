@@ -242,6 +242,14 @@ jobs:
           python3 -m playwright install --with-deps chromium
       - name: Verify actual browser workflows at desktop and mobile widths
         run: python3 scripts/browser_release_smoke.py --disposable-ci-stack
+      - name: Save disposable browser design previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-design-previews
+          path: browser-preview/
+          if-no-files-found: ignore
+          retention-days: 3
       - name: Save disposable browser failure screenshot
         if: failure()
         uses: actions/upload-artifact@v4
