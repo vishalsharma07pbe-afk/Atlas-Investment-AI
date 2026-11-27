@@ -303,4 +303,7 @@ it("prioritizes non-price business evidence in the compact summary",async()=>{
  expect(await screen.findByText("Reported operating cash flow fell between matched annual periods.")).toBeTruthy();
  expect(screen.getByText("Dated company statements")).toBeTruthy();
  expect(screen.getByText("Official filing unverified")).toBeTruthy();
+ expect(screen.getByText("Business evidence review")).toBeTruthy();
+ expect(screen.getByText("Next research step")).toBeTruthy();
+ expect(screen.queryByText("Recorded loss")).toBeNull();
 });

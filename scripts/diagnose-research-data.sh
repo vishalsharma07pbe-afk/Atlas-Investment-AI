@@ -37,7 +37,7 @@ docker compose exec -T intelligence python - <<'PY'
 import os,sqlite3,json
 from datetime import datetime,timezone
 from pathlib import Path
-flags=("MARKET_DATA_USAGE_RIGHTS_CONFIRMED","MARKET_DATA_ENTITLEMENT_CONFIRMED","ATLAS_AUTONOMOUS_RESEARCH_ENABLED","ATLAS_GLOBAL_FX_ENABLED","ATLAS_GLOBAL_YIELDS_ENABLED","ATLAS_GLOBAL_OIL_ENABLED","ATLAS_ECONOMIC_CALENDAR_ENABLED","ATLAS_MF_DISCLOSURE_AUTO_REFRESH_ENABLED")
+flags=("MARKET_DATA_USAGE_RIGHTS_CONFIRMED","MARKET_DATA_ENTITLEMENT_CONFIRMED","ATLAS_AUTONOMOUS_RESEARCH_ENABLED","ATLAS_GLOBAL_FX_ENABLED","ATLAS_GLOBAL_YIELDS_ENABLED","ATLAS_GLOBAL_OIL_ENABLED","ATLAS_ECONOMIC_CALENDAR_ENABLED","ATLAS_MF_DISCLOSURE_AUTO_REFRESH_ENABLED","ATLAS_PORTFOLIO_THESIS_ENABLED","ATLAS_AUTOMATIC_COMPANY_EVIDENCE_ENABLED","ATLAS_AUTOMATIC_NEWS_ENABLED","ATLAS_AUTOMATIC_AI_REVIEW_ENABLED")
 for key in flags:
     print(key, "enabled" if os.getenv(key,"").lower()=="true" else "off")
 for key in ("UPSTOX_ACCESS_TOKEN","FRED_API_KEY","TWELVE_DATA_API_KEY","EIA_API_KEY","ATLAS_GLOBAL_MARKETS_SERIES","ATLAS_GLOBAL_RELEASES_SOURCES"):
@@ -65,4 +65,20 @@ with sqlite3.connect(path.as_uri()+"?mode=ro",uri=True) as db:
         for row in db.execute("SELECT job,status,failures,error_code,next_due FROM research_job_state ORDER BY priority"):
             due=datetime.fromtimestamp(row["next_due"],timezone.utc).isoformat() if row["next_due"] else "pending"
             print(row["job"],row["status"],"failures",row["failures"],row["error_code"] or "-", "next",due)
+PY
+
+echo "=== Private research cache coverage (aggregate counts only) ==="
+docker compose exec -T intelligence python - <<'PY'
+from pathlib import Path
+import os,sqlite3
+p=Path(os.getenv("ATLAS_RESEARCH_SNAPSHOT_DB","/app/ingestion-data/research_snapshots.sqlite3"))
+p=p.with_name("portfolio_"+p.name)
+if p.is_file():
+    with sqlite3.connect(p.as_uri()+"?mode=ro",uri=True) as db:
+        tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        for table in ("automatic_company_evidence","automatic_news_state","portfolio_local_ai"):
+            if table in tables:
+                print(table,db.execute("SELECT status,count(*) FROM "+table+" GROUP BY status").fetchall())
+else:
+    print("Private evidence cache has not been created yet.")
 PY

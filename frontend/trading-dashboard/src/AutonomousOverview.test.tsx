@@ -133,7 +133,7 @@ it("links canonical briefing watches and company evidence review to existing wor
  render(<AutonomousOverview onPortfolio={portfolio} onFunds={()=>{}} onSettings={()=>{}} onHorizon={horizon}>{null}</AutonomousOverview>);
  expect(await screen.findByRole("region",{name:"Today's evidence review"})).toBeTruthy();
  expect(screen.getByText(/0 qualified in the reviewed sample/)).toBeTruthy();
- expect(screen.getByText(/3\/8 dated global indicators/)).toBeTruthy();
+ expect(screen.getByRole("meter",{name:"Dated global indicators"}).getAttribute("aria-valuenow")).toBe("3");
  fireEvent.click(screen.getByText(/TEST · 1 findings/));
  expect(screen.getByText("replay review")).toBeTruthy();
  fireEvent.click(screen.getByRole("button",{name:"Review swing research"}));

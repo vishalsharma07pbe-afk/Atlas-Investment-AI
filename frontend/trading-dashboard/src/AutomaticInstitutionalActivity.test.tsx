@@ -42,3 +42,9 @@ it("shows withheld trading-session windows rather than substituting older observ
  expect(screen.getByText(/2026-11-18/)).toBeTruthy();
  expect(screen.getAllByText("Unavailable")).toHaveLength(2);
 });
+
+it("shows observed flow charts in overview mode and keeps full windows in a disclosure",()=>{
+ render(<AutomaticInstitutionalActivity compact data={{status:"RECENT_PROVIDER_EVIDENCE",participants:{FII:{status:"AVAILABLE",retrieved_at:null,endpoint:"fixture",records:[{trade_date:"2026-11-26",observed_at:"",net_amount:"20",buy_amount:"30",sell_amount:"10"},{trade_date:"2026-11-25",observed_at:"",net_amount:"-10",buy_amount:"10",sell_amount:"20"}]}}}}/>);
+ expect(screen.getByRole("img",{name:"FII daily net flows trend, observed dates only"})).toBeTruthy();
+ expect(screen.getByText("Flow windows, source evidence & coverage").closest("details")?.open).toBe(false);
+});
