@@ -55,9 +55,10 @@ public class DiscoveryQuoteScheduler {
   if(now.isBefore(open)||!now.isBefore(close))return true;
   var rows=db.queryForList("""
     SELECT u.instrument_id,u.instrument_key,u.isin,u.symbol
-    FROM discovery_quote_universe u LEFT JOIN discovery_quote_screen q ON q.instrument_id=u.instrument_id
+    FROM discovery_quote_universe u LEFT JOIN discovery_security_context quality ON quality.instrument_id=u.instrument_id
+    LEFT JOIN discovery_quote_screen q ON q.instrument_id=u.instrument_id
        AND q.instrument_key=u.instrument_key AND q.isin=u.isin
-    WHERE u.exchange=? AND (q.attempted_at IS NULL OR q.attempted_at<=now()-interval '30 seconds')
+    WHERE u.exchange=? AND coalesce(quality.security_state,'UNKNOWN')<>'SUSPENDED_REPORTED' AND (q.attempted_at IS NULL OR q.attempted_at<=now()-interval '30 seconds')
     ORDER BY q.attempted_at ASC NULLS FIRST,u.instrument_id LIMIT 200
     """,exchange);
   Map<String,Identity> claimed=new LinkedHashMap<>();

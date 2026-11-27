@@ -15,7 +15,7 @@ from .financial_strength import _block, _values, _recent_common
 from .fundamental_quality import _ratio_rows
 
 VERSION="STEADY-MOMENTUM-1"
-NOTICE="ATLAS rule-based screen, not TradingView Strong Buy or investment qualification. Reported earnings and undated sector P/E are preliminary evidence. Historical turnover and AMFI six-month average capitalization are not live execution liquidity or current market cap. Thresholds not backtested. Coverage is limited to validated daily-history samples."
+NOTICE="ATLAS rule-based screen, not TradingView Strong Buy or investment qualification. Reported earnings and undated sector P/E are preliminary evidence. Historical turnover and AMFI six-month average capitalization are not live execution liquidity or current market cap. Provider security classifications and observed suspension lists are incomplete tradability evidence; absence does not establish unrestricted status. Thresholds not backtested. Coverage is limited to validated daily-history samples."
 
 def numeric(v):
     return type(v) in (int,float) and isfinite(v)
@@ -132,6 +132,9 @@ def summarize(snapshot,connect,instant):
                 continue
             out["technical_count"]+=1
             isin=row["isin"]
+            if row.get("security_state") in ("PCA","SME","RELIST","IPO","SUSPENDED_REPORTED"):
+                excluded["SPECIAL_SECURITY_CLASSIFICATION"]+=1
+                continue
             cap=caps.get(isin)
             if not cap:
                 excluded["AMFI_CAP_EVIDENCE_MISSING"]+=1

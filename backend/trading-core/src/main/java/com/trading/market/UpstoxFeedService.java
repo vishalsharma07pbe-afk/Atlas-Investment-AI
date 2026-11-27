@@ -92,13 +92,14 @@ import org.springframework.transaction.annotation.Transactional;
     if(mapped!=1)continue;
     int written;
     try{written=jdbc.update("""
-      INSERT INTO upstox_instrument_map(instrument_key,exchange_code,isin,trading_symbol,instrument_type,display_name)
-      VALUES (?,?,?,?,?,?)
+      INSERT INTO upstox_instrument_map(instrument_key,exchange_code,isin,trading_symbol,instrument_type,display_name,security_type,security_observed_at)
+      VALUES (?,?,?,?,?,?,?,now())
       ON CONFLICT(instrument_key) DO UPDATE SET isin=EXCLUDED.isin,trading_symbol=EXCLUDED.trading_symbol,
-        instrument_type=EXCLUDED.instrument_type,display_name=EXCLUDED.display_name,updated_at=now()
+        instrument_type=EXCLUDED.instrument_type,display_name=EXCLUDED.display_name,updated_at=now(),
+        security_type=EXCLUDED.security_type,security_observed_at=EXCLUDED.security_observed_at
       WHERE upstox_instrument_map.exchange_code=EXCLUDED.exchange_code
         AND (upstox_instrument_map.isin IS NULL OR upstox_instrument_map.isin=EXCLUDED.isin)
-      """,key,exchange,isin,symbol,"EQ",displayName);}
+      """,key,exchange,isin,symbol,"EQ",displayName,securityType(item));}
     catch(org.springframework.dao.DataAccessException ex){throw new MasterImportException(exchange,MasterFailure.MAPPING_WRITE_FAILED);}
     if(written!=1)throw new MasterImportException(exchange,MasterFailure.IDENTITY_CONFLICT);
     count++;accepted++;
@@ -106,6 +107,10 @@ import org.springframework.transaction.annotation.Transactional;
    if(accepted==0)throw new MasterImportException(exchange,MasterFailure.NO_VALID_EQUITIES);
   }
   return count;
+ }
+ static String securityType(JsonNode item){
+  String type=item.path("security_type").asText("");
+  return Set.of("NORMAL","SME","RELIST","PCA","IPO").contains(type)?type:"UNKNOWN";
  }
  static boolean validEquityIdentity(String exchange,String key,String isin){
   return isin.matches("IN[A-Z0-9]{9}[0-9]") && (

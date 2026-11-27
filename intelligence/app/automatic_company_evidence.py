@@ -45,16 +45,21 @@ def identify(snapshot):
                 isin=item.get("isin")
                 if isinstance(isin,str) and ISIN.fullmatch(isin) and item.get("exchange")==section["section"]:
                     yield item,isin
-        # The Elite screen has stricter early-momentum gates than the general
-        # horizon lists. Prioritize its actual candidates even if they are not
-        # in a displayed horizon top five; preserve existing provider budgets.
+
+
+def identify_priority(snapshot):
+    yield from identify(snapshot)
+    # Deepen the actual Elite candidates without expanding report attachment.
+    for section in snapshot.get("sections",[]):
+        if section.get("status")!="READY" or section.get("section") not in ("NSE","BSE"):
+            continue
         result=section.get("result") or {}
         coverage=result.get("discovery_coverage") or {}
         expected=coverage.get("expected_session")
         if coverage.get("calendar_status")=="PUBLISHED_SESSION" and expected:
             for item in result.get("steady_momentum_candidates",[]):
                 isin=item.get("isin")
-                if isinstance(isin,str) and ISIN.fullmatch(isin) and item.get("exchange")==section["section"] and item.get("as_of")==expected:
+                if isinstance(isin,str) and ISIN.fullmatch(isin) and item.get("exchange")==section["section"] and item.get("as_of")==expected and item.get("security_state") not in ("PCA","SME","RELIST","IPO","SUSPENDED_REPORTED"):
                     yield item,isin
 
 
@@ -286,7 +291,7 @@ def refresh(snapshot, connect, loader=company_research, instant=None, *, explici
 def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None):
     stamp=instant.isoformat()
     candidates={}
-    for item,isin in identify(snapshot):
+    for item,isin in identify_priority(snapshot):
         # Exact public discovery venue/ISIN; no name matching.
         if isin not in candidates or item["exchange"]=="NSE":
             candidates[isin]=item["exchange"]+"_EQ|"+isin
@@ -380,7 +385,7 @@ def acquisition_status(snapshot,connect,instant):
     import sqlite3
     from collections import Counter
     sample={isin for _,isin in identify_sample(snapshot,instant)}
-    primary={isin for _,isin in identify(snapshot)}
+    primary={isin for _,isin in identify_priority(snapshot)}
     stamp=instant.isoformat()
     try:
         with closing(connect()) as db:

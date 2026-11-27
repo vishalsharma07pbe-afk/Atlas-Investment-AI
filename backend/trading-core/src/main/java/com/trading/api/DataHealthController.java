@@ -67,6 +67,8 @@ public class DataHealthController {
       """));
     out.put("discoveryQuoteCoverage",jdbc.queryForList("SELECT * FROM discovery_quote_coverage ORDER BY exchange"));
     out.put("discoveryCapCoverage",jdbc.queryForList("SELECT * FROM discovery_cap_coverage ORDER BY exchange,category"));
+    out.put("discoverySecurityCoverage",jdbc.queryForList("SELECT * FROM discovery_security_coverage ORDER BY exchange,security_state"));
+    out.put("suspensionFeed",jdbc.queryForList("SELECT retrieved_at,record_count FROM discovery_suspension_snapshot"));
     out.put("upstoxRegistry",registry);out.put("officialAmfiNav",nav);out.put("upstoxDailyHistory",daily);
     out.put("instrumentCount",jdbc.queryForObject("SELECT count(*) FROM instruments",Long.class));
     out.put("candleCount",jdbc.queryForObject("SELECT count(*) FROM market_candles WHERE timeframe='1d'",Long.class));

@@ -97,6 +97,7 @@ public class InternalFeedController {
       SELECT i.id,e.code AS exchange,i.symbol,i.series,i.isin,i.instrument_type,i.listing_status,i.active,
              to_char(i.listed_on,'YYYY-MM-DD') AS listed_on,to_char(i.delisted_on,'YYYY-MM-DD') AS delisted_on,
              i.source AS registry_source,i.source_revision AS registry_revision,
+             coalesce(quality.security_state,'UNKNOWN') AS security_state,quality.security_evidence_at,
              count(*) OVER () AS recent_registry_count,calendar.expected_session,
              count(*) FILTER (WHERE (latest.candle_time AT TIME ZONE e.timezone)::date=calendar.expected_session) OVER () AS expected_session_count,
              (SELECT max(a.ex_date) FROM corporate_actions a
@@ -119,6 +120,7 @@ public class InternalFeedController {
         ORDER BY c.candle_time DESC LIMIT 1
       ) latest ON true
       CROSS JOIN calendar
+      LEFT JOIN discovery_security_context quality ON quality.instrument_id=i.id AND quality.isin=i.isin
       WHERE e.code=? AND i.active AND i.listing_status='ACTIVE' AND i.series='EQ'
         AND i.instrument_type IN ('EQ','EQUITY','STOCK')
       """;

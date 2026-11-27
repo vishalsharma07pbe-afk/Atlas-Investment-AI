@@ -68,7 +68,8 @@ public class DiscoveryHistoryScheduler {
             AND x.session_date=s.session_date AND x.is_trading_day AND x.session_type<>'REGULAR')
       ), candidates AS (
       SELECT i.id,m.instrument_key,h.candle_count,h.latest_date,g.first_missing_date,a.attempted_at,
-        CASE WHEN q.state='PRIORITY' AND q.observed_at>=now()-interval '15 minutes' AND q.response_at>=now()-interval '15 minutes' THEN
+        CASE WHEN coalesce(quality.security_state,'UNKNOWN') IN ('PCA','SME','RELIST','IPO','SUSPENDED_REPORTED') THEN 0
+          WHEN q.state='PRIORITY' AND q.observed_at>=now()-interval '15 minutes' AND q.response_at>=now()-interval '15 minutes' THEN
           CASE WHEN cap.average_cap_cr>=1000 THEN 2 WHEN cap.isin IS NULL THEN 1 ELSE 0 END ELSE 0 END AS quote_priority,
         CASE WHEN h.candle_count>=25 AND h.latest_date<? THEN 0 ELSE 1 END AS workload
       FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
@@ -82,6 +83,7 @@ public class DiscoveryHistoryScheduler {
       ) m ON true
       LEFT JOIN discovery_history_attempts a ON a.instrument_id=i.id
       LEFT JOIN discovery_quote_screen q ON q.instrument_id=i.id AND q.instrument_key=m.instrument_key AND q.isin=i.isin
+      LEFT JOIN discovery_security_context quality ON quality.instrument_id=i.id AND quality.instrument_key=m.instrument_key AND quality.isin=i.isin
       LEFT JOIN discovery_amfi_cap cap ON cap.isin=i.isin AND cap.as_of BETWEEN (now() AT TIME ZONE 'Asia/Kolkata')::date-220 AND (now() AT TIME ZONE 'Asia/Kolkata')::date-1
       CROSS JOIN LATERAL (
         SELECT count(DISTINCT (c.candle_time AT TIME ZONE 'Asia/Kolkata')::date)
@@ -107,6 +109,7 @@ public class DiscoveryHistoryScheduler {
       ) g ON true
       WHERE e.code=? AND i.active AND i.listing_status='ACTIVE' AND i.series='EQ'
         AND i.instrument_type IN ('EQ','EQUITY','STOCK')
+        AND coalesce(quality.security_state,'UNKNOWN')<>'SUSPENDED_REPORTED'
         AND NOT coalesce(h.has_adjusted,false)
         AND (h.candle_count<? OR h.latest_date IS NULL OR h.latest_date<? OR g.first_missing_date IS NOT NULL)
         AND (a.next_attempt_at IS NULL OR a.next_attempt_at<=now())
