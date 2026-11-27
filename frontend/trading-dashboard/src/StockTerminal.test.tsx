@@ -28,10 +28,10 @@ describe("chart-first stock terminal",()=>{
   const chart=await screen.findByRole("region",{name:"Stock price and volume chart"});
   expect(screen.getByText(/10.00%.*previous recorded close/)).toBeTruthy();
   expect(chart.compareDocumentPosition(screen.getByText("Research alerts"))&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  fireEvent.click(screen.getByRole("button",{name:"Line",exact:true}));
-  expect(screen.getByRole("button",{name:"Line",exact:true}).getAttribute("aria-pressed")).toBe("true");
-  fireEvent.click(screen.getByRole("button",{name:"1M",exact:true}));
-  expect(screen.getByRole("button",{name:"1M",exact:true}).getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(screen.getByRole("button",{name:"Line"}));
+  expect(screen.getByRole("button",{name:"Line"}).getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(screen.getByRole("button",{name:"1M"}));
+  expect(screen.getByRole("button",{name:"1M"}).getAttribute("aria-pressed")).toBe("true");
   fireEvent.click(screen.getByRole("button",{name:"Expand chart"}));
   expect(screen.getByRole("button",{name:"Reduce chart"})).toBeTruthy();
   fireEvent.click(screen.getByRole("button",{name:"Open company research"}));
