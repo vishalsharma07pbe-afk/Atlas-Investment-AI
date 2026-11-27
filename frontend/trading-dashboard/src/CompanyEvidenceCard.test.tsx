@@ -88,3 +88,13 @@ it("labels documented sector-only sample separately from industry",()=>{
  expect(screen.getByText("120 Cr")).toBeTruthy();
  expect(screen.getByText("Industry identity is not established.")).toBeTruthy();
 });
+
+it("displays historical cash assumptions separately from intrinsic value",()=>{
+ const missing={status:"UNAVAILABLE",data:null,source:null};
+ const evidence:CompanyEvidence={isin:"INE002A01018",retrieved_at:"2026-11-27T05:00:00Z",available_sections:2,total_sections:8,notice:"Provider reported.",sections:{profile:missing,ratios:missing,income_statement:missing,cash_flow:missing,balance_sheet:missing,shareholding:missing,corporate_actions:missing,competitors:missing},
+ valuation_sensitivity:{status:"HYPOTHETICAL_CASH_STREAM_ONLY",historical_periods:[{period:"2026-03",reported_net_profit_cr:100,reported_operating_cash_cr:120}],cash_conversion_ratio:1.2,operating_cash_anchor_cr:105,scenarios:[{case:"STRESS",cash_fraction_percent:30,annual_growth_percent:-5,discount_percent:16,terminal_growth_percent:0,hypothetical_cash_stream_pv_cr:150,terminal_share_percent:40}],discount_sensitivity:[{discount_percent:12,values:[{annual_growth_percent:5,hypothetical_cash_stream_pv_cr:250}]}],blockers:["VERIFIED_NET_DEBT_AND_SHARE_BASIS_REQUIRED"],notice:"Hypothetical cash stream, not intrinsic equity value."}};
+ render(<CompanyEvidenceCard evidence={evidence}/>);
+ expect(screen.getByText("Historical cash-stream sensitivity · not fair value")).toBeTruthy();
+ expect(screen.getByText(/Fixed 50% cash fraction and 3% terminal growth/)).toBeTruthy();
+ expect(screen.getByText("Hypothetical cash stream, not intrinsic equity value.")).toBeTruthy();
+});

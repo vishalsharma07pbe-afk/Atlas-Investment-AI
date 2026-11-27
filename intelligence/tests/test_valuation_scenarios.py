@@ -42,3 +42,12 @@ class ValuationScenariosTest(unittest.TestCase):
         self.assertEqual(result["unassessed_fund_weight_percent"],40)
         self.assertIsNone(result["intrinsic_valuation_weight_percent"])
         self.assertEqual(v.fund_coverage([rows[0],rows[0]],{},NOW)["status"],"INVALID_HOLDING_IDENTITIES")
+
+    def test_tiny_profit_outlier_does_not_publish_a_cash_scenario(self):
+        report=fixture()
+        for point in report["sections"]["income_statement"]["data"]["rows"][0]["history"]:
+            point["value"]=1e-100
+        result=v.summarize(report,NOW)
+        self.assertEqual(result["status"],"CASH_CONVERSION_OUTLIER_REVIEW")
+        self.assertFalse(result["scenarios"])
+        self.assertIsNone(result["intrinsic_value"])

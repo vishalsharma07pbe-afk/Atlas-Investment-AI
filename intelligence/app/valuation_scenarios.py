@@ -6,6 +6,7 @@ effect of assumptions. No fair value, market-price target, or buy/sell gate.
 """
 from datetime import datetime,timedelta
 from math import isfinite
+import re
 from .financial_strength import _block,_values,_recent_common
 
 VERSION="VALUATION-SENSITIVITY-1"
@@ -25,7 +26,7 @@ def pv(cash,growth,discount,terminal,years=5):
     flows=[cash*(1+growth)**i/(1+discount)**i for i in range(1,years+1)]
     terminal_pv=cash*(1+growth)**years*(1+terminal)/(discount-terminal)/(1+discount)**years
     total=sum(flows)+terminal_pv
-    if not isfinite(total) or total>1e15:raise ValueError("SCENARIO_RANGE")
+    if not isfinite(total) or not 0<total<=1e15:raise ValueError("SCENARIO_RANGE")
     return {"explicit_cash_stream_pv_cr":round(sum(flows),4),"terminal_stream_pv_cr":round(terminal_pv,4),
             "hypothetical_cash_stream_pv_cr":round(total,4),"terminal_share_percent":round(100*terminal_pv/total,4)}
 
@@ -53,7 +54,10 @@ def summarize(report,instant):
             out["status"]="HISTORICAL_DETERIORATION_REVIEW";return out
         total_profit=sum(profits[p] for p in periods)
         total_cash=sum(operating[p] for p in periods)
-        out["cash_conversion_ratio"]=round(total_cash/total_profit,4)
+        conversion=total_cash/total_profit
+        if not isfinite(conversion) or conversion>1e6:
+            out["status"]="CASH_CONVERSION_OUTLIER_REVIEW";return out
+        out["cash_conversion_ratio"]=round(conversion,4)
         # Lower of latest and four-year mean is a transparent historical anchor,
         # not normalized FCFE. No automatic sector eligibility.
         anchor=min(operating[periods[-1]],total_cash/4)
@@ -80,7 +84,6 @@ def fund_coverage(equities,reports,instant):
     seen=set();total=eligible=review=covered=0.
     for h in equities:
         isin,w=h.get("isin"),h.get("weight_percent")
-        import re
         if not isinstance(isin,str) or not re.fullmatch(r"INE[A-Z0-9]{9}",isin) or isin in seen or type(w) not in (int,float) or not isfinite(w) or not 0<w<=100:
             return {"status":"INVALID_HOLDING_IDENTITIES","notice":NOTICE}
         seen.add(isin);total+=w
@@ -88,7 +91,7 @@ def fund_coverage(equities,reports,instant):
         if not isinstance(raw,dict) or raw.get("isin")!=isin:continue
         assessment=summarize(raw,instant)
         if assessment["status"]=="HYPOTHETICAL_CASH_STREAM_ONLY":eligible+=w;covered+=w
-        elif assessment["status"]=="HISTORICAL_DETERIORATION_REVIEW":review+=w;covered+=w
+        elif assessment["status"] in ("HISTORICAL_DETERIORATION_REVIEW","CASH_CONVERSION_OUTLIER_REVIEW"):review+=w;covered+=w
     if total>100.5000001:return {"status":"INVALID_HOLDING_IDENTITIES","notice":NOTICE}
     return {"status":"HISTORICAL_CASH_COVERAGE_ONLY" if covered else "AWAITING_EVIDENCE",
         "exact_equity_weight_percent":round(total,4),"assessed_weight_percent":round(covered,4),
