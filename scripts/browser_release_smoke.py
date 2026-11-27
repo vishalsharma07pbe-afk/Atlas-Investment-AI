@@ -19,7 +19,7 @@ def run():
         context=browser.new_context(viewport={"width":1440,"height":900},reduced_motion="reduce")
         errors=[]
         page=context.new_page()
-        page.on("pageerror",lambda exc:errors.append(str(exc)))
+        page.on("pageerror",lambda exc:errors.append(exc.stack or str(exc)))
         try:
             registration=context.request.post(base+"/api/v1/auth/register",data={"email":email,"password":password})
             assert registration.ok,"disposable registration failed"

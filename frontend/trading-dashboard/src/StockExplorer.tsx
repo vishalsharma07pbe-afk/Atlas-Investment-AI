@@ -31,7 +31,9 @@ function MarketChart({data,toggles,mode,sessions,volumeVisible,expanded}:{data:T
   let chart:ReturnType<typeof createChart>|undefined;let observer:MutationObserver|undefined;let media:MediaQueryList|undefined;let applyTheme:(()=>void)|undefined;
   try{
    const themeOptions=()=>{const styles=getComputedStyle(host);const ink=styles.getPropertyValue("--ink-soft").trim()||"#b9c4dc";const grid=styles.getPropertyValue("--row-line").trim()||"rgba(130,150,200,.12)";return {layout:{background:{type:ColorType.Solid as const,color:"transparent"},textColor:ink},grid:{vertLines:{color:grid},horzLines:{color:grid}},timeScale:{borderColor:grid},rightPriceScale:{borderColor:grid}};};
-   chart=createChart(host,{autoSize:true,...themeOptions(),crosshair:{mode:0}});
+   // Use a stable BCP 47 locale rather than inheriting a host/browser locale
+   // that may contain unsupported POSIX modifiers in Chromium or on Linux.
+   chart=createChart(host,{autoSize:true,...themeOptions(),localization:{locale:"en-IN",dateFormat:"dd MMM yyyy"},crosshair:{mode:0}});
    applyTheme=()=>chart?.applyOptions(themeOptions());
    const dashboard=host.closest(".dashboard");if(dashboard&&typeof MutationObserver!=="undefined"){observer=new MutationObserver(applyTheme);observer.observe(dashboard,{attributes:true,attributeFilter:["data-theme"]});}
    if(typeof matchMedia==="function"){media=matchMedia("(prefers-color-scheme: light)");media.addEventListener?.("change",applyTheme);}
@@ -47,7 +49,7 @@ function MarketChart({data,toggles,mode,sessions,volumeVisible,expanded}:{data:T
    const colors:Record<string,string>={sma_20:"#478bdc",sma_50:"#a58be8",sma_200:"#ce9a46",ema_20:"#d66db2"};
    Object.keys(colors).forEach(key=>{if(toggles.has(key)&&data.indicators?.[key]){const line=chart!.addSeries(LineSeries,{color:colors[key],lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:key.toUpperCase().replace("_"," ")});line.setData(data.indicators[key].map(x=>({time:x.time as any,value:x.value})));}});
    const byDate=new Map(data.candles.map(c=>[c.trade_date,c]));
-   chart.subscribeCrosshairMove(event=>setHovered(typeof event.time==="string"?byDate.get(event.time)??null:null));
+   chart.subscribeCrosshairMove(event=>{const t=event.time;const day=typeof t==="string"?t:typeof t==="object"?`${t.year}-${String(t.month).padStart(2,"0")}-${String(t.day).padStart(2,"0")}`:null;setHovered(day?byDate.get(day)??null:null);});
    chart.timeScale().fitContent();
    if(sessions>0&&data.candles.length>sessions)chart.timeScale().setVisibleRange({from:data.candles[data.candles.length-sessions].trade_date as any,to:data.candles[data.candles.length-1].trade_date as any});
   }catch{setFailed(true);}

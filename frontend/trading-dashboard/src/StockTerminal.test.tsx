@@ -2,9 +2,10 @@
 import {cleanup,fireEvent,render,screen,waitFor} from "@testing-library/react";
 import {afterEach,describe,expect,it,vi} from "vitest";
 import StockExplorer,{dailyPriceChange} from "./StockExplorer";
+const chartOptions=vi.hoisted(()=>vi.fn());
 vi.mock("lightweight-charts",()=>({
  ColorType:{Solid:"solid"},CandlestickSeries:"candles",HistogramSeries:"volume",LineSeries:"line",createSeriesMarkers:vi.fn(),
- createChart:()=>({addSeries:()=>({setData:vi.fn(),priceScale:()=>({applyOptions:vi.fn()})}),subscribeCrosshairMove:vi.fn(),timeScale:()=>({fitContent:vi.fn(),setVisibleRange:vi.fn()}),applyOptions:vi.fn(),remove:vi.fn()})
+ createChart: (host:HTMLElement,options:unknown)=>{chartOptions(host,options);return {addSeries:()=>({setData:vi.fn(),priceScale:()=>({applyOptions:vi.fn()})}),subscribeCrosshairMove:vi.fn(),timeScale:()=>({fitContent:vi.fn(),setVisibleRange:vi.fn()}),applyOptions:vi.fn(),remove:vi.fn()};}
 }));
 vi.mock("./BacktestPanel",()=>({default:()=>null}));
 vi.mock("./RiskQualification",()=>({default:()=>null}));
@@ -26,6 +27,7 @@ describe("chart-first stock terminal",()=>{
   fireEvent.change(screen.getByRole("textbox",{name:"Instrument search"}),{target:{value:"TEST"}});
   fireEvent.click(await screen.findByRole("button",{name:/NSE:TEST/}));
   const chart=await screen.findByRole("region",{name:"Stock price and volume chart"});
+  expect(chartOptions).toHaveBeenCalledWith(expect.any(HTMLElement),expect.objectContaining({localization:expect.objectContaining({locale:"en-IN"})}));
   expect(screen.getByText(/10.00%.*previous recorded close/)).toBeTruthy();
   expect(chart.compareDocumentPosition(screen.getByText("Research alerts"))&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   fireEvent.click(screen.getByRole("button",{name:"Line"}));
