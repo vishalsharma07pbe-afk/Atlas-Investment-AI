@@ -68,7 +68,8 @@ public class DiscoveryHistoryScheduler {
             AND x.session_date=s.session_date AND x.is_trading_day AND x.session_type<>'REGULAR')
       ), candidates AS (
       SELECT i.id,m.instrument_key,h.candle_count,h.latest_date,g.first_missing_date,a.attempted_at,
-        CASE WHEN q.state='PRIORITY' AND q.observed_at>=now()-interval '15 minutes' AND q.response_at>=now()-interval '15 minutes' THEN 1 ELSE 0 END AS quote_priority,
+        CASE WHEN q.state='PRIORITY' AND q.observed_at>=now()-interval '15 minutes' AND q.response_at>=now()-interval '15 minutes' THEN
+          CASE WHEN cap.average_cap_cr>=1000 THEN 2 WHEN cap.isin IS NULL THEN 1 ELSE 0 END ELSE 0 END AS quote_priority,
         CASE WHEN h.candle_count>=25 AND h.latest_date<? THEN 0 ELSE 1 END AS workload
       FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
       JOIN LATERAL (
@@ -81,6 +82,7 @@ public class DiscoveryHistoryScheduler {
       ) m ON true
       LEFT JOIN discovery_history_attempts a ON a.instrument_id=i.id
       LEFT JOIN discovery_quote_screen q ON q.instrument_id=i.id AND q.instrument_key=m.instrument_key AND q.isin=i.isin
+      LEFT JOIN discovery_amfi_cap cap ON cap.isin=i.isin AND cap.as_of BETWEEN (now() AT TIME ZONE 'Asia/Kolkata')::date-220 AND (now() AT TIME ZONE 'Asia/Kolkata')::date-1
       CROSS JOIN LATERAL (
         SELECT count(DISTINCT (c.candle_time AT TIME ZONE 'Asia/Kolkata')::date)
                  FILTER (WHERE c.candle_time >= ?::date::timestamp AT TIME ZONE 'Asia/Kolkata'
@@ -113,14 +115,14 @@ public class DiscoveryHistoryScheduler {
         FROM candidates
       ), ranked AS (
         SELECT *,row_number() OVER (PARTITION BY workload ORDER BY
-          CASE WHEN workload=1 AND oldest_position=1 THEN 2 WHEN workload=1 THEN quote_priority ELSE 0 END DESC,attempted_at ASC NULLS FIRST,
+          CASE WHEN workload=1 AND oldest_position=1 THEN 3 WHEN workload=1 THEN quote_priority ELSE 0 END DESC,attempted_at ASC NULLS FIRST,
           candle_count DESC,id) AS position
         FROM oldest
       )
       SELECT id,instrument_key,candle_count,latest_date,first_missing_date FROM ranked
       WHERE (workload=0 AND position<=8) OR (workload=1 AND position<=2)
       ORDER BY workload,position LIMIT 10
-      """.replace("CASE WHEN workload=1 AND oldest_position=1 THEN 2 WHEN workload=1 THEN quote_priority ELSE 0 END DESC,",quoteScreenEnabled?"CASE WHEN workload=1 AND oldest_position=1 THEN 2 WHEN workload=1 THEN quote_priority ELSE 0 END DESC,":""),exchange,end.minusMonths(BACKFILL_MONTHS),end,end,end.minusMonths(BACKFILL_MONTHS),end,end,exchange,REQUIRED_DAILY_CANDLES,end);
+      """.replace("CASE WHEN workload=1 AND oldest_position=1 THEN 3 WHEN workload=1 THEN quote_priority ELSE 0 END DESC,",quoteScreenEnabled?"CASE WHEN workload=1 AND oldest_position=1 THEN 3 WHEN workload=1 THEN quote_priority ELSE 0 END DESC,":""),exchange,end.minusMonths(BACKFILL_MONTHS),end,end,end.minusMonths(BACKFILL_MONTHS),end,end,exchange,REQUIRED_DAILY_CANDLES,end);
     for(var row:rows){
       if(OperatorFeedCooldown.blocked(jdbc))return;
       long id=((Number)row.get("id")).longValue();

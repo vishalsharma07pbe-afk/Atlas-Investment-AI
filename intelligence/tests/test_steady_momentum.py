@@ -79,3 +79,9 @@ class SteadyMomentumTests(unittest.TestCase):
         self.assertEqual(result["eligible_history_count"],120)
         self.assertEqual(result["technical_count"],0)
         self.assertEqual(result["matched_count"],0)
+
+    def test_amfi_period_rollover_does_not_relabel_old_classification(self):
+        from app.amfi_equity_caps import periods,url_for
+        self.assertEqual(periods(date(2026,11,27)),[date(2026,6,30)])
+        self.assertEqual(periods(date(2027,1,3)),[date(2026,12,31),date(2026,6,30)])
+        self.assertTrue(url_for(date(2026,12,31)).endswith("31Dec2026.xlsx"))

@@ -22,6 +22,7 @@ public class InternalFeedController {
   private final MarketDataController marketData;
   private final DataHealthController dataHealth;
   private final String serviceToken;
+  @Value("${MARKET_DATA_USAGE_RIGHTS_CONFIRMED:false}") boolean capUsageRights;
 
   public InternalFeedController(JdbcTemplate jdbc, InstrumentController instruments,
       MarketDataController marketData, DataHealthController dataHealth,
@@ -140,6 +141,44 @@ public class InternalFeedController {
       WHERE e.code=? AND i.active AND i.listing_status='ACTIVE' AND i.series='EQ'
         AND i.instrument_type IN ('EQ','EQUITY','STOCK') AND i.id IN (
       """+placeholders+") ORDER BY i.id,c.trade_date",args.toArray());
+  }
+
+  /** Atomic replacement of a dated public classification list, no account data. */
+  @PostMapping("/amfi-equity-caps")
+  @org.springframework.transaction.annotation.Transactional
+  public Map<String,Object> amfiEquityCaps(HttpServletRequest request,@RequestBody com.fasterxml.jackson.databind.JsonNode body) {
+    requireServiceToken(request.getHeader("X-Atlas-Service-Token"));
+    if(!capUsageRights)throw new ResponseStatusException(HttpStatus.FORBIDDEN,"Market data rights required");
+    java.time.LocalDate asOf;
+    try{asOf=java.time.LocalDate.parse(body.path("as_of").asText());}
+    catch(RuntimeException ex){throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid cap period");}
+    java.time.LocalDate today=java.time.LocalDate.now(MarketCalendarService.IST);
+    if(!asOf.isBefore(today)||asOf.isBefore(today.minusDays(220))||
+       !((asOf.getMonthValue()==6&&asOf.getDayOfMonth()==30)||(asOf.getMonthValue()==12&&asOf.getDayOfMonth()==31)))
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid cap period");
+    var items=body.path("items");
+    if(!items.isArray()||items.size()<250||items.size()>10000)
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid cap coverage");
+    Set<String> seen=new HashSet<>();
+    int large=0,mid=0;
+    List<Object[]> values=new ArrayList<>();
+    for(var item:items){
+      String isin=item.path("isin").asText(""),category=item.path("category").asText("");
+      var cap=item.path("average_cap_cr");
+      if(!isin.matches("IN[A-Z0-9]{9}[0-9]")||!seen.add(isin)||!Set.of("LARGE_CAP","MID_CAP","SMALL_CAP").contains(category)||
+         !cap.isNumber()||cap.decimalValue().signum()<=0||cap.decimalValue().compareTo(new java.math.BigDecimal("100000000"))>=0)
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid cap record");
+      if(category.equals("LARGE_CAP"))large++;
+      if(category.equals("MID_CAP"))mid++;
+      values.add(new Object[]{isin,category,cap.decimalValue(),asOf});
+    }
+    if(large!=100||mid!=150)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Incomplete cap categories");
+    jdbc.execute("LOCK TABLE discovery_amfi_cap IN EXCLUSIVE MODE");
+    if(Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM discovery_amfi_cap WHERE as_of>?)",Boolean.class,asOf)))
+      throw new ResponseStatusException(HttpStatus.CONFLICT,"Newer cap evidence already stored");
+    jdbc.update("DELETE FROM discovery_amfi_cap");
+    jdbc.batchUpdate("INSERT INTO discovery_amfi_cap(isin,category,average_cap_cr,as_of) VALUES (?,?,?,?)",values);
+    return Map.of("as_of",asOf.toString(),"count",values.size());
   }
 
   private void requireExchange(String exchange) {

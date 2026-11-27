@@ -108,4 +108,17 @@ class InternalFeedControllerTest {
     verify(instruments).list(20,null,"NSE");
     verify(marketData).candles(7,250);
   }
+
+  @Test void capPublicationRequiresServiceCredentialAndRightsAndCompleteDatedRows(){
+    JdbcTemplate jdbc=mock(JdbcTemplate.class);
+    HttpServletRequest request=mock(HttpServletRequest.class);
+    var api=controller(jdbc,"service-secret");
+    var body=new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode();
+    assertThatThrownBy(()->api.amfiEquityCaps(request,body)).isInstanceOf(ResponseStatusException.class);
+    when(request.getHeader("X-Atlas-Service-Token")).thenReturn("service-secret");
+    assertThatThrownBy(()->api.amfiEquityCaps(request,body)).isInstanceOf(ResponseStatusException.class);
+    api.capUsageRights=true;
+    assertThatThrownBy(()->api.amfiEquityCaps(request,body)).isInstanceOf(ResponseStatusException.class);
+    verifyNoInteractions(jdbc);
+  }
 }

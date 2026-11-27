@@ -373,7 +373,10 @@ def _execute_job(job):
     if job=="AMFI_EQUITY_CAP":
         if not amfi_equity_caps.permitted():
             return "DISABLED_OR_NOT_AUTHORIZED"
-        return "PASS_COMPLETED" if amfi_equity_caps.refresh(_connect,now().astimezone(ZoneInfo("Asia/Kolkata")).date()) else "WAITING_EVIDENCE"
+        today=now().astimezone(ZoneInfo("Asia/Kolkata")).date()
+        updated=amfi_equity_caps.refresh(_connect,today)
+        published=amfi_equity_caps.publish_to_scheduler(_connect,today)
+        return "PASS_COMPLETED" if updated and published else "WAITING_EVIDENCE"
     if job=="PUBLIC_RESEARCH_ALERTS":
         from . import public_alert_history
         snapshot=read_market_snapshot()
