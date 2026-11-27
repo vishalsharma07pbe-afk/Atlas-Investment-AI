@@ -20,7 +20,7 @@ from . import steady_momentum, amfi_equity_caps, company_reports, nse_surveillan
 from .screener import screen
 from . import discovery_scan
 from .mutual_fund_recommendations import CATEGORIES, dashboard
-from . import stock_qualification, market_regime, release_reconciliation, economic_calendar, global_releases, global_context, global_markets, global_macro, global_fx, automatic_deals, fund_portfolios, fund_disclosures, fund_prospective, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
+from . import unified_decision, stock_qualification, market_regime, release_reconciliation, economic_calendar, global_releases, global_context, global_markets, global_macro, global_fx, automatic_deals, fund_portfolios, fund_disclosures, fund_prospective, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
 
 SECTIONS = ("NSE", "BSE", *CATEGORIES)
 DEFAULT_INTERVAL = 900
@@ -410,6 +410,7 @@ def read_snapshot(include_ai=True):
         stock_qualification.attach(snapshot,current.astimezone(ZoneInfo("Asia/Kolkata")).date(),current)
         snapshot["daily_briefing"] = daily_briefing.summarize(snapshot)
         company_reports.attach(snapshot,current)
+        snapshot["unified_decision"]=unified_decision.summarize(snapshot,current.astimezone(ZoneInfo("Asia/Kolkata")).date())
     return snapshot
 
 
