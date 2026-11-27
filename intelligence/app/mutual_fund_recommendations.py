@@ -14,7 +14,7 @@ import hashlib
 import json
 import sqlite3
 
-from . import nav_catalog, fund_disclosures, fund_portfolios, fund_peer_shortlist, fund_local_evidence, fund_prospective, fund_growth_drivers, official_tri
+from . import nav_catalog, fund_disclosures, fund_portfolios, fund_peer_shortlist, fund_local_evidence, fund_prospective, fund_growth_drivers, official_tri, official_amc_factsheet
 from .market_client import backend_json
 from .fund_categories import CATEGORIES, LABELS as OFFICIAL_CATEGORY_LABELS, DEBT, SPECIALIZED, COMPARABLE
 
@@ -559,6 +559,7 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
     downloaded_tri=official_tri.read(datetime.now(timezone.utc))
     local_export=official_tri.combine(fund_local_evidence.load(today),downloaded_tri)
     local_reports=fund_local_evidence.reports(official,source_rows,local_export,today)
+    publisher_reports=official_amc_factsheet.matched(official,source_rows,datetime.now(timezone.utc))
     coverage["secondary_portfolio_composition_matches"]=len(compositions)
     coverage["secondary_portfolio_matches"]=len(portfolios)
     # Public catalog discovery remains separate from exact AMFI scheme evidence.
@@ -581,6 +582,8 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
     reports=_research_reports(official,ranked,source_rows,disclosed,portfolios,compositions)
     for report in reports:
         if report["identifier"] in local_reports:report["local_export_evidence"]=local_reports[report["identifier"]]
+        if report["identifier"] in publisher_reports:
+            report["publisher_factsheet_evidence"]=publisher_reports[report["identifier"]]
     try:
         prospective=fund_prospective.summary(category,today)
     except (OSError,ValueError,TypeError,sqlite3.Error):
@@ -607,6 +610,8 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
       "suitability":ranked["suitability"],"blockers":blockers,
       "qualification_summary":{"evaluated_count":len(official),"top_eligible_count":ranked["top_eligible_count"],
           "growth_eligible_count":ranked["growth_eligible_count"],"excluded":ranked["excluded"]},
+      "official_amc_coverage":{"status":"PUBLISHER_MATCHES" if publisher_reports else "AWAITING_MATCHED_SOURCE" if official_amc_factsheet.permitted() else "DISABLED_OR_NOT_AUTHORIZED",
+          "matched_schemes":len(publisher_reports),"notice":official_amc_factsheet.NOTICE},
       "official_tri_coverage":{"status":downloaded_tri["status"],"configured_count":downloaded_tri["configured_count"],
           "available_count":len(downloaded_tri["indices"]),"conflicting_series":local_export["tri_conflicts"],"notice":official_tri.NOTICE},
       "market_overview":fund_local_evidence.overview(local_export,today),
