@@ -105,34 +105,32 @@ def summarize(snapshot,today):
         if len(sections)!=1:continue
         result=sections[0].get("result") or {}
         if result.get("category")!=category:continue
-        reports={}
-        duplicates=set()
-        for row in result.get("research_reports",[])[:40]:
-            if not isinstance(row,dict):continue
-            code=row.get("identifier")
-            if not isinstance(code,str) or not re.fullmatch(r"[1-9][0-9]{5,8}",code) or row.get("category")!=category or not _fresh(row.get("nav_date"),today,7,0):continue
-            if code in reports:duplicates.add(code)
-            reports[code]=row
-        counts=Counter()
-        for code,row in reports.items():
-            if code in duplicates:continue
-            for kind in ("top_performer","growth_outlook"):
-                gate=row.get(kind) or {}
-                if gate.get("status")=="WITHHELD":counts[kind+"_withheld"]+=1
-                for v in codes(gate.get("missing")):counts[v]+=1
+        counts=result.get("qualification_counts") or {}
+        evaluated,top,growth=(counts.get(k) for k in ("evaluated_count","top_eligible_count","growth_eligible_count"))
+        valid=all(type(x) is int and 0<=x<=40 for x in (evaluated,top,growth)) and max(top,growth)<=evaluated
+        blockers=Counter()
+        if valid:
+            for key in ("top_missing_gate_counts","growth_missing_gate_counts"):
+                for k,v in (counts.get(key) or {}).items():
+                    if codes([k]) and type(v) is int and 0<v<=evaluated:blockers[k]+=v
         watches=[]
         shortlist=result.get("historical_research_shortlist") or {}
-        if shortlist.get("status")=="HISTORICAL_SHORTLIST_AVAILABLE" and shortlist.get("category")==category:
+        if shortlist.get("methodology")=="MF-MATCHED-PEER-1" and shortlist.get("status")=="HISTORICAL_SHORTLIST_AVAILABLE" and shortlist.get("category")==category:
             seen=set()
             for row in shortlist.get("items",[])[:5]:
                 code=row.get("identifier")
-                if code in seen or code in duplicates or code not in reports or row.get("nav_date")!=reports[code].get("nav_date") or row.get("qualified") is not False or row.get("status")!="HISTORICAL_RESEARCH_ONLY":continue
+                if not isinstance(code,str) or not re.fullmatch(r"[1-9][0-9]{5,8}",code) or code in seen or row.get("nav_date")!=shortlist.get("last_date") or not _fresh(row.get("nav_date"),today,7,0) or row.get("qualified") is not False or row.get("status")!="HISTORICAL_RESEARCH_ONLY":continue
                 seen.add(code)
-                watches.append({"identifier":code,"name":reports[code].get("name"),"nav_date":row["nav_date"],"state":"HISTORICAL_WATCH_ONLY","qualified":False})
+                watches.append({"identifier":code,"name":row.get("name"),"nav_date":row["nav_date"],"state":"HISTORICAL_WATCH_ONLY","qualified":False})
+        driver_review=result.get("growth_driver_review") or {}
+        drivers=[{"identifier":row.get("identifier"),"state":row.get("state"),
+                  "ai_status":((row.get("ai_review") or {}).get("committee") or {}).get("agreement_status","UNAVAILABLE")}
+                 for row in driver_review.get("items",[])[:5] if row.get("qualified") is False]
         out["fund_categories"].append({"category":category,"state":"HISTORICAL_WATCH_ONLY" if watches else "EVIDENCE_REVIEW",
-          "reviewed_count":len(reports)-len(duplicates),"historical_watches":watches,
-          "top_withheld_count":counts["top_performer_withheld"],"growth_withheld_count":counts["growth_outlook_withheld"],
-          "leading_blockers":[{"code":k,"count":v} for k,v in sorted(counts.items(),key=lambda x:(-x[1],x[0])) if not k.endswith("_withheld")][:5],
+          "reviewed_count":evaluated if valid else None,"historical_watches":watches,
+          "top_withheld_count":evaluated-top if valid else None,"growth_withheld_count":evaluated-growth if valid else None,
+          "leading_blockers":[{"code":k,"count":v} for k,v in sorted(blockers.items(),key=lambda x:(-x[1],x[0]))][:5],
+          "driver_reviews":drivers,
           "prospective_status":(result.get("prospective_validation") or {}).get("status","UNAVAILABLE"),
           "qualification_status":result.get("recommendation_status","UNAVAILABLE")})
     if companies or out["fund_categories"]:out["status"]="RESEARCH_CONTEXT_AVAILABLE"

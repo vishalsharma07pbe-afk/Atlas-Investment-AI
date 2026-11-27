@@ -32,15 +32,14 @@ class UnifiedDecisionTests(unittest.TestCase):
         self.assertIsNone(d.summarize(snapshot,TODAY)["equity_company_count"])
     def test_exact_fund_historical_match_preserves_blockers(self):
         snapshot,_=fixture()
-        fund={"identifier":"123456","name":"Example","category":"LARGE_CAP","nav_date":"2026-11-26",
-              "top_performer":{"status":"WITHHELD","missing":["TRI_MISSING"]},
-              "growth_outlook":{"status":"WITHHELD","missing":["FORWARD_EVIDENCE_MISSING"]}}
-        result={"category":"LARGE_CAP","research_reports":[fund],"historical_research_shortlist":{"status":"HISTORICAL_SHORTLIST_AVAILABLE","category":"LARGE_CAP","items":[{"identifier":"123456","nav_date":"2026-11-26","qualified":False,"status":"HISTORICAL_RESEARCH_ONLY"}]}}
+        result={"category":"LARGE_CAP","qualification_counts":{"evaluated_count":1,"top_eligible_count":0,"growth_eligible_count":0,
+            "top_missing_gate_counts":{"TRI_MISSING":1},"growth_missing_gate_counts":{"FORWARD_EVIDENCE_MISSING":1}},
+            "historical_research_shortlist":{"methodology":"MF-MATCHED-PEER-1","status":"HISTORICAL_SHORTLIST_AVAILABLE","category":"LARGE_CAP","last_date":"2026-11-26","items":[{"identifier":"123456","nav_date":"2026-11-26","qualified":False,"status":"HISTORICAL_RESEARCH_ONLY"}]}}
         snapshot["sections"].append({"section":"LARGE_CAP","status":"READY","result":result})
         row=d.summarize(snapshot,TODAY)["fund_categories"][0]
         self.assertEqual(row["growth_withheld_count"],1)
         self.assertFalse(row["historical_watches"][0]["qualified"])
-        result["research_reports"].append(fund)
+        result["historical_research_shortlist"]["last_date"]="2026-10-01"
         self.assertFalse(d.summarize(snapshot,TODAY)["fund_categories"][0]["historical_watches"])
 
     def test_elite_and_daily_watches_count_one_company(self):

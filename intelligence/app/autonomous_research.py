@@ -20,7 +20,7 @@ from . import steady_momentum, amfi_equity_caps, company_reports, nse_surveillan
 from .screener import screen
 from . import discovery_scan
 from .mutual_fund_recommendations import CATEGORIES, dashboard
-from . import unified_decision, stock_qualification, market_regime, release_reconciliation, economic_calendar, global_releases, global_context, global_markets, global_macro, global_fx, automatic_deals, fund_portfolios, fund_disclosures, fund_prospective, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
+from . import fund_ai_review, unified_decision, stock_qualification, market_regime, release_reconciliation, economic_calendar, global_releases, global_context, global_markets, global_macro, global_fx, automatic_deals, fund_portfolios, fund_disclosures, fund_prospective, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
 
 SECTIONS = ("NSE", "BSE", *CATEGORIES)
 DEFAULT_INTERVAL = 900
@@ -199,6 +199,15 @@ def fund_snapshot(category):
         "category", "coverage", "top_performers", "growth_outlook",
         "recommendation_status", "blockers", "notice", "filters", "historical_coverage")}
     snapshot["qualification_counts"]=_fund_qualification_counts(result.get("qualification_summary"))
+    drivers=result.get("growth_driver_review") or {}
+    if drivers.get("methodology")=="MF-QUARTERLY-DRIVERS-1":
+        snapshot["growth_driver_review"]={"methodology":drivers["methodology"],"status":drivers.get("status"),
+            "items":[{k:row.get(k) for k in ("identifier","name","portfolio_date","quarter","joint_coverage_weight_percent",
+                "joint_growth_weight_percent","review_weight_percent","state","qualified","forecast_return_percent")}
+                for row in drivers.get("items",[])[:5] if isinstance(row,dict) and row.get("qualified") is False]}
+    prospective=result.get("prospective_validation") or {}
+    if isinstance(prospective.get("status"),str):
+        snapshot["prospective_validation"]={"status":prospective["status"]}
     # Keep only the bounded public shortlist, never the full report or
     # arbitrary secondary source payload. Qualification lists stay separate.
     shortlist=result.get("historical_research_shortlist") or {}
@@ -261,6 +270,10 @@ def _published_evidence_current(section, result, today):
             if any(not fresh(item["nav_date"],0,7) or item["nav_date"]!=shortlist["last_date"] or item.get("qualified") is not False
                    for item in shortlist["items"]):
                 return False
+        drivers=result.get("growth_driver_review") or {}
+        if any(not fresh(row["portfolio_date"],0,60) or not fresh(row["quarter"],0,150) or row.get("qualified") is not False
+               for row in drivers.get("items",[])):
+            return False
         # The current strict catalog cannot qualify recommendations without
         # evidence, but recheck dates defensively if qualified picks are stored.
         for key in ("top_performers", "growth_outlook"):
@@ -406,6 +419,14 @@ def read_snapshot(include_ai=True):
             snapshot["bracket_research"]=bracket_research.prospective(_connect,current) if enabled else {"status":"DISABLED"}
         except (ValueError,TypeError,OSError,sqlite3.Error):
             snapshot["bracket_research"]={"status":"UNAVAILABLE","notice":bracket_research.NOTICE}
+        try:
+            if fund_portfolios.permitted() and automatic_company_evidence.permitted():
+                fund_ai_review.attach(snapshot,_connect)
+            else:
+                for section in snapshot.get("sections",[]):
+                    (section.get("result") or {}).pop("growth_driver_review",None)
+        except (ValueError,TypeError,OSError,sqlite3.Error):
+            pass
         research_reliability.attach_conclusions(snapshot)
         stock_qualification.attach(snapshot,current.astimezone(ZoneInfo("Asia/Kolkata")).date(),current)
         snapshot["daily_briefing"] = daily_briefing.summarize(snapshot)
@@ -432,6 +453,15 @@ def job_status():
 
 def _execute_job(job):
     """Dispatch existing bounded engines, with explicit evidence/config gates."""
+    if job=="FUND_AI_REVIEW":
+        if not automatic_ai_review.providers() or not fund_portfolios.permitted() or not automatic_company_evidence.permitted():
+            return "DISABLED_OR_NOT_AUTHORIZED"
+        enabled,interval=config()
+        snapshot=_read_sections(CATEGORIES,enabled,interval,now())
+        if not any(fund_ai_review.candidates(snapshot)):
+            return "WAITING_EVIDENCE"
+        fund_ai_review.refresh(snapshot,_connect)
+        return "PASS_COMPLETED"
     if job=="SECTOR_BENCHMARKS":
         if not sector_benchmarks.permitted():return "DISABLED_OR_NOT_AUTHORIZED"
         return "PASS_COMPLETED" if sector_benchmarks.refresh(_connect,now()) else "WAITING_EVIDENCE"

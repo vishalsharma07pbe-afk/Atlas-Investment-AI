@@ -175,6 +175,13 @@ def _review(pack, provider, runner, role="TECHNICAL_EVIDENCE"):
               "Peer multiples are undated, global changes are not synchronized, and replay is not forward performance. "
               "The system will validate each assertion against the supplied observations.\n"
               + json.dumps(supplied, ensure_ascii=True,separators=(",",":")))
+    if pack.get("version")=="AUTO-FUND-GROUNDED-1":
+        prompt=("Review the supplied public mutual fund's historical quarterly earnings exposure, not private holdings. "
+                "Return one to eight findings using the existing findings schema. Each statement must be a JSON string "
+                "with exactly keys path and value, for example {\\\"path\\\":\\\"/OBS/quarter\\\",\\\"value\\\":\\\"2026-09-30\\\"}. "
+                "Cite exactly OBS or LIMITS as appropriate. Use exact scalar values only; do not extrapolate, predict NAV, "
+                "infer recommendations, or treat original fund weight as company earnings growth. "
+                "All statements are checked against the supplied evidence.\\n"+json.dumps(supplied,ensure_ascii=True,separators=(",",":")))
     result = runner(prompt, list(supplied), providers=[provider])
     response = result.get("response")
     if result.get("status") != "MODEL_GROUNDED" or result.get("provider") != provider or not isinstance(response, dict):
@@ -262,7 +269,7 @@ def _committee(pack, selected, reviews, attempted):
             "notice":"Exact scalar checks against the supplied evidence only, not independent source verification, interpretive agreement, confidence or investment qualification."}
 
 
-def refresh(snapshot, connect, runner=ai_failover.grounded_research):
+def refresh(snapshot, connect, runner=ai_failover.grounded_research, *, candidate_loader=None):
     if not snapshot["enabled"] or not enabled():
         return
     selected=providers()
@@ -272,7 +279,7 @@ def refresh(snapshot, connect, runner=ai_failover.grounded_research):
     # Up to two calls per pass, one evidence pack; up to five permitted
     # providers across passes. Keep valid reviews while retrying missing roles.
     seen=set()
-    for _,pack,key in candidates(snapshot,selected):
+    for _,pack,key in (candidate_loader or candidates)(snapshot,selected):
         if key in seen:continue
         seen.add(key)
         previous=_claim(connect,key,now)
@@ -340,6 +347,8 @@ def attach(snapshot, connect):
 
 
 def _supplied(pack):
+    if pack.get("version")=="AUTO-FUND-GROUNDED-1":
+        return {"OBS":pack["fund"],"LIMITS":pack["missing"]}
     domains={"financial_trends":"FUND","historical_replay":"REPLAY",**ai_public_evidence.DOMAINS}
     # OBS remains an explicit field allowlist, never an arbitrary remainder.
     supplied={"OBS":{k:pack[k] for k in ("version","symbol","exchange","as_of","horizon","adjustment","observations")},"LIMITS":pack["missing"]}
