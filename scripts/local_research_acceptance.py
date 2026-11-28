@@ -6,6 +6,9 @@ The interactive password and short-lived use of a session token stay in memory.
 No registration, holdings mutation, forced refresh, provider call or trade.
 """
 import argparse
+from datetime import date,datetime,timedelta,timezone
+from zoneinfo import ZoneInfo
+from math import isfinite
 import getpass
 import json
 import re
@@ -481,7 +484,142 @@ def advanced_audit(readiness,overview,review,intraday):
             "observed_evidence":evidence,"investment_qualification":"NOT_CERTIFIED",
             "notice":"Contract audit only. Empty or disabled evidence is not a verified provider or investment result."}
 
-def collect(request,include_qualification_audit=False,include_advanced_audit=False):
+RECOVERY_FIELDS=("current_listings","deep_listings","adjusted_depth_listings","recoverable_missing","due_missing")
+RECOVERY_COUNTS=("mapped_listings","mapped_companies","active_claims","expired_claims","failed_last_attempts","never_attempted","suspended_listings","protected_adjusted_listings")
+GLOBAL_PUBLISHERS=("FRED","EIA","US_TREASURY","TWELVE_DATA","ECB","FED","BLS")
+COMPANY_SECTIONS=("profile","ratios","income_statement","quarterly_income","balance_sheet","cash_flow","shareholding","corporate_actions","competitors")
+def _date(value):
+    try:
+        day=date.fromisoformat(value)
+        return day if day.isoformat()==value else None
+    except (ValueError,TypeError):return None
+
+def _timestamp(value):
+    try:
+        stamp=datetime.fromisoformat(value.replace("Z","+00:00"))
+        return stamp if stamp.tzinfo is not None else None
+    except (ValueError,TypeError,AttributeError,OverflowError):return None
+
+def recovery_audit(history,readiness,overview,providers,instant=None):
+    """Validate aggregate contracts, not evidence sufficiency or source rights.
+
+    Fixed output fields only: do not echo labels, symbols, provider messages,
+    URLs, account data or credential/configuration values.
+    """
+    instant=instant or datetime.now(timezone.utc)
+    today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
+    history,readiness,overview,providers=map(_obj,(history,readiness,overview,providers))
+    checks={};evidence={}
+    def check(name,ok):checks[name]="PASS" if ok else "BLOCKED"
+    rows=history.get("exchanges");market={}
+    stamp=_timestamp(history.get("generated_at"))
+    history_ok=(isinstance(rows,list) and len(rows)==2 and type(history.get("configured")) is bool
+        and type(history.get("provider_blocked")) is bool and history.get("depth_target")==253
+        and stamp is not None and abs((instant-stamp).total_seconds())<=300
+        and _count(history.get("distinct_mapped_companies")))
+    if history_ok:
+        for row in rows:
+            row=_obj(row);venue=row.get("exchange");mapped=row.get("mapped_listings")
+            if venue not in ("NSE","BSE") or venue in market or not _count(mapped) or any(not _count(row.get(k)) or row[k]>mapped for k in RECOVERY_COUNTS):
+                history_ok=False;break
+            target=_date(row.get("target_session"))
+            known=row.get("calendar_status")=="VERIFIED_PRIOR_REGULAR_SESSION"
+            if known:
+                if not target or not 1<=(today-target).days<=14 or any(not _count(row.get(k)) or row[k]>mapped for k in RECOVERY_FIELDS):
+                    history_ok=False;break
+                if not (row["due_missing"]<=row["recoverable_missing"]<=mapped-row["current_listings"] and row["adjusted_depth_listings"]<=row["deep_listings"]):
+                    history_ok=False;break
+            elif row.get("calendar_status")!="UNVERIFIED" or row.get("target_session") is not None or any(row.get(k) is not None for k in RECOVERY_FIELDS):
+                history_ok=False;break
+            market[venue]={"target_session":target.isoformat() if known else None,**{k:row.get(k) for k in RECOVERY_COUNTS+RECOVERY_FIELDS}}
+        if history_ok:
+            counts=[v["mapped_companies"] for v in market.values()]
+            history_ok=max(counts)<=history["distinct_mapped_companies"]<=sum(counts)
+    check("history_recovery_contract",history_ok)
+    evidence["history"]={"exchanges":market,"configured":history["configured"],"provider_blocked":history["provider_blocked"],
+        "distinct_mapped_companies":history["distinct_mapped_companies"]} if history_ok else None
+
+    jobs=_obj(readiness.get("research_jobs"))
+    company=_obj(jobs.get("company_acquisition"));sample=company.get("sample_identities")
+    company_ok=company.get("status")=="DISABLED_OR_NOT_AUTHORIZED"
+    company_evidence=None
+    if company.get("status")=="LOCAL_ACQUISITION_AUDIT":
+        counts=_obj(company.get("counts"));primary=company.get("primary_identities")
+        fip=company.get("fip_priority_identities");due=company.get("due_fip_priority")
+        company_ok=(all(_count(v) for v in (sample,primary,fip,due,company.get("due_sample"),company.get("due_primary")))
+            and fip<=10 and due<=fip<=primary and company["due_sample"]<=sample and company["due_primary"]<=primary
+            and type(company.get("global_company_cooldown")) is bool
+            and all(_count(counts.get(k,0)) and counts.get(k,0)<=sample for k in ("fresh_reports","fresh_current_normalization","incremental_reports")))
+        if company_ok:
+            company_evidence={"sample_identities":sample,"primary_identities":primary,"fip_priority_identities":fip,"due_fip_priority":due,
+                "fresh_reports":counts.get("fresh_reports",0),"incremental_reports":counts.get("incremental_reports",0)}
+            company_ok=company_evidence["incremental_reports"]<=company_evidence["fresh_reports"]<=sample
+    check("company_recovery_contract",company_ok)
+    evidence["company"]=company_evidence if company_ok else None
+
+    funds=_obj(jobs.get("fund_disclosure_acquisition"))
+    fund_ok=funds.get("status") in ("DISABLED_OR_NOT_AUTHORIZED","NO_SNAPSHOT")
+    fund_evidence=None
+    if funds.get("status") in ("LAST_SUCCESSFUL_SECONDARY_FILE","STALE_SECONDARY_FILE"):
+        total=funds.get("stored_scheme_count");fields=_obj(funds.get("fresh_field_counts"))
+        allowed=("aum_cr_all_plans","benchmark","riskometer","ter_percent","base_expense_percent","fund_managers","exit_load")
+        fund_ok=(_count(total) and total>0 and isinstance(funds.get("source_counts"),dict)
+                 and isinstance(funds.get("fresh_field_counts"),dict) and all(k in allowed and _count(v) and v<=total for k,v in fields.items())
+                 and (funds["status"]!="STALE_SECONDARY_FILE" or not fields))
+        if fund_ok:fund_evidence={"stored_scheme_count":total,"fresh_field_counts":{k:fields[k] for k in allowed if k in fields},
+                                  "fresh_snapshot":funds["status"]=="LAST_SUCCESSFUL_SECONDARY_FILE"}
+    check("fund_disclosure_recovery_contract",fund_ok)
+    evidence["fund_disclosures"]=fund_evidence
+
+    global_state=_obj(jobs.get("global_source_recovery"));global_rows=global_state.get("providers")
+    global_ok=global_state.get("status")=="PERSISTED_GLOBAL_RECOVERY" and isinstance(global_rows,list) and len(global_rows)==len(GLOBAL_PUBLISHERS)
+    states={}
+    if global_ok:
+        for row in global_rows:
+            row=_obj(row);key=row.get("provider");state=row.get("state")
+            if key not in GLOBAL_PUBLISHERS or key in states or state not in ("CLOSED","NOT_OBSERVED","OPEN","PROBE_IN_PROGRESS","RECOVERY_PROBE_DUE") or not _count(row.get("retry_after_seconds")):
+                global_ok=False;break
+            states[key]=state
+    check("global_recovery_contract",global_ok)
+    evidence["global_publishers"]=states if global_ok else None
+
+    fallback=_obj(providers.get("fallback_observation"));n=fallback.get("observation_count")
+    fallback_ok=(providers.get("automatic_fallback_available") is False and providers.get("streaming_verified") is False
+        and type(providers.get("same_market_fallback_configured")) is bool and fallback.get("route")=="UPSTOX_TO_DHAN"
+        and _count(n) and ((fallback.get("status")=="NOT_OBSERVED" and n==0 and fallback.get("last_observed_at") is None)
+             or (fallback.get("status")=="PAST_VALIDATED_HTTP_FALLBACK" and n>0 and _timestamp(fallback.get("last_observed_at")) is not None)))
+    check("fallback_provenance_contract",fallback_ok)
+    evidence["fallback"]={"configured":providers["same_market_fallback_configured"],"past_observation_count":n} if fallback_ok else None
+
+    archive=overview.get("historical_display");seen=set();total=0
+    archive_ok=isinstance(archive,list) and len(archive)<=len(SECTIONS)
+    section_rows={r.get("section"):r for r in _list(overview.get("sections")) if isinstance(r,dict) and isinstance(r.get("section"),str)}
+    if archive_ok:
+        for row in archive:
+            row=_obj(row);key=row.get("section");observations=row.get("observations");stamp=_timestamp(row.get("generated_at"))
+            equity=key in ("NSE","BSE")
+            if (key not in SECTIONS or key in seen or row.get("status")!="HISTORICAL_DISPLAY_ONLY" or row.get("qualification_eligible") is not False
+                or overview.get("enabled") is not True or row.get("current_status") not in ("READY","STALE","FAILED")
+                or row.get("current_status")!=_obj(section_rows.get(key)).get("status")
+                or row.get("metric")!=("20_SESSION_PRICE_CHANGE" if equity else "3_YEAR_CAGR")
+                or stamp is None or not timedelta(0)<=instant-stamp<=timedelta(days=7)
+                or not isinstance(observations,list) or not 1<=len(observations)<=5):
+                archive_ok=False;break
+            for item in observations:
+                item=_obj(item);day=_date(item.get("observed_date"));value=item.get("value_percent")
+                if (set(item)!={"label","observed_date","value_percent"} or not isinstance(item.get("label"),str)
+                    or not 1<=len(item["label"])<=300 or day is None or not (1 if equity else 0)<=(stamp.astimezone(ZoneInfo("Asia/Kolkata")).date()-day).days<=(4 if equity else 7)
+                    or type(value) not in (int,float) or not isfinite(value) or abs(value)>1e6):
+                    archive_ok=False;break
+            if not archive_ok:break
+            seen.add(key);total+=len(observations)
+    check("historical_display_isolation_contract",archive_ok)
+    evidence["historical_display"]={"section_count":len(seen),"observation_count":total} if archive_ok else None
+    return {"status":"PASS" if all(v=="PASS" for v in checks.values()) else "BLOCKED","checks":checks,
+            "observed_evidence":evidence,"product_acceptance":"NOT_CERTIFIED",
+            "notice":"Recovery contracts only. Unknown calendars, empty archives, disabled optional sources and zero observations are not evidence of working live acquisition."}
+
+def collect(request,include_qualification_audit=False,include_advanced_audit=False,include_recovery_audit=False):
     readiness=request("/intelligence/api/v1/intelligence/data-readiness")
     overview=request("/intelligence/api/v1/intelligence/research/overview")
     review=request("/api/v1/portfolio/review")
@@ -501,6 +639,10 @@ def collect(request,include_qualification_audit=False,include_advanced_audit=Fal
         result["advanced_audit"]=advanced_audit(readiness,overview,review,intraday)
     if include_qualification_audit:
         result["qualification_audit"]=qualification_audit(overview,readiness,intraday)
+    if include_recovery_audit:
+        history=request("/api/v1/data-health/history-recovery")
+        providers=request("/intelligence/api/v1/intelligence/data-hub/provider-adapters")
+        result["recovery_audit"]=recovery_audit(history,readiness,overview,providers)
     if workflows["workflow_runtime"]!="PASS" or final["final_runtime"]!="PASS":
         result["runtime"]="BLOCKED"
     return result
@@ -511,6 +653,7 @@ def main():
     parser.add_argument("--require-live",action="store_true",help="Require a fresh tick during an expected live trading session")
     parser.add_argument("--qualification-audit",action="store_true",help="Include redacted stock and fund evidence gap counts")
     parser.add_argument("--advanced-audit",action="store_true",help="Audit advanced decision and validation contracts; require them to pass")
+    parser.add_argument("--recovery-audit",action="store_true",help="Audit recovery diagnostics and historical display isolation; require contracts to pass")
     args=parser.parse_args()
     session=LocalSession(args.base_url)
     result=None
@@ -526,7 +669,7 @@ def main():
         session.token=token
         del login,token
         session.request("/api/v1/auth/me")
-        result=collect(session.request,include_qualification_audit=args.qualification_audit,include_advanced_audit=args.advanced_audit)
+        result=collect(session.request,include_qualification_audit=args.qualification_audit,include_advanced_audit=args.advanced_audit,include_recovery_audit=args.recovery_audit)
     except (RuntimeError,ValueError,TypeError,KeyError,AttributeError):
         print(json.dumps({"runtime":"BLOCKED","reason":"LOCAL_ACCEPTANCE_REQUEST_OR_CONTRACT_FAILED"}))
         return 1
@@ -537,7 +680,7 @@ def main():
                 if result is not None:result["runtime"]="BLOCKED";result["checks"]["session_logout"]="BLOCKED"
             finally:session.token=None
     print(json.dumps(result,indent=2,sort_keys=True))
-    return 0 if result["runtime"]==result["stored_provider_evidence"]=="PASS" and (not args.require_live or result["live_feed"]=="OBSERVED") and (not args.advanced_audit or result["advanced_audit"]["status"]=="PASS") else 1
+    return 0 if result["runtime"]==result["stored_provider_evidence"]=="PASS" and (not args.require_live or result["live_feed"]=="OBSERVED") and (not args.advanced_audit or result["advanced_audit"]["status"]=="PASS") and (not args.recovery_audit or result["recovery_audit"]["status"]=="PASS") else 1
 
 if __name__=="__main__":
     raise SystemExit(main())
