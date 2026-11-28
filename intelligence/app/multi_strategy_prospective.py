@@ -30,6 +30,9 @@ def publish(snapshot,connect,instant):
                 if not lanes:continue
                 e={k:r[k] for k in ("symbol","exchange","close","as_of","isin")}
                 e.update(methodology=VERSION,adjustment_status="ADJUSTED",strategies=lanes)
+                from . import strategy_adaptation
+                if r.get("publication_regime") in strategy_adaptation.REGIMES and r["publication_regime"]==report.get("regime"):
+                    e.update(regime_policy=strategy_adaptation.VERSION,regime=r["publication_regime"])
                 cursor=db.execute("""INSERT OR IGNORE INTO watch_outcomes(instrument_id,horizon,observed_date,published_at,maturity_date,evidence)
                     VALUES(?,?,?,?,?,?)""",(r["id"],HORIZON,r["as_of"],instant.isoformat(),(today+timedelta(days=60)).isoformat(),json.dumps(e,allow_nan=False)))
                 count+=cursor.rowcount;existing.add(r["isin"])
