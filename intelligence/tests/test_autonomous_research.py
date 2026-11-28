@@ -370,3 +370,20 @@ class AutonomousResearchTests(unittest.TestCase):
                 [{"date":"2026-11-25","action_type":"SPLIT"}])
             research._save("NSE",{"company_research_universe":[]})
             self.assertEqual(research.read_market_snapshot()["sections"][0]["status"],"READY")
+
+    def test_fund_targets_persist_only_compact_public_current_composition_references(self):
+        payload={key:None for key in ("category","coverage","top_performers","growth_outlook",
+            "recommendation_status","blockers","notice","filters","historical_coverage")}
+        payload.update(category="LARGE_CAP",top_performers=[],growth_outlook=[],portfolio_evidence={"items":[
+          {"status":"SECONDARY_COMPOSITION_ONLY","source":"TIGZIG_AMC_DERIVED","fund_id":"fund:123",
+           "scheme_code":"123456","portfolio_date":"2026-10-31","equities":"DO_NOT_PERSIST"}]})
+        now=datetime(2026,11,28,5,tzinfo=timezone.utc)
+        with patch.object(research,"dashboard",return_value=payload):
+            snapshot=research.fund_snapshot("LARGE_CAP")
+        self.assertNotIn("DO_NOT_PERSIST",str(snapshot))
+        self.assertEqual(snapshot["portfolio_research_targets"],[{"fund_id":"fund:123","scheme_code":"123456","portfolio_date":"2026-10-31"}])
+        with patch.object(research,"now",return_value=now),patch.object(research.fund_portfolios,"permitted",return_value=True),patch.object(research.automatic_company_evidence,"permitted",return_value=True):
+            research._save("LARGE_CAP",snapshot)
+            self.assertEqual(research._fund_research_targets(now),{"fund:123":"2026-10-31"})
+        with patch.object(research.fund_portfolios,"permitted",return_value=False):
+            self.assertEqual(research._fund_research_targets(now),{})

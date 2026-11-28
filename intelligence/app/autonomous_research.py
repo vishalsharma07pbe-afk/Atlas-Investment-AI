@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import json
 import os
+import re
 from pathlib import Path
 import sqlite3
 from urllib.parse import urlencode
@@ -229,6 +230,18 @@ def fund_snapshot(category):
             "items":[{k:row.get(k) for k in ("identifier","name","portfolio_date","quarter","nav_date","joint_coverage_weight_percent",
                 "joint_growth_weight_percent","review_weight_percent","state","qualified","forecast_return_percent")}
                 for row in drivers.get("items",[])[:5] if isinstance(row,dict) and row.get("qualified") is False]}
+    # Compact exact public composition targets for the existing underlying
+    # research scheduler. No raw holdings, names or source URLs are persisted.
+    targets=[]
+    for row in (result.get("portfolio_evidence") or {}).get("items",[])[:5]:
+        if not isinstance(row,dict) or row.get("status")!="SECONDARY_COMPOSITION_ONLY" or row.get("source")!="TIGZIG_AMC_DERIVED":continue
+        fund=row.get("fund_id");code=row.get("scheme_code")
+        try:
+            day=date.fromisoformat(row["portfolio_date"])
+            if not isinstance(fund,str) or not re.fullmatch(r"[A-Za-z0-9:_.-]{1,80}",fund) or not isinstance(code,str) or not re.fullmatch(r"[1-9][0-9]{0,8}",code):continue
+            targets.append({"fund_id":fund,"scheme_code":code,"portfolio_date":day.isoformat()})
+        except (ValueError,TypeError,KeyError):continue
+    if targets:snapshot["portfolio_research_targets"]=targets
     # Only aggregate public source coverage. Never persist source URLs or holdings.
     for key,fields in (("official_tri_coverage",("configured_count","available_count")),("official_amc_coverage",("matched_schemes",))):
         block=result.get(key)
@@ -381,6 +394,7 @@ def _read_sections(section_names,enabled,interval,current):
             error_code = "INVALID_STORED_RESEARCH_SNAPSHOT"
         if section in CATEGORIES and isinstance(result,dict) and (not fund_portfolios.permitted() or not automatic_company_evidence.permitted()):
             result.pop("growth_driver_review",None)
+            result.pop("portfolio_research_targets",None)
         if section in CATEGORIES and isinstance(result,dict):
             if not official_tri.permitted():result.pop("official_tri_coverage",None)
             if not official_amc_factsheet.permitted():result.pop("official_amc_coverage",None)
@@ -535,6 +549,26 @@ def job_status():
     return result
 
 
+def _fund_research_targets(current):
+    enabled,interval=config()
+    snapshot=_read_sections(CATEGORIES,enabled,interval,current)
+    today=current.astimezone(ZoneInfo("Asia/Kolkata")).date()
+    targets={};conflicts=set()
+    for section in snapshot["sections"]:
+        if section.get("status")!="READY":continue
+        result=section.get("result") or {}
+        if result.get("category")!=section["section"]:continue
+        for row in result.get("portfolio_research_targets",[])[:5]:
+            if not isinstance(row,dict):continue
+            fund=row.get("fund_id")
+            try:
+                if not isinstance(fund,str) or not re.fullmatch(r"[A-Za-z0-9:_.-]{1,80}",fund) or not 0<=(today-date.fromisoformat(row["portfolio_date"])).days<=60:continue
+            except (ValueError,TypeError,KeyError):continue
+            if fund in targets and targets[fund]!=row["portfolio_date"]:conflicts.add(fund)
+            targets[fund]=row["portfolio_date"]
+    return {fund:day for fund,day in targets.items() if fund not in conflicts}
+
+
 def _execute_job(job):
     """Dispatch existing bounded engines, with explicit evidence/config gates."""
     if job=="OFFICIAL_AMC_FACTSHEETS":
@@ -628,7 +662,8 @@ def _execute_job(job):
     if job=="FUND_COMPANY_EVIDENCE":
         if not fund_portfolios.permitted() or not automatic_company_evidence.permitted():
             return "DISABLED_OR_NOT_AUTHORIZED"
-        ids=fund_portfolios.research_identities()
+        current=now()
+        ids=fund_portfolios.research_identities(current,preferred_funds=_fund_research_targets(current))
         if not ids:
             return "WAITING_EVIDENCE"
         outcome=automatic_company_evidence.refresh({"enabled":True,"sections":[]},_connect,explicit_isins=ids)

@@ -406,7 +406,13 @@ def qualification_audit(overview,readiness=None,intraday=None):
     matched=_bounded_count(strict.get("matched_count"))
     if strict.get("qualification_eligible") is not False or displayed is None or matched is None or displayed!=min(matched,10) or strict.get("status")!=("JOINT_SCREEN_MATCHES" if matched else "NO_JOINT_SCREEN_MATCHES"):
         displayed=matched=None
+    reported=_obj(screen.get("reported_suggestions"))
+    reported_displayed=_distinct_stock_count(reported.get("items"),10)
+    reported_matched=_bounded_count(reported.get("matched_count"))
+    if reported.get("qualification_eligible") is not False or reported_displayed is None or reported_matched is None or reported_displayed!=min(reported_matched,10) or reported.get("status")!=("REPORTED_JOINT_MATCHES" if reported_matched else "NO_REPORTED_JOINT_MATCHES"):
+        reported_displayed=reported_matched=None
     elite={"strict_joint_match_count":matched,"displayed_strict_suggestion_count":displayed,
+           "reported_joint_match_count":reported_matched,"displayed_reported_suggestion_count":reported_displayed,
            "preliminary_business_match_count":_bounded_count(screen.get("matched_count"))}
     return {"status":"EVIDENCE_AUDIT_ONLY","stocks":stocks,"funds":funds,"elite":elite,"company_acquisition":company_audit,
             "notice":"Counts describe bounded existing snapshots; null means unavailable, not zero. No new data acquisition, investment recommendation or certification."}
