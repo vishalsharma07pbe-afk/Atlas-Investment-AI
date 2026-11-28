@@ -192,7 +192,10 @@ def summary(category,today,connect=None):
             state=e.get("decision_state") if e.get("decision_policy")==decision_version else None
             if state in decisions:decisions[state]["published"]+=1
             if today<=maturity+timedelta(days=7):immature+=1;continue
-            outcome=json.loads(r["outcome"]) if r["status"]=="OBSERVED" and r["outcome"] else {}
+            try:
+                outcome=json.loads(r["outcome"]) if r["status"]=="OBSERVED" and r["outcome"] else {}
+                if not isinstance(outcome,dict):outcome={}
+            except (ValueError,TypeError):outcome={}
             selected.append((r["isin"],r["published_date"],score,outcome))
             if state in decisions:
                 d=decisions[state];d["mature"]+=1
@@ -214,8 +217,12 @@ def summary(category,today,connect=None):
             "distinct_schemes":len({r[0] for r in observed}),"publication_dates":len({r[1] for r in observed}),
             "mean_nav_change_percent":round(mean(returns),4) if returns else None,"median_nav_change_percent":round(median(returns),4) if returns else None,
             "worst_observed_drawdown_percent":min(r[3]["observed_drawdown_percent"] for r in observed) if observed else None})
+    def tri_state(v):
+        paired=v["paired"]
+        if len(rows)>1000 or len(paired)<20 or len({x[0] for x in paired})<15 or len({x[1] for x in paired})<10 or not v["mature"] or len(paired)/v["mature"]<.8:return "NO_ADVERSE_SAMPLE_ESTABLISHED"
+        return "ADVERSE_DESCRIPTIVE_SAMPLE" if median(x[2] for x in paired)<=0 else "POSITIVE_DESCRIPTIVE_SAMPLE"
     decision_summary={k:{"published":v["published"],"mature":v["mature"],"observed":len(v["observed"]),"coverage_percent":round(100*len(v["observed"])/v["mature"],2) if v["mature"] else 0,"median_nav_change_percent":round(median(v["observed"]),4) if v["observed"] else None,
         "matched_tri_count":len(v["paired"]),"median_nav_minus_tri_pp":round(median(x[2] for x in v["paired"]),4) if v["paired"] else None,
-        "tri_review_status":"ADVERSE_DESCRIPTIVE_SAMPLE" if len(rows)<=1000 and len(v["paired"])>=20 and len({x[0] for x in v["paired"]})>=15 and len({x[1] for x in v["paired"]})>=10 and len(v["paired"])/v["mature"]>=.8 and median(x[2] for x in v["paired"])<=0 else "NO_ADVERSE_SAMPLE_ESTABLISHED"} for k,v in decisions.items()}
+        "tri_review_status":tri_state(v)} for k,v in decisions.items()}
     return {"decision_policy":decision_version,"decision_states":decision_summary,"status":"DESCRIPTIVE_OBSERVED_OUTCOMES" if any(b["observed_count"] for b in bands) else "AWAITING_MATURE_EVIDENCE",
         "mature_count":len(selected),"immature_count":immature,"truncated":len(rows)>1000,"bands":bands,"calibrated":False,"notice":NOTICE}
