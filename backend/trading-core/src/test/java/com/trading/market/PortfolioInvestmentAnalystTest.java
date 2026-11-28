@@ -47,4 +47,15 @@ class PortfolioInvestmentAnalystTest {
     assertFalse(json.valueToTree(out).path("investment_analysis").path("recent_weight_coverage").asBoolean());
     assertFalse(h.containsKey("investment_analysis"));
   }
+  @Test void scenarioRequiresCompleteWeightsAndNeverInfersForecast(){
+    var equity=holding(60,80);var fund=holding(40,80);fund.put("asset_type","MUTUAL_FUND");
+    var result=json.valueToTree(PortfolioInvestmentAnalyst.attach(Map.of("holdings",List.of(equity,fund)),json,today));
+    var stress=result.path("investment_analysis").path("stress_test");
+    assertEquals("ILLUSTRATIVE_SHOCKS",stress.path("status").asText());
+    assertEquals(-26.0,stress.path("scenarios").get(0).path("portfolio_change_percent").asDouble(),.00001);
+    assertEquals(.52,stress.path("position_hhi").asDouble(),.00001);
+    fund.put("recorded_valuation_recent",false);
+    result=json.valueToTree(PortfolioInvestmentAnalyst.attach(Map.of("holdings",List.of(equity,fund)),json,today));
+    assertEquals("AWAITING_COMPLETE_RECORDED_WEIGHTS",result.path("investment_analysis").path("stress_test").path("status").asText());
+  }
 }
