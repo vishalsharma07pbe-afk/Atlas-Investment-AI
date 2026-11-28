@@ -228,7 +228,7 @@ def fund_snapshot(category):
     if drivers.get("methodology")=="MF-QUARTERLY-DRIVERS-1":
         snapshot["growth_driver_review"]={"methodology":drivers["methodology"],"status":drivers.get("status"),
             "items":[{k:row.get(k) for k in ("identifier","name","portfolio_date","quarter","nav_date","joint_coverage_weight_percent",
-                "joint_growth_weight_percent","review_weight_percent","state","qualified","forecast_return_percent")}
+                "joint_growth_weight_percent","review_weight_percent","state","qualified","forecast_return_percent","experimental_forward")}
                 for row in drivers.get("items",[])[:5] if isinstance(row,dict) and row.get("qualified") is False]}
     # Compact exact public composition targets for the existing underlying
     # research scheduler. No raw holdings, names or source URLs are persisted.
@@ -534,7 +534,10 @@ def read_overview():
     snapshot["historical_display"]=research_display_archive.display(_connect,snapshot,now())
     from . import investment_analyst
     try:
-        snapshot["investment_analyst"]=investment_analyst.analyze(snapshot,now().astimezone(ZoneInfo("Asia/Kolkata")).date())
+        from . import analyst_committee
+        instant=now()
+        snapshot["investment_analyst"]=investment_analyst.analyze(snapshot,instant.astimezone(ZoneInfo("Asia/Kolkata")).date(),instant)
+        analyst_committee.attach(snapshot["investment_analyst"],_connect,instant)
     except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
         snapshot["investment_analyst"]={"methodology":investment_analyst.VERSION,"status":"UNAVAILABLE","stocks":[],"funds":[],"next_steps":[],"notice":investment_analyst.NOTICE}
     return snapshot
@@ -716,6 +719,12 @@ def _execute_job(job):
         return "DISABLED_OR_NOT_AUTHORIZED"
     if job=="COMPANY_NEWS" and not automatic_news.permitted():
         return "DISABLED_OR_NOT_AUTHORIZED"
+    if job=="INVESTMENT_ANALYST_AI":
+        from . import investment_analyst,analyst_committee
+        if not automatic_ai_review.providers():return "DISABLED_OR_NOT_AUTHORIZED"
+        instant=now()
+        report=investment_analyst.analyze(read_snapshot(),instant.astimezone(ZoneInfo("Asia/Kolkata")).date(),instant)
+        return "PASS_COMPLETED" if analyst_committee.refresh(report,_connect,instant) else "WAITING_EVIDENCE"
     if job=="AI_REVIEW" and (not automatic_ai_review.enabled() or not automatic_ai_review.providers()):
         return "DISABLED_OR_NOT_AUTHORIZED"
     # AI review intentionally uses the complete enriched snapshot. All other

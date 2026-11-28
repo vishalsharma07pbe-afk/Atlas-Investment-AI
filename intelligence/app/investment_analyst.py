@@ -8,7 +8,7 @@ from collections import Counter
 from datetime import date
 from math import isfinite
 import re
-from . import company_reports, company_venues, steady_momentum, fip_research
+from . import company_reports, company_venues, steady_momentum, fip_research, forward_earnings, quarterly_financials
 from .replay_evidence import exact_isin
 
 VERSION="INVESTMENT-ANALYST-1"
@@ -40,7 +40,36 @@ def price_plan(row,horizon):
         "reward_risk":round((target-entry)/(entry-stop),2),"method":"TWO_ATR_RISK_TWO_R_SCENARIO",
         "notice":"Illustrative prior-close scenario, not a price forecast. Recheck live quote, spread, costs and gap risk before any order."}
 
-def stock_projection(snapshot):
+def stock_growth(row,instant):
+    if instant is None:return None
+    company=obj(row.get("company_evidence"))
+    if company.get("isin")!=row.get("isin"):return None
+    baseline=forward_earnings.baseline(company,instant)
+    if not baseline:return None
+    return {"status":"UNCALIBRATED_EARNINGS_SCENARIO","observed_quarter":baseline["observed_quarter"],
+        "target_quarter":baseline["target_quarter"],
+        "revenue_yoy_percent":baseline["metrics"]["revenue"]["persisted_growth_percent"],
+        "profit_yoy_percent":baseline["metrics"]["net_profit"]["persisted_growth_percent"],
+        "notice":"Quarterly persistence scenario, not consensus earnings or stock return forecast."}
+
+def fund_growth(driver,today):
+    e=obj(driver.get("experimental_forward"))
+    try:
+        observed=date.fromisoformat(e["observed_quarter"]);target=date.fromisoformat(e["target_quarter"])
+        if (e.get("status")!="UNCALIBRATED_PERSISTENCE_EXPERIMENT" or e.get("qualified") is not False
+            or e["observed_quarter"]!=driver.get("quarter") or quarterly_financials.shift(observed,3)!=target
+            or not observed<today<target or not num(e.get("covered_weight_percent"),70,100.5)
+            or not num(e.get("positive_joint_growth_weight_percent"),0,e["covered_weight_percent"])
+            or not num(e.get("covered_subset_revenue_persistence_percent"),-50,100)
+            or not num(e.get("covered_subset_profit_persistence_percent"),-50,100)):return None
+        return {"status":"UNCALIBRATED_UNDERLYING_GROWTH_SCENARIO","observed_quarter":e["observed_quarter"],
+            "target_quarter":e["target_quarter"],"coverage_percent":e["covered_weight_percent"],
+            "revenue_yoy_percent":e["covered_subset_revenue_persistence_percent"],
+            "profit_yoy_percent":e["covered_subset_profit_persistence_percent"],
+            "notice":"Persistence scenario for covered original fund weight only; not a fund NAV forecast."}
+    except (ValueError,TypeError,KeyError):return None
+
+def stock_projection(snapshot,instant=None):
     screen=obj(snapshot.get("steady_momentum"))
     strict=obj(screen.get("strict_suggestions"));reported=obj(screen.get("reported_suggestions"))
     # Match the actual objects accepted by the current-session company read model.
@@ -54,10 +83,16 @@ def stock_projection(snapshot):
             or not re.fullmatch(r"[A-Z0-9._&-]{1,50}",r["symbol"])
             or not num(r.get("close"),.0001,1e8)):return
         seen.add(r["isin"])
+        growth=stock_growth(r,instant)
+        risk=obj(obj(r.get("elite_assessment")).get("historical_risk")).get("historical_price_risk")
+        if risk not in ("LOW","MEDIUM","HIGH"):
+            atr=r.get("atr_percent")
+            risk=("HIGH" if atr>=4 else "MEDIUM" if atr>=2 else "LOW") if num(atr,.01,5) else None
         out.append({k:r[k] for k in ("id","isin","symbol","exchange","as_of","close")}|
             {"tier":tier,"horizon":horizon,"score":score,"reasons":reasons,"limitations":gaps,
              "qualified":False,"price_plan":price_plan(r,horizon),
-             "risk":obj(obj(r.get("elite_assessment")).get("historical_risk")).get("historical_price_risk"),
+             "risk":risk,"risk_basis":"HISTORICAL_PRICE_RISK_PROXY","growth_outlook":growth,
+             "evidence_confidence":"MODERATE" if tier=="ADJUSTED_JOINT" and growth else "LIMITED" if tier in ("ADJUSTED_JOINT","REPORTED_JOINT","BUSINESS_SCREEN") else "LOW",
              "action":"RESEARCH_FOR_ENTRY" if tier=="ADJUSTED_JOINT" else "WATCH_FOR_CONFIRMATION"})
     for report,status,tier,key,basis in ((strict,"JOINT_SCREEN_MATCHES","ADJUSTED_JOINT","strict_fip_evidence","ADJUSTED"),
             (reported,"REPORTED_JOINT_MATCHES","REPORTED_JOINT","reported_fip_evidence","RAW_UNADJUSTED")):
@@ -138,22 +173,24 @@ def fund_projection(snapshot,today):
             reasons=[f"Matched historical peer score {r['score']:.1f}/100; three-year weekly-sampled CAGR {r['weekly_cagr_percent']:.1f}%."]
             if positive:reasons.append(f"Reported holdings with positive joint growth represent {d['joint_growth_weight_percent']:.1f}% of original fund weight.")
             if adverse:reasons.append("Underlying reported business trends require review.")
+            growth=fund_growth(d,today) if matched else None
             items.append({"identifier":code,"name":r["name"],"nav_date":day,"score":r["score"],
                 "tier":"DRIVER_SUPPORTED" if positive else "DRIVER_REVIEW" if adverse else "HISTORICAL_ONLY",
                 "action":"REVIEW_BEFORE_NEW_SIP" if adverse else "COMPARE_FOR_SIP" if positive else "WATCH_FOR_CONFIRMATION",
-                "relative_risk":r.get("relative_risk"),"reasons":reasons,
+                "relative_risk":r.get("relative_risk"),"reasons":reasons,"growth_outlook":growth,
+                "evidence_confidence":"MODERATE" if positive and growth else "LIMITED" if positive else "LOW",
                 "limitations":["Past returns and reported underlying growth do not establish future NAV returns.",
                     "Verify current official costs, holdings, benchmark and personal horizon."],"qualified":False})
         items.sort(key=lambda r:({"DRIVER_SUPPORTED":0,"HISTORICAL_ONLY":1,"DRIVER_REVIEW":2}[r["tier"]],-r["score"],r["identifier"]))
         result.append({"category":category,"items":items})
     return result
 
-def analyze(snapshot,today):
+def analyze(snapshot,today,instant=None):
     out={"methodology":VERSION,"status":"DISABLED","research_date":today.isoformat(),"stocks":[],"funds":[],"next_steps":[],"notice":NOTICE}
     if snapshot.get("enabled") is not True or snapshot.get("scope")!="PUBLIC_MARKET_RESEARCH_ONLY":return out
     out["status"]="AWAITING_CURRENT_RESEARCH"
     if snapshot.get("research_date")!=today.isoformat():return out
-    stocks=stock_projection(snapshot);funds=fund_projection(snapshot,today)
+    stocks=stock_projection(snapshot,instant);funds=fund_projection(snapshot,today)
     out.update(stocks=stocks,funds=funds,status="RESEARCH_AVAILABLE" if stocks or any(f["items"] for f in funds) else "NO_SUPPORTED_CANDIDATES")
     if stocks:out["next_steps"].append("Review the highest evidence-tier stock first; confirm current price and independent business evidence before allocating cash.")
     else:out["next_steps"].append("Do not force a new equity position from the current sample.")
