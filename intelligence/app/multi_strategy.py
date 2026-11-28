@@ -339,6 +339,8 @@ def summarize(snapshot,connect,instant):
         preferred={"QUALITY","VALUE","DEFENSIVE"} if trend=="FALLING" else {"MOMENTUM","GROWTH","SECTOR"} if trend=="RISING" else {"VALUE","REVERSAL","QUALITY"} if trend=="SIDEWAYS" else set()
         rank=r["observed_facts"].get("sample_momentum_percentile") if "MOMENTUM" in r["families"] else None
         return ({"SUPPORTED_CONTEXT":0,"UNVALIDATED":1,"CAUTION":2}[r["regime_priority"]],-len(r["families"]),-len(preferred.intersection(r["families"])),not r["adjustment_verified_for_screen"],-(rank if rank is not None else 0),-r["observed_facts"]["median_daily_turnover_cr"],r["isin"])
+    from . import ranking_challenger
+    result["ranking_experiment"]=ranking_challenger.selection(items,order)
     items.sort(key=order)
     # Round-robin family coverage prevents a momentum-only top list.
     selected=[];seen=set()
