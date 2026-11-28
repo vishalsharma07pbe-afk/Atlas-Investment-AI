@@ -44,3 +44,11 @@ class IndependentValuationTest(unittest.TestCase):
                 self.assertEqual(v.read(now,p,identities={"INE467B01029"}),{})
                 (p.parent/"document-0.txt").write_text("changed")
                 self.assertEqual(v.read(now,p),{})
+
+
+    def test_reverse_valuation_recovers_declared_growth_at_exact_model_price(self):
+        cash,shares,debt=60,10,20
+        price=v.discounted_equity(cash,7,12,2,debt)/shares
+        reverse=v.implied_growth(cash,shares,price,12,2,debt)
+        self.assertAlmostEqual(reverse["growth_percent"],7,places=4)
+        self.assertIsNone(v.implied_growth(cash,shares,10000000,12,2,debt)["growth_percent"])
