@@ -321,19 +321,29 @@ def summarize(snapshot,connect,instant):
     # a descriptive review lens only; no unvalidated regime performance claim.
     trend=regime.get("trend") if (regime.get("calendar_checked_on")==today.isoformat()
         and regime.get("as_of") in {r["as_of"] for r in candidates}) else None
+    from . import strategy_adaptation
+    try:
+        adaptive=strategy_adaptation.read(connect,instant,LANES,trend)
+    except (ValueError,TypeError,KeyError,AttributeError,OSError,__import__("sqlite3").Error):
+        adaptive={"methodology":strategy_adaptation.VERSION,"status":"UNAVAILABLE","lanes":{},"qualified":False,"notice":strategy_adaptation.NOTICE}
+    for r in items:
+        r["regime_priority"]=strategy_adaptation.priority(r["strategies"],adaptive)
+        # Only a same-session regime is frozen for prospective comparison.
+        r["publication_regime"]=trend if r["as_of"]==regime.get("as_of") and trend in strategy_adaptation.REGIMES else None
+        if r["publication_regime"] is None:r["regime_priority"]="UNVALIDATED"
     def order(r):
         preferred={"QUALITY","VALUE","DEFENSIVE"} if trend=="FALLING" else {"MOMENTUM","GROWTH","SECTOR"} if trend=="RISING" else {"VALUE","REVERSAL","QUALITY"} if trend=="SIDEWAYS" else set()
         rank=r["observed_facts"].get("sample_momentum_percentile") if "MOMENTUM" in r["families"] else None
-        return (-len(r["families"]),-len(preferred.intersection(r["families"])),not r["adjustment_verified_for_screen"],-(rank if rank is not None else 0),-r["observed_facts"]["median_daily_turnover_cr"],r["isin"])
+        return ({"SUPPORTED_CONTEXT":0,"UNVALIDATED":1,"CAUTION":2}[r["regime_priority"]],-len(r["families"]),-len(preferred.intersection(r["families"])),not r["adjustment_verified_for_screen"],-(rank if rank is not None else 0),-r["observed_facts"]["median_daily_turnover_cr"],r["isin"])
     items.sort(key=order)
     # Round-robin family coverage prevents a momentum-only top list.
     selected=[];seen=set()
     for family in ("QUALITY","VALUE","GROWTH","MOMENTUM","DEFENSIVE","SECTOR","REVERSAL"):
-        row=next((r for r in items if family in r["families"] and r["isin"] not in seen),None)
+        row=next((r for r in items if family in r["families"] and r["isin"] not in seen and r["regime_priority"]!="CAUTION"),None)
         if row:selected.append(row);seen.add(row["isin"])
     selected.extend(r for r in items if r["isin"] not in seen)
     result.update(status="RESEARCH_AVAILABLE" if selected else "NO_SUPPORTED_MATCHES",items=selected[:10],
         coverage={"eligible_companies":len(candidates),"cached_company_reports":len(reports),"comparable_cohorts":len(bounds),"matched_companies":len(items),"excluded_known_price_risk":excluded_price_risk},
-        lane_counts=dict(counts),regime=trend,regime_basis="DESCRIPTIVE_PRIORITY_ONLY",
+        lane_counts=dict(counts),regime=trend,regime_basis="PROSPECTIVE_CONTEXT_WITH_STATIC_FALLBACK",adaptive_priority=adaptive,
         strategy_catalog=pro.catalog(counts,expectations_available=bool(surprises)))
     return result
