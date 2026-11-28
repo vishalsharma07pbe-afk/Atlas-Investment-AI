@@ -551,7 +551,11 @@ def job_status():
 
 def _fund_research_targets(current):
     enabled,interval=config()
-    snapshot=_read_sections(CATEGORIES,enabled,interval,current)
+    # Priority enrichment is optional; a missing snapshot store cannot
+    # block the existing authorized broad fund acquisition queue.
+    if not enabled:return {}
+    try:snapshot=_read_sections(CATEGORIES,enabled,interval,current)
+    except (OSError,sqlite3.Error,ValueError,TypeError,KeyError,AttributeError):return {}
     today=current.astimezone(ZoneInfo("Asia/Kolkata")).date()
     targets={};conflicts=set()
     for section in snapshot["sections"]:

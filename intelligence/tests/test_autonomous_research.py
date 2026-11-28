@@ -387,3 +387,8 @@ class AutonomousResearchTests(unittest.TestCase):
             self.assertEqual(research._fund_research_targets(now),{"fund:123":"2026-10-31"})
         with patch.object(research.fund_portfolios,"permitted",return_value=False):
             self.assertEqual(research._fund_research_targets(now),{})
+
+    def test_fund_target_storage_failure_preserves_existing_acquisition_path(self):
+        now=datetime(2026,11,28,5,tzinfo=timezone.utc)
+        with patch.object(research,"_read_sections",side_effect=OSError("storage unavailable")):
+            self.assertEqual(research._fund_research_targets(now),{})
