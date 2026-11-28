@@ -595,6 +595,16 @@ def read_overview():
         analyst_source_discovery.attach(snapshot["investment_analyst"],_connect,instant)
     except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,AttributeError):
         snapshot["investment_analyst"]["source_discovery"]={"status":"UNAVAILABLE","links":[],"notice":analyst_source_discovery.NOTICE}
+    from . import decision_quality
+    try:
+        decision_quality.attach(snapshot["investment_analyst"],instant.astimezone(ZoneInfo("Asia/Kolkata")).date())
+    except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
+        # Failure of final policy must not leave a positive allocation action.
+        report=snapshot["investment_analyst"]
+        for row in report.get("stocks",[]):row["action"]="WATCH_FOR_CONFIRMATION"
+        for group in report.get("funds",[]):
+            for row in group.get("items",[]):row["action"]="WATCH_FOR_CONFIRMATION"
+        report["decision_quality"]={"methodology":decision_quality.VERSION,"status":"UNAVAILABLE","qualified":False,"notice":decision_quality.NOTICE}
     return snapshot
 
 
