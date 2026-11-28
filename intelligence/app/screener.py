@@ -6,7 +6,7 @@ from .technical import Candle, compute
 from .horizon_research import evaluate, summarize, MIN_HISTORY as HORIZON_MIN_HISTORY
 from .price_structure import analyze as price_structure
 from .corporate_action_normalization import preview as action_preview, reported_crossings, archived_crossings
-from .replay_evidence import fingerprint, exact_isin
+from .replay_evidence import fingerprint, exact_isin, full_manifest
 from . import price_volume_pressure, steady_momentum, relative_strength, company_venues, sector_price_context, score_calibration, fip_research, bracket_research
 
 MIN_HISTORY = 21
@@ -196,6 +196,8 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                 key=candles[-2].date
                 counts=breadth_pairs.setdefault(key,{"advancing":0,"declining":0,"unchanged":0})
                 counts["advancing" if close>previous else "declining" if close<previous else "unchanged"]+=1
+            if batch_loaded and exact_isin(instrument.get("isin")):
+                row["isin"]=instrument["isin"]
             rows.append(row)
             # Observation depth only, not verified continuity or adjusted evidence.
             if batch_loaded and expected_session is not None and len(candles)>=253:
@@ -215,6 +217,14 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                                 # the broad snapshot; keep status/reasons for
                                 # coverage and strict Elite review of others.
                                 identity["fip_research"]=fip if fip["status"]=="FIP_PRICE_MATCH" else {k:v for k,v in fip.items() if k!="windows"}
+                if expected_session is not None and row["security_state"] not in sector_price_context.SPECIAL:
+                    from . import multi_strategy
+                    features=multi_strategy.price_features(candles,fip_dates)
+                    if features is not None:
+                        if features["calendar_matched"] and full_manifest(raw[-features["observations"]:],today) is None:
+                            features["calendar_matched"]=False
+                        identity["symbol"]=row["symbol"]
+                        identity["multi_strategy_price"]=features
                 company_research_universe.append(identity)
                 if instrument["id"] in venue_observations:
                     venue_observations[instrument["id"]]=company_venues.observation(instrument,candles)

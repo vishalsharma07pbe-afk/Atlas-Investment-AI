@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import {afterEach,describe,expect,it,vi} from "vitest";
 import {cleanup,fireEvent,render,screen} from "@testing-library/react";
-import AutonomousOverview from "./AutonomousOverview";
+import AutonomousOverview,{companyMomentum} from "./AutonomousOverview";
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
 describe("automatic research overview",()=>{
  it("shows persisted observations without launching a manual scan and keeps tools hidden",async()=>{
@@ -9,7 +9,7 @@ describe("automatic research overview",()=>{
    vi.stubGlobal("fetch",fetchMock);
    render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}}><p>Manual research tool</p></AutonomousOverview>);
    expect(await screen.findByRole("region",{name:"Momentum leaders"})).toBeTruthy();
-   expect(screen.getAllByText("TCS · NSE").length).toBeGreaterThan(0);
+   expect(screen.getAllByText("TCS").length).toBeGreaterThan(0);
    expect(screen.getByText("No growth picks meet the verified evidence requirements.")).toBeTruthy();
    expect(screen.queryByText("Manual research tool")).toBeNull();
    expect(fetchMock.mock.calls.length).toBe(1);
@@ -164,8 +164,8 @@ it("keeps the briefing first and evidence in expandable sections without duplica
  expect(screen.getByRole("region",{name:"Global currency context"})).toBeTruthy();
  fireEvent.click(screen.getByText("View 1 selected observations"));
  expect(selected.open).toBe(true);
- expect(screen.getByText(/TEST · NSE/)).toBeTruthy();
- fireEvent.click(screen.getByRole("button",{name:"Open TEST NSE research report"}));
+ expect(screen.getAllByText("TEST").length).toBeGreaterThan(0);
+ fireEvent.click(screen.getByRole("button",{name:"Open TEST research report"}));
  expect(navigate).toHaveBeenCalledWith("SWING",{exchange:"NSE",id:1,isin:"INE009A01021",as_of:"2026-11-23"});
  fireEvent.click(screen.getByRole("button",{name:"Review swing research"}));
  expect(navigate).toHaveBeenCalledWith("SWING");
@@ -244,4 +244,12 @@ it("displays historical bars separately from current opportunity rankings",async
  expect(await screen.findByRole("region",{name:"Last valid historical observations"})).toBeTruthy();
  expect(screen.getByText("Observed 2026-11-25")).toBeTruthy();
  expect(screen.queryByRole("region",{name:"Momentum leaders"})).toBeNull();
+});
+
+it("consolidates only exact company identities and prefers the current primary listing on a date tie",()=>{
+ const a={id:1,symbol:"TCS",isin:"INE467B01029",exchange:"NSE",as_of:"2026-11-27",change_1d_percent:1,momentum_20d_percent:5};
+ const b={...a,id:2,exchange:"BSE",momentum_20d_percent:6};
+ const c={...b,id:3,isin:"INE002A01018",symbol:"OTHER"};
+ expect(companyMomentum([b,a,c])).toEqual([c,a]);
+ expect(companyMomentum([a,{...b,as_of:"2026-11-28"}])[0].id).toBe(2);
 });

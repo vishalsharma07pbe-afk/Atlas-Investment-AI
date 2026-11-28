@@ -10,7 +10,7 @@ from .automatic_company_evidence import cached_action_reports, cached_action_eve
 from .corporate_action_normalization import reported_crossings, archived_crossings
 from .replay_evidence import (VERSION as EVIDENCE_VERSION, exact_isin, fingerprint,
     full_manifest, corporate_action_status, revision_audit, session_audit, listing_audit)
-CACHE_VERSION = VERSION + ':' + EVIDENCE_VERSION + ':market-price-index-v1:signal-regime-v1:chronological-folds-v1:execution-proxy-v1:full-provenance-v1:session-continuity-v1:listing-evidence-v1:scoped-action-v1:provider-action-and-rotation-v1'
+CACHE_VERSION = VERSION + ':' + EVIDENCE_VERSION + ':market-price-index-v1:signal-regime-v1:chronological-folds-v1:execution-proxy-v1:full-provenance-v1:session-continuity-v1:listing-evidence-v1:scoped-action-v1:provider-action-and-rotation-v1:multi-strategy-v2'
 
 IST=ZoneInfo("Asia/Kolkata")
 def _table(db):
@@ -187,6 +187,8 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
                                 from . import fip_research
                                 fip=fip_research.replay(payload["candles"],today)
                                 if fip is not None:result["fip_replay"]=fip
+                                from . import multi_strategy_replay
+                                result["multi_strategy_replay"]=multi_strategy_replay.replay(payload,benchmark,today)
                             for horizon in result["horizons"].values():
                                 horizon["history_provenance"]={**audit,"calendar_continuity":continuity}
             result["isin"]=identity["isin"]
@@ -281,6 +283,8 @@ def read(connect,instant=None,*,snapshot=None):
             if result and status=="REPLAY_OBSERVED":
                 items.append({"exchange":row["exchange"],"symbol":row["symbol"],"as_of":payload["as_of"],**result})
         horizons[horizon]={"counts":counts,"observed_instruments":len(items),"items":items[:10],"calendar_withheld":calendar_withheld,"listing_withheld":listing_withheld}
-    return {"methodology":VERSION,"evidence_version":EVIDENCE_VERSION,"sample_count":len(rows),"horizons":horizons,
+    from . import multi_strategy_replay
+    multi=multi_strategy_replay.summarize((_payload(row) for row in rows),today)
+    return {"methodology":VERSION,"evidence_version":EVIDENCE_VERSION,"sample_count":len(rows),"horizons":horizons,"multi_strategy":multi,
         "universe_basis":"CURRENT_ACTIVE_REGISTRY_SAMPLE","historical_universe_verified":False,"selection_counts":selection_counts,
         "notice":"Bounded rotating current-registry sample alternating recent validated adjusted-history hints with general registry entries, not selected by current watch score. History availability selection bias remains. Delisted/suspended historical membership is not established; survivorship and selection bias remain. Per-instrument replay only; results are not independent or a portfolio backtest. Nifty 50 price-index comparison and signal-date trend cohorts require matching observed dates; Repeated fixed-rule test windows are descriptive; no prospective validation. No recommendation gate is lifted."}

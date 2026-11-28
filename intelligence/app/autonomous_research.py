@@ -100,7 +100,12 @@ def market_snapshot(exchange):
         dates=fip_research.calendar_suffix(calendar,exchange,now().astimezone(ZoneInfo("Asia/Kolkata")).date())
         return discovery_scan.scan(exchange,backend_json,lambda e,rows,cutoff:_market_page(e,rows,cutoff,fip_dates=dates),now)
     instruments = backend_json("/api/v1/market-data/discovery-universe?" + urlencode({"exchange": exchange}))
-    return _market_page(exchange,instruments)
+    dates=()
+    if isinstance(instruments,list) and any(isinstance(r,dict) and r.get("expected_session") and exact_isin(r.get("isin")) for r in instruments):
+        try:calendar=backend_json(f"/api/v1/market-data/strategy-calendar?exchange={exchange}")
+        except Exception:calendar=None
+        dates=fip_research.calendar_suffix(calendar,exchange,now().astimezone(ZoneInfo("Asia/Kolkata")).date())
+    return _market_page(exchange,instruments,fip_dates=dates)
 
 
 def _market_page(exchange,instruments,cutoff=None,*,fip_dates=()):
@@ -230,6 +235,21 @@ def fund_snapshot(category):
             "items":[{k:row.get(k) for k in ("identifier","name","portfolio_date","quarter","nav_date","joint_coverage_weight_percent",
                 "joint_growth_weight_percent","review_weight_percent","state","qualified","forecast_return_percent")}
                 for row in drivers.get("items",[])[:5] if isinstance(row,dict) and row.get("qualified") is False]}
+        # Persist only validated public numerical scenarios, never arbitrary
+        # nested publisher/model fields from the full fund research response.
+        from .investment_analyst import fund_growth
+        today=now().astimezone(ZoneInfo("Asia/Kolkata")).date()
+        for compact,original in zip(snapshot["growth_driver_review"]["items"],
+                (row for row in drivers.get("items",[])[:5] if isinstance(row,dict) and row.get("qualified") is False)):
+            growth=fund_growth(original,today)
+            if growth:
+                compact["experimental_forward"]={
+                    "status":"UNCALIBRATED_PERSISTENCE_EXPERIMENT","qualified":False,
+                    "observed_quarter":growth["observed_quarter"],"target_quarter":growth["target_quarter"],
+                    "covered_weight_percent":growth["coverage_percent"],
+                    "positive_joint_growth_weight_percent":original["experimental_forward"]["positive_joint_growth_weight_percent"],
+                    "covered_subset_revenue_persistence_percent":growth["revenue_yoy_percent"],
+                    "covered_subset_profit_persistence_percent":growth["profit_yoy_percent"]}
     # Compact exact public composition targets for the existing underlying
     # research scheduler. No raw holdings, names or source URLs are persisted.
     targets=[]
@@ -516,6 +536,17 @@ def read_snapshot(include_ai=True):
         stock_qualification.attach(snapshot,current.astimezone(ZoneInfo("Asia/Kolkata")).date(),current)
         snapshot["daily_briefing"] = daily_briefing.summarize(snapshot)
         company_reports.attach(snapshot,current)
+        from . import multi_strategy
+        try:
+            snapshot["multi_strategy"]=multi_strategy.summarize(snapshot,_connect,current)
+        except (ValueError,TypeError,KeyError,AttributeError,OverflowError,OSError,sqlite3.Error):
+            snapshot["multi_strategy"]={"methodology":multi_strategy.VERSION,"status":"UNAVAILABLE","items":[],"notice":multi_strategy.NOTICE}
+        snapshot["multi_strategy"]["historical_validation"]=(snapshot.get("strategy_validation") or {}).get("multi_strategy")
+        try:
+            from . import multi_strategy_prospective
+            snapshot["multi_strategy"]["prospective_validation"]=multi_strategy_prospective.summary(_connect,current)
+        except (ValueError,TypeError,KeyError,AttributeError,OverflowError,OSError,sqlite3.Error):
+            snapshot["multi_strategy"]["prospective_validation"]={"status":"UNAVAILABLE","lanes":{},"notice":"Paper-tracking evidence unavailable."}
         try:
             snapshot["forward_earnings_validation"]=forward_earnings.summary(_connect,current) if enabled else {"status":"DISABLED"}
         except (ValueError,TypeError,OSError,sqlite3.Error):
@@ -532,6 +563,27 @@ def read_overview():
     """UI-only projection, appended after all current qualification consumers."""
     snapshot=read_snapshot()
     snapshot["historical_display"]=research_display_archive.display(_connect,snapshot,now())
+    from . import investment_analyst,analyst_committee
+    from copy import deepcopy
+    instant=now()
+    try:
+        snapshot["investment_analyst"]=investment_analyst.analyze(snapshot,instant.astimezone(ZoneInfo("Asia/Kolkata")).date(),instant)
+    except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
+        snapshot["investment_analyst"]={"methodology":investment_analyst.VERSION,"status":"UNAVAILABLE","stocks":[],"funds":[],"next_steps":[],"notice":investment_analyst.NOTICE}
+    try:
+        # Optional model cache corruption or a failed read must not replace
+        # the usable deterministic report with an empty research screen.
+        with_committee=deepcopy(snapshot["investment_analyst"])
+        analyst_committee.attach(with_committee,_connect,instant)
+        snapshot["investment_analyst"]=with_committee
+    except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,AttributeError,OverflowError):
+        snapshot["investment_analyst"]["committee"]={"methodology":analyst_committee.VERSION,
+            "status":"UNAVAILABLE","reviewed_providers":0,"notice":analyst_committee.NOTICE}
+    from . import analyst_source_discovery
+    try:
+        analyst_source_discovery.attach(snapshot["investment_analyst"],_connect,instant)
+    except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,AttributeError):
+        snapshot["investment_analyst"]["source_discovery"]={"status":"UNAVAILABLE","links":[],"notice":analyst_source_discovery.NOTICE}
     return snapshot
 
 
@@ -711,6 +763,25 @@ def _execute_job(job):
         return "DISABLED_OR_NOT_AUTHORIZED"
     if job=="COMPANY_NEWS" and not automatic_news.permitted():
         return "DISABLED_OR_NOT_AUTHORIZED"
+    if job=="MULTI_STRATEGY_PUBLICATION":
+        from . import multi_strategy_prospective
+        instant=now()
+        snapshot=read_snapshot()
+        if not snapshot.get("enabled"):return "DISABLED_OR_NOT_AUTHORIZED"
+        multi_strategy_prospective.publish(snapshot,_connect,instant)
+        return "PASS_COMPLETED"
+    if job=="INVESTMENT_ANALYST_SOURCES":
+        from . import investment_analyst,analyst_source_discovery
+        if not analyst_source_discovery.enabled():return "DISABLED_OR_NOT_AUTHORIZED"
+        instant=now()
+        report=investment_analyst.analyze(read_snapshot(),instant.astimezone(ZoneInfo("Asia/Kolkata")).date(),instant)
+        return "PASS_COMPLETED" if analyst_source_discovery.refresh(report,_connect,instant) else "WAITING_EVIDENCE"
+    if job=="INVESTMENT_ANALYST_AI":
+        from . import investment_analyst,analyst_committee
+        if not automatic_ai_review.providers():return "DISABLED_OR_NOT_AUTHORIZED"
+        instant=now()
+        report=investment_analyst.analyze(read_snapshot(),instant.astimezone(ZoneInfo("Asia/Kolkata")).date(),instant)
+        return "PASS_COMPLETED" if analyst_committee.refresh(report,_connect,instant) else "WAITING_EVIDENCE"
     if job=="AI_REVIEW" and (not automatic_ai_review.enabled() or not automatic_ai_review.providers()):
         return "DISABLED_OR_NOT_AUTHORIZED"
     # AI review intentionally uses the complete enriched snapshot. All other

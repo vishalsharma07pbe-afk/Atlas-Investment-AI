@@ -66,6 +66,40 @@ class AutonomousResearchTests(unittest.TestCase):
         self.assertTrue(research._published_evidence_current("LARGE_CAP",snapshot,date(2026,11,27)))
         self.assertFalse(research._published_evidence_current("LARGE_CAP",snapshot,date(2026,12,5)))
 
+    def test_optional_analyst_model_cache_failure_preserves_current_research(self):
+        import sqlite3
+        from app import investment_analyst, analyst_committee
+        report={"methodology":investment_analyst.VERSION,"status":"RESEARCH_AVAILABLE",
+                "stocks":[{"isin":"INE002A01018","qualified":False}],"funds":[],"next_steps":["Review"]}
+        def broken(r,*args):
+            r["stocks"].clear()
+            raise sqlite3.OperationalError("invalid cache")
+        with patch.object(research,"read_snapshot",return_value={"enabled":True}), \
+             patch.object(research.research_display_archive,"display",return_value=[]), \
+             patch.object(investment_analyst,"analyze",return_value=report), \
+             patch.object(analyst_committee,"attach",side_effect=broken):
+            result=research.read_overview()["investment_analyst"]
+        self.assertEqual(result["status"],"RESEARCH_AVAILABLE")
+        self.assertEqual(len(result["stocks"]),1)
+        self.assertEqual(result["committee"]["status"],"UNAVAILABLE")
+
+    def test_fund_snapshot_retains_only_public_forward_scenario(self):
+        payload={key:None for key in ("category","coverage","top_performers","growth_outlook",
+            "recommendation_status","blockers","notice","filters","historical_coverage")}
+        payload["growth_driver_review"]={"methodology":"MF-QUARTERLY-DRIVERS-1","items":[
+            {"qualified":False,"quarter":"2026-09-30","experimental_forward":{
+                "status":"UNCALIBRATED_PERSISTENCE_EXPERIMENT","qualified":False,
+                "observed_quarter":"2026-09-30","target_quarter":"2026-12-31",
+                "covered_weight_percent":80,"positive_joint_growth_weight_percent":65,
+                "covered_subset_revenue_persistence_percent":10,"covered_subset_profit_persistence_percent":15,
+                "private_marker":"DO_NOT_PERSIST"}}]}
+        with patch.object(research,"dashboard",return_value=payload), \
+             patch.object(research,"now",return_value=datetime(2026,11,28,5,tzinfo=timezone.utc)):
+            snapshot=research.fund_snapshot("LARGE_CAP")
+        scenario=snapshot["growth_driver_review"]["items"][0]["experimental_forward"]
+        self.assertEqual(scenario["covered_subset_profit_persistence_percent"],15)
+        self.assertNotIn("DO_NOT_PERSIST",str(snapshot))
+
     def test_fund_shortlist_snapshot_is_bounded_and_dates_rechecked(self):
         payload={key:None for key in ("category","coverage","top_performers","growth_outlook",
             "recommendation_status","blockers","notice","filters","historical_coverage")}

@@ -271,13 +271,13 @@ def normalize(report, isin, instant):
                       "statement_type":text(raw.get("type")),"time_period":text(raw.get("time_period"))}
                 if key=="cash_flow" and data["statement_type"]=="consolidated" and data["time_period"]=="yearly":
                     data["detail_rows"]=[r for r in history(raw.get("full_statement"),category="particular")
-                                         if r["name"].strip().casefold() in DETAIL_NAMES["cash_flow"]]
+                                         if r["name"].strip().casefold() in (DETAIL_NAMES["cash_flow"]|{"proceeds from issue of equity shares","dividends paid","repurchase of equity shares"})]
                 if key=="income_statement" and data["statement_type"]=="consolidated" and data["time_period"]=="yearly":
                     # Full statement EPS lines have a different dimensional meaning
                     # from the aggregate monetary statement. Do not apply crore units.
                     detailed=history(raw.get("full_statement"),category="particular")
                     data["eps_rows"]=[r for r in detailed if r["name"].strip().casefold() in ("eps - basic","eps - diluted")]
-                    data["detail_rows"]=[r for r in detailed if r["name"].strip().casefold() in INCOME_NAMES]
+                    data["detail_rows"]=[r for r in detailed if r["name"].strip().casefold() in (INCOME_NAMES|{"gross profit"})]
         elif key=="balance_sheet" and isinstance(raw,dict):
             rows=[]
             for point in raw.get("history",[])[:5] if isinstance(raw.get("history"),list) else []:
@@ -291,7 +291,7 @@ def normalize(report, isin, instant):
                       "statement_type":text(raw.get("type")),"time_period":text(raw.get("time_period"))}
                 if data["statement_type"]=="consolidated" and data["time_period"]=="yearly":
                     data["detail_rows"]=[r for r in history(raw.get("full_statement"),category="particular")
-                                         if r["name"].strip().casefold() in DETAIL_NAMES["balance_sheet"]]
+                                         if r["name"].strip().casefold() in (DETAIL_NAMES["balance_sheet"]|{"long term borrowings"})]
         elif key=="shareholding":
             data=history(raw)
         elif key=="competitors" and isinstance(raw,list):

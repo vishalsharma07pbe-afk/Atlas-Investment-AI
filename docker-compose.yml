@@ -79,6 +79,16 @@ services:
       ATLAS_GROQ_MODEL: ${ATLAS_GROQ_MODEL:-llama-3.3-70b-versatile}
       ATLAS_GROQ_RPM: ${ATLAS_GROQ_RPM:-5}
       ATLAS_GROQ_RPD: ${ATLAS_GROQ_RPD:-100}
+      ATLAS_AI_INCLUDED_ONLY: ${ATLAS_AI_INCLUDED_ONLY:-false}
+      ATLAS_GEMINI_FREE_TIER_CONFIRMED: ${ATLAS_GEMINI_FREE_TIER_CONFIRMED:-false}
+      ATLAS_GROQ_FREE_TIER_CONFIRMED: ${ATLAS_GROQ_FREE_TIER_CONFIRMED:-false}
+      ATLAS_CHATGPT_PLAN_WEB_RESEARCH: ${ATLAS_CHATGPT_PLAN_WEB_RESEARCH:-false}
+      ATLAS_EARNINGS_EXPECTATIONS_ENABLED: ${ATLAS_EARNINGS_EXPECTATIONS_ENABLED:-false}
+      ATLAS_CHATGPT_PLAN_ENABLED: ${ATLAS_CHATGPT_PLAN_ENABLED:-false}
+      ATLAS_CHATGPT_PLAN_RPM: ${ATLAS_CHATGPT_PLAN_RPM:-1}
+      ATLAS_CHATGPT_PLAN_RPD: ${ATLAS_CHATGPT_PLAN_RPD:-8}
+      ATLAS_CHATGPT_PLAN_INCLUDED_ONLY_CONFIRMED: ${ATLAS_CHATGPT_PLAN_INCLUDED_ONLY_CONFIRMED:-false}
+      ATLAS_CHATGPT_PLAN_DIR: /app/chatgpt-plan
       ATLAS_OPENAI_ENABLED: ${ATLAS_OPENAI_ENABLED:-false}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ATLAS_OPENAI_MODEL: ${ATLAS_OPENAI_MODEL:-gpt-4.1-mini}
@@ -165,7 +175,8 @@ services:
       - flowledger:/app/flow-data
       - newsledger:/app/news-data
       - reliabilityledger:/app/reliability-data
-    ports: ["127.0.0.1:${INTELLIGENCE_PORT:-8000}:8000"]
+      - chatgptplan:/app/chatgpt-plan
+    ports: ["127.0.0.1:${INTELLIGENCE_PORT:-8000}:8000", "127.0.0.1:1455:1455"]
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -183,3 +194,4 @@ volumes:
   flowledger:
   newsledger:
   reliabilityledger:
+  chatgptplan:

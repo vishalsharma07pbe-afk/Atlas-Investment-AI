@@ -87,3 +87,16 @@ class RecoveryAcceptanceTests(unittest.TestCase):
         sections[3]["status"]="STALE"
         self.assertEqual(a.result_acceptance(overview,review,NOW)["status"],"AWAITING_POPULATED_RESEARCH")
         self.assertEqual(a.result_acceptance({}, {},NOW)["status"],"AWAITING_POPULATED_RESEARCH")
+
+    def test_analyst_acceptance_distinguishes_contracts_from_results(self):
+        overview={"investment_analyst":{"methodology":"INVESTMENT-ANALYST-1","research_date":"2026-11-28","status":"NO_SUPPORTED_CANDIDATES",
+            "stocks":[],"funds":[],"next_steps":["Wait"],"committee":{"reviewed_providers":0}}}
+        review={"holding_count":1,"holdings":[{"symbol":"PRIVATE_MARKER","investment_analysis":{"qualified":False,"next_move":"Review"}}],
+            "investment_analysis":{"methodology":"OWNER-INVESTMENT-ANALYST-1","scope":"OWNER_LOCAL","holding_count":1,"next_steps":["Review"]}}
+        result=a.analyst_acceptance(overview,review,NOW)
+        self.assertEqual(result["status"],"CONTRACTS_OBSERVED")
+        self.assertFalse(result["populated_outputs_observed"])
+        self.assertEqual(result["owner_holding_decisions"],1)
+        self.assertNotIn("PRIVATE_MARKER",json.dumps(result))
+        review["holdings"][0]["investment_analysis"]["qualified"]=True
+        self.assertEqual(a.analyst_acceptance(overview,review,NOW)["status"],"BLOCKED")
