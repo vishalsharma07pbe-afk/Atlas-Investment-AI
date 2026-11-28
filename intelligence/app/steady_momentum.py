@@ -265,9 +265,18 @@ def summarize(snapshot,connect,instant):
                     raise ValueError()
                 # Raw series need a reported action section before being used
                 # in this screen; the screener already rejects known crossings.
-                if row.get("adjustment_status")!="ADJUSTED" and not (report.get("sections",{}).get("corporate_actions",{}).get("status")=="AVAILABLE"):
-                    excluded["RAW_ACTION_EVIDENCE_MISSING"]+=1
-                    continue
+                if row.get("adjustment_status")!="ADJUSTED":
+                    action=report.get("sections",{}).get("corporate_actions",{}) or {}
+                    if action.get("status")=="REPORTED_EMPTY":
+                        source=action.get("source") or {}
+                        captured=datetime.fromisoformat(source.get("retrieved_at",""))
+                        empty=(action.get("data")==[] and source.get("provider")=="UPSTOX"
+                            and source.get("endpoint")=="/v2/fundamentals/"+isin+"/corporate-actions"
+                            and captured.tzinfo is not None and instant-timedelta(hours=24)<=captured<=instant)
+                    else:empty=False
+                    if action.get("status")!="AVAILABLE" and not empty:
+                        excluded["RAW_ACTION_EVIDENCE_MISSING"]+=1
+                        continue
                 evidence,reason=fundamentals(report,today)
                 from .quarterly_financials import summarize as quarterly_summary
                 quarter=quarterly_summary(report,today)

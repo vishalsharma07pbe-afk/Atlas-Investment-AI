@@ -400,3 +400,14 @@ class CompanyEvidenceTests(unittest.TestCase):
         self.assertEqual(captured["available_sections"],3)
         report["sections"]["cash_flow"]["source"]["retrieved_at"]=(self.now-timedelta(hours=1)).isoformat()
         self.assertIsNone(company.annual_capture(report,self.isin,self.now))
+
+    def test_explicit_empty_action_capture_does_not_certify_adjustment_or_count_as_positive(self):
+        source={"provider":"UPSTOX","endpoint":"/v2/fundamentals/"+self.isin+"/corporate-actions"}
+        report={"isin":self.isin,"sections":{"corporate_actions":{"status":"REPORTED_EMPTY","data":[],"source":source}}}
+        result=company.normalize(report,self.isin,self.now)
+        section=result["sections"]["corporate_actions"]
+        self.assertEqual(section["status"],"REPORTED_EMPTY")
+        self.assertEqual(result["available_sections"],0)
+        self.assertEqual(section["diagnostic"],"NO_EVENTS_REPORTED_NOT_VERIFIED_COMPLETE")
+        report["sections"]["corporate_actions"]["source"]["endpoint"]="/v2/fundamentals/WRONG/corporate-actions"
+        self.assertEqual(company.normalize(report,self.isin,self.now)["sections"]["corporate_actions"]["status"],"UNAVAILABLE")

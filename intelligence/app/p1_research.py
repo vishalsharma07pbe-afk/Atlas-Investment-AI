@@ -51,6 +51,10 @@ def _source(endpoint: str) -> dict:
 def _safe_section(name: str, endpoint: str, loader) -> dict:
     try:
         data = loader()
+        # The documented corporate-action response is a list. A successful
+        # empty list is a reported observation, not a network/schema failure.
+        if name=="corporate_actions" and isinstance(data,list) and not data:
+            return {"name":name,"status":"REPORTED_EMPTY","data":[],"source":_source(endpoint),"error":None}
         if not data:
             raise ProviderFailure("NO_PROVIDER_RECORDS")
         return {"name": name, "status": "AVAILABLE", "data": data,

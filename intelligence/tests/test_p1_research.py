@@ -85,3 +85,13 @@ class P1ResearchTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_successful_empty_action_response_is_distinct_from_failed_request(self):
+        with patch.object(p1,"_get",return_value=[]):
+            section=p1.company_research("INE002A01018",section_names=["corporate_actions"])["sections"]["corporate_actions"]
+            self.assertEqual(section["status"],"REPORTED_EMPTY")
+            self.assertEqual(section["data"],[])
+            self.assertIsNone(section["error"])
+        with patch.object(p1,"_get",side_effect=p1.ProviderFailure("PROVIDER_HTTP_FAILURE")):
+            section=p1.company_research("INE002A01018",section_names=["corporate_actions"])["sections"]["corporate_actions"]
+            self.assertEqual(section["status"],"UNAVAILABLE")

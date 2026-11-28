@@ -296,6 +296,13 @@ def normalize(report, isin, instant):
             endpoint=None
         sections[key]={"status":"AVAILABLE" if data else "UNAVAILABLE","data":data or None,
                        "source":{"provider":"UPSTOX","endpoint":endpoint,"retrieved_at":instant.isoformat()} if data else None}
+        if (key=="corporate_actions" and section.get("status")=="REPORTED_EMPTY"
+                and section.get("data")==[] and isinstance(source,dict)
+                and source.get("provider")=="UPSTOX" and endpoint=="/v2/fundamentals/"+isin+"/corporate-actions"):
+            sections[key]={"status":"REPORTED_EMPTY","data":[],
+                "source":{"provider":"UPSTOX","endpoint":endpoint,"retrieved_at":instant.isoformat()},
+                "diagnostic":"NO_EVENTS_REPORTED_NOT_VERIFIED_COMPLETE"}
+            continue
         if not data:
             # Keep only fixed error labels; no raw HTTP messages or tokens.
             error=section.get("error")
