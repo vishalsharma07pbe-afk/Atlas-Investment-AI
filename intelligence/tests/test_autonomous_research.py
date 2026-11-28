@@ -426,3 +426,21 @@ class AutonomousResearchTests(unittest.TestCase):
         now=datetime(2026,11,28,5,tzinfo=timezone.utc)
         with patch.object(research,"_read_sections",side_effect=OSError("storage unavailable")):
             self.assertEqual(research._fund_research_targets(now),{})
+
+    def test_scheduled_fund_snapshot_keeps_exact_bounded_decision_evidence(self):
+        from app import research_synthesis as s
+        payload={key:None for key in ("category","coverage","top_performers","growth_outlook","recommendation_status","blockers","notice","filters","historical_coverage")}
+        row={"identifier":"123456","isin_growth":"INF123456789","name":"Example Fund","nav_date":"2026-11-27","score":90,"weekly_cagr_percent":15,"weekly_drawdown_percent":-20,"annualized_volatility_percent":15,"qualified":False,"status":"HISTORICAL_RESEARCH_ONLY"}
+        payload["historical_research_shortlist"]={"methodology":"MF-MATCHED-PEER-1","category":"LARGE_CAP","status":"HISTORICAL_SHORTLIST_AVAILABLE","items":[row]}
+        detail={"identifier":"123456","nav_date":"2026-11-27","category":"LARGE_CAP","plan":"DIRECT","option":"GROWTH","automatic_amfi_ter_evidence":{"status":"OPERATOR_CROSSWALK_MATCH","isin_growth":row["isin_growth"],"ter_date":"2026-11-27","ter_percent":.7,"source_url":"https://example.invalid/DO_NOT_PERSIST"},"raw_holdings":"DO_NOT_PERSIST"}
+        payload["research_reports"]=[detail]
+        with patch.object(research,"dashboard",return_value=payload),patch.object(research,"now",return_value=datetime(2026,11,28,5,tzinfo=timezone.utc)):
+            snapshot=research.fund_snapshot("LARGE_CAP")
+        self.assertNotIn("DO_NOT_PERSIST",str(snapshot))
+        self.assertNotIn("research_reports",snapshot)
+        saved=snapshot["fund_decision_evidence"]
+        row=snapshot["historical_research_shortlist"]["items"][0]
+        self.assertEqual(row["weekly_drawdown_percent"],-20)
+        self.assertEqual(s.saved_fund_context(row,saved,"LARGE_CAP",date(2026,11,28),website=True,local=False,tri=False,secondary=False)["ter_percent"],.7)
+        self.assertNotIn("ter_percent",s.saved_fund_context(row,saved,"LARGE_CAP",date(2026,11,28),website=False,local=False,tri=False,secondary=False))
+        self.assertNotIn("ter_percent",s.saved_fund_context(row,saved,"MID_CAP",date(2026,11,28),website=True,local=False,tri=False,secondary=False))
