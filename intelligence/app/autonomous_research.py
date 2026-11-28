@@ -611,7 +611,19 @@ def read_overview():
                 observation=fund_prospective.summary(category,instant.astimezone(ZoneInfo("Asia/Kolkata")).date())
                 fund_outcomes[category]={"states":observation.get("decision_states",{}),"truncated":observation.get("truncated",False)}
             except (sqlite3.Error,OSError,ValueError,TypeError,KeyError):continue
-        snapshot["investment_analyst"]["fund_decision_outcomes"]=fund_outcomes
+        report=snapshot["investment_analyst"]
+        report["fund_decision_outcomes"]=fund_outcomes
+        held=[]
+        for group in report.get("funds",[]):
+            category=group.get("category")
+            sample=(fund_outcomes.get(category,{}).get("states") or {}).get("PRIORITY_RESEARCH") or {}
+            if sample.get("tri_review_status")!="ADVERSE_DESCRIPTIVE_SAMPLE":continue
+            held.append(category)
+            for row in group.get("items",[]):
+                if row.get("action")=="COMPARE_FOR_SIP":row["action"]="WATCH_FOR_CONFIRMATION"
+        if held:
+            report.setdefault("decision_quality",{})["fund_allocation_holds"]=held
+            report.setdefault("next_steps",[]).insert(0,"Defer new SIP research allocations in categories with adverse mature paired TRI evidence.")
     except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
         # Failure of final policy must not leave a positive allocation action.
         report=snapshot["investment_analyst"]
