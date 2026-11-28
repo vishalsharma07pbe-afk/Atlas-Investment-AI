@@ -307,9 +307,9 @@ def summarize(snapshot,connect,instant):
         families=sorted({LANES[v] for v in lanes})
         counts.update(lanes)
         plan=pro.strategy_risk_plan(f,lanes) if adjusted else None
-        from . import forward_earnings, valuation_scenarios
+        from . import forward_earnings
         growth=forward_earnings.baseline(report,instant) if report else None
-        cash_sensitivity=valuation_scenarios.summarize(report,instant) if report else None
+        cash_sensitivity=obj(report.get("valuation_sensitivity")) if report else None
         if cash_sensitivity and cash_sensitivity.get("status")!="HYPOTHETICAL_CASH_STREAM_ONLY":cash_sensitivity=None
         patterns=obj(f.get("professional_patterns"))
         diagnostics={k:patterns[k] for k in ("trend_template_checks","contraction_checks") if k in patterns} if adjusted else {}
