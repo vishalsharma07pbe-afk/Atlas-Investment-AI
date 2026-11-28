@@ -5,7 +5,7 @@ import SectorPriceView,{type SectorPriceEvidence} from "./SectorPriceView";
 import FinancialFilingView,{type FilingEvidence} from "./FinancialFilingView";
 import {EvidenceBars} from "./TerminalCharts";
 import {visiblePolling} from "./visiblePolling";
-import {useEffect,useRef,useState,type ReactNode} from "react";
+import {useEffect,useLayoutEffect,useRef,useState,type ReactNode} from "react";
 import WatchOutcomeHistory from "./WatchOutcomeHistory";
 import IntradayResearch from "./IntradayResearch";
 import AdvancedSection from "./AdvancedSection";
@@ -195,7 +195,7 @@ export default function HorizonResearch({horizon,children,onSettings,reportTarge
  const requestedMatches=reportTarget&&selection?ranked.filter(c=>c.exchange===reportTarget.exchange&&c.id===reportTarget.id&&c.isin===reportTarget.isin):[];
  const requested=requestedMatches.length===1?requestedMatches[0]:undefined;
  const requestedKey=requested?requested.exchange+":"+requested.id+":"+requested.isin:null;
- useEffect(()=>{
+ useLayoutEffect(()=>{
   if(!reportTarget||!requestedKey||!requestedDetails.current)return;
   const details=requestedDetails.current;
   details.open=true;

@@ -54,4 +54,23 @@ class PortfolioReviewServiceTest {
     assertEquals("EVIDENCE_GAP",missing.get("status"));
     assertTrue(missing.get("missing_evidence").toString().contains("restriction clearance is not established"));
   }
+  @Test void fundMixedHistoryNeedsOfficialAnchorExactSchemeAndBoundedGaps(){
+    LocalDate today=LocalDate.of(2026,11,28);
+    var row=new HashMap<String,Object>();
+    row.put("id",1L);row.put("symbol","123456");row.put("asset_type","MUTUAL_FUND");
+    row.put("exact_scheme_code",123456L);row.put("latest_source","AMFI");
+    row.put("history_count",50L);row.put("distinct_sources",2L);row.put("max_gap_days",4L);
+    row.put("evidence_date",today.minusDays(6));row.put("latest",new BigDecimal("120"));
+    row.put("prior",new BigDecimal("100"));row.put("peak",new BigDecimal("125"));
+    var item=(Map<?,?>)((List<?>)PortfolioReviewService.assess(List.of(row),today,Instant.EPOCH).get("holdings")).getFirst();
+    assertEquals("AMFI_ANCHORED_MIXED_SOURCE",item.get("fund_recent_history_status"));
+    assertEquals(20.0,item.get("change_20_observations_percent"));
+    row.put("max_gap_days",15L);
+    item=(Map<?,?>)((List<?>)PortfolioReviewService.assess(List.of(row),today,Instant.EPOCH).get("holdings")).getFirst();
+    assertNull(item.get("change_20_observations_percent"));
+    row.put("max_gap_days",4L);row.put("latest_source","MFAPI");
+    item=(Map<?,?>)((List<?>)PortfolioReviewService.assess(List.of(row),today,Instant.EPOCH).get("holdings")).getFirst();
+    assertNull(item.get("change_20_observations_percent"));
+  }
+
 }
