@@ -296,6 +296,14 @@ STOCK_GATE_STATES=("PARTIAL_CONTEXT","MISSING_EVIDENCE","OBSERVATION_CHECKS_MET"
 def _bounded_count(value,maximum=1000000):
     return value if _count(value) and value<=maximum else None
 
+def _distinct_stock_count(rows,maximum):
+    if not isinstance(rows,list) or len(rows)>maximum:
+        return None
+    refs=[_ref(row) for row in rows]
+    if any(ref is None or not re.fullmatch(r"INE[A-Z0-9]{9}",ref[2]) for ref in refs):
+        return None
+    return len(refs) if len({ref[2] for ref in refs})==len(refs) else None
+
 def qualification_audit(overview,readiness=None,intraday=None):
     """Aggregate existing public evidence; never echo identifiers or unknown strings.
 
@@ -334,7 +342,10 @@ def qualification_audit(overview,readiness=None,intraday=None):
                     state=matched[0].get("status") if len(matched)==1 else None
                     domains[domain][state if state in STOCK_GATE_STATES else "UNKNOWN"]+=1
         prospective=_obj(reliability.get(horizon))
-        stocks[horizon]={"market_coverage":coverage,"reviewed_count":_bounded_count(report.get("reviewed_count")),
+        selection=_obj(report.get("selection"))
+        stocks[horizon]={"strict_watch_count":_distinct_stock_count(selection.get("watch_refs"),5),
+            "preliminary_watch_count":_distinct_stock_count(selection.get("preliminary_watch_refs"),5),
+            "market_coverage":coverage,"reviewed_count":_bounded_count(report.get("reviewed_count")),
             "qualified_count":_bounded_count(report.get("qualified_count")),"domain_counts":domains,
             "prospective_mature_watches":_bounded_count(prospective.get("selected_mature_watches")),
             "prospective_observed_outcomes":_bounded_count(prospective.get("observed_outcomes")),
@@ -361,7 +372,16 @@ def qualification_audit(overview,readiness=None,intraday=None):
             if (not withheld and values) or (withheld and sum(values.values())<withheld):
                 return None
             return dict(values)
-        funds[category]={"history_sample_count":_bounded_count(historical.get("sample_count"),40),
+        shortlist=_obj(result.get("historical_research_shortlist"))
+        rows=shortlist.get("items")
+        historical_watch_count=None
+        if isinstance(rows,list) and len(rows)<=5 and all(isinstance(row,dict) and
+                row.get("qualified") is False and row.get("status")=="HISTORICAL_RESEARCH_ONLY" and
+                isinstance(row.get("identifier"),str) and re.fullmatch(r"[1-9][0-9]{5,8}",row["identifier"])
+                for row in rows) and len({row["identifier"] for row in rows})==len(rows):
+            historical_watch_count=len(rows)
+        funds[category]={"historical_research_watch_count":historical_watch_count,
+            "history_sample_count":_bounded_count(historical.get("sample_count"),40),
             "history_eligible_count":_bounded_count(historical.get("eligible_count"),40),
             "evaluated_count":evaluated if valid else None,"top_eligible_count":top if valid else None,
             "growth_eligible_count":growth if valid else None,
@@ -370,7 +390,7 @@ def qualification_audit(overview,readiness=None,intraday=None):
     acquisition=_obj(_obj(_obj(readiness).get("research_jobs")).get("company_acquisition"))
     count_keys=("never_attempted","available","partial","unavailable","running","fresh_reports",
                 "fresh_current_normalization","legacy_reports","due_legacy_reports")
-    sample=_bounded_count(acquisition.get("sample_identities"),400)
+    sample=_bounded_count(acquisition.get("sample_identities"),40000)
     company_counts={k:_bounded_count(_obj(acquisition.get("counts")).get(k),sample or 0)
                     for k in count_keys} if sample is not None else {k:None for k in count_keys}
     sections=("profile","ratios","income_statement","balance_sheet","cash_flow","shareholding","corporate_actions","competitors")
@@ -380,7 +400,15 @@ def qualification_audit(overview,readiness=None,intraday=None):
         "fresh_sections":{k:_bounded_count(_obj(acquisition.get("fresh_sections")).get(k),sample or 0) if sample is not None else None for k in sections}}
     q=_obj(_obj(intraday).get("qualification"))
     stocks["INTRADAY"]={k:_bounded_count(q.get(k)) for k in ("reviewed_count","review_required_count","qualified_count","unidentified_listing_count","cross_venue_company_count","conflicting_company_count")}
-    return {"status":"EVIDENCE_AUDIT_ONLY","stocks":stocks,"funds":funds,"company_acquisition":company_audit,
+    screen=_obj(overview.get("steady_momentum"))
+    strict=_obj(screen.get("strict_suggestions"))
+    displayed=_distinct_stock_count(strict.get("items"),10)
+    matched=_bounded_count(strict.get("matched_count"))
+    if strict.get("qualification_eligible") is not False or displayed is None or matched is None or displayed!=min(matched,10) or strict.get("status")!=("JOINT_SCREEN_MATCHES" if matched else "NO_JOINT_SCREEN_MATCHES"):
+        displayed=matched=None
+    elite={"strict_joint_match_count":matched,"displayed_strict_suggestion_count":displayed,
+           "preliminary_business_match_count":_bounded_count(screen.get("matched_count"))}
+    return {"status":"EVIDENCE_AUDIT_ONLY","stocks":stocks,"funds":funds,"elite":elite,"company_acquisition":company_audit,
             "notice":"Counts describe bounded existing snapshots; null means unavailable, not zero. No new data acquisition, investment recommendation or certification."}
 
 ADVANCED_JOBS=("OFFICIAL_TRI_DOWNLOAD","OFFICIAL_AMC_FACTSHEETS","NSE_FINANCIAL_FILINGS",

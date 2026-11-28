@@ -74,10 +74,18 @@ def summarize(snapshot,today):
             if isinstance(ref,dict) and exact_isin(ref.get("isin")) and ref.get("exchange") in ("NSE","BSE") and type(ref.get("id")) is int:
                 selected.add((horizon,ref["exchange"],ref["id"],ref["isin"]))
     # company_reports entries already validate venue/date/calendar and bounded shortlist.
+    screen=snapshot.get("steady_momentum") or {}
+    strict=screen.get("strict_suggestions")
+    # An explicitly empty strict shortlist is authoritative. Preliminary cards
+    # remain accessible in company reports, but cannot enter the decision desk.
+    strict_rows=(strict.get("items",[])[:10] if isinstance(strict,dict)
+                 and strict.get("status")=="JOINT_SCREEN_MATCHES"
+                 and strict.get("qualification_eligible") is False else [])
     observations={}
     conflicting=set()
     for horizon,item in company_reports.entries(snapshot):
         if horizon!="ELITE" and (horizon,item["exchange"],item["id"],item["isin"]) not in selected:continue
+        if horizon=="ELITE" and "strict_suggestions" in screen and not any(item is row for row in strict_rows):continue
         if not isinstance(item.get("symbol"),str) or not re.fullmatch(r"[A-Z0-9._&-]{1,40}",item["symbol"]):continue
         decision=_stock(item,horizon)
         if decision is None:continue

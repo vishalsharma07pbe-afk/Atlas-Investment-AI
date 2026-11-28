@@ -45,3 +45,15 @@ class RecoveryAcceptanceTests(unittest.TestCase):
             self.assertNotIn("PRIVATE_MARKER",json.dumps(result))
     def test_missing_contract_is_blocked(self):
         self.assertEqual(a.recovery_audit({}, {}, {}, {},instant=NOW)["status"],"BLOCKED")
+
+    def test_opportunity_audit_counts_outputs_without_certifying(self):
+        row={"exchange":"NSE","id":1,"isin":"INE002A01018","symbol":"PRIVATE_MARKER"}
+        overview={"steady_momentum":{"matched_count":3,"strict_suggestions":{
+            "status":"JOINT_SCREEN_MATCHES","qualification_eligible":False,"matched_count":1,"items":[row]}}}
+        result=a.qualification_audit(overview)
+        self.assertEqual(result["elite"]["displayed_strict_suggestion_count"],1)
+        self.assertEqual(result["elite"]["preliminary_business_match_count"],3)
+        self.assertNotIn("PRIVATE_MARKER",json.dumps(result))
+        self.assertIsNone(result["stocks"]["SWING"]["strict_watch_count"])
+        overview["steady_momentum"]["strict_suggestions"]["items"]=[row,row]
+        self.assertIsNone(a.qualification_audit(overview)["elite"]["displayed_strict_suggestion_count"])
