@@ -619,14 +619,22 @@ def cached_action_reports(connect,identities,instant):
     if not permitted():
         return {}
     wanted={i for i in identities if isinstance(i,str) and re.fullmatch(r"INE[A-Z0-9]{9}",i)}
-    if not wanted or len(wanted)>200:
+    if not wanted or len(wanted)>40000:
         return {}
     try:
         with closing(connect()) as db:
-            marks=",".join("?" for _ in wanted)
-            rows=db.execute(f"""SELECT isin,payload FROM automatic_company_evidence
-                WHERE isin IN ({marks}) AND status IN ('AVAILABLE','PARTIAL')
-                AND attempted_at BETWEEN ? AND ?""",(*sorted(wanted),(instant-timedelta(hours=24)).isoformat(),instant.isoformat())).fetchall()
+            bounds=((instant-timedelta(hours=24)).isoformat(),instant.isoformat())
+            if len(wanted)<=200:
+                marks=",".join("?" for _ in wanted)
+                rows=db.execute(f"""SELECT isin,payload FROM automatic_company_evidence
+                    WHERE isin IN ({marks}) AND status IN ('AVAILABLE','PARTIAL')
+                    AND attempted_at BETWEEN ? AND ?""",(*sorted(wanted),*bounds)).fetchall()
+            else:
+                # Broad snapshot validation: one read of the current cache, no
+                # unbounded SQL placeholders and no provider requests.
+                rows=[row for row in db.execute("""SELECT isin,payload FROM automatic_company_evidence
+                    WHERE status IN ('AVAILABLE','PARTIAL') AND attempted_at BETWEEN ? AND ?""",bounds)
+                    if row["isin"] in wanted]
         result={}
         for row in rows:
             try:

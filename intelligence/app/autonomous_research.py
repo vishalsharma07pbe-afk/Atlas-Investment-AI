@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import closing
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import json
 import os
@@ -18,6 +18,8 @@ from urllib.parse import urlencode
 from .market_client import backend_json
 from . import steady_momentum, amfi_equity_caps, company_reports, nse_surveillance, nse_pledge_filings, nse_financial_filings, sector_price_context, sector_benchmarks, score_calibration, fip_research, bracket_research
 from .screener import screen
+from .corporate_action_normalization import reported_crossings
+from .replay_evidence import exact_isin
 from . import discovery_scan, research_display_archive
 from .mutual_fund_recommendations import CATEGORIES, dashboard
 from . import forward_earnings, official_amc_factsheet, official_tri, fund_ai_review, unified_decision, stock_qualification, market_regime, release_reconciliation, economic_calendar, global_releases, global_context, global_markets, global_macro, global_fx, automatic_deals, fund_portfolios, fund_disclosures, fund_prospective, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
@@ -309,6 +311,41 @@ def _published_evidence_current(section, result, today):
     return True
 
 
+def _revalidate_reported_actions(sections,current):
+    """A newly acquired positive action report invalidates the saved sweep.
+
+    Don't patch a truncated top-k list or stale breadth aggregate in place.
+    Keep the original capture for diagnostics; all READY-only consumers wait
+    for the existing scheduled scan to rebuild it using the new evidence.
+    """
+    work=[]
+    identities=set()
+    for section in sections:
+        if section.get("section") not in ("NSE","BSE") or section.get("status")!="READY":continue
+        result=section.get("result") or {}
+        rows=result.get("company_research_universe")
+        if not isinstance(rows,list) or len(rows)>20000:continue
+        valid=[]
+        for row in rows:
+            if not isinstance(row,dict) or row.get("exchange")!=section["section"] or not exact_isin(row.get("isin")):continue
+            try:
+                last=date.fromisoformat(row["as_of"])
+                # Upgrade old snapshots conservatively until the next scan
+                # supplies the exact original observation interval.
+                first=date.fromisoformat(row["first_date"]) if "first_date" in row else last-timedelta(days=1100)
+                if not 0<(last-first).days<=1100:continue
+            except (TypeError,ValueError,KeyError,OverflowError):continue
+            identities.add(row["isin"])
+            valid.append((row["isin"],first,last))
+        work.append((section,valid))
+    if not identities:return
+    reports=automatic_company_evidence.cached_action_reports(_connect,identities,current)
+    for section,rows in work:
+        if any(reported_crossings(reports.get(isin),isin,first,last,current) for isin,first,last in rows if isin in reports):
+            section["status"]="STALE"
+            section["error_code"]="NEW_REPORTED_ACTION_RESCAN_REQUIRED"
+
+
 def _read_sections(section_names,enabled,interval,current):
     # All callers use the identical observation-date and section-state gates.
     # Filter in SQLite before materializing payloads, not after JSON decoding.
@@ -350,6 +387,8 @@ def _read_sections(section_names,enabled,interval,current):
         sections.append({"section": section, "status": status,
                          "generated_at": row["generated_at"], "attempted_at": row["attempted_at"],
                          "result": result, "error_code": error_code})
+    if enabled:
+        _revalidate_reported_actions(sections,current)
     return {"enabled": enabled, "interval_seconds": interval, "sections": sections,
             "scope": "PUBLIC_MARKET_RESEARCH_ONLY",
             "research_date":today.isoformat(),
@@ -392,7 +431,7 @@ def read_snapshot(include_ai=True):
         except (ValueError,OSError,sqlite3.Error):
             snapshot["institutional_activity"]["deal_reports"]={"status":"UNAVAILABLE"}
         try:
-            automatic_company_evidence.attach(snapshot, _connect)
+            automatic_company_evidence.attach(snapshot, _connect,current)
         except (ValueError, OSError, sqlite3.Error):
             snapshot["automatic_company_status"] = "UNAVAILABLE"
         try:

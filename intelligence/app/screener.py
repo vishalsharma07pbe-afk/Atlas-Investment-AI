@@ -103,7 +103,10 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                     skipped["RAW_CORPORATE_ACTION"] += 1
                     # A complete stored calendar suffix can confirm the dates, not event completeness.
                     calendar_dates=fip_dates[-len(candles):] if len(fip_dates)>=len(candles) else ()
-                    normalized=action_preview(candles,instrument,expected_dates=calendar_dates)
+                    # A newly reported crossing may not be represented in the
+                    # explicitly normalized local ledger. Don't imply the preview
+                    # reconciles every event when that is not established.
+                    normalized=action_preview(candles,instrument,expected_dates=calendar_dates) if not crossings else {"status":"NORMALIZATION_WITHHELD"}
                     if normalized["status"]=="KNOWN_ACTIONS_NORMALIZED_PRICE_ONLY":
                         action_preview_count+=1
                         if len(action_previews)<5:
@@ -196,7 +199,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
             if batch_loaded and expected_session is not None and len(candles)>=253:
                 annual_depth_count+=1
             if batch_loaded and exact_isin(instrument.get("isin")):
-                identity={"id":row["id"],"exchange":row["exchange"],"isin":instrument["isin"],"as_of":row["as_of"]}
+                identity={"id":row["id"],"exchange":row["exchange"],"isin":instrument["isin"],"as_of":row["as_of"],"first_date":candles[0].date}
                 # Collect comparable returns for the broad valid sample, not
                 # only bullish candidates. Reuse the already loaded histories.
                 if expected_session is not None:

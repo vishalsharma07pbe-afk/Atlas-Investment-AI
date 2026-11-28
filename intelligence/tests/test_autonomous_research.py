@@ -338,3 +338,29 @@ class AutonomousResearchTests(unittest.TestCase):
             self.assertNotIn("123456",str(archive))
             research._save("LARGE_CAP",result)
             self.assertEqual(research.research_display_archive.display(research._connect,research.read_snapshot(False),research.now()),[])
+
+    def test_late_reported_action_invalidates_current_market_snapshot_for_all_consumers(self):
+        from app.corporate_action_normalization import normalize_reported_actions
+        from app import automatic_company_evidence as company
+        from contextlib import closing
+        import json
+        now=datetime(2026,11,28,5,tzinfo=timezone.utc)
+        isin="INE002A01018"
+        result={"company_research_universe":[{"id":1,"exchange":"NSE","isin":isin,"first_date":"2026-06-01","as_of":"2026-11-27"}]}
+        report={"isin":isin,"sections":{"corporate_actions":{"status":"AVAILABLE","source":{"provider":"UPSTOX",
+            "endpoint":"/v2/fundamentals/"+isin+"/corporate-actions","retrieved_at":now.isoformat()},
+            "data":normalize_reported_actions([{"name":"Split","expiry_date":"2026-11-25","ratio":"1:2"}])}}}
+        with patch.object(research,"now",return_value=now),patch.object(company,"permitted",return_value=True):
+            research._save("NSE",result)
+            research._save("BSE",{"company_research_universe":[]})
+            self.assertEqual(research.read_market_snapshot()["sections"][0]["status"],"READY")
+            with closing(research._connect()) as db,db:
+                company._table(db)
+                db.execute("INSERT INTO automatic_company_evidence VALUES(?,?,?,?,?)",
+                    (isin,now.isoformat(),now.isoformat(),"PARTIAL",json.dumps(report)))
+            for snapshot in (research.read_market_snapshot(),research.read_snapshot(False)):
+                self.assertEqual(snapshot["sections"][0]["status"],"STALE")
+                self.assertEqual(snapshot["sections"][0]["error_code"],"NEW_REPORTED_ACTION_RESCAN_REQUIRED")
+                self.assertEqual(snapshot["sections"][1]["status"],"READY")
+            research._save("NSE",{"company_research_universe":[]})
+            self.assertEqual(research.read_market_snapshot()["sections"][0]["status"],"READY")

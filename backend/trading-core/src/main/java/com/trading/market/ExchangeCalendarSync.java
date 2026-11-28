@@ -168,7 +168,7 @@ public class ExchangeCalendarSync {
   for(String venue:List.of("NSE","BSE")){
    var context=calendar.sessionContext(venue,day.atTime(12,0).atZone(MarketCalendarService.IST).toInstant());
    String phase=(String)context.get("phase");
-   if("CALENDAR_UNVERIFIED".equals(phase)||"SPECIAL_SESSION_UNSUPPORTED".equals(phase))return false;
+   if(phase==null||!Set.of("CLOSED","MARKET_HOURS","POST_MARKET","PRE_MARKET","BEFORE_PRE_MARKET").contains(phase))return false;
   }
   return true;
  }
