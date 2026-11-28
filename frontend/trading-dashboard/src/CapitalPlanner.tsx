@@ -5,7 +5,7 @@ import {visiblePolling} from "./visiblePolling";
 type Holding={id:number;symbol:string;isin?:string;exact_scheme_code?:string|number;asset_type:string;recorded_market_value?:number;recorded_valuation_recent?:boolean;investment_analysis?:{action:string}};
 type Comparison={asset_type:string;holding:string;alternative:string;holding_identity:string;alternative_identity:string;first_date:string;last_date:string;holding_return_percent:number;alternative_return_percent:number;basis:string};
 type FundingComparison={scope:string;kind:string;status:string;purchaseNotional:number;saleNotional:number;estimates:{basisPointsPerSide:number;additionalCashIncludingTransactionCost:number;conditionalCashIfThresholdUnused?:number|null;conditionalCashIfThresholdUsed?:number|null}[];evidenceGaps:string[]};
-export type OwnerReview={generated_at:string;holding_count:number;holdings:Holding[];investment_analysis?:{recent_weight_coverage:boolean;scope:string};opportunity_context?:{matched_comparisons?:Comparison[]};portfolio_level_risk?:{look_through_status:string;attention?:{kind:string;label:string;value:number;unit:string}[]};rebalancing_funding?:{status:string;comparisons:FundingComparison[];notice:string}};
+export type OwnerReview={generated_at:string;holding_count:number;holdings:Holding[];investment_analysis?:{recent_weight_coverage:boolean;scope:string};opportunity_context?:{matched_comparisons?:Comparison[]};diversification?:{look_through?:{status:string;portfolio_date?:string;mapped_portfolio_percent?:number;exposures?:{isin:string;estimatedValue:number;indirectValue:number}[]}};portfolio_level_risk?:{look_through_status:string;attention?:{kind:string;label:string;value:number;unit:string}[]};rebalancing_funding?:{status:string;comparisons:FundingComparison[];notice:string}};
 type Risk="LOW"|"MODERATE"|"HIGH";
 type Allocation={identity:string;label:string;category:string;amount:number;reason:string;wholeShares?:number;stopRisk?:number};
 const money=(n:number)=>"₹"+n.toLocaleString("en-IN",{maximumFractionDigits:0});
@@ -59,17 +59,21 @@ export function makeCapitalPlan(report:InvestmentAnalysis,review:OwnerReview|nul
  // No sale proceeds, emergency reserve, leverage, or assumed future gains.
  const existingReview=!!review.portfolio_level_risk?.attention?.length||review.holdings.some(h=>["REVIEW_REDUCTION","REASSESS_THESIS","REBALANCE_REVIEW","PAUSE_ADDITIONS"].includes(h.investment_analysis?.action??""));
  const reservePct=existingReview?.6:risk==="MODERATE"?.4:.25;
- const maxStock=risk==="HIGH"&&!existingReview?.1:0, fundBudget=existingReview?.4:risk==="HIGH"?.5:.6;
+ const look=review.diversification?.look_through;
+ const currentLook=look?.status==="DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE"&&typeof look.portfolio_date==="string"&&age(look.portfolio_date,today)>=0&&age(look.portfolio_date,today)<=60&&Array.isArray(look.exposures);
+ // Existing funds with no current look-through evidence warrant restraint on
+ // direct-stock additions. Partial known exposures are lower bounds only.
+ const maxStock=risk==="HIGH"&&!existingReview&&(fundIds.size===0||currentLook)?.1:0, fundBudget=existingReview?.4:risk==="HIGH"?.5:.6;
  let left=Math.floor(amount*(1-reservePct));
  // Reserve 30 bps per-side illustrative purchase friction in addition to
  // the planned notional. NAV performance already reflects recurring TER.
  const chargeRate=.003;let stockRiskLeft=amount*.0075;
  const used=new Set<string>();
- function add(identity:string,label:string,category:string,desired:number,positionCap:number,reason:string,price?:number,riskPerShare?:number){
+ function add(identity:string,label:string,category:string,desired:number,positionCap:number,reason:string,price?:number,riskPerShare?:number,knownExposure=0){
   if(used.has(identity)||left<=0)return;
   // Conservative post-contribution denominator: existing investments plus
   // only the proposed position, ignoring other planned additions and cash.
-  const maxPosition=total>0?Math.floor(total*positionCap/(1-positionCap)):Math.floor(amount*positionCap);
+  const maxPosition=total>0?Math.max(0,Math.floor((total*positionCap-knownExposure)/(1-positionCap))):Math.floor(amount*positionCap);
   const limit=Math.min(Math.floor(desired),maxPosition,Math.floor(left/(1+chargeRate)));
   const shares=price&&riskPerShare?Math.floor(Math.min(limit/price,stockRiskLeft/riskPerShare)):undefined;
   const n=shares!=null?Math.ceil(shares*price!):limit;
@@ -99,12 +103,16 @@ export function makeCapitalPlan(report:InvestmentAnalysis,review:OwnerReview|nul
   }));
   if(f)add("F:"+f.identifier,f.name,category,amount*fundBudget/categories.length,.25,"Reported growth drivers and current historical peer evidence; confirm suitability, costs and portfolio overlap.");
  }
- if(maxStock>0)for(const s of eligibleStocks.slice(0,2)){
+ if(maxStock>0)for(const s of eligibleStocks){
+  if(allocations.filter(a=>a.category==="EQUITY").length>=2)break;
+  const matches=currentLook?(look?.exposures??[]).filter(x=>x.isin===s.isin):[];
+  if(matches.length>1||matches.some(x=>!finite(x.estimatedValue)||!finite(x.indirectValue)||x.indirectValue<0||x.estimatedValue<x.indirectValue||x.estimatedValue>total))continue;
+  const knownExposure=matches[0]?.estimatedValue??0;
   const plan=s.price_plan!;
   const riskPerShare=plan.reference-plan.stop_scenario;
   // At most 0.5% of fresh investable capital per stock before gaps and costs.
   const shares=Math.floor(Math.min(amount*maxStock/plan.reference,amount*.005/riskPerShare));
-  add("S:"+s.isin,s.symbol,"EQUITY",Math.ceil(shares*plan.reference),.1,"Adjusted joint screen; illustrative stop risk capped at 0.5% per stock and 0.75% combined fresh capital. Recheck actual quote, gap risk and charges.",plan.reference,riskPerShare);
+  add("S:"+s.isin,s.symbol,"EQUITY",Math.ceil(shares*plan.reference),.1,"Adjusted joint screen; illustrative stop risk capped at 0.5% per stock and 0.75% combined fresh capital. Recheck actual quote, gap risk, charges and any unmodeled fund exposure.",plan.reference,riskPerShare,knownExposure);
  }
  out.planned=allocations.reduce((n,r)=>n+r.amount,0);out.reserved=amount-out.planned;
  out.status=allocations.length?"CONDITIONAL_RESEARCH_BUDGET":"NO_SUPPORTED_ALLOCATION";
