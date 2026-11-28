@@ -7,6 +7,7 @@ from contextlib import closing
 from collections import defaultdict
 from datetime import date,timedelta
 from statistics import mean,median
+from math import isfinite
 from zoneinfo import ZoneInfo
 import json,re
 from . import decision_quality as q,watch_outcomes as w,research_reliability as rel
@@ -55,10 +56,12 @@ def summarize_rows(rows,today,truncated=False):
             if maturity!=start+timedelta(days=60) or start>today:continue
             published[state]+=1
             if today<=maturity+timedelta(days=7):continue
-            ret=rel._outcome(r,start,maturity,today)
-            benchmark=rel._index_change(r,ret) if ret is not None else None
-            net=100*((1+ret)*.997**2-1) if ret is not None else None
-            excess=net-100*benchmark if benchmark is not None else None
+            try:
+                ret=rel._outcome(r,start,maturity,today)
+                benchmark=rel._index_change(r,ret) if ret is not None else None
+                net=100*((1+ret)*.997**2-1) if ret is not None and isfinite(ret) else None
+                excess=net-100*benchmark if net is not None and benchmark is not None and isfinite(benchmark) else None
+            except (ValueError,TypeError,KeyError,OverflowError,AttributeError):net=excess=None
             groups[state].append((e["isin"],start,net,excess))
         except (ValueError,TypeError,KeyError,OverflowError,AttributeError):continue
     result={}
