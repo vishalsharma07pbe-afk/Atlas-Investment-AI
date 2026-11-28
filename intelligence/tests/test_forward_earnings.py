@@ -74,3 +74,15 @@ class ForwardEarningsTest(unittest.TestCase):
                 self.assertEqual(f.due_identities(connect,datetime(2027,8,1,5,tzinfo=timezone.utc)),[])
             with patch.object(f.company,"permitted",return_value=False):
                 self.assertEqual(f.due_identities(connect,datetime(2027,2,1,5,tzinfo=timezone.utc)),[])
+
+    def test_challengers_are_frozen_and_not_backfilled(self):
+        evidence=f.baseline(report(),NOW)
+        self.assertEqual(evidence["challengers"]["revenue"]["HALF_PERSISTENCE"]["amount_cr"],126)
+        self.assertNotIn("DAMPED_ACCELERATION",evidence["challengers"]["revenue"])
+        later=datetime(2027,2,1,5,tzinfo=timezone.utc)
+        row={"isin":ISIN,"target_quarter":evidence["target_quarter"],"published_at":NOW.isoformat(),"evidence":json.dumps(evidence)}
+        result=f.evaluate(row,report(later,True),later)
+        self.assertEqual(result["metrics"]["revenue"]["challenger_absolute_errors_pp"]["HALF_PERSISTENCE"],7.5)
+        evidence.pop("challenger_policy")
+        row["evidence"]=json.dumps(evidence)
+        self.assertNotIn("challenger_absolute_errors_pp",f.evaluate(row,report(later,True),later)["metrics"]["revenue"])
