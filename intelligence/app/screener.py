@@ -217,6 +217,12 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                                 # the broad snapshot; keep status/reasons for
                                 # coverage and strict Elite review of others.
                                 identity["fip_research"]=fip if fip["status"]=="FIP_PRICE_MATCH" else {k:v for k,v in fip.items() if k!="windows"}
+                if expected_session is not None and row["security_state"] not in sector_price_context.SPECIAL:
+                    from . import multi_strategy
+                    features=multi_strategy.price_features(candles,fip_dates)
+                    if features is not None:
+                        identity["symbol"]=row["symbol"]
+                        identity["multi_strategy_price"]=features
                 company_research_universe.append(identity)
                 if instrument["id"] in venue_observations:
                     venue_observations[instrument["id"]]=company_venues.observation(instrument,candles)

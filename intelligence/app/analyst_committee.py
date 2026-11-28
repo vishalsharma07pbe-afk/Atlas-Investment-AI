@@ -13,10 +13,11 @@ from .investment_analyst import obj, rows, num
 
 VERSION="ANALYST-COMMITTEE-1"
 NOTICE="Model judgments are conditional research priorities, not independently verified facts, return probabilities or order instructions. Disagreement is caution, not a vote to trade."
-TIERS={"ADJUSTED_JOINT","REPORTED_JOINT","BUSINESS_SCREEN","TECHNICAL_LEAD","DRIVER_SUPPORTED","HISTORICAL_ONLY","DRIVER_REVIEW"}
+TIERS={"ADJUSTED_JOINT","REPORTED_JOINT","BUSINESS_SCREEN","TECHNICAL_LEAD","MULTI_STRATEGY_RESEARCH","DRIVER_SUPPORTED","HISTORICAL_ONLY","DRIVER_REVIEW"}
 REASONS={
  "JOINT_SCREEN":"Joint price and reported business screen supports further review.",
  "BUSINESS_SCREEN":"Reported business evidence supports investigation.",
+ "STRATEGY_MATCH":"Independent fixed-rule strategy evidence supports further investigation, not a validated trade.",
  "GROWTH_AND_VALUATION":"Reported earnings growth and relative P/E support investigation; valuation date unverified.",
  "VALUATION_CAUTION":"Reported relative P/E is above the reported sector multiple; verify valuation.",
  "HISTORICAL_PEERS":"Historical peer comparison supports further investigation.",
@@ -52,6 +53,7 @@ def pack(report):
         if tier=="ADJUSTED_JOINT":allowed.append("JOINT_SCREEN")
         if tier=="REPORTED_JOINT":allowed.extend(["JOINT_SCREEN","ADJUSTMENT_UNKNOWN"])
         if tier=="BUSINESS_SCREEN":allowed.append("BUSINESS_SCREEN")
+        if tier=="MULTI_STRATEGY_RESEARCH":allowed.append("STRATEGY_MATCH")
         if tier in ("DRIVER_SUPPORTED","HISTORICAL_ONLY","DRIVER_REVIEW"):allowed.append("HISTORICAL_PEERS")
         if tier=="DRIVER_SUPPORTED":allowed.append("GROWTH_DRIVERS")
         if tier=="DRIVER_REVIEW":allowed.append("DRIVER_RISK")
@@ -59,7 +61,7 @@ def pack(report):
         if scenario and min(scenario)>0:allowed.append("POSITIVE_SCENARIO")
         if scenario and min(scenario)<0:allowed.append("NEGATIVE_SCENARIO")
         out[key]={"identity":identity,"group":group,"tier":tier,"date":row.get("as_of",row.get("nav_date")),
-            "score":score if num(score,0,100) else None,"risk":risk,"earnings_scenario":scenario,"facts":facts,
+            "score":score if num(score,0,100) else None,"risk":risk,"earnings_scenario":scenario,"facts":facts,"strategy_families":[v for v in rows(row.get("strategy_families")) if v in ("QUALITY","VALUE","GROWTH","MOMENTUM","DEFENSIVE","SECTOR")],
             "allowed_reasons":allowed}
     for i,r in enumerate(rows(report.get("stocks"))[:6]):
         if isinstance(r,dict) and re.fullmatch(r"INE[A-Z0-9]{9}",str(r.get("isin",""))):add("S"+str(i+1),r,"EQUITY",r["isin"])
@@ -84,7 +86,7 @@ def validate(response,evidence):
             candidate=v["candidate"];decision=v["decision"];reason=v["reason"]
             if candidate not in evidence or r.get("evidence_ids")!=[candidate] or reason not in evidence[candidate]["allowed_reasons"]:continue
             if decision not in ("PRIORITIZE_REVIEW","DEFER_REVIEW"):continue
-            if decision=="PRIORITIZE_REVIEW" and (reason not in ("JOINT_SCREEN","BUSINESS_SCREEN","HISTORICAL_PEERS","GROWTH_DRIVERS","POSITIVE_SCENARIO","GROWTH_AND_VALUATION")
+            if decision=="PRIORITIZE_REVIEW" and (reason not in ("JOINT_SCREEN","BUSINESS_SCREEN","STRATEGY_MATCH","HISTORICAL_PEERS","GROWTH_DRIVERS","POSITIVE_SCENARIO","GROWTH_AND_VALUATION")
                 or evidence[candidate]["tier"]=="DRIVER_REVIEW"):continue
             if decision=="DEFER_REVIEW" and reason not in ("LIMITED_EVIDENCE","HIGH_HISTORICAL_RISK","ADJUSTMENT_UNKNOWN","DRIVER_RISK","NEGATIVE_SCENARIO","VALUATION_CAUTION"):continue
             if candidate in found:duplicate.add(candidate)

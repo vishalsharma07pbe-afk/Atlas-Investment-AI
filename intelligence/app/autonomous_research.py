@@ -531,6 +531,11 @@ def read_snapshot(include_ai=True):
         stock_qualification.attach(snapshot,current.astimezone(ZoneInfo("Asia/Kolkata")).date(),current)
         snapshot["daily_briefing"] = daily_briefing.summarize(snapshot)
         company_reports.attach(snapshot,current)
+        from . import multi_strategy
+        try:
+            snapshot["multi_strategy"]=multi_strategy.summarize(snapshot,_connect,current)
+        except (ValueError,TypeError,KeyError,AttributeError,OverflowError,OSError,sqlite3.Error):
+            snapshot["multi_strategy"]={"methodology":multi_strategy.VERSION,"status":"UNAVAILABLE","items":[],"notice":multi_strategy.NOTICE}
         try:
             snapshot["forward_earnings_validation"]=forward_earnings.summary(_connect,current) if enabled else {"status":"DISABLED"}
         except (ValueError,TypeError,OSError,sqlite3.Error):

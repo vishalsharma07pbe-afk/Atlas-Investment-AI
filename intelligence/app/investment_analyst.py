@@ -119,6 +119,23 @@ def stock_projection(snapshot,instant=None):
             gaps=["Independent filing/valuation and prospective performance not certified."]
             if basis!="ADJUSTED":gaps.append("Historical adjustment basis unverified; no price plan.")
             add(r,tier,"ELITE",e["score"],reasons,gaps)
+    # Independent strategy lanes can surface non-FIP opportunities. Reserve up
+    # to three discovery slots without changing strict FIP exports/qualification.
+    alternatives=obj(snapshot.get("multi_strategy"))
+    if alternatives.get("methodology")=="MULTI-STRATEGY-1":
+        alt=[r for r in rows(alternatives.get("items")) if isinstance(r,dict) and r.get("qualified") is False and exact_isin(r.get("isin")) and r["isin"] not in prohibited and r["isin"] not in seen and num(r.get("close"),.0001,1e9)]
+        if alt:
+            out=out[:max(7,10-min(3,len(alt)))]
+            for r in alt:
+                if len(out)>=10:break
+                if r["isin"] in seen:continue
+                seen.add(r["isin"])
+                out.append({**{k:r[k] for k in ("id","isin","symbol","exchange","as_of","close")},
+                    "tier":"MULTI_STRATEGY_RESEARCH","horizon":"RESEARCH","score":None,"qualified":False,"action":"WATCH_FOR_CONFIRMATION",
+                    "risk":None,"growth_outlook":None,"price_plan":None,"evidence_confidence":"LIMITED",
+                    "strategies":r["strategies"],"strategy_families":r["families"],"observed_facts":r["observed_facts"],
+                    "reasons":["Independent strategy research matches: "+", ".join(x.replace("_"," ").lower() for x in r["strategies"])],
+                    "limitations":["Fixed research proxies; independent strategy performance not established.","No allocation or execution qualification; price adjustment and valuation evidence may be incomplete."]})
     # Use already-consolidated business screens only when joint FIP is absent.
     # Never describe a business-only match as having passed FIP.
     if not out:
@@ -198,6 +215,7 @@ def analyze(snapshot,today,instant=None):
     out["status"]="AWAITING_CURRENT_RESEARCH"
     if snapshot.get("research_date")!=today.isoformat():return out
     stocks=stock_projection(snapshot,instant);funds=fund_projection(snapshot,today)
+    out["multi_strategy"]=obj(snapshot.get("multi_strategy"))
     out.update(stocks=stocks,funds=funds,status="RESEARCH_AVAILABLE" if stocks or any(f["items"] for f in funds) else "NO_SUPPORTED_CANDIDATES")
     if stocks:out["next_steps"].append("Review the highest evidence-tier stock first; confirm current price and independent business evidence before allocating cash.")
     else:out["next_steps"].append("Do not force a new equity position from the current sample.")
