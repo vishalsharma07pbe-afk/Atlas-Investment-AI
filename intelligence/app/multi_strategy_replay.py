@@ -162,7 +162,7 @@ def replay(payload,benchmark,today):
 def summarize(payloads,today):
     # Per-instrument simulations are not portfolio backtests. Report sample
     # counts rather than aggregate compounding of overlapping capital.
-    seen=set();counts={lane:{"companies":0,"trades":0,"positive_holdout_companies":0,"matched_price_index_companies":0} for lane in LANES}
+    seen=set();turtle_experiments=0;turtle_completed=0;counts={lane:{"companies":0,"trades":0,"positive_holdout_companies":0,"matched_price_index_companies":0} for lane in LANES}
     for p in payloads:
         report=p.get("multi_strategy_replay") or {}
         identity=p.get("isin")
@@ -170,6 +170,9 @@ def summarize(payloads,today):
             if not m.exact_isin(identity) or identity in seen or report.get("methodology")!=VERSION or report.get("signal_policy")!=SIGNAL_POLICY or report.get("status")!="DESCRIPTIVE_REPLAY_ONLY" or not 1<=(today-date.fromisoformat(report["as_of"])).days<=5:continue
         except (ValueError,TypeError,KeyError):continue
         seen.add(identity)
+        experiment=m.obj(report.get("turtle_channel_experiment"))
+        if experiment.get("status")=="DESCRIPTIVE_SINGLE_INSTRUMENT_CHANNEL_REPLAY" and experiment.get("qualified") is False and type(experiment.get("completed_trades")) is int and experiment["completed_trades"]>=0:
+            turtle_experiments+=1;turtle_completed+=experiment["completed_trades"]
         for lane in LANES:
             r=report.get("lanes",{}).get(lane,{})
             scenarios=r.get("cost_scenarios",[])
@@ -180,5 +183,6 @@ def summarize(payloads,today):
             if r.get("gross_nifty50_price_index_percent") is not None:counts[lane]["matched_price_index_companies"]+=1
     return {"methodology":VERSION,"status":"DESCRIPTIVE_SAMPLE_AVAILABLE" if seen else "AWAITING_REPLAY",
             "companies":len(seen),"lanes":counts,"qualified":False,"notice":NOTICE,
+             "turtle_channel_experiments":turtle_experiments,"turtle_channel_completed_trades":turtle_completed,
             "blockers":["FIVE_TO_TEN_YEAR_HISTORY_REQUIRED","HISTORICAL_CONSTITUENT_MEMBERSHIP_REQUIRED",
             "POINT_IN_TIME_FINANCIALS_REQUIRED","TOTAL_RETURN_BENCHMARK_REQUIRED","PORTFOLIO_WALK_FORWARD_REQUIRED","PROSPECTIVE_VALIDATION_REQUIRED"]}
