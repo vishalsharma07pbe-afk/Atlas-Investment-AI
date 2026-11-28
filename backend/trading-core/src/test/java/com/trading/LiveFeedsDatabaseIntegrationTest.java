@@ -353,6 +353,55 @@ class LiveFeedsDatabaseIntegrationTest {
   assertThat((Boolean)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"targetPresent",id,LocalDate.of(1999,1,1))).isFalse();
  }
 
+ @Test
+ @org.springframework.transaction.annotation.Transactional
+ void discoverySchedulerRollsOverSuccessButDoesNotRetryPartialResponseInSameSession()throws Exception{
+  db.update("UPDATE instruments SET active=false WHERE exchange_id=(SELECT id FROM exchanges WHERE code='NSE')");
+  long id=seedStock();
+  db.update("UPDATE instruments SET active=true WHERE id=?",id);
+  db.update("DELETE FROM discovery_history_attempts WHERE instrument_id=?",id);
+  db.update("DELETE FROM market_candles WHERE instrument_id=?",id);
+  LocalDate end=LocalDate.now(MarketCalendarService.IST).minusDays(1),old=end.minusDays(1),partial=old.minusDays(1);
+  String token="rollover-test-token";
+  String key="NSE_EQ%7CINE000A01001";
+  // Simulate an already completed prior-session attempt with an unexpired cooldown.
+  db.update("""
+    INSERT INTO discovery_history_attempts(instrument_id,attempted_at,next_attempt_at,status,rows_written,target_session)
+    VALUES (?,now(),now()+interval '12 hours','SUCCESS',1,?)
+    """,id,old);
+  db.update("""
+    INSERT INTO market_candles(instrument_id,timeframe,candle_time,source_id,open,high,low,close,volume,is_complete,quality_status,adjustment_status)
+    VALUES (?,'1d',(?::date::timestamp+interval '9 hours 15 minutes') AT TIME ZONE 'Asia/Kolkata',
+      (SELECT id FROM data_sources WHERE source_code='UPSTOX'),100,105,99,102,200,true,'PROVIDER_VALIDATED','RAW_UNADJUSTED')
+    """,id,old);
+  when(http.text(contains(key),eq(token),anyInt())).thenReturn(
+    "{\"status\":\"success\",\"data\":{\"candles\":[[\""+partial+"T09:15:00+05:30\",100,105,99,102,200]]}}");
+  Object oldGap=org.springframework.test.util.ReflectionTestUtils.getField(discovery,"requestGapMs");
+  org.springframework.test.util.ReflectionTestUtils.setField(discovery,"accessToken",token);
+  org.springframework.test.util.ReflectionTestUtils.setField(discovery,"requestGapMs",0L);
+  try{
+    org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"refreshExchange","NSE",end);
+    verify(http,times(1)).text(contains(key),eq(token),anyInt());
+    assertThat(db.queryForMap("SELECT status,rows_written FROM discovery_history_attempts WHERE instrument_id=?",id))
+      .containsEntry("status","FAILED").containsEntry("rows_written",1);
+    assertThat((Boolean)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"targetPresent",id,end)).isFalse();
+    org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"refreshExchange","NSE",end);
+    verify(http,times(1)).text(contains(key),eq(token),anyInt());
+    db.update("UPDATE discovery_history_attempts SET next_attempt_at=now()-interval '1 second' WHERE instrument_id=?",id);
+    when(http.text(contains(key),eq(token),anyInt())).thenReturn(
+      "{\"status\":\"success\",\"data\":{\"candles\":[[\""+end+"T09:15:00+05:30\",100,105,99,102,200]]}}");
+    org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"refreshExchange","NSE",end);
+    verify(http,times(2)).text(contains(key),eq(token),anyInt());
+    assertThat((Boolean)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"targetPresent",id,end)).isTrue();
+    assertThat(db.queryForMap("SELECT status,rows_written FROM discovery_history_attempts WHERE instrument_id=?",id))
+      .containsEntry("status","SUCCESS").containsEntry("rows_written",1);
+    verifyNoInteractions(vault);
+  }finally{
+    org.springframework.test.util.ReflectionTestUtils.setField(discovery,"accessToken","");
+    org.springframework.test.util.ReflectionTestUtils.setField(discovery,"requestGapMs",oldGap);
+  }
+ }
+
  @Test void discoveryBackfillsMappedEquityWithoutBorrowingOwnerToken()throws Exception{
   db.update("INSERT INTO instruments(exchange_id,symbol,series,source,isin,instrument_type) VALUES ((SELECT id FROM exchanges WHERE code='BSE'),'DISCOVERYTEST','EQ','UPSTOX','INE000A01002','EQ')");
   db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,instrument_type,isin) VALUES ('BSE_EQ|INE000A01002','BSE','DISCOVERYTEST','EQ','INE000A01002')");
