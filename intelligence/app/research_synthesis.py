@@ -48,6 +48,19 @@ def fund_context(shortlist,detail,today):
         if num(shortlist.get(k),lo,hi):result[k]=shortlist[k]
     if detail.get("identifier")!=shortlist.get("identifier") or detail.get("plan")!="DIRECT" or detail.get("option")!="GROWTH":return result
     ter=obj(detail.get("automatic_amfi_ter_evidence"));local=obj(detail.get("local_export_evidence"))
+    secondary=obj(detail.get("secondary_disclosure"))
+    try:
+        disclosed=date.fromisoformat(secondary["document_date"])
+        if secondary.get("status")=="SECONDARY_REPORTED_NOT_INDEPENDENTLY_VERIFIED" and 0<=(today-disclosed).days<=90:
+            meta={k:secondary[k] for k in ("fund_managers","exit_load") if isinstance(secondary.get(k),str) and 0<len(secondary[k])<=2000}
+            if meta:result["reported_metadata"]={**meta,"document_date":disclosed.isoformat(),"basis":"SECONDARY_REPORTED"}
+    except (ValueError,TypeError,KeyError):pass
+    comparison=obj(local.get("benchmark_comparison"))
+    windows=comparison.get("windows")
+    if comparison.get("status") in ("MATCHED_LOCAL_TRI_EXPORT","MATCHED_AUTHORIZED_DIRECT_TRI_CSV") and comparison.get("matched_anchors")==157 and comparison.get("rolling_windows")==105 and isinstance(windows,list):
+        matched=[w for w in windows if isinstance(w,dict) and w.get("weeks")==156 and w.get("last_date")==shortlist.get("nav_date") and all(num(w.get(k),-100,1e6) for k in ("fund_cagr_percent","tri_cagr_percent","difference_pp"))]
+        if len(matched)==1 and num(comparison.get("above_tri_percent"),0,100) and num(comparison.get("annualized_weekly_active_volatility_percent"),0,1e6):
+            result["benchmark_context"]={"basis":comparison["status"],"benchmark":obj(local.get("disclosure")).get("benchmark"),"three_year_difference_pp":matched[0]["difference_pp"],"rolling_outperformance_percent":comparison["above_tri_percent"],"active_volatility_percent":comparison["annualized_weekly_active_volatility_percent"],"notice":"Matched historical TRI dates; historical mandate and future outperformance are not established."}
     if ter.get("status")=="CONFLICTING_SAME_DATE_TER" or obj(local.get("ter_components_evidence")).get("status")=="CONFLICTING_SAME_DATE_TER":
         result["ter_status"]="CONFLICTING_SAME_DATE_TER";return result
     disclosure=obj(local.get("disclosure"));candidates=[]
@@ -75,6 +88,7 @@ def thesis(row,is_fund):
     if num(g.get("profit_yoy_percent"),-50,100) and g["profit_yoy_percent"]<=0:cautions.append("Reported-growth persistence assumption is non-positive; verify sustainability.")
     if num(facts.get("reported_pe"),0,1e6) and num(facts.get("reported_sector_pe"),0,1e6) and facts["reported_pe"]>facts["reported_sector_pe"]:cautions.append("Reported P/E exceeds the reported sector multiple; valuation needs verification.")
     if row.get("risk")=="HIGH" or row.get("relative_risk")=="ABOVE_PEER_MEDIAN_DOWNSIDE":cautions.append("Observed historical risk warrants caution.")
+    if obj(row.get("fund_evidence")).get("ter_status")=="CONFLICTING_SAME_DATE_TER":cautions.append("Conflicting fund expense evidence; do not use it for a new allocation.")
     if row.get("tier")=="DRIVER_REVIEW":cautions.append("Underlying business evidence requires review before a new SIP.")
     if not cautions:cautions.append("No additional adverse observation in this bounded evidence set; this is not proof of low risk.")
     return {"status":"CONDITIONAL_EVIDENCE_THESIS","bull_case":support,"bear_case":cautions,
