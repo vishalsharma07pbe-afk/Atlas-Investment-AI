@@ -70,6 +70,10 @@ def finish(connect,job,token,instant,interval,status):
         delay=min(interval,60*2**min(failures-1,8)) if failures else interval
         if status=="WAITING_EVIDENCE" and (job.startswith("GLOBAL_") or job.startswith("RELEASE_") or job=="ECONOMIC_CALENDAR"):
             delay=min(interval,900)
+        elif status=="WAITING_EVIDENCE" and job in ("COMPANY_EVIDENCE","FUND_COMPANY_EVIDENCE"):
+            # A truthful no-evidence outcome must not inadvertently increase
+            # the existing provider request budget.
+            delay=interval
         elif status=="WAITING_EVIDENCE":
             # Semiannual AMFI publication can lag the period boundary. Avoid
             # minute-by-minute download retries while retaining waiting status.

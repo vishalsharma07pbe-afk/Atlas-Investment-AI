@@ -288,8 +288,6 @@ class RecommendationEngineTests(unittest.TestCase):
         self.assertNotIn("REPORTED_MULTI_YEAR_BUSINESS_REVIEW_EXPOSURE",{r["code"] for r in other["review_findings"]})
 
 
-if __name__=="__main__":unittest.main()
-
     def test_publisher_riskometer_enters_existing_gates_without_promoting_base_fee(self):
         today=date(2026,11,28)
         fund=strong(identifier="123456",riskometer=None,riskometer_date=None,expense_ratio=None,benchmark_hit_rate=None)
@@ -312,3 +310,6 @@ if __name__=="__main__":unittest.main()
             self.assertEqual(result,[fund]);self.assertEqual(used,{})
         with patch.object(recommendations.official_amc_factsheet,"permitted",return_value=False):
             self.assertEqual(recommendations._publisher_riskometer([fund],[row],{"123456":source},today),([fund],{}))
+
+
+if __name__=="__main__":unittest.main()
