@@ -791,6 +791,10 @@ def advanced_engine_acceptance(overview,review):
     receipts=sum(r.get("financial_facts_verified") is False for r in _list(_obj(a.get("source_discovery")).get("document_receipts")) if isinstance(r,dict))
     history=_obj(_obj(a.get("multi_strategy")).get("historical_validation"))
     channel_count=_bounded_count(history.get("turtle_channel_experiments"),20000)
+    shared=_obj(history.get("shared_cash_channel_replay"))
+    shared_count=_bounded_count(shared.get("companies"),12) if shared.get("status")=="DESCRIPTIVE_SHARED_CASH_REPLAY" and shared.get("qualified") is False else None
+    valuations=sum(_obj(r.get("valuation_scenario")).get("status")=="OPERATOR_SOURCE_BOUND_VALUATION_SCENARIO" and len(_list(_obj(r.get("valuation_scenario")).get("scenarios")))==3 for r in stocks)
+    benchmark_counts={g.get("category"):sum(bool(_obj(_obj(r.get("fund_evidence")).get("benchmark_context"))) for r in _list(g.get("items")) if isinstance(r,dict)) for g in groups if g.get("category") in ("LARGE_CAP","MID_CAP","SMALL_CAP")}
     owner=_obj(review.get("investment_analysis"));stress=_obj(owner.get("stress_test"))
     stress_ok=stress.get("status")=="ILLUSTRATIVE_SHOCKS" and len(_list(stress.get("scenarios")))==3
     empty=owner.get("holding_count")==0 and owner.get("scope")=="OWNER_LOCAL"
@@ -803,12 +807,15 @@ def advanced_engine_acceptance(overview,review):
     if set(providers)!=required:blockers.append("FOUR_ACTUAL_PROVIDER_REVIEWS_REQUIRED")
     if not receipts:blockers.append("OFFICIAL_DOCUMENT_RECEIPT_REQUIRED")
     if not channel_count:blockers.append("CHANNEL_REPLAY_OBSERVATION_REQUIRED")
+    if not shared_count or shared_count<2:blockers.append("SHARED_CASH_REPLAY_OBSERVATION_REQUIRED")
+    if not valuations:blockers.append("SOURCE_BOUND_VALUATION_REQUIRED")
+    if not all(benchmark_counts.get(k) for k in ("LARGE_CAP","MID_CAP","SMALL_CAP")):blockers.append("MATCHED_TRI_IN_ALL_CORE_CATEGORIES_REQUIRED")
     if not stress_ok and not empty:blockers.append("OWNER_STRESS_SCENARIO_REQUIRED")
     if any(r.get("qualified") is not False for r in stocks+funds):blockers.append("UNSUPPORTED_QUALIFICATION")
     return {"status":"INTEGRATED_OUTPUTS_OBSERVED" if not blockers else "AWAITING_INTEGRATED_OUTPUTS",
-        "stock_risk_scenarios":stock_plans,"stock_amount_scenarios":amount_scenarios,"fund_matched_ter_counts":fund_costs,
+        "stock_risk_scenarios":stock_plans,"stock_amount_scenarios":amount_scenarios,"source_bound_stock_valuations":valuations,"fund_matched_ter_counts":fund_costs,"fund_matched_tri_counts":benchmark_counts,
         "actual_review_providers":providers,"official_document_receipt_count":receipts,
-        "turtle_channel_experiments":channel_count,"owner_stress_status":"OBSERVED" if stress_ok else "NOT_APPLICABLE_EMPTY_PORTFOLIO" if empty else "AWAITING_EVIDENCE",
+        "turtle_channel_experiments":channel_count,"shared_cash_channel_companies":shared_count,"owner_stress_status":"OBSERVED" if stress_ok else "NOT_APPLICABLE_EMPTY_PORTFOLIO" if empty else "AWAITING_EVIDENCE",
         "blockers":blockers,"investment_qualification":"NOT_CERTIFIED"}
 
 def collect(request,include_qualification_audit=False,include_advanced_audit=False,include_recovery_audit=False,include_result_acceptance=False,include_analyst_audit=False,include_multi_strategy_audit=False,include_advanced_engine_audit=False):
