@@ -85,6 +85,20 @@ def evaluate(candles, indicators, base):
     return result
 
 
+def candidate_order(row):
+    """Preserve downstream-eligible observations before truncating the sample.
+
+    Scores order comparable technical candidates within each evidence tier,
+    not raw versus validated adjusted histories. No qualification is inferred.
+    The stricter current-session/identity checks still run downstream.
+    """
+    from .replay_evidence import exact_isin
+    priority=(row.get("adjustment_status")=="ADJUSTED" and exact_isin(row.get("isin"))
+              and isinstance(row.get("replay_evidence_hash"),str)
+              and row.get("security_state") not in ("PCA","SME","RELIST","IPO","SUSPENDED_REPORTED"))
+    return (not priority,-row["rank_score"],row["exchange"],row["symbol"],row["id"])
+
+
 def summarize(evaluations):
     output = {}
     for horizon in HORIZONS:
@@ -96,7 +110,7 @@ def summarize(evaluations):
                 counts[state] = counts.get(state, 0)+1
                 if candidate is not None:
                     candidates.append(candidate)
-        candidates.sort(key=lambda row: (-row["rank_score"], row["exchange"], row["symbol"], row["id"]))
+        candidates.sort(key=candidate_order)
         output[horizon] = {"methodology": VERSION,
             "status": "TECHNICAL_WATCH_ONLY" if candidates else "NO_QUALIFIED_EVIDENCE",
             "candidates": candidates[:5], "matched_count": len(candidates),

@@ -163,8 +163,11 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                 evidence_hash=fingerprint(raw,today) if batch_loaded else None
                 evaluation=evaluate(candles, ind, row)
                 for state,candidate in evaluation.values():
-                    if candidate is not None and evidence_hash is not None:
-                        candidate["replay_evidence_hash"]=evidence_hash
+                    if candidate is not None:
+                        if batch_loaded and exact_isin(instrument.get("isin")):
+                            candidate["isin"]=instrument["isin"]
+                        if evidence_hash is not None:
+                            candidate["replay_evidence_hash"]=evidence_hash
                 paths=steady_momentum.window_observations(candles) if comparative and any(c is not None for _,c in evaluation.values()) else {}
                 for horizon, (state,candidate) in evaluation.items():
                     if candidate is not None:

@@ -8,6 +8,7 @@ from collections import Counter
 from time import monotonic
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
+from .horizon_research import candidate_order
 
 PAGE=200
 MAX_LISTINGS=20000
@@ -22,7 +23,7 @@ def _counts(a,b):
 def _gainer(r): return (-r["change_1d_percent"],r["exchange"],r["symbol"],r["id"])
 def _loser(r): return (r["change_1d_percent"],r["exchange"],r["symbol"],r["id"])
 def _momentum(r): return (-r["momentum_20d_percent"],r["symbol"],r["id"])
-def _horizon(r): return (-r["rank_score"],r["exchange"],r["symbol"],r["id"])
+def _horizon(r): return candidate_order(r)
 def _pressure(r): return (-r["price_volume_pressure"]["relative_volume"],r["symbol"],r["id"])
 def _trap(r): return (not any(e["status"]=="REENTRY_OBSERVED" for e in r["followthrough"]["events"]),
     -max(abs(e["break_percent"]) for e in r["followthrough"]["events"]),r["symbol"],r["id"])
