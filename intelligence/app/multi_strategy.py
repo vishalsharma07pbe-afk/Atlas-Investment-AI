@@ -260,10 +260,11 @@ def summarize(snapshot,connect,instant):
         if not lanes:continue
         families=sorted({LANES[v] for v in lanes})
         counts.update(lanes)
+        plan=pro.strategy_risk_plan(f,lanes) if adjusted else None
         items.append({"id":r["id"],"isin":isin,"symbol":r["symbol"],"exchange":r["exchange"],"as_of":r["as_of"],
             "close":f["close"],"strategies":lanes,"families":families,"adjustment_verified_for_screen":adjusted,
             "observed_facts":facts,"price_volatility_percent":f["volatility_126_percent"],
-            "risk":None,"qualified":False,"status":"RESEARCH_MATCH_ONLY"})
+            "risk":None,"price_plan":plan,"qualified":False,"status":"RESEARCH_MATCH_ONLY"})
     # Independent family breadth, not correlated-indicator voting. Regime is
     # a descriptive review lens only; no unvalidated regime performance claim.
     trend=regime.get("trend") if regime.get("as_of") in {r["as_of"] for r in candidates} else None
