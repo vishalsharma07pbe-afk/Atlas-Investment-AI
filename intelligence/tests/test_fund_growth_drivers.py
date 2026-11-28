@@ -31,3 +31,23 @@ class GrowthDriversTests(unittest.TestCase):
         self.assertFalse(result["items"][0]["qualified"])
         self.assertFalse(g.readiness("LARGE_CAP",[r,r],[p],NOW.date())["items"])
         self.assertFalse(g.readiness("CORPORATE_BOND",[r],[p],NOW.date())["items"])
+
+    def test_fund_forward_experiment_respects_weight_and_original_quarter(self):
+        raw=report(A)
+        raw["sections"]["quarterly_income"]["source"]["retrieved_at"]=NOW.isoformat()
+        for series in raw["sections"]["quarterly_income"]["data"]["series"].values():
+            series.insert(2,{"period":"2025-12-31","value":120})
+        q=g.summarize([{"isin":A,"weight_percent":75}],{A:raw},NOW)
+        e=q["experimental_forward_cohorts"][0]
+        self.assertEqual(e["target_quarter"],"2026-12-31")
+        self.assertEqual(e["covered_weight_percent"],75)
+        self.assertEqual(e["positive_joint_growth_weight_percent"],75)
+        self.assertEqual(e["covered_subset_profit_persistence_percent"],50)
+        self.assertFalse(e["qualified"])
+        self.assertIsNone(q["forward_earnings_coverage_percent"])
+        self.assertIsNone(q["forecast_nav_return_percent"])
+        p={"scheme_code":"123456","status":"SECONDARY_COMPOSITION_ONLY","portfolio_date":"2026-10-31","underlying_research":{"quarterly_growth_drivers":q}}
+        r={"identifier":"123456","category":"LARGE_CAP","plan":"DIRECT","option":"GROWTH","nav_date":"2026-11-26","name":"Example"}
+        self.assertEqual(g.readiness("LARGE_CAP",[r],[p],NOW.date())["items"][0]["experimental_forward"],e)
+        e["target_quarter"]="2027-03-31"
+        self.assertIsNone(g.readiness("LARGE_CAP",[r],[p],NOW.date())["items"][0]["experimental_forward"])

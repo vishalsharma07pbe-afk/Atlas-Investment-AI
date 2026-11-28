@@ -85,6 +85,40 @@ def observe(raw,calendar_dates,today):
             "history_fingerprint":audit["digest"],"replay_evidence_hash":fingerprint(sample,today),"calendar_status":"STORED_SESSIONS_MATCHED","adjustment_status":"ADJUSTED"}
     except (ValueError,TypeError,KeyError,OverflowError):return None
 
+REPORTED_VERSION="FIP-REPORTED-PRICE-1"
+REPORTED_NOTICE=("Same four-window gradual-momentum rules on provider-reported history with an unverified adjustment basis. "
+    "Exact stored regular-session dates and consistent provider OHLCV are required. No action-completeness inference, "
+    "strict adjusted-history qualification, strategy replay, live execution or investment recommendation.")
+
+def observe_reported(raw,calendar_dates,today):
+    """A separate preliminary price observation; never modify adjustment labels."""
+    if not isinstance(raw,list) or len(raw)<253 or len(calendar_dates)!=253:return None
+    sample=raw[-253:]
+    try:
+        if tuple(r["trade_date"] for r in sample)!=calendar_dates or any(date.fromisoformat(d)>=today for d in calendar_dates):return None
+        if any(not 0<(date.fromisoformat(b)-date.fromisoformat(a)).days<=7 for a,b in zip(calendar_dates,calendar_dates[1:])):return None
+        sources=set()
+        closes=[];volumes=[]
+        for r in sample:
+            if r.get("adjustment_status")!="RAW_UNADJUSTED" or r.get("quality_status")!="PROVIDER_VALIDATED":return None
+            source=r.get("source_code")
+            if not isinstance(source,str) or not source.strip() or type(r.get("revision")) is not int or r["revision"]<1:return None
+            sources.add(source)
+            if any(isinstance(r[k],bool) for k in ("open","high","low","close","volume")):return None
+            o,h,l,c,v=(float(r[k]) for k in ("open","high","low","close","volume"))
+            if not all(isfinite(x) for x in (o,h,l,c,v)) or min(o,h,l,c)<=0 or h<max(o,c,l) or l>min(o,c) or v<0 or not v.is_integer():return None
+            closes.append(c);volumes.append(int(v))
+        if len(sources)!=1:return None
+        result=metrics(closes,volumes)
+        if result is None:return None
+        return {**result,"methodology":REPORTED_VERSION,
+            "status":"REPORTED_PRICE_MATCH" if result["status"]=="FIP_PRICE_MATCH" else "REPORTED_PRICE_FILTER_NOT_MET",
+            "first_date":calendar_dates[0],"as_of":calendar_dates[-1],"source_code":sample[-1]["source_code"],
+            "calendar_status":"STORED_SESSIONS_MATCHED","adjustment_status":"RAW_UNADJUSTED",
+            "qualification_eligible":False,"adjustment_verified":False,"notice":REPORTED_NOTICE}
+    except (ValueError,TypeError,KeyError,OverflowError,AttributeError):return None
+
+
 def replay(raw,today):
     """Called only AFTER existing full-history action, identity and calendar audit."""
     audit=full_manifest(raw,today)
@@ -120,7 +154,7 @@ def replay(raw,today):
     return {"status":"DESCRIPTIVE_FIXED_RULE_REPLAY","methodology":VERSION,"windows":result,"signal_count":len(signals),
         "as_of":rows[-1]["trade_date"],"notice":"Fixed rules, next closing mark, nonoverlapping positions, earlier/later disjoint windows. No fitting, no execution, no point-in-time universe or independent walk-forward certification."}
 
-def rank(snapshot,instant):
+def rank(snapshot,instant,*,required_refs=None):
     today=instant.astimezone(IST).date()
     summary={"methodology":VERSION,"status":"AWAITING_STRICT_HISTORY","eligible_listings":0,"matched_listings":0,"matched_companies":0,
         "exclusions":{},"items":[],"notice":NOTICE}
@@ -137,6 +171,7 @@ def rank(snapshot,instant):
         for row in rows:
             f=row.get("fip_research") or {};isin=row.get("isin")
             if not exact_isin(isin) or counts[isin]!=1 or row.get("exchange")!=venue or row.get("as_of")!=coverage.get("expected_session") or row.get("security_state") in company_venues.SPECIAL:continue
+            if required_refs is not None and (venue,row.get("id"),isin,row.get("as_of")) not in required_refs:continue
             if f.get("methodology")!=VERSION or f.get("calendar_status")!="STORED_SESSIONS_MATCHED" or f.get("as_of")!=row.get("as_of") or f.get("adjustment_status")!="ADJUSTED":continue
             summary["eligible_listings"]+=1
             if f.get("status")!="FIP_PRICE_MATCH":

@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import closing
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import json
 import os
+import re
 from pathlib import Path
 import sqlite3
 from urllib.parse import urlencode
@@ -18,9 +19,11 @@ from urllib.parse import urlencode
 from .market_client import backend_json
 from . import steady_momentum, amfi_equity_caps, company_reports, nse_surveillance, nse_pledge_filings, nse_financial_filings, sector_price_context, sector_benchmarks, score_calibration, fip_research, bracket_research
 from .screener import screen
+from .corporate_action_normalization import archived_crossings
+from .replay_evidence import exact_isin
 from . import discovery_scan, research_display_archive
 from .mutual_fund_recommendations import CATEGORIES, dashboard
-from . import forward_earnings, official_amc_factsheet, official_tri, fund_ai_review, unified_decision, stock_qualification, market_regime, release_reconciliation, economic_calendar, global_releases, global_context, global_markets, global_macro, global_fx, automatic_deals, fund_portfolios, fund_disclosures, fund_prospective, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
+from . import official_amfi_ter, forward_earnings, official_amc_factsheet, official_tri, fund_ai_review, unified_decision, stock_qualification, market_regime, release_reconciliation, economic_calendar, global_releases, global_context, global_markets, global_macro, global_fx, automatic_deals, fund_portfolios, fund_disclosures, fund_prospective, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
 
 SECTIONS = ("NSE", "BSE", *CATEGORIES)
 DEFAULT_INTERVAL = 900
@@ -145,10 +148,10 @@ def _market_page(exchange,instruments,cutoff=None,*,fip_dates=()):
         if any(len(histories[i])>history_limit for i in batch):
             raise ValueError("DISCOVERY_HISTORY_LIMIT_EXCEEDED")
     instant=now()
-    action_reports=automatic_company_evidence.cached_action_reports(_connect,[r.get("isin") for r in instruments],instant)
+    action_events=automatic_company_evidence.cached_action_events(_connect,[r.get("isin") for r in instruments],instant)
     result = screen(instruments, lambda identifier:{"candles":histories[identifier]}, as_of=today,
                     universe_limit=200, max_age_days=4, include_horizons=True, batch_loaded=True, expected_session=expected_session,
-                    action_reports=action_reports,instant=instant,fip_dates=fip_dates)
+                    action_events=action_events,instant=instant,fip_dates=fip_dates)
     result["discovery_coverage"]={"recent_registry_count":recent_count,"selected_count":len(ids),
         "selection_limit":200,"selection_method":"EXPECTED_SESSION_THEN_DAILY_TRADED_VALUE",
         "expected_session_count":matching if expected_session else None,
@@ -227,8 +230,20 @@ def fund_snapshot(category):
             "items":[{k:row.get(k) for k in ("identifier","name","portfolio_date","quarter","nav_date","joint_coverage_weight_percent",
                 "joint_growth_weight_percent","review_weight_percent","state","qualified","forecast_return_percent")}
                 for row in drivers.get("items",[])[:5] if isinstance(row,dict) and row.get("qualified") is False]}
+    # Compact exact public composition targets for the existing underlying
+    # research scheduler. No raw holdings, names or source URLs are persisted.
+    targets=[]
+    for row in (result.get("portfolio_evidence") or {}).get("items",[])[:5]:
+        if not isinstance(row,dict) or row.get("status")!="SECONDARY_COMPOSITION_ONLY" or row.get("source")!="TIGZIG_AMC_DERIVED":continue
+        fund=row.get("fund_id");code=row.get("scheme_code")
+        try:
+            day=date.fromisoformat(row["portfolio_date"])
+            if not isinstance(fund,str) or not re.fullmatch(r"[A-Za-z0-9:_.-]{1,80}",fund) or not isinstance(code,str) or not re.fullmatch(r"[1-9][0-9]{0,8}",code):continue
+            targets.append({"fund_id":fund,"scheme_code":code,"portfolio_date":day.isoformat()})
+        except (ValueError,TypeError,KeyError):continue
+    if targets:snapshot["portfolio_research_targets"]=targets
     # Only aggregate public source coverage. Never persist source URLs or holdings.
-    for key,fields in (("official_tri_coverage",("configured_count","available_count")),("official_amc_coverage",("matched_schemes",))):
+    for key,fields in (("official_tri_coverage",("configured_count","available_count","local_csv_count")),("official_amc_coverage",("matched_schemes",)),("automatic_amfi_ter_coverage",("matched_schemes",))):
         block=result.get(key)
         if isinstance(block,dict):
             snapshot[key]={k:block[k] for k in fields if type(block.get(k)) is int and 0<=block[k]<=40}
@@ -309,6 +324,41 @@ def _published_evidence_current(section, result, today):
     return True
 
 
+def _revalidate_reported_actions(sections,current):
+    """A newly acquired positive action report invalidates the saved sweep.
+
+    Don't patch a truncated top-k list or stale breadth aggregate in place.
+    Keep the original capture for diagnostics; all READY-only consumers wait
+    for the existing scheduled scan to rebuild it using the new evidence.
+    """
+    work=[]
+    identities=set()
+    for section in sections:
+        if section.get("section") not in ("NSE","BSE") or section.get("status")!="READY":continue
+        result=section.get("result") or {}
+        rows=result.get("company_research_universe")
+        if not isinstance(rows,list) or len(rows)>20000:continue
+        valid=[]
+        for row in rows:
+            if not isinstance(row,dict) or row.get("exchange")!=section["section"] or not exact_isin(row.get("isin")):continue
+            try:
+                last=date.fromisoformat(row["as_of"])
+                # Upgrade old snapshots conservatively until the next scan
+                # supplies the exact original observation interval.
+                first=date.fromisoformat(row["first_date"]) if "first_date" in row else last-timedelta(days=1100)
+                if not 0<(last-first).days<=1100:continue
+            except (TypeError,ValueError,KeyError,OverflowError):continue
+            identities.add(row["isin"])
+            valid.append((row["isin"],first,last))
+        work.append((section,valid))
+    if not identities:return
+    events=automatic_company_evidence.cached_action_events(_connect,identities,current)
+    for section,rows in work:
+        if any(archived_crossings(events.get(isin),first,last) for isin,first,last in rows if isin in events):
+            section["status"]="STALE"
+            section["error_code"]="NEW_REPORTED_ACTION_RESCAN_REQUIRED"
+
+
 def _read_sections(section_names,enabled,interval,current):
     # All callers use the identical observation-date and section-state gates.
     # Filter in SQLite before materializing payloads, not after JSON decoding.
@@ -344,12 +394,15 @@ def _read_sections(section_names,enabled,interval,current):
             error_code = "INVALID_STORED_RESEARCH_SNAPSHOT"
         if section in CATEGORIES and isinstance(result,dict) and (not fund_portfolios.permitted() or not automatic_company_evidence.permitted()):
             result.pop("growth_driver_review",None)
+            result.pop("portfolio_research_targets",None)
         if section in CATEGORIES and isinstance(result,dict):
             if not official_tri.permitted():result.pop("official_tri_coverage",None)
             if not official_amc_factsheet.permitted():result.pop("official_amc_coverage",None)
         sections.append({"section": section, "status": status,
                          "generated_at": row["generated_at"], "attempted_at": row["attempted_at"],
                          "result": result, "error_code": error_code})
+    if enabled:
+        _revalidate_reported_actions(sections,current)
     return {"enabled": enabled, "interval_seconds": interval, "sections": sections,
             "scope": "PUBLIC_MARKET_RESEARCH_ONLY",
             "research_date":today.isoformat(),
@@ -392,7 +445,7 @@ def read_snapshot(include_ai=True):
         except (ValueError,OSError,sqlite3.Error):
             snapshot["institutional_activity"]["deal_reports"]={"status":"UNAVAILABLE"}
         try:
-            automatic_company_evidence.attach(snapshot, _connect)
+            automatic_company_evidence.attach(snapshot, _connect,current)
         except (ValueError, OSError, sqlite3.Error):
             snapshot["automatic_company_status"] = "UNAVAILABLE"
         try:
@@ -496,8 +549,35 @@ def job_status():
     return result
 
 
+def _fund_research_targets(current):
+    enabled,interval=config()
+    # Priority enrichment is optional; a missing snapshot store cannot
+    # block the existing authorized broad fund acquisition queue.
+    if not enabled:return {}
+    try:snapshot=_read_sections(CATEGORIES,enabled,interval,current)
+    except (OSError,sqlite3.Error,ValueError,TypeError,KeyError,AttributeError):return {}
+    today=current.astimezone(ZoneInfo("Asia/Kolkata")).date()
+    targets={};conflicts=set()
+    for section in snapshot["sections"]:
+        if section.get("status")!="READY":continue
+        result=section.get("result") or {}
+        if result.get("category")!=section["section"]:continue
+        for row in result.get("portfolio_research_targets",[])[:5]:
+            if not isinstance(row,dict):continue
+            fund=row.get("fund_id")
+            try:
+                if not isinstance(fund,str) or not re.fullmatch(r"[A-Za-z0-9:_.-]{1,80}",fund) or not 0<=(today-date.fromisoformat(row["portfolio_date"])).days<=60:continue
+            except (ValueError,TypeError,KeyError):continue
+            if fund in targets and targets[fund]!=row["portfolio_date"]:conflicts.add(fund)
+            targets[fund]=row["portfolio_date"]
+    return {fund:day for fund,day in targets.items() if fund not in conflicts}
+
+
 def _execute_job(job):
     """Dispatch existing bounded engines, with explicit evidence/config gates."""
+    if job=="OFFICIAL_AMFI_TER":
+        if not official_amfi_ter.permitted():return "DISABLED_OR_NOT_AUTHORIZED"
+        return "PASS_COMPLETED" if official_amfi_ter.refresh(now()) else "WAITING_EVIDENCE"
     if job=="OFFICIAL_AMC_FACTSHEETS":
         if not official_amc_factsheet.permitted():return "DISABLED_OR_NOT_AUTHORIZED"
         return "PASS_COMPLETED" if official_amc_factsheet.refresh(now()) else "WAITING_EVIDENCE"
@@ -589,7 +669,8 @@ def _execute_job(job):
     if job=="FUND_COMPANY_EVIDENCE":
         if not fund_portfolios.permitted() or not automatic_company_evidence.permitted():
             return "DISABLED_OR_NOT_AUTHORIZED"
-        ids=fund_portfolios.research_identities()
+        current=now()
+        ids=fund_portfolios.research_identities(current,preferred_funds=_fund_research_targets(current))
         if not ids:
             return "WAITING_EVIDENCE"
         outcome=automatic_company_evidence.refresh({"enabled":True,"sections":[]},_connect,explicit_isins=ids)
@@ -650,12 +731,15 @@ def _execute_job(job):
         except (ValueError,TypeError,OSError,sqlite3.Error):pass
         watch_outcomes.refresh(snapshot,_connect)
         return "PASS_COMPLETED"
+    if job=="COMPANY_EVIDENCE":
+        followups=forward_earnings.due_identities(_connect,now())
+        if not followups and not any(s["section"] in ("NSE","BSE") and s["status"]=="READY" for s in snapshot["sections"]):
+            return "WAITING_EVIDENCE"
+        outcome=automatic_company_evidence.refresh(snapshot,_connect,followup_isins=followups) if followups else automatic_company_evidence.refresh(snapshot,_connect)
+        return "PASS_COMPLETED" if outcome in ("AVAILABLE","PARTIAL") else "WAITING_EVIDENCE"
     if not any(s["section"] in ("NSE","BSE") and s["status"]=="READY" for s in snapshot["sections"]):
         return "WAITING_EVIDENCE"
-    if job=="COMPANY_EVIDENCE":
-        outcome=automatic_company_evidence.refresh(snapshot,_connect)
-        return "PASS_COMPLETED" if outcome in ("AVAILABLE","PARTIAL") else "WAITING_EVIDENCE"
-    elif job=="COMPANY_NEWS":
+    if job=="COMPANY_NEWS":
         automatic_news.refresh(snapshot,_connect)
     elif job=="STRATEGY_REPLAY":
         automatic_strategy_validation.refresh(snapshot,_connect)
@@ -668,7 +752,7 @@ def _execute_job(job):
 
 
 def company_success_interval(interval):
-    """Bounded stock acquisition cadence; only successful evidence passes.
+    """Bounded stock/fund company acquisition cadence; only successful evidence passes.
 
     One company per pass, single local worker, existing transport cooldowns.
     Invalid operator configuration falls back to the normal job cadence.
@@ -692,7 +776,7 @@ def run_one_job(interval):
         outcome="WAITING_EVIDENCE"
     except Exception:
         outcome="FAILED"
-    research_jobs.finish(_connect,job,token,now().timestamp(),(company_success_interval(interval) if job=="COMPANY_EVIDENCE" and outcome=="PASS_COMPLETED" else research_calendar.POLL_SECONDS if job=="CALENDAR_CONTEXT" else economic_calendar.INTERVAL if job=="ECONOMIC_CALENDAR" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_releases.INTERVAL if job in global_releases.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_markets.INTERVAL if job in global_markets.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_macro.INTERVAL if job in global_macro.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_fx.INTERVAL if job=="GLOBAL_FX" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else 3600 if job=="FORWARD_EARNINGS_BASELINE" else 900 if job=="OFFICIAL_TRI_DOWNLOAD" else sector_benchmarks.INTERVAL if job=="SECTOR_BENCHMARKS" else nse_financial_filings.INTERVAL if job=="NSE_FINANCIAL_FILINGS" else nse_pledge_filings.INTERVAL if job=="NSE_PLEDGE_FILINGS" else nse_surveillance.INTERVAL if job=="NSE_SURVEILLANCE" else amfi_equity_caps.INTERVAL if job=="AMFI_EQUITY_CAP" else fund_disclosures.INTERVAL if job in ("FUND_DISCLOSURES","FUND_PORTFOLIOS") and outcome!="DISABLED_OR_NOT_AUTHORIZED" else interval),outcome)
+    research_jobs.finish(_connect,job,token,now().timestamp(),(company_success_interval(interval) if job in ("COMPANY_EVIDENCE","FUND_COMPANY_EVIDENCE") and outcome=="PASS_COMPLETED" else research_calendar.POLL_SECONDS if job=="CALENDAR_CONTEXT" else economic_calendar.INTERVAL if job=="ECONOMIC_CALENDAR" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_releases.INTERVAL if job in global_releases.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_markets.INTERVAL if job in global_markets.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_macro.INTERVAL if job in global_macro.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_fx.INTERVAL if job=="GLOBAL_FX" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else 3600 if job=="FORWARD_EARNINGS_BASELINE" else 900 if job in ("OFFICIAL_TRI_DOWNLOAD","OFFICIAL_AMFI_TER") else sector_benchmarks.INTERVAL if job=="SECTOR_BENCHMARKS" else nse_financial_filings.INTERVAL if job=="NSE_FINANCIAL_FILINGS" else nse_pledge_filings.INTERVAL if job=="NSE_PLEDGE_FILINGS" else nse_surveillance.INTERVAL if job=="NSE_SURVEILLANCE" else amfi_equity_caps.INTERVAL if job=="AMFI_EQUITY_CAP" else fund_disclosures.INTERVAL if job in ("FUND_DISCLOSURES","FUND_PORTFOLIOS") and outcome!="DISABLED_OR_NOT_AUTHORIZED" else interval),outcome)
     return True
 
 

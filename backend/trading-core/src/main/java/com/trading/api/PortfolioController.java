@@ -55,13 +55,40 @@ public class PortfolioController {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid quantity or price");
     if (input.notes()!=null && input.notes().length()>500)
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Notes too long");
+    UUID owner=AuthSecurity.currentUser();
+    if("MUTUAL_FUND".equals(input.assetType())&&symbol.matches("[0-9]{1,18}")){
+      long code=Long.parseLong(symbol);
+      if(code<=0)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid fund scheme code");
+      // The stored official scheme identity is authoritative. Never stamp a
+      // client-supplied NAV with now() or confuse a search capture with a NAV date.
+      String canonical=Long.toString(code);
+      int saved=jdbc.update("""
+        INSERT INTO personal_holdings(user_id,symbol,asset_type,quantity,average_cost,last_price,previous_close,price_as_of,notes)
+        SELECT ?,?,'MUTUAL_FUND',?,?,n.nav,n.previous_nav,
+          n.nav_date::timestamp AT TIME ZONE 'Asia/Kolkata',left(s.scheme_name,500)
+        FROM mutual_fund_schemes s
+        LEFT JOIN LATERAL (
+          SELECT nav,nav_date,lead(nav) OVER (ORDER BY nav_date DESC) previous_nav
+          FROM mutual_fund_nav WHERE scheme_code=s.scheme_code AND nav>0
+            AND nav_date<=(now() AT TIME ZONE 'Asia/Kolkata')::date
+          ORDER BY nav_date DESC LIMIT 1
+        ) n ON true WHERE s.scheme_code=?
+        ON CONFLICT(user_id,symbol,asset_type) DO UPDATE SET quantity=EXCLUDED.quantity,
+          average_cost=EXCLUDED.average_cost,last_price=EXCLUDED.last_price,
+          previous_close=EXCLUDED.previous_close,price_as_of=EXCLUDED.price_as_of,
+          notes=EXCLUDED.notes,updated_at=now()
+        """,owner,canonical,input.quantity(),input.averageCost(),code);
+      if(saved==1)return Map.of("saved",true,"symbol",canonical);
+    }
+    // Legacy/manual imports remain supported. An unmatched fund price is
+    // recorded without a date; it is not a provider-verified current NAV.
     jdbc.update("""
       INSERT INTO personal_holdings(user_id,symbol,asset_type,quantity,average_cost,last_price,price_as_of,notes)
       VALUES (?,?,?,?,?,?,CASE WHEN ? THEN now() ELSE NULL END,?)
       ON CONFLICT(user_id,symbol,asset_type) DO UPDATE SET quantity=EXCLUDED.quantity,
       average_cost=EXCLUDED.average_cost,last_price=EXCLUDED.last_price,
       price_as_of=EXCLUDED.price_as_of,previous_close=NULL,notes=EXCLUDED.notes,updated_at=now()
-      """,AuthSecurity.currentUser(),symbol,input.assetType(),input.quantity(),input.averageCost(),input.lastPrice(),input.lastPrice()!=null,input.notes());
+      """,owner,symbol,input.assetType(),input.quantity(),input.averageCost(),input.lastPrice(),input.lastPrice()!=null&&"EQUITY".equals(input.assetType()),input.notes());
     return Map.of("saved",true,"symbol",symbol);
   }
 
@@ -163,7 +190,11 @@ public class PortfolioController {
    * This never creates, removes, buys or sells a holding. One failed symbol does
    * not prevent other holdings from updating. */
   @PostMapping("/refresh-prices")
-  public Map<String,Object> refreshPrices(@RequestParam(defaultValue="false") boolean includeHistory){
-    return refreshService.refreshUser(AuthSecurity.currentUser(),includeHistory);
+  public Map<String,Object> refreshPrices(@RequestParam(defaultValue="false") boolean includeHistory,
+      @RequestParam(required=false) String assetType){
+    UUID owner=AuthSecurity.currentUser();
+    if(assetType==null)return refreshService.refreshUser(owner,includeHistory);
+    if("MUTUAL_FUND".equals(assetType))return refreshService.refreshFunds(owner);
+    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid refresh asset type");
   }
 }

@@ -17,7 +17,7 @@ from .fundamental_quality import summarize as fundamental_quality
 from .financial_strength import summarize as financial_strength, DETAIL_NAMES
 from .earnings_quality import summarize as earnings_quality, INCOME_NAMES
 from . import peer_research, shareholding_research, quarterly_financials
-from .corporate_action_normalization import normalize_reported_actions
+from .corporate_action_normalization import normalize_reported_actions, reported_crossings
 
 ISIN = re.compile(r"^IN[A-Z0-9]{10}$")
 HORIZONS = ("LONG_TERM", "SHORT_TERM", "SWING")
@@ -50,10 +50,10 @@ def identify(snapshot):
                     yield item,isin
 
 
-def identify_priority(snapshot,instant=None):
+def identify_priority(snapshot,instant=None,*,fip_items=None):
     # Reuse the strict, current, cross-venue FIP shortlist, not a new score.
     if instant is not None:
-        for item,isin in identify_fip_priority(snapshot,instant):
+        for item,isin in (identify_fip_priority(snapshot,instant) if fip_items is None else fip_items):
             yield item,isin
     yield from identify(snapshot)
     # Deepen the actual Elite candidates without expanding report attachment.
@@ -73,15 +73,34 @@ def identify_priority(snapshot,instant=None):
 def identify_fip_priority(snapshot,instant):
     from . import fip_research
     try:
-        result=fip_research.rank(snapshot,instant)
-        if result.get("status")!="PRICE_MATCHES_AVAILABLE":
-            return
-        for item in result.get("items",[])[:10]:
-            isin=item.get("isin")
-            if (isinstance(isin,str) and re.fullmatch(r"INE[A-Z0-9]{9}",isin)
-                    and item.get("exchange") in ("NSE","BSE")
-                    and not item.get("review_findings")):
-                yield item,isin
+        today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date().isoformat()
+        refs=set()
+        for section in snapshot.get("sections",[]):
+            venue=section.get("section")
+            if venue not in ("NSE","BSE") or section.get("status")!="READY":continue
+            result=section.get("result") or {};coverage=result.get("discovery_coverage") or {}
+            if coverage.get("calendar_checked_on")!=today or coverage.get("calendar_status")!="PUBLISHED_SESSION":continue
+            for row in result.get("steady_momentum_candidates",[]):
+                if (row.get("exchange")==venue and row.get("as_of")==coverage.get("expected_session")
+                    and row.get("adjustment_status")=="ADJUSTED" and type(row.get("id")) is int
+                    and row.get("security_state") not in ("PCA","SME","RELIST","IPO","SUSPENDED_REPORTED")):
+                    refs.add((venue,row["id"],row.get("isin"),row["as_of"]))
+        # Apply the intersection BEFORE FIP's top-ten and representative
+        # selection. Fill remaining slots with price-only research as before.
+        seen=set()
+        results=[fip_research.rank(snapshot,instant,required_refs=refs)] if refs else []
+        if not results or len([i for i in results[0].get("items",[]) if not i.get("review_findings")])<10:
+            results.append(fip_research.rank(snapshot,instant))
+        for result in results:
+            if result.get("status")!="PRICE_MATCHES_AVAILABLE":continue
+            for item in result.get("items",[])[:10]:
+                isin=item.get("isin")
+                if (isinstance(isin,str) and re.fullmatch(r"INE[A-Z0-9]{9}",isin)
+                        and item.get("exchange") in ("NSE","BSE")
+                        and not item.get("review_findings") and isin not in seen):
+                    seen.add(isin)
+                    yield item,isin
+                    if len(seen)>=10:return
     except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
         return
 
@@ -121,6 +140,9 @@ def _table(db):
         status TEXT NOT NULL, payload TEXT)""")
     db.execute("""CREATE TABLE IF NOT EXISTS automatic_company_annual_archive(
         isin TEXT PRIMARY KEY, retrieved_at TEXT NOT NULL, payload TEXT NOT NULL)""")
+    db.execute("""CREATE TABLE IF NOT EXISTS automatic_company_action_archive(
+        isin TEXT NOT NULL,event_date TEXT NOT NULL,action_type TEXT NOT NULL,
+        observed_at TEXT NOT NULL,PRIMARY KEY(isin,event_date,action_type))""")
     db.execute("""CREATE TABLE IF NOT EXISTS automatic_company_rotation(
         scope TEXT PRIMARY KEY, priority_streak INTEGER NOT NULL)""")
 
@@ -157,7 +179,27 @@ def annual_capture(report,isin,instant):
         return None
 
 
+def _archive_actions(db,report,isin,instant):
+    """Keep positive historical reports, never a certification of completeness."""
+    try:
+        source=report["sections"]["corporate_actions"]["source"]
+        observed=datetime.fromisoformat(source["retrieved_at"])
+        today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
+        if observed.tzinfo is None or not instant-timedelta(days=1101)<=observed<=instant:return
+        # Validate original exact provider/endpoint and event schema at its
+        # original capture time. No freshness promotion of the company report.
+        events=reported_crossings(report,isin,today-timedelta(days=1101),today,observed)
+        for event in events:
+            if event["date"]>observed.astimezone(ZoneInfo("Asia/Kolkata")).date().isoformat():continue
+            db.execute("""INSERT INTO automatic_company_action_archive VALUES(?,?,?,?)
+                ON CONFLICT(isin,event_date,action_type) DO UPDATE SET observed_at=excluded.observed_at
+                WHERE automatic_company_action_archive.observed_at<excluded.observed_at""",
+                (isin,event["date"],event["action_type"],observed.isoformat()))
+    except (TypeError,ValueError,KeyError,AttributeError,OverflowError):return
+
+
 def _archive(db,report,isin,instant):
+    _archive_actions(db,report,isin,instant)
     captured=annual_capture(report,isin,instant)
     if captured:
         db.execute("""INSERT INTO automatic_company_annual_archive VALUES(?,?,?)
@@ -273,6 +315,13 @@ def normalize(report, isin, instant):
             endpoint=None
         sections[key]={"status":"AVAILABLE" if data else "UNAVAILABLE","data":data or None,
                        "source":{"provider":"UPSTOX","endpoint":endpoint,"retrieved_at":instant.isoformat()} if data else None}
+        if (key=="corporate_actions" and section.get("status")=="REPORTED_EMPTY"
+                and section.get("data")==[] and isinstance(source,dict)
+                and source.get("provider")=="UPSTOX" and endpoint=="/v2/fundamentals/"+isin+"/corporate-actions"):
+            sections[key]={"status":"REPORTED_EMPTY","data":[],
+                "source":{"provider":"UPSTOX","endpoint":endpoint,"retrieved_at":instant.isoformat()},
+                "diagnostic":"NO_EVENTS_REPORTED_NOT_VERIFIED_COMPLETE"}
+            continue
         if not data:
             # Keep only fixed error labels; no raw HTTP messages or tokens.
             error=section.get("error")
@@ -307,11 +356,11 @@ def _refresh_table(db):
         scope TEXT PRIMARY KEY, observed_at TEXT NOT NULL, outcome TEXT NOT NULL)""")
 
 
-def refresh(snapshot, connect, loader=company_research, instant=None, *, explicit_isins=None):
+def refresh(snapshot, connect, loader=company_research, instant=None, *, explicit_isins=None, followup_isins=()):
     if not snapshot["enabled"] or not permitted():
         return
     instant=instant or datetime.now(timezone.utc)
-    outcome=_refresh(snapshot,connect,loader,instant,explicit_isins=explicit_isins)
+    outcome=_refresh(snapshot,connect,loader,instant,explicit_isins=explicit_isins,followup_isins=followup_isins)
     scope="FUND" if explicit_isins is not None else "STOCK"
     with closing(connect()) as db,db:
         _refresh_table(db)
@@ -386,11 +435,12 @@ def _merge_refresh(report,retained,instant):
             "available_sections":len(stamps),"reused_sections":sorted(retained),
             "notice":report["notice"]+" Retained sections preserve their original retrieval dates; report freshness uses the oldest available section."}
 
-def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None):
+def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None, followup_isins=()):
     stamp=instant.isoformat()
     candidates={}
-    fip_order={isin:index for index,(_,isin) in enumerate(identify_fip_priority(snapshot,instant))} if explicit_isins is None else {}
-    for item,isin in identify_priority(snapshot,instant):
+    fip_items=list(identify_fip_priority(snapshot,instant)) if explicit_isins is None else []
+    fip_order={isin:index for index,(_,isin) in enumerate(fip_items)}
+    for item,isin in identify_priority(snapshot,instant,fip_items=fip_items):
         # Exact public discovery venue/ISIN; no name matching.
         if isin not in candidates or item["exchange"]=="NSE":
             candidates[isin]=item["exchange"]+"_EQ|"+isin
@@ -403,7 +453,10 @@ def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None):
         for exchange,isin in identify_sample(snapshot,instant):
             if isin not in sample or exchange=="NSE":
                 sample[isin]=exchange+"_EQ|"+isin
-    if not candidates and not sample:
+    # The public scheduler supplies only matured frozen earnings publications.
+    # Private and fund-only calls cannot enter this rotation.
+    followups={i:None for i in followup_isins[:100] if isinstance(i,str) and ISIN.fullmatch(i)} if explicit_isins is None and snapshot.get("scope")=="PUBLIC_MARKET_RESEARCH_ONLY" else {}
+    if not candidates and not sample and not followups:
         return "NO_CANDIDATES"
     with closing(connect()) as db, db:
         _table(db)
@@ -417,7 +470,8 @@ def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None):
         # Oldest attempted first prevents starvation. Among never-attempted or
         # equally old identities use strict FIP rank as the tie-breaker.
         due=sorted((isin for isin in candidates if due_now(isin)),
-                   key=lambda isin:(rows[isin]["attempted_at"] if isin in rows else "",
+                   key=lambda isin:(isin not in fip_order if explicit_isins is None else False,
+                                    rows[isin]["attempted_at"] if isin in rows else "",
                                     priority.get(isin,len(fip_order) if explicit_isins is None else 0),isin))
         broad=False
         streak=0
@@ -432,10 +486,15 @@ def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None):
                                             rows[i]["attempted_at"] if i in rows else "",i))
             # Reserve one bounded pass after three priority claims when broad
             # work is due. Never increase the request budget or bypass due gates.
-            if sample_due and (streak>=MAX_PRIORITY_STREAK or not (due or peer_due)):
+            followup_due=sorted((i for i in followups if due_now(i)),
+                key=lambda i:(rows[i]["attempted_at"] if i in rows else "",i))
+            if sample_due and (streak>=MAX_PRIORITY_STREAK or not (due or peer_due or followup_due)):
                 due=sample_due
                 candidates.update(sample)
                 broad=True
+            elif followup_due and (streak==1 or not (due or peer_due)):
+                due=followup_due
+                for i in followup_due:candidates.setdefault(i,None)
             elif not due and peer_due:
                 due=peer_due
                 candidates.update(peers)
@@ -488,6 +547,7 @@ def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None):
             _archive(db,report,isin,instant)
         db.execute("DELETE FROM automatic_company_evidence WHERE attempted_at<?",((instant-timedelta(days=30)).isoformat(),))
         db.execute("DELETE FROM automatic_company_annual_archive WHERE retrieved_at<?",((instant-timedelta(days=ANNUAL_HISTORY_CACHE_DAYS)).isoformat(),))
+        db.execute("DELETE FROM automatic_company_action_archive WHERE event_date<?",((instant.astimezone(ZoneInfo("Asia/Kolkata")).date()-timedelta(days=1100)).isoformat(),))
     return status
 
 
@@ -498,8 +558,9 @@ def acquisition_status(snapshot,connect,instant):
     import sqlite3
     from collections import Counter
     sample={isin for _,isin in identify_sample(snapshot,instant)}
-    primary={isin for _,isin in identify_priority(snapshot,instant)}
-    fip={isin for _,isin in identify_fip_priority(snapshot,instant)}
+    fip_items=list(identify_fip_priority(snapshot,instant))
+    primary={isin for _,isin in identify_priority(snapshot,instant,fip_items=fip_items)}
+    fip={isin for _,isin in fip_items}
     stamp=instant.isoformat()
     try:
         with closing(connect()) as db:
@@ -619,14 +680,22 @@ def cached_action_reports(connect,identities,instant):
     if not permitted():
         return {}
     wanted={i for i in identities if isinstance(i,str) and re.fullmatch(r"INE[A-Z0-9]{9}",i)}
-    if not wanted or len(wanted)>200:
+    if not wanted or len(wanted)>40000:
         return {}
     try:
         with closing(connect()) as db:
-            marks=",".join("?" for _ in wanted)
-            rows=db.execute(f"""SELECT isin,payload FROM automatic_company_evidence
-                WHERE isin IN ({marks}) AND status IN ('AVAILABLE','PARTIAL')
-                AND attempted_at BETWEEN ? AND ?""",(*sorted(wanted),(instant-timedelta(hours=24)).isoformat(),instant.isoformat())).fetchall()
+            bounds=((instant-timedelta(hours=24)).isoformat(),instant.isoformat())
+            if len(wanted)<=200:
+                marks=",".join("?" for _ in wanted)
+                rows=db.execute(f"""SELECT isin,payload FROM automatic_company_evidence
+                    WHERE isin IN ({marks}) AND status IN ('AVAILABLE','PARTIAL')
+                    AND attempted_at BETWEEN ? AND ?""",(*sorted(wanted),*bounds)).fetchall()
+            else:
+                # Broad snapshot validation: one read of the current cache, no
+                # unbounded SQL placeholders and no provider requests.
+                rows=[row for row in db.execute("""SELECT isin,payload FROM automatic_company_evidence
+                    WHERE status IN ('AVAILABLE','PARTIAL') AND attempted_at BETWEEN ? AND ?""",bounds)
+                    if row["isin"] in wanted]
         result={}
         for row in rows:
             try:
@@ -640,6 +709,38 @@ def cached_action_reports(connect,identities,instant):
         return {}
     except __import__("sqlite3").Error:
         return {}
+
+
+def cached_action_events(connect,identities,instant):
+    """Historical positive observations; a missing result is not action clearance.
+
+    Old archive rows cannot provide current company evidence or adjustment
+    authorization. Retain crossings across report failures and expiry.
+    """
+    if not permitted():return {}
+    wanted={i for i in identities if isinstance(i,str) and re.fullmatch(r"INE[A-Z0-9]{9}",i)}
+    if not wanted or len(wanted)>40000:return {}
+    today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
+    first=today-timedelta(days=1101)
+    found={}
+    # Legacy current reports remain readable before archive population.
+    for isin,report in cached_action_reports(connect,wanted,instant).items():
+        for event in reported_crossings(report,isin,first,today,instant):
+            found.setdefault(isin,set()).add((event["date"],event["action_type"]))
+    try:
+        with closing(connect()) as db:
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='automatic_company_action_archive'").fetchone():
+                for row in db.execute("""SELECT isin,event_date,action_type,observed_at FROM automatic_company_action_archive
+                    WHERE event_date BETWEEN ? AND ? AND observed_at<=?""",(first.isoformat(),today.isoformat(),instant.isoformat())):
+                    if row["isin"] in wanted and row["action_type"] in ("DIVIDEND","BONUS","SPLIT","RIGHTS","OTHER"):
+                        try:
+                            observed=datetime.fromisoformat(row["observed_at"])
+                            day=datetime.fromisoformat(row["event_date"]).date()
+                            if observed.tzinfo is None or not first<=day<=observed.astimezone(ZoneInfo("Asia/Kolkata")).date() or observed>instant:continue
+                        except (TypeError,ValueError):continue
+                        found.setdefault(row["isin"],set()).add((row["event_date"],row["action_type"]))
+    except (OSError,ValueError,TypeError,KeyError,AttributeError,__import__("sqlite3").Error):pass
+    return {isin:[{"date":day,"action_type":kind} for day,kind in sorted(events)] for isin,events in found.items()}
 
 
 def _enrich(report,today,instant=None):

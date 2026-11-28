@@ -137,3 +137,14 @@ class DurableResearchJobsTests(unittest.TestCase):
             self.assertTrue(research.run_one_job(900))
         self.assertIsNone(jobs.claim(self.connect,definitions,self.clock+299))
         self.assertEqual(jobs.claim(self.connect,definitions,self.clock+300)[0],"COMPANY_EVIDENCE")
+
+    def test_fund_company_success_cadence_and_waiting_keep_shared_safety_boundary(self):
+        definitions={"FUND_COMPANY_EVIDENCE":0}
+        with patch.object(jobs,"definitions",return_value=definitions),patch.object(research,"now",return_value=datetime.fromtimestamp(self.clock,timezone.utc)),patch.dict(os.environ,{"ATLAS_COMPANY_RESEARCH_INTERVAL_SECONDS":"300"}),patch.object(research,"_execute_job",return_value="PASS_COMPLETED"):
+            self.assertTrue(research.run_one_job(900))
+        self.assertIsNone(jobs.claim(self.connect,definitions,self.clock+299))
+        job,token=jobs.claim(self.connect,definitions,self.clock+300)
+        self.assertEqual(job,"FUND_COMPANY_EVIDENCE")
+        self.assertTrue(jobs.finish(self.connect,job,token,self.clock+300,900,"WAITING_EVIDENCE"))
+        self.assertIsNone(jobs.claim(self.connect,definitions,self.clock+1199))
+        self.assertEqual(jobs.claim(self.connect,definitions,self.clock+1200)[0],job)

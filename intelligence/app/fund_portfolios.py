@@ -458,14 +458,21 @@ def overlap(disclosures,instant=None):
         return {"status":"INSUFFICIENT_COMPARABLE_PORTFOLIOS","pairs":[]}
 
 
-def research_identities(instant=None):
-    """Public disclosed equity identifiers only, no personal portfolio data."""
+def research_identities(instant=None,*,preferred_funds=None):
+    """Public disclosed equity identifiers only, no personal portfolio data.
+
+    Reserve up to half the existing 200-company budget for holdings of funds
+    already matched in the current category research. Keep broad rotation.
+    """
     if not permitted():
         return []
     instant=instant or datetime.now(timezone.utc)
     today=instant.astimezone(IST).date()
     weights={}
     largest={}
+    preferred_weights={}
+    preferred_largest={}
+    preferred_funds=preferred_funds if isinstance(preferred_funds,dict) and len(preferred_funds)<=50 else {}
     try:
         with nav_catalog._LOCK,closing(nav_catalog._connect()) as db:
             # Evaluate all accepted fresh portfolios within the original file
@@ -485,10 +492,19 @@ def research_identities(instant=None):
                         weight=Decimal(str(holding["weight_percent"]))
                         weights[isin]=weights.get(isin,Decimal(0))+weight
                         largest[isin]=max(largest.get(isin,Decimal(0)),weight)
+                        # A current category target refers to the exact public
+                        # composition vintage, not merely a reused fund ID.
+                        if (preferred_funds.get(row["fund_id"])==report["portfolio_date"]
+                            and report.get("source")=="TIGZIG_AMC_DERIVED"):
+                            preferred_weights[isin]=preferred_weights.get(isin,Decimal(0))+weight
+                            preferred_largest[isin]=max(preferred_largest.get(isin,Decimal(0)),weight)
                 except (ValueError,TypeError,KeyError,AttributeError,InvalidOperation):
                     continue
     except (OSError,sqlite3.Error,ValueError,TypeError,KeyError,AttributeError,InvalidOperation):
         return []
     # Sum of original public fund weights is a collection priority, not an
     # aggregate market exposure or investment ranking. Keep the existing cap.
-    return sorted(weights,key=lambda isin:(-weights[isin],-largest[isin],isin))[:200]
+    first=sorted(preferred_weights,key=lambda isin:(-preferred_weights[isin],-preferred_largest[isin],isin))[:100]
+    chosen=set(first)
+    broad=sorted((isin for isin in weights if isin not in chosen),key=lambda isin:(-weights[isin],-largest[isin],isin))
+    return (first+broad)[:200]

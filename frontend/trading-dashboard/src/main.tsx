@@ -170,6 +170,15 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
     }catch{/* Automatic refresh is best-effort; saved data remains usable offline. */}
   }
 
+  async function refreshFundPrices(){
+    const response=await fetch(`${API}/refresh-prices?assetType=MUTUAL_FUND`,{method:"POST"});
+    if(!response.ok)throw Error("Fund NAV refresh unavailable");
+    const result=await response.json();
+    if(!Number.isInteger(result.updated)||result.updated<0||!Number.isInteger(result.total)||result.total<result.updated)throw Error("Invalid NAV refresh result");
+    await load();
+    return {updated:result.updated,total:result.total};
+  }
+
   async function refreshLiveValuations(){
     if(livePending.current||document.visibilityState!=="visible")return;livePending.current=true;
     try{const result=await fetch(API+"/refresh-live-prices",{method:"POST",cache:"no-store"});if(result.ok)await load(true);}
@@ -204,7 +213,7 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
 
   async function submitHolding(draft:HoldingDraft) {
     setLoading(true);
-    try { await save(draft); await load();await reconcileFeed();await refreshPortfolioPrices(true); }
+    try { await save(draft); await load();if(draft.assetType==="EQUITY"){await reconcileFeed();await refreshPortfolioPrices(true);} }
     catch (e) { setError(String(e)); throw e; } finally { setLoading(false); }
   }
 
@@ -300,7 +309,7 @@ export function App({identity={id:"preview",email:"Local preview",role:"USER"},o
           <PortfolioDoctor revision={portfolioRevision} onSettings={()=>navigate(6)}/>
           <GoalMonitor/>
           <AdvancedSection title="Past investments" description="Review closed holdings and realized performance"><HistoricalInvestments activeHoldings={holdings}/></AdvancedSection>
-        </> : tab === 1 ? <MutualFundHoldings holdings={holdings}/> : (tab === 2 || tab === 3 || tab === 4 || tab === 5) ? <HorizonResearch key={tab} horizon={tab===2?"INTRADAY":tab===3?"SWING":tab===4?"SHORT_TERM":"LONG_TERM"} reportTarget={tab===2?undefined:reportTarget} onSettings={()=>navigate(6)}>{tab===5?<EquityResearchDashboard/>:<><MarketIntelligence/><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/></>}</HorizonResearch> : tab === 8 ? <P2ResearchWorkspace/> : tab === 7 ? <StockExplorer initialTarget={eliteTarget}/> : tab === 10 ? <>
+        </> : tab === 1 ? <MutualFundHoldings holdings={holdings} busy={loading} onSave={submitHolding} onRemove={remove} onRefresh={refreshFundPrices}/> : (tab === 2 || tab === 3 || tab === 4 || tab === 5) ? <HorizonResearch key={tab} horizon={tab===2?"INTRADAY":tab===3?"SWING":tab===4?"SHORT_TERM":"LONG_TERM"} reportTarget={tab===2?undefined:reportTarget} onSettings={()=>navigate(6)}>{tab===5?<EquityResearchDashboard/>:<><MarketIntelligence/><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/></>}</HorizonResearch> : tab === 8 ? <P2ResearchWorkspace/> : tab === 7 ? <StockExplorer initialTarget={eliteTarget}/> : tab === 10 ? <>
           <AutonomousOverview onPortfolio={()=>navigate(9)} onFunds={()=>navigate(1)} onSettings={()=>navigate(6)} onHorizon={navigateHorizon} onOpenStock={navigateElite}><MarketIntelligence/></AutonomousOverview>
           <AdvancedSection title="Company and institutional research" description="Company reports, news and institutional activity"><EquityResearchDashboard/><InstitutionalFlows/></AdvancedSection>
           <AdvancedSection title="Research evidence and history" description="Broker research, source audit, outcome review and evidence ledgers"><BrokerResearch/><ResearchOutcomes/><ResearchSourceAudit/><FlowLedger/><NewsEvidence/><NewsLedger/></AdvancedSection>

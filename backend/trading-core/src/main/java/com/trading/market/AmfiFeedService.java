@@ -72,7 +72,7 @@ import org.springframework.transaction.annotation.Transactional;
  }
  public List<Map<String,Object>> search(String q){
   if(q==null||q.trim().length()<2||q.length()>100)throw new IllegalArgumentException("Search must be 2..100 characters");
-  return jdbc.queryForList("SELECT s.*,n.nav,n.nav_date FROM mutual_fund_schemes s LEFT JOIN LATERAL (SELECT nav,nav_date FROM mutual_fund_nav WHERE scheme_code=s.scheme_code ORDER BY nav_date DESC LIMIT 1) n ON true WHERE s.scheme_name ILIKE ? OR s.scheme_code::text=? ORDER BY s.scheme_name LIMIT 50","%"+q.trim()+"%",q.trim());
+  return jdbc.queryForList("SELECT s.*,n.nav,n.nav_date FROM mutual_fund_schemes s LEFT JOIN LATERAL (SELECT nav,nav_date FROM mutual_fund_nav WHERE scheme_code=s.scheme_code AND nav>0 AND nav_date<=(now() AT TIME ZONE 'Asia/Kolkata')::date ORDER BY nav_date DESC LIMIT 1) n ON true WHERE s.scheme_name ILIKE ? OR s.scheme_code::text=? ORDER BY CASE WHEN s.scheme_code::text=? THEN 0 ELSE 1 END,s.scheme_name,s.scheme_code LIMIT 50","%"+q.trim()+"%",q.trim(),q.trim());
  }
  @Transactional(rollbackFor=Exception.class)
  public int history(long code)throws Exception{

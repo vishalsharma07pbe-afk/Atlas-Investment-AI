@@ -8,6 +8,9 @@ from hashlib import sha256
 from math import isfinite,sqrt
 from pathlib import Path
 from statistics import mean,median,stdev
+import csv
+import io
+from decimal import Decimal, InvalidOperation
 import json
 import os
 import re
@@ -83,6 +86,49 @@ def load(today,path=PATH):
         return {"status":"LOCAL_EXPORTS_LOADED",**parse(raw,today)}
     except (OSError,ValueError,TypeError,KeyError,AttributeError,OverflowError):return {"status":"MISSING_OR_INVALID_LOCAL_EXPORTS"}
 
+TER_PATH=PATH.with_name("ter-components.csv")
+TER_FIELDS=("scheme_code","isin_growth","plan","option","ter_date","base_expense_percent",
+    "brokerage_percent","transaction_percent","statutory_levies_percent","ter_percent")
+
+def parse_ter(raw,today):
+    """Operator-normalized exact scheme rows; not a claimed AMFI CSV schema."""
+    if not isinstance(raw,bytes) or not 0<len(raw)<=MAX_BYTES:raise ValueError("SIZE")
+    reader=csv.DictReader(io.StringIO(raw.decode("utf-8-sig"),newline=""),strict=True)
+    if tuple(reader.fieldnames or ())!=TER_FIELDS:raise ValueError("TER_SCHEMA")
+    out={};isins=set()
+    for row in reader:
+        if None in row or any(v is None for v in row.values()):raise ValueError("TER_ROW")
+        code=row["scheme_code"];isin=row["isin_growth"];d=day(row["ter_date"])
+        if not re.fullmatch(r"[1-9][0-9]{0,8}",code) or not re.fullmatch(r"INF[A-Z0-9]{9}",isin) or row["plan"]!="DIRECT" or row["option"]!="GROWTH" or d>today or code in out or isin in isins:raise ValueError("TER_IDENTITY")
+        values={}
+        for key in TER_FIELDS[5:]:
+            if not re.fullmatch(r"[0-9]{1,3}(?:\.[0-9]{1,6})?",row[key]):raise ValueError("TER_NUMBER")
+            value=Decimal(row[key])
+            if not Decimal(0)<=value<=Decimal(100):raise ValueError("TER_NUMBER")
+            values[key]=value
+        # Published values rounded independently can differ by <=0.0002 pp.
+        # Do not calculate a missing total or substitute BER for TER.
+        if abs(sum(values[k] for k in TER_FIELDS[5:-1])-values["ter_percent"])>Decimal("0.0002"):
+            raise ValueError("TER_COMPONENT_MISMATCH")
+        out[code]={"scheme_code":int(code),"isin_growth":isin,"plan":"DIRECT","option":"GROWTH",
+            "ter_date":d.isoformat(),**{k:float(v) for k,v in values.items()}}
+        isins.add(isin)
+        if len(out)>1000:raise ValueError("TER_LIMIT")
+    return {"status":"LOCAL_TER_COMPONENTS_LOADED","items":out,"sha256":sha256(raw).hexdigest()}
+
+def load_ter(today,path=TER_PATH):
+    if not permitted():return {"status":"DISABLED_OR_NOT_AUTHORIZED","items":{}}
+    try:
+        fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+        with os.fdopen(fd,"rb") as f:
+            before=os.fstat(f.fileno())
+            if not stat.S_ISREG(before.st_mode) or not 0<before.st_size<=MAX_BYTES:raise ValueError("SIZE")
+            raw=f.read(MAX_BYTES+1);after=os.fstat(f.fileno())
+            if len(raw)!=before.st_size or before.st_mtime_ns!=after.st_mtime_ns or before.st_size!=after.st_size:raise ValueError("FILE_CHANGED")
+        return parse_ter(raw,today)
+    except (OSError,ValueError,TypeError,KeyError,UnicodeError,csv.Error,InvalidOperation):
+        return {"status":"MISSING_OR_INVALID_LOCAL_TER","items":{}}
+
 def annual(a,b,days):return 100*((b/a)**(365.2425/days)-1)
 
 def compare(row,values):
@@ -111,25 +157,48 @@ def compare(row,values):
             "annualized_weekly_active_volatility_percent":round(tracking,4),"windows":windows}
     except (ValueError,TypeError,KeyError,OverflowError,ZeroDivisionError):return None
 
-def reports(candidates,source_rows,loaded,today):
+def reports(candidates,source_rows,loaded,today,ter=None):
     result={}
-    if loaded.get("status")!="LOCAL_EXPORTS_LOADED":return result
-    by_code={str(r["scheme_code"]):r for r in source_rows if isinstance(r,dict) and type(r.get("scheme_code")) is int}
+    ter=ter or {}
+    if loaded.get("status")!="LOCAL_EXPORTS_LOADED" and ter.get("status")!="LOCAL_TER_COMPONENTS_LOADED":return result
+    by_code={}
+    conflicts=set()
+    for r in source_rows:
+        if not isinstance(r,dict) or type(r.get("scheme_code")) is not int:continue
+        code=str(r["scheme_code"])
+        if code in by_code:conflicts.add(code)
+        by_code[code]=r
     for f in candidates:
         r=by_code.get(f.identifier) or {}
-        if not f.identifier.isdigit():continue
-        s=loaded["schemes"].get(int(f.identifier))
-        if not s or s["isin_growth"]!=r.get("isin_growth") or f.plan!="DIRECT" or f.option!="GROWTH":continue
-        if not 0<=(today-day(s["disclosure_date"])).days<=60:continue
-        disclosure={**s}
-        if (today-day(s["ter_date"])).days>90:disclosure.update(ter_date=None,ter_percent=None)
-        if (today-day(s["riskometer_date"])).days>60:disclosure.update(riskometer_date=None,riskometer=None)
-        index=loaded["indices"].get(s["benchmark"],{})
-        comparison=compare(r,index)
-        provenance=(loaded.get("downloaded_tri_provenance") or {}).get(s["benchmark"])
+        if not f.identifier.isdigit() or f.identifier in conflicts:continue
+        if f.plan!="DIRECT" or f.option!="GROWTH":continue
+        s=loaded.get("schemes",{}).get(int(f.identifier))
+        c=(ter.get("items") or {}).get(f.identifier)
+        if s and (s["isin_growth"]!=r.get("isin_growth") or not 0<=(today-day(s["disclosure_date"])).days<=60):s=None
+        if c and (c["isin_growth"]!=r.get("isin_growth") or not 0<=(today-day(c["ter_date"])).days<=7):c=None
+        if not s and not c:continue
+        disclosure={**s} if s else {"scheme_code":int(f.identifier),"isin_growth":c["isin_growth"],"plan":"DIRECT","option":"GROWTH",
+            "benchmark":None,"disclosure_date":None,"ter_date":None,"ter_percent":None,"riskometer":None,
+            "riskometer_date":None,"source_url":None,"ter_source_url":AMFI_SOURCE}
+        if s and (today-day(s["ter_date"])).days>90:disclosure.update(ter_date=None,ter_percent=None)
+        if s and (today-day(s["riskometer_date"])).days>60:disclosure.update(riskometer_date=None,riskometer=None)
+        ter_evidence=None
+        if c:
+            if disclosure["ter_date"]==c["ter_date"] and disclosure["ter_percent"] is not None and abs(disclosure["ter_percent"]-c["ter_percent"])>.0002:
+                disclosure.update(ter_date=None,ter_percent=None)
+                ter_evidence={"status":"CONFLICTING_SAME_DATE_TER","ter_date":c["ter_date"],"source_sha256":ter["sha256"]}
+            elif disclosure["ter_date"] is None or c["ter_date"]>=disclosure["ter_date"]:
+                disclosure.update(ter_date=c["ter_date"],ter_percent=c["ter_percent"])
+                ter_evidence={"status":"OPERATOR_NORMALIZED_TER_COMPONENTS",**c,"source_sha256":ter["sha256"]}
+        benchmark=disclosure["benchmark"]
+        index=loaded.get("indices",{}).get(benchmark,{})
+        comparison=compare(r,index) if benchmark else None
+        provenance=(loaded.get("downloaded_tri_provenance") or {}).get(benchmark)
         if comparison and provenance:comparison={**comparison,"status":"MATCHED_AUTHORIZED_DIRECT_TRI_CSV","source_provenance":provenance}
+        elif comparison and (loaded.get("operator_tri_provenance") or {}).get(benchmark):
+            comparison={**comparison,"source_provenance":loaded["operator_tri_provenance"][benchmark]}
         result[f.identifier]={"status":"LOCAL_EXPORT_EVIDENCE_ONLY","disclosure":disclosure,"benchmark_comparison":comparison,
-            "input_sha256":loaded["sha256"],"notice":NOTICE}
+            "input_sha256":loaded.get("sha256"),"ter_components_evidence":ter_evidence,"notice":NOTICE}
     return result
 
 def overview(loaded,today):

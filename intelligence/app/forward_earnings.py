@@ -31,7 +31,11 @@ def _series(report,instant):
         stamp=datetime.fromisoformat(report["retrieved_at"])
         if stamp.tzinfo is None or not instant-timedelta(hours=24)<=stamp<=instant:return None
         b=report["sections"]["quarterly_income"]
-        if datetime.fromisoformat(b["source"]["retrieved_at"])!=stamp:return None
+        captured=datetime.fromisoformat(b["source"]["retrieved_at"])
+        # Incremental company reports keep the oldest section date at report
+        # level. Use the actual quarterly source capture, never refresh it.
+        if captured.tzinfo is None or not stamp<=captured<=instant or captured<instant-timedelta(hours=24):return None
+        stamp=captured
         today=instant.astimezone(IST).date()
         result=q.summarize(report,today)
         if result["status"] not in ("REPORTED_QUARTERLY_COMPARISONS","PARTIAL_LATEST_QUARTER"):return None
@@ -102,6 +106,32 @@ def evaluate(row,report,instant):
             rows[key]={"actual_amount_cr":actual,"persistence_absolute_error_pp":round(a,6),"unchanged_absolute_error_pp":round(b,6)}
         return {"status":"OBSERVED_PROVIDER_QUARTER","observed_at":stamp.isoformat(),"metrics":rows}
     except (ValueError,TypeError,KeyError,AttributeError,OverflowError,ZeroDivisionError):return None
+
+def due_identities(connect,instant):
+    """Only immutable public publications, never private or arbitrary identities."""
+    if not company.permitted():return []
+    today=instant.astimezone(IST).date()
+    try:
+        with closing(connect()) as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='earnings_persistence'").fetchone():return []
+            rows=db.execute("""SELECT * FROM earnings_persistence WHERE status='PENDING'
+                AND target_quarter>=? AND target_quarter<? ORDER BY target_quarter,isin LIMIT 100""",
+                ((today-timedelta(days=150)).isoformat(),today.isoformat())).fetchall()
+        result=[]
+        for row in rows:
+            try:
+                e=json.loads(row["evidence"]);target=date.fromisoformat(row["target_quarter"])
+                published=datetime.fromisoformat(row["published_at"]);old=date.fromisoformat(e["observed_quarter"])
+                isin=row["isin"]
+                if (exact_isin(isin) and e.get("isin")==isin and e.get("methodology")==VERSION
+                    and e.get("qualified") is False and e.get("target_quarter")==target.isoformat()
+                    and published.tzinfo is not None and published<=instant
+                    and old<published.astimezone(IST).date()<target and q.shift(old,3)==target
+                    and isin not in result):result.append(isin)
+            except (ValueError,TypeError,KeyError,AttributeError,OverflowError):continue
+        return result
+    except (OSError,ValueError,TypeError,AttributeError,__import__("sqlite3").Error):return []
+
 
 def refresh(snapshot,connect,instant):
     if snapshot.get("enabled") is not True or snapshot.get("scope")!="PUBLIC_MARKET_RESEARCH_ONLY" or not company.permitted():return 0

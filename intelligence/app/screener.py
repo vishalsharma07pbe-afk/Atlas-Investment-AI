@@ -5,7 +5,7 @@ from math import isfinite
 from .technical import Candle, compute
 from .horizon_research import evaluate, summarize, MIN_HISTORY as HORIZON_MIN_HISTORY
 from .price_structure import analyze as price_structure
-from .corporate_action_normalization import preview as action_preview, reported_crossings
+from .corporate_action_normalization import preview as action_preview, reported_crossings, archived_crossings
 from .replay_evidence import fingerprint, exact_isin
 from . import price_volume_pressure, steady_momentum, relative_strength, company_venues, sector_price_context, score_calibration, fip_research, bracket_research
 
@@ -20,7 +20,7 @@ def report_close_history(candles):
             "points": [{"date": c.date, "close": round(c.close, 4)} for c in candles[-30:]]}
 
 
-def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit=MAX_INSTRUMENTS, include_horizons=False, *, batch_loaded=False, expected_session=None, action_reports=None, instant=None, fip_dates=()):
+def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit=MAX_INSTRUMENTS, include_horizons=False, *, batch_loaded=False, expected_session=None, action_reports=None, instant=None, fip_dates=(), action_events=None):
     limit = max(1, min(200 if batch_loaded else 60, universe_limit))
     today = as_of or date.today()
     rows = []
@@ -93,6 +93,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                 # the separate local action ledger. It cannot authorize adjustment.
                 isin=instrument.get("isin")
                 crossings=reported_crossings((action_reports or {}).get(isin),isin,first_day,last_day,instant) if instant is not None else []
+                crossings=archived_crossings([*crossings,*(action_events or {}).get(isin,[])],first_day,last_day)
                 raw_history=candles[-1].adjustment_status=="RAW_UNADJUSTED"
                 if crossings:
                     provider_crossing_count+=1
@@ -103,7 +104,10 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                     skipped["RAW_CORPORATE_ACTION"] += 1
                     # A complete stored calendar suffix can confirm the dates, not event completeness.
                     calendar_dates=fip_dates[-len(candles):] if len(fip_dates)>=len(candles) else ()
-                    normalized=action_preview(candles,instrument,expected_dates=calendar_dates)
+                    # A newly reported crossing may not be represented in the
+                    # explicitly normalized local ledger. Don't imply the preview
+                    # reconciles every event when that is not established.
+                    normalized=action_preview(candles,instrument,expected_dates=calendar_dates) if not crossings else {"status":"NORMALIZATION_WITHHELD"}
                     if normalized["status"]=="KNOWN_ACTIONS_NORMALIZED_PRICE_ONLY":
                         action_preview_count+=1
                         if len(action_previews)<5:
@@ -139,7 +143,8 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                 if steady:
                     swing_structure=price_structure(candles,ind,"SWING",calendar_verified=True)
                     strict_bracket=bracket_research.observe(raw,swing_structure,"SWING",fip_dates,today) if fip_dates else None
-                    steady_candidates.append({**steady,"bracket_research":strict_bracket,"historical_swing_structure":swing_structure,"adjusted_window_dates":relative_strength.stock_windows(raw,today),"security_state":row["security_state"],"report_close_history":report_close_history(candles),"id":row["id"],"symbol":row["symbol"],"exchange":row["exchange"],"isin":instrument["isin"],"as_of":row["as_of"]})
+                    reported_fip=fip_research.observe_reported(raw,fip_dates,today) if fip_dates and row["adjustment_status"]=="RAW_UNADJUSTED" else None
+                    steady_candidates.append({**steady,"reported_fip_evidence":reported_fip,"bracket_research":strict_bracket,"historical_swing_structure":swing_structure,"adjusted_window_dates":relative_strength.stock_windows(raw,today),"security_state":row["security_state"],"report_close_history":report_close_history(candles),"id":row["id"],"symbol":row["symbol"],"exchange":row["exchange"],"isin":instrument["isin"],"as_of":row["as_of"]})
             if include_horizons and batch_loaded:
                 pressure=price_volume_pressure.analyze(candles, calendar_verified=expected_session is not None)
                 row["price_volume_pressure"]=pressure
@@ -196,7 +201,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
             if batch_loaded and expected_session is not None and len(candles)>=253:
                 annual_depth_count+=1
             if batch_loaded and exact_isin(instrument.get("isin")):
-                identity={"id":row["id"],"exchange":row["exchange"],"isin":instrument["isin"],"as_of":row["as_of"]}
+                identity={"id":row["id"],"exchange":row["exchange"],"isin":instrument["isin"],"as_of":row["as_of"],"first_date":candles[0].date}
                 # Collect comparable returns for the broad valid sample, not
                 # only bullish candidates. Reuse the already loaded histories.
                 if expected_session is not None:

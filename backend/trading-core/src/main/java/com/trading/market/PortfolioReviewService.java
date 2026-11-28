@@ -69,7 +69,7 @@ public class PortfolioReviewService {
         CASE WHEN p.asset_type='EQUITY' THEN eq.prior ELSE mf.prior END AS prior,
         CASE WHEN p.asset_type='EQUITY' THEN eq.peak ELSE mf.peak END AS peak,
         eq.average AS average_close,eq.distinct_dates,eq.adjustments,eq.raw_count,
-        mf.distinct_sources
+        mf.distinct_sources,mf.latest_source,mf.max_gap_days
       FROM personal_holdings p
       LEFT JOIN mutual_fund_schemes s ON p.asset_type='MUTUAL_FUND' AND p.symbol=s.scheme_code::text
       LEFT JOIN LATERAL (
@@ -117,12 +117,18 @@ public class PortfolioReviewService {
       LEFT JOIN LATERAL (
         SELECT count(*) n,count(DISTINCT source_code) distinct_sources,
           max(nav_date) latest_date,max(nav) FILTER(WHERE rn=1) latest,
+          max(source_code) FILTER(WHERE rn=1) latest_source,
+          max(nav_date-prior_date) FILTER(WHERE rn<50) max_gap_days,
           max(nav) FILTER(WHERE rn=21) prior,max(nav) peak
         FROM (
-          SELECT n.nav_date,n.nav,n.source_code,row_number() OVER(ORDER BY n.nav_date DESC) rn
+          SELECT n.nav_date,n.nav,n.source_code,row_number() OVER(ORDER BY n.nav_date DESC) rn,
+            lead(n.nav_date) OVER(ORDER BY n.nav_date DESC) prior_date
           FROM mutual_fund_nav n
-          WHERE n.scheme_code=CASE WHEN p.asset_type='MUTUAL_FUND' AND p.symbol ~ '^[0-9]{1,18}$'
-            THEN p.symbol::bigint ELSE NULL END AND n.nav_date<=?::date
+          WHERE n.scheme_code=s.scheme_code AND n.nav>0
+            AND n.source_code IN ('AMFI','MFAPI')
+            AND n.nav_date<=(SELECT max(a.nav_date) FROM mutual_fund_nav a
+              WHERE a.scheme_code=s.scheme_code AND a.source_code='AMFI'
+                AND a.nav>0 AND a.nav_date<=?::date)
           ORDER BY n.nav_date DESC LIMIT 50
         ) history
       ) mf ON true
@@ -217,7 +223,8 @@ public class PortfolioReviewService {
       long count=number(r,"history_count");
       LocalDate observed=date(r.get("evidence_date"));
       long age=observed==null?Long.MAX_VALUE:java.time.temporal.ChronoUnit.DAYS.between(observed,today);
-      boolean valid=count>=21&&age>=0&&age<=5;
+      long maximumAge=equity?5:7;
+      boolean valid=count>=21&&age>=0&&age<=maximumAge;
       if(equity){
         if(r.get("instrument_id")==null){missing.add("Stock mapping missing or ambiguous.");valid=false;}
         if(number(r,"distinct_dates")!=count||number(r,"adjustments")!=1){missing.add("Daily history has duplicate dates or mixed adjustment status.");valid=false;}
@@ -229,11 +236,17 @@ public class PortfolioReviewService {
         missing.add("Complete current NSE/BSE restriction clearance is not established by available listing classifications.");
         missing.add("Current fundamentals, valuation, institutional activity and news have not been verified in this review.");
       }else{
-        if(number(r,"distinct_sources")!=1){missing.add("NAV history lacks a consistent source.");valid=false;}
+        if(r.get("exact_scheme_code")==null){missing.add("Exact AMFI scheme mapping is missing.");valid=false;}
+        if(!"AMFI".equals(r.get("latest_source"))){missing.add("Current official AMFI NAV anchor is missing.");valid=false;}
+        if(number(r,"distinct_sources")<1||number(r,"distinct_sources")>2
+            ||!(r.get("max_gap_days") instanceof Number gap)||gap.longValue()>14||gap.longValue()<1){
+          missing.add("NAV history has missing or unsupported observations.");valid=false;
+        }
+        if(number(r,"distinct_sources")==2)missing.add("Earlier NAV history includes MFAPI observations; historical changes are descriptive, not independently verified.");
         missing.add("Fund holdings, benchmark, fees and official risk classification have not been verified in this review.");
       }
       if(count<21)missing.add("At least 21 dated observations are needed for historical change.");
-      if(age<0||age>5)missing.add("Historical observations are missing, stale or future-dated.");
+      if(age<0||age>maximumAge)missing.add("Historical observations are missing, stale or future-dated.");
       BigDecimal latest=decimal(r,"latest"),prior=decimal(r,"prior"),peak=decimal(r,"peak");
       Double momentum=valid&&latest!=null&&prior!=null?percentage(latest.subtract(prior),prior):null;
       Double drawdown=valid&&latest!=null&&peak!=null?percentage(latest.subtract(peak),peak):null;
@@ -251,7 +264,9 @@ public class PortfolioReviewService {
       item.put("recorded_valuation_recent",Boolean.TRUE.equals(r.get("recorded_valuation_recent")));
       item.put("recorded_market_value",value);item.put("exact_scheme_code",r.get("exact_scheme_code"));item.put("scheme_category",r.get("scheme_category"));item.put("recorded_return_percent",returnPct);item.put("evidence_date",observed==null?null:observed.toString());
       if(equity&&r.get("holding_relative_strength")!=null)item.put("holding_relative_strength",r.get("holding_relative_strength"));
-      item.put("history_count",count);item.put("change_20_observations_percent",momentum);
+      item.put("history_count",count);
+      if(!equity)item.put("fund_recent_history_status",valid?(number(r,"distinct_sources")==2?"AMFI_ANCHORED_MIXED_SOURCE":"AMFI_ANCHORED"):"INSUFFICIENT_EVIDENCE");
+      item.put("change_20_observations_percent",momentum);
       item.put("recent_peak_change_percent",drawdown);item.put("findings",findings);item.put("missing_evidence",missing);
       assessments.add(item);
     }

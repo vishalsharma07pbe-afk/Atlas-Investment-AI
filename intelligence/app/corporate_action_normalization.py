@@ -217,3 +217,16 @@ def reported_crossings(report,isin,first,last,instant):
         return [{"date":d,"action_type":k} for d,k in sorted(found)]
     except (ValueError,TypeError,KeyError,AttributeError):
         return []
+
+
+def archived_crossings(events,first,last):
+    """Only positive exact-identity cached event dates; no ratio inference."""
+    result=set()
+    for row in events or []:
+        try:
+            day=date.fromisoformat(row["date"])
+            kind=row["action_type"]
+            if first<day<=last and kind in (*_ACTION_TYPES.values(),"OTHER"):
+                result.add((day.isoformat(),kind))
+        except (ValueError,TypeError,KeyError,AttributeError):continue
+    return [{"date":day,"action_type":kind} for day,kind in sorted(result)]

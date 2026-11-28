@@ -913,4 +913,51 @@ class LiveFeedsDatabaseIntegrationTest {
   db.update("UPDATE discovery_suspension_snapshot SET retrieved_at=now(),record_count=0");
   assertThat(db.queryForObject("SELECT security_state FROM discovery_security_context WHERE instrument_id=?",String.class,id)).isEqualTo("NORMAL");
  }
+ @Test
+ @org.springframework.transaction.annotation.Transactional
+ void fundHoldingSaveUsesStoredDatedNavAndExactSchemeInsteadOfClientPrice()throws Exception{
+  UUID owner=UUID.randomUUID(),other=UUID.randomUUID();
+  db.update("INSERT INTO atlas_users(id,email,password_hash) VALUES (?,?, 'test'),(?,?,'test')",owner,owner+"@example.test",other,other+"@example.test");
+  long code=987654321L;
+  LocalDate today=LocalDate.now(MarketCalendarService.IST),navDay=today.minusDays(9);
+  db.update("INSERT INTO mutual_fund_schemes(scheme_code,scheme_name) VALUES (?,'Holding Test Direct Growth')",code);
+  db.update("INSERT INTO mutual_fund_nav(scheme_code,nav_date,nav,source_code) VALUES (?,?,100,'AMFI'),(?,?,120,'AMFI'),(?,?,999,'AMFI')",
+    code,navDay.minusDays(1),code,navDay,code,today.plusDays(1));
+  user(owner);
+  String input="{\"symbol\":\""+code+"\",\"assetType\":\"MUTUAL_FUND\",\"quantity\":12.5,\"averageCost\":90,\"lastPrice\":999,\"notes\":\"wrong name\"}";
+  mvc.perform(post("/api/v1/portfolio/holdings").contentType("application/json").content(input))
+    .andExpect(status().isOk()).andExpect(jsonPath("$.symbol").value(Long.toString(code)));
+  var row=db.queryForMap("""
+    SELECT quantity,last_price,previous_close,notes,(price_as_of AT TIME ZONE 'Asia/Kolkata')::date::text nav_day
+    FROM personal_holdings WHERE user_id=? AND symbol=?
+    """,owner,Long.toString(code));
+  assertThat((BigDecimal)row.get("last_price")).isEqualByComparingTo("120");
+  assertThat((BigDecimal)row.get("previous_close")).isEqualByComparingTo("100");
+  assertThat(row).containsEntry("nav_day",navDay.toString()).containsEntry("notes","Holding Test Direct Growth");
+  mvc.perform(get("/api/v1/portfolio/holdings")).andExpect(status().isOk()).andExpect(jsonPath("$[0].valuation_status").value("STALE"));
+  mvc.perform(post("/api/v1/portfolio/holdings").contentType("application/json").content(input.replace("12.5","15.5"))).andExpect(status().isOk());
+  assertThat(db.queryForObject("SELECT quantity FROM personal_holdings WHERE user_id=? AND symbol=?",BigDecimal.class,owner,Long.toString(code))).isEqualByComparingTo("15.5");
+  user(other);
+  mvc.perform(get("/api/v1/portfolio/holdings")).andExpect(status().isOk()).andExpect(content().json("[]"));
+ }
+
+ @Test
+ @org.springframework.transaction.annotation.Transactional
+ void historyRepairDetectsInteriorGapsDespiteEnoughRows()throws Exception{
+  long broken=987654322L,complete=987654323L;
+  LocalDate today=LocalDate.now(MarketCalendarService.IST),end=today.minusDays(1);
+  for(long code:List.of(broken,complete)){
+   db.update("INSERT INTO mutual_fund_schemes(scheme_code,scheme_name) VALUES (?,'Fund repair test')",code);
+   db.update("""
+     INSERT INTO mutual_fund_nav(scheme_code,nav_date,nav,source_code)
+     SELECT ?,?::date-g,100,CASE WHEN g=0 THEN 'AMFI' ELSE 'MFAPI' END
+     FROM generate_series(0,1110) g
+     """,code,end);
+  }
+  db.update("DELETE FROM mutual_fund_nav WHERE scheme_code=? AND nav_date BETWEEN ? AND ?",broken,end.minusDays(500),end.minusDays(480));
+  String needs=(String)org.springframework.test.util.ReflectionTestUtils.getField(FundHistoryResearchService.class,"NEEDS_HISTORY");
+  assertThat(db.queryForList("SELECT s.scheme_code FROM mutual_fund_schemes s WHERE s.scheme_code IN (?,?) "+needs,Long.class,broken,complete,today,today))
+    .containsExactly(broken);
+ }
+
 }

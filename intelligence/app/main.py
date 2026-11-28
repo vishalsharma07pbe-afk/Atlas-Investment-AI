@@ -998,10 +998,10 @@ def mutual_fund_catalog_details(fund_identifier: str):
 
 @app.get("/api/v1/intelligence/mutual-funds/recommendations")
 def mutual_fund_recommendations(category: str = "LARGE_CAP",horizon_months: int = 60,
-                                risk_tolerance: str = "MODERATE"):
+                                risk_tolerance: str = "MODERATE",category_only: bool = False):
     from .mutual_fund_recommendations import dashboard
     try:
-        return dashboard(category,horizon_months,risk_tolerance)
+        return dashboard(category,horizon_months,risk_tolerance,category_only=True) if category_only else dashboard(category,horizon_months,risk_tolerance)
     except ValueError as exc:
         raise HTTPException(status_code=400,detail=str(exc)) from exc
 

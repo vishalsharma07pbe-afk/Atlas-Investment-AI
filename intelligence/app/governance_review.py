@@ -22,6 +22,8 @@ def assess(row,report,today):
             findings.append("ISSUER_REPORTED_AUDIT_QUALIFICATION_REVIEW")
         if (filing.get("comparison") or {}).get("status")=="REVENUE_DIFFERENCE_REVIEW":
             findings.append("INDEPENDENT_REVENUE_DIFFERENCE_REVIEW")
+        if ((filing.get("comparison") or {}).get("profit_comparison") or {}).get("status")=="PROFIT_DIFFERENCE_REVIEW":
+            findings.append("INDEPENDENT_PROFIT_DIFFERENCE_REVIEW")
         cash=filing.get("cash_flow_ytd") or {}
         if cash.get("net_profit_cr",0)>0 and cash.get("operating_cash_flow_cr",0)<0:
             findings.append("POSITIVE_PROFIT_NEGATIVE_OPERATING_CASH_FLOW_REVIEW")

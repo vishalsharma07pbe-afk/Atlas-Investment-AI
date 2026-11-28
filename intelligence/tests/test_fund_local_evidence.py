@@ -28,3 +28,24 @@ class LocalEvidenceTests(unittest.TestCase):
         data,row,_=fixture();loaded=f.parse(json.dumps(data).encode(),TODAY)
         row["matched_weekly_comparison"]["date_digest"]="b"*64
         self.assertIsNone(f.compare(row,loaded["indices"]["NIFTY 100 TRI"]))
+
+    def test_cost_only_import_and_same_date_conflict(self):
+        from types import SimpleNamespace
+        data,row,_=fixture()
+        raw=(",".join(f.TER_FIELDS)+"\n123456,INF179K01BB2,DIRECT,GROWTH,2026-11-26,0.3,0.05,0.05,0.1,0.5\n").encode()
+        ter=f.parse_ter(raw,TODAY)
+        candidate=SimpleNamespace(identifier="123456",plan="DIRECT",option="GROWTH")
+        row.update(scheme_code=123456,isin_growth="INF179K01BB2")
+        report=f.reports([candidate],[row],{"status":"MISSING_OR_INVALID_LOCAL_EXPORTS"},TODAY,ter=ter)["123456"]
+        self.assertEqual(report["disclosure"]["ter_percent"],.5)
+        self.assertIsNone(report["disclosure"]["benchmark"])
+        self.assertIsNone(report["benchmark_comparison"])
+        self.assertEqual(report["ter_components_evidence"]["status"],"OPERATOR_NORMALIZED_TER_COMPONENTS")
+        self.assertEqual(f.reports([candidate],[row,row],{},TODAY,ter=ter),{})
+        self.assertEqual(f.reports([candidate],[row],{},TODAY+timedelta(days=8),ter=ter),{})
+        with self.assertRaises(ValueError):f.parse_ter(raw.replace(b",0.1,0.5",b",0.1,0.3"),TODAY)
+        data["schemes"][0].update(ter_date="2026-11-26",disclosure_date="2026-11-26",ter_percent=.8)
+        loaded={**f.parse(json.dumps(data).encode(),TODAY),"status":"LOCAL_EXPORTS_LOADED"}
+        conflict=f.reports([candidate],[row],loaded,TODAY,ter=ter)["123456"]
+        self.assertIsNone(conflict["disclosure"]["ter_percent"])
+        self.assertEqual(conflict["ter_components_evidence"]["status"],"CONFLICTING_SAME_DATE_TER")

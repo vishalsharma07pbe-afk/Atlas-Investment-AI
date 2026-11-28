@@ -14,7 +14,7 @@ import hashlib
 import json
 import sqlite3
 
-from . import nav_catalog, fund_disclosures, fund_portfolios, fund_peer_shortlist, fund_local_evidence, fund_prospective, fund_growth_drivers, official_tri, official_amc_factsheet
+from . import official_amfi_ter, nav_catalog, fund_disclosures, fund_portfolios, fund_peer_shortlist, fund_local_evidence, fund_prospective, fund_growth_drivers, official_tri, official_amc_factsheet
 from .market_client import backend_json
 from .fund_categories import CATEGORIES, LABELS as OFFICIAL_CATEGORY_LABELS, DEBT, SPECIALIZED, COMPARABLE
 
@@ -503,6 +503,30 @@ def _research_reports(candidates, ranked, source_rows, disclosed, portfolios, co
     return reports
 
 
+def _reconcile_website_ter(local_report,website):
+    """Do not publish contradictory same-date totals or components as evidence."""
+    if not local_report:
+        return {"status":"OPERATOR_CROSSWALK_MATCH",**website,"notice":official_amfi_ter.NOTICE}
+    disclosure=local_report.get("disclosure") or {}
+    components=local_report.get("ter_components_evidence") or {}
+    day=website["ter_date"]
+    same_disclosure=disclosure.get("ter_date")==day
+    same_components=components.get("ter_date")==day
+    def differs(row,field):
+        value=row.get(field)
+        return value is not None and abs(value-website[field])>.0002
+    conflict=(same_disclosure and differs(disclosure,"ter_percent")) or (
+        same_components and (components.get("status")=="CONFLICTING_SAME_DATE_TER"
+            or any(differs(components,k) for k in official_amfi_ter.FIELDS)))
+    if conflict:
+        if same_disclosure:disclosure.update(ter_percent=None,ter_date=None)
+        if same_components:
+            local_report["ter_components_evidence"]={"status":"CONFLICTING_SAME_DATE_TER","ter_date":day,
+                "source_sha256":components.get("source_sha256")}
+        return {"status":"CONFLICTING_SAME_DATE_TER","ter_date":day}
+    return {"status":"OPERATOR_CROSSWALK_MATCH",**website,"notice":official_amfi_ter.NOTICE}
+
+
 def _history_gate_counts(historical):
     counts=historical.get("history_gate_counts")
     keys=("OFFICIAL_ANCHOR_UNAVAILABLE","COMPARISON_DATE_MISMATCH","HISTORY_QUALITY_OR_LENGTH","ELIGIBLE")
@@ -590,8 +614,27 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
     portfolios=fund_portfolios.matched(prioritized)
     quality_watch=fund_peer_shortlist.quality_watch(official,portfolios,category,fit,today)
     downloaded_tri=official_tri.read(datetime.now(timezone.utc))
-    local_export=official_tri.combine(fund_local_evidence.load(today),downloaded_tri)
-    local_reports=fund_local_evidence.reports(official,source_rows,local_export,today)
+    operator_tri=official_tri.local_csv_exports(today)
+    local_export=official_tri.combine(fund_local_evidence.load(today),downloaded_tri,operator_tri)
+    local_ter=fund_local_evidence.load_ter(today)
+    website_ter=official_amfi_ter.read(today)
+    local_reports=fund_local_evidence.reports(official,source_rows,local_export,today,ter=local_ter)
+    # Use only exact source-row identity; never promote an operator crosswalk
+    # to independently verified expenses for rank_candidates.
+    source_ids={}
+    duplicates=set()
+    for row in source_rows:
+        if not isinstance(row,dict) or type(row.get("scheme_code")) is not int:continue
+        code=str(row["scheme_code"])
+        if code in source_ids:duplicates.add(code)
+        source_ids[code]=row.get("isin_growth")
+    matched_ter={c:v for c,v in website_ter["items"].items()
+        if c in official_ids and c not in duplicates and source_ids.get(c)==v["isin_growth"]}
+    reconciled_ter={c:_reconcile_website_ter(local_reports.get(c),v) for c,v in matched_ter.items()}
+    ter_matches=sum(v["status"]=="OPERATOR_CROSSWALK_MATCH" for v in reconciled_ter.values())
+    coverage["automatic_amfi_ter_matches"]=ter_matches
+    coverage["automatic_amfi_ter_conflicts"]=len(reconciled_ter)-ter_matches
+    coverage["local_ter_component_matches"]=sum((r.get("ter_components_evidence") or {}).get("status")=="OPERATOR_NORMALIZED_TER_COMPONENTS" for r in local_reports.values())
     publisher_reports=official_amc_factsheet.matched(official,source_rows,datetime.now(timezone.utc))
     coverage["secondary_portfolio_composition_matches"]=len(compositions)
     coverage["secondary_portfolio_matches"]=len(portfolios)
@@ -621,6 +664,8 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
         if report["identifier"] in risk_sources:
             report["official_riskometer_source"]=risk_sources[report["identifier"]]
         if report["identifier"] in local_reports:report["local_export_evidence"]=local_reports[report["identifier"]]
+        if report["identifier"] in reconciled_ter:
+            report["automatic_amfi_ter_evidence"]=reconciled_ter[report["identifier"]]
         if report["identifier"] in publisher_reports:
             e=publisher_reports[report["identifier"]]
             # A publisher-reported current benchmark is a descriptive comparison
@@ -631,7 +676,7 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
                 comparison=fund_local_evidence.compare(matches[0],idx)
                 if comparison:
                     e={**e,"historical_tri_context":comparison,
-                       "tri_provenance":local_export.get("downloaded_tri_provenance",{}).get(e["benchmark"])}
+                       "tri_provenance":local_export.get("downloaded_tri_provenance",{}).get(e["benchmark"]) or local_export.get("operator_tri_provenance",{}).get(e["benchmark"])}
             report["publisher_factsheet_evidence"]=e
     try:
         prospective=fund_prospective.summary(category,today)
@@ -659,10 +704,11 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
       "suitability":ranked["suitability"],"blockers":blockers,
       "qualification_summary":{"evaluated_count":len(official),"top_eligible_count":ranked["top_eligible_count"],
           "growth_eligible_count":ranked["growth_eligible_count"],"excluded":ranked["excluded"]},
+      "automatic_amfi_ter_coverage":{"status":website_ter["status"],"matched_schemes":ter_matches,"conflicting_schemes":len(reconciled_ter)-ter_matches,"notice":official_amfi_ter.NOTICE},
       "official_amc_coverage":{"status":"PUBLISHER_MATCHES" if publisher_reports else "AWAITING_MATCHED_SOURCE" if official_amc_factsheet.permitted() else "DISABLED_OR_NOT_AUTHORIZED",
           "matched_schemes":len(publisher_reports),"notice":official_amc_factsheet.NOTICE},
       "official_tri_coverage":{"status":downloaded_tri["status"],"configured_count":downloaded_tri["configured_count"],
-          "available_count":len(downloaded_tri["indices"]),"conflicting_series":local_export["tri_conflicts"],"notice":official_tri.NOTICE},
+          "available_count":len(downloaded_tri["indices"]),"local_csv_count":len(operator_tri["indices"]),"local_csv_invalid_count":operator_tri["invalid_count"],"conflicting_series":local_export["tri_conflicts"],"notice":official_tri.NOTICE},
       "market_overview":fund_local_evidence.overview(local_export,today),
       "recommendation_status":"QUALIFIED_RESEARCH_AVAILABLE" if ranked["top_performers"] or ranked["growth_outlook"] else "NO_QUALIFYING_FUNDS_INCOMPLETE_EVIDENCE",
       "notice":"Discovery records are not recommendations. Top Performer and Growth Outlook use independent evidence gates; zero picks is allowed."}

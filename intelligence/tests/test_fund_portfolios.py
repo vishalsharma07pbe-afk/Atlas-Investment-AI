@@ -210,3 +210,15 @@ class FundPortfoliosTests(unittest.TestCase):
         with closing(nav_catalog._connect()) as db,db:
             db.execute("UPDATE fund_portfolio_snapshot SET payload='invalid' WHERE fund_id='fund:001'")
         self.assertEqual(portfolios.research_identities(INSTANT),["INE002A01018","INE009A01021"])
+
+    def test_current_category_portfolio_targets_get_priority_without_dropping_broad_funds(self):
+        a="INE002A01018";b="INE009A01021"
+        rows=[]
+        for i in range(4):
+            fields={"fund_code":str(i),"amfi_ssd_fund_id":"fund:"+str(i)}
+            key=b if i==3 else a
+            rows.extend([row(**fields,isin=key,isin_as_filed=key),{**CASH,**fields}])
+        portfolios.store(payload(*rows),TODAY,INSTANT.isoformat())
+        self.assertEqual(portfolios.research_identities(INSTANT),[a,b])
+        self.assertEqual(portfolios.research_identities(INSTANT,preferred_funds={"fund:3":"2026-10-31"}),[b,a])
+        self.assertEqual(portfolios.research_identities(INSTANT,preferred_funds={"fund:3":"2026-09-30"}),[a,b])

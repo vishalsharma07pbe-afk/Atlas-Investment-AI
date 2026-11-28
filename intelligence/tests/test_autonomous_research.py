@@ -338,3 +338,57 @@ class AutonomousResearchTests(unittest.TestCase):
             self.assertNotIn("123456",str(archive))
             research._save("LARGE_CAP",result)
             self.assertEqual(research.research_display_archive.display(research._connect,research.read_snapshot(False),research.now()),[])
+
+    def test_late_reported_action_invalidates_current_market_snapshot_for_all_consumers(self):
+        from app.corporate_action_normalization import normalize_reported_actions
+        from app import automatic_company_evidence as company
+        from contextlib import closing
+        import json
+        now=datetime(2026,11,28,5,tzinfo=timezone.utc)
+        isin="INE002A01018"
+        result={"company_research_universe":[{"id":1,"exchange":"NSE","isin":isin,"first_date":"2026-06-01","as_of":"2026-11-27"}]}
+        report={"isin":isin,"sections":{"corporate_actions":{"status":"AVAILABLE","source":{"provider":"UPSTOX",
+            "endpoint":"/v2/fundamentals/"+isin+"/corporate-actions","retrieved_at":now.isoformat()},
+            "data":normalize_reported_actions([{"name":"Split","expiry_date":"2026-11-25","ratio":"1:2"}])}}}
+        with patch.object(research,"now",return_value=now),patch.object(company,"permitted",return_value=True):
+            research._save("NSE",result)
+            research._save("BSE",{"company_research_universe":[]})
+            self.assertEqual(research.read_market_snapshot()["sections"][0]["status"],"READY")
+            with closing(research._connect()) as db,db:
+                company._table(db)
+                db.execute("INSERT INTO automatic_company_evidence VALUES(?,?,?,?,?)",
+                    (isin,now.isoformat(),now.isoformat(),"PARTIAL",json.dumps(report)))
+            for snapshot in (research.read_market_snapshot(),research.read_snapshot(False)):
+                self.assertEqual(snapshot["sections"][0]["status"],"STALE")
+                self.assertEqual(snapshot["sections"][0]["error_code"],"NEW_REPORTED_ACTION_RESCAN_REQUIRED")
+                self.assertEqual(snapshot["sections"][1]["status"],"READY")
+            with closing(research._connect()) as db,db:
+                company._archive(db,report,isin,now)
+                db.execute("DELETE FROM automatic_company_evidence")
+            later=now+__import__("datetime").timedelta(hours=25)
+            self.assertEqual(company.cached_action_events(research._connect,[isin],later)[isin],
+                [{"date":"2026-11-25","action_type":"SPLIT"}])
+            research._save("NSE",{"company_research_universe":[]})
+            self.assertEqual(research.read_market_snapshot()["sections"][0]["status"],"READY")
+
+    def test_fund_targets_persist_only_compact_public_current_composition_references(self):
+        payload={key:None for key in ("category","coverage","top_performers","growth_outlook",
+            "recommendation_status","blockers","notice","filters","historical_coverage")}
+        payload.update(category="LARGE_CAP",top_performers=[],growth_outlook=[],portfolio_evidence={"items":[
+          {"status":"SECONDARY_COMPOSITION_ONLY","source":"TIGZIG_AMC_DERIVED","fund_id":"fund:123",
+           "scheme_code":"123456","portfolio_date":"2026-10-31","equities":"DO_NOT_PERSIST"}]})
+        now=datetime(2026,11,28,5,tzinfo=timezone.utc)
+        with patch.object(research,"dashboard",return_value=payload):
+            snapshot=research.fund_snapshot("LARGE_CAP")
+        self.assertNotIn("DO_NOT_PERSIST",str(snapshot))
+        self.assertEqual(snapshot["portfolio_research_targets"],[{"fund_id":"fund:123","scheme_code":"123456","portfolio_date":"2026-10-31"}])
+        with patch.object(research,"now",return_value=now),patch.object(research.fund_portfolios,"permitted",return_value=True),patch.object(research.automatic_company_evidence,"permitted",return_value=True):
+            research._save("LARGE_CAP",snapshot)
+            self.assertEqual(research._fund_research_targets(now),{"fund:123":"2026-10-31"})
+        with patch.object(research.fund_portfolios,"permitted",return_value=False):
+            self.assertEqual(research._fund_research_targets(now),{})
+
+    def test_fund_target_storage_failure_preserves_existing_acquisition_path(self):
+        now=datetime(2026,11,28,5,tzinfo=timezone.utc)
+        with patch.object(research,"_read_sections",side_effect=OSError("storage unavailable")):
+            self.assertEqual(research._fund_research_targets(now),{})

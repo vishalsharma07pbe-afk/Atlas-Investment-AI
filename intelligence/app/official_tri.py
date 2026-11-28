@@ -201,13 +201,45 @@ def read(instant,*,path=PATH,connect=None):
         out.update(status="UNAVAILABLE",indices={},provenance={})
     return out
 
-def combine(loaded,downloaded):
+def local_csv_exports(today,folder=PATH.parent):
+    """Read operator-authorized original gross TRI CSV files, not normalized prices.
+    Fixed filenames, no arbitrary paths, no network, no publisher authentication claim.
+    """
+    result={"indices":{},"provenance":{},"invalid_count":0,"status":"DISABLED_OR_NOT_AUTHORIZED"}
+    if not local.permitted():return result
+    result["status"]="AWAITING_LOCAL_CSV"
+    for name in local.INDEXES:
+        filename="tri-"+name.lower().replace(" ","-").replace(":","-")+".csv"
+        try:
+            fd=os.open(folder/filename,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+            with os.fdopen(fd,"rb") as f:
+                before=os.fstat(f.fileno())
+                if not stat.S_ISREG(before.st_mode) or not 0<before.st_size<=MAX_BYTES:raise ValueError("FILE_SIZE")
+                raw=f.read(MAX_BYTES+1);after=os.fstat(f.fileno())
+                if len(raw)!=before.st_size or before.st_size!=after.st_size or before.st_mtime_ns!=after.st_mtime_ns:raise ValueError("FILE_CHANGED")
+            points=parse(raw,name,today)
+            result["indices"][name]={local.day(row["date"]):row["tri"] for row in points}
+            result["provenance"][name]={"status":"AUTHORIZED_OPERATOR_CSV","source_sha256":sha256(raw).hexdigest(),
+                "source_url":local.TRI_SOURCE,"last_observation":points[-1]["date"]}
+        except FileNotFoundError:continue
+        except (OSError,ValueError,TypeError,KeyError,UnicodeError,csv.Error,OverflowError):
+            result["invalid_count"]+=1
+    if result["indices"]:result["status"]="LOCAL_CSV_AVAILABLE"
+    return result
+
+
+def combine(loaded,downloaded,operator_csv=None):
     """Do not silently merge conflicting series or infer fund benchmark identity."""
-    indices=dict(loaded.get("indices",{}));provenance={};conflicts=[]
-    for name,series in downloaded.get("indices",{}).items():
-        old=indices.get(name,{})
-        if any(abs(old[d]-series[d])>max(.000001,abs(series[d])*1e-8) for d in old.keys() & series.keys()):
-            indices.pop(name,None);conflicts.append(name);continue
-        indices[name]=series
-        provenance[name]=downloaded["provenance"][name]
-    return {**loaded,"indices":indices,"downloaded_tri_provenance":provenance,"tri_conflicts":conflicts}
+    indices=dict(loaded.get("indices",{}));provenance={};local_provenance={};conflicts=set()
+    # Never splice vintages or let a third source silently restore a conflict.
+    for source,source_provenance in ((operator_csv or {},local_provenance),(downloaded,provenance)):
+        for name,series in source.get("indices",{}).items():
+            if name in conflicts:continue
+            old=indices.get(name,{})
+            if any(abs(old[d]-series[d])>max(.000001,abs(series[d])*1e-8) for d in old.keys() & series.keys()):
+                indices.pop(name,None);provenance.pop(name,None);local_provenance.pop(name,None);conflicts.add(name);continue
+            indices[name]=series
+            local_provenance.pop(name,None)
+            source_provenance[name]=source["provenance"][name]
+    return {**loaded,"indices":indices,"downloaded_tri_provenance":provenance,
+        "operator_tri_provenance":local_provenance,"tri_conflicts":sorted(conflicts)}

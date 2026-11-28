@@ -134,8 +134,38 @@ def strict_fip_match(row):
             and e.get("status")=="FIP_PRICE_MATCH" and e.get("calendar_status")=="STORED_SESSIONS_MATCHED"
             and e.get("adjustment_status")=="ADJUSTED" and e.get("as_of")==row.get("as_of")
             and numeric(e.get("score")) and 0<=e["score"]<=100
+            and numeric((e.get("windows") or {}).get("252",{}).get("return_percent"))
+            and 0<e["windows"]["252"]["return_percent"]<100
             and not (row.get("governance_review") or {}).get("findings")
             and not (row.get("company_venue_context") or {}).get("review_findings"))
+
+
+def reported_suggestions(candidates,observations,instant):
+    """Preliminary joint FIP research only, separate from strict suggestions."""
+    from . import fip_research
+    today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
+    def eligible(row):
+        e=row.get("reported_fip_evidence") or {}
+        try:
+            current=1<=(today-date.fromisoformat(row["as_of"])).days<=4
+        except (ValueError,TypeError,KeyError):return False
+        return (current and exact_isin(row.get("isin")) and row.get("exchange") in ("NSE","BSE")
+            and type(row.get("id")) is int and row["id"]>0
+            and row.get("security_state") not in company_venues.SPECIAL
+            and row.get("adjustment_status")=="RAW_UNADJUSTED"
+            and e.get("methodology")==fip_research.REPORTED_VERSION and e.get("status")=="REPORTED_PRICE_MATCH"
+            and e.get("calendar_status")=="STORED_SESSIONS_MATCHED" and e.get("as_of")==row.get("as_of")
+            and e.get("adjustment_status")=="RAW_UNADJUSTED" and e.get("qualification_eligible") is False
+            and e.get("adjustment_verified") is False and numeric(e.get("score")) and 0<=e["score"]<=100
+            and numeric((e.get("windows") or {}).get("252",{}).get("return_percent"))
+            and 0<e["windows"]["252"]["return_percent"]<100
+            and not (row.get("governance_review") or {}).get("findings")
+            and not (row.get("company_venue_context") or {}).get("review_findings"))
+    def rank(row):
+        return (-row["reported_fip_evidence"]["score"],-row["median_daily_turnover_cr"],row["isin"],row["exchange"])
+    matches=company_venues.consolidate([row for row in candidates if eligible(row)],observations,instant,rank)
+    matches=sorted([row for row in matches if eligible(row)],key=rank)
+    return matches[:10],len(matches)
 
 
 def strict_suggestions(candidates,observations,instant):
@@ -177,12 +207,13 @@ def ranked_shortlists(candidates,observations=None,instant=None):
     return distinct[:10],{k:[row for row in distinct if row["cap_category"]==k][:10] for k in CAP_GROUPS},len(distinct)
 
 def summarize(snapshot,connect,instant):
-    from . import automatic_company_evidence, amfi_equity_caps, relative_strength, governance_review
+    from . import automatic_company_evidence, amfi_equity_caps, relative_strength, governance_review, nse_financial_filings
     today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
     out={"methodology":VERSION,"status":"AWAITING_EVIDENCE","items":[],"reviewed_count":0,
          "technical_count":0,"sampled_count":0,"eligible_history_count":0,"matched_count":0,
          "qualified_count":0,"category_items":{k:[] for k in CAP_GROUPS},"exclusions":[],"notice":NOTICE,
-         "strict_suggestions":{"status":"AWAITING_EVIDENCE","matched_count":0,"items":[],"qualification_eligible":False}}
+         "strict_suggestions":{"status":"AWAITING_EVIDENCE","matched_count":0,"items":[],"qualification_eligible":False},
+         "reported_suggestions":{"status":"AWAITING_EVIDENCE","matched_count":0,"items":[],"qualification_eligible":False}}
     if not snapshot.get("enabled"):
         out["status"]="DISABLED"
         return out
@@ -265,9 +296,18 @@ def summarize(snapshot,connect,instant):
                     raise ValueError()
                 # Raw series need a reported action section before being used
                 # in this screen; the screener already rejects known crossings.
-                if row.get("adjustment_status")!="ADJUSTED" and not (report.get("sections",{}).get("corporate_actions",{}).get("status")=="AVAILABLE"):
-                    excluded["RAW_ACTION_EVIDENCE_MISSING"]+=1
-                    continue
+                if row.get("adjustment_status")!="ADJUSTED":
+                    action=report.get("sections",{}).get("corporate_actions",{}) or {}
+                    if action.get("status")=="REPORTED_EMPTY":
+                        source=action.get("source") or {}
+                        captured=datetime.fromisoformat(source.get("retrieved_at",""))
+                        empty=(action.get("data")==[] and source.get("provider")=="UPSTOX"
+                            and source.get("endpoint")=="/v2/fundamentals/"+isin+"/corporate-actions"
+                            and captured.tzinfo is not None and instant-timedelta(hours=24)<=captured<=instant)
+                    else:empty=False
+                    if action.get("status")!="AVAILABLE" and not empty:
+                        excluded["RAW_ACTION_EVIDENCE_MISSING"]+=1
+                        continue
                 evidence,reason=fundamentals(report,today)
                 from .quarterly_financials import summarize as quarterly_summary
                 quarter=quarterly_summary(report,today)
@@ -282,7 +322,24 @@ def summarize(snapshot,connect,instant):
                 continue
             candidate={**row,**evidence,**cap,"quarterly_financials":quarter,"company_evidence":enriched[isin],
                 "benchmark_relative_strength":relative_strength.compare(row,snapshot.get("market_regime") or {},today),
-                "governance_review":governance_review.assess(row,report,today),"status":"SCREEN_MATCH_ONLY"}
+                "status":"SCREEN_MATCH_ONLY"}
+            # Steady-only candidates may not have had a company report attached
+            # when the filing adapter ran. Reconcile against the exact cached
+            # quarterly evidence before any company-level ranking or export.
+            filing=candidate.get("independent_financial_evidence")
+            if isinstance(filing,dict) and filing.get("status")=="REPORTED_CONSOLIDATED_FILING" and filing.get("isin")==isin:
+                try:
+                    comparison=nse_financial_filings.compare(filing,{"isin":isin,"quarterly_financials":quarter})
+                    previous=filing.get("comparison") or {}
+                    if comparison["status"]=="NOT_COMPARABLE" and previous.get("status")=="REVENUE_DIFFERENCE_REVIEW":
+                        comparison={**previous}
+                    elif (comparison.get("profit_comparison") or {}).get("status","NOT_COMPARABLE")=="NOT_COMPARABLE" and (previous.get("profit_comparison") or {}).get("status")=="PROFIT_DIFFERENCE_REVIEW":
+                        comparison["profit_comparison"]=previous["profit_comparison"]
+                    candidate["independent_financial_evidence"]={**filing,"comparison":comparison}
+                except (KeyError,TypeError,ValueError,AttributeError,OverflowError):
+                    # Do not discard an existing review finding on malformed data.
+                    pass
+            candidate["governance_review"]=governance_review.assess(candidate,report,today)
             strict_fip=strict.get((row["id"],isin,row["as_of"]))
             if isinstance(strict_fip,dict) and strict_fip.get("methodology")==fip_research.VERSION and strict_fip.get("adjustment_status")=="ADJUSTED" and row.get("adjustment_status")=="ADJUSTED":
                 candidate["strict_fip_evidence"]=strict_fip
@@ -294,6 +351,10 @@ def summarize(snapshot,connect,instant):
     out["strict_suggestions"]={"status":"JOINT_SCREEN_MATCHES" if strict_items else "NO_JOINT_SCREEN_MATCHES",
         "matched_count":strict_count,"items":strict_items,"qualification_eligible":False,
         "notice":"Four-window FIP, bullish technical, reported earnings/EPS, relative P/E, cap and turnover screens all passed. No recorded governance or venue review findings in the screened evidence. Not TradingView Strong Buy, independent valuation, or final investment qualification."}
+    reported_items,reported_count=reported_suggestions(candidates,observations,instant)
+    out["reported_suggestions"]={"status":"REPORTED_JOINT_MATCHES" if reported_items else "NO_REPORTED_JOINT_MATCHES",
+        "matched_count":reported_count,"items":reported_items,"qualification_eligible":False,
+        "notice":fip_research.REPORTED_NOTICE+" Reported business, cap and historical liquidity screens also passed; annual return must be below 100%."}
     out["exclusions"]=[{"reason":k,"count":v} for k,v in excluded.most_common()]
     out["status"]="SCREEN_MATCHES_AVAILABLE" if out["items"] else "NO_SCREEN_MATCHES" if out["technical_count"] else "AWAITING_EVIDENCE"
     return out

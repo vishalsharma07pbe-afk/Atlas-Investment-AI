@@ -16,8 +16,7 @@ class FundHistoryResearchServiceTest {
  @Test void heldSchemeIsCollectedBeforeDiscoveryWithoutCategoryRestriction()throws Exception{
   JdbcTemplate jdbc=mock(JdbcTemplate.class);AmfiFeedService funds=mock(AmfiFeedService.class);
   var service=new FundHistoryResearchService(jdbc,funds);service.enabled=true;service.permitted=true;
-  when(jdbc.queryForList(contains("FROM personal_holdings h"),any(LocalDate.class),any(LocalDate.class),
-    any(LocalDate.class),any(LocalDate.class),any(LocalDate.class),any(LocalDate.class)))
+  when(jdbc.queryForList(contains("FROM personal_holdings h"),any(LocalDate.class),any(LocalDate.class)))
     .thenReturn(List.of(Map.of("scheme_code",123456L),Map.of("scheme_code",234567L)));
   when(jdbc.update(contains("INSERT INTO fund_history_attempts"),eq(123456L))).thenReturn(1);
   when(funds.history(123456L)).thenReturn(800);
@@ -28,13 +27,12 @@ class FundHistoryResearchServiceTest {
   var ordered=inOrder(jdbc,funds);
   ordered.verify(funds).history(123456L);
   ordered.verify(jdbc,times(6)).queryForList(contains("lower(trim(s.category))"),anyString(),
-    any(LocalDate.class),any(LocalDate.class),any(LocalDate.class),any(LocalDate.class));
+    any(LocalDate.class),any(LocalDate.class));
  }
  @Test void heldSchemeFailureKeepsExistingRetryLedger()throws Exception{
   JdbcTemplate jdbc=mock(JdbcTemplate.class);AmfiFeedService funds=mock(AmfiFeedService.class);
   var service=new FundHistoryResearchService(jdbc,funds);service.enabled=true;service.permitted=true;
-  when(jdbc.queryForList(contains("FROM personal_holdings h"),any(LocalDate.class),any(LocalDate.class),
-    any(LocalDate.class),any(LocalDate.class),any(LocalDate.class),any(LocalDate.class)))
+  when(jdbc.queryForList(contains("FROM personal_holdings h"),any(LocalDate.class),any(LocalDate.class)))
     .thenReturn(List.of(Map.of("scheme_code",123456L)));
   when(jdbc.update(contains("INSERT INTO fund_history_attempts"),eq(123456L))).thenReturn(1);
   when(funds.history(123456L)).thenThrow(new IllegalStateException("source unavailable"));

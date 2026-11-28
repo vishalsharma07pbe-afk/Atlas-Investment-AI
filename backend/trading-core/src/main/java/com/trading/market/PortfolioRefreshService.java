@@ -26,6 +26,15 @@ public class PortfolioRefreshService {
       """,user),includeHistory);
   }
 
+  /** Explicit fund-only refresh uses the dated local NAV store and never
+   * touches stock quotes, subscriptions or provider credentials. */
+  public Map<String,Object> refreshFunds(UUID user){
+    return refresh(jdbc.queryForList("""
+      SELECT id,user_id,symbol,asset_type FROM personal_holdings
+      WHERE user_id=? AND asset_type='MUTUAL_FUND' ORDER BY symbol LIMIT 200
+      """,user),false);
+  }
+
   /** At most ten holdings per pass, oldest attempts first. Mark attempts before
    * provider access so failures cannot starve other holdings or cause tight loops.
    * This is intended for the single local backend instance.
@@ -126,9 +135,12 @@ public class PortfolioRefreshService {
           Object previous=nav.size()>1?nav.get(1).get("nav"):null;
           if(!(previous instanceof BigDecimal amountPrevious)||amountPrevious.signum()<=0)previous=null;
           updated+=jdbc.update("""
-            UPDATE personal_holdings SET last_price=?,previous_close=?,price_as_of=?::date,updated_at=now()
+            UPDATE personal_holdings SET last_price=?,previous_close=?,price_as_of=?::date::timestamp AT TIME ZONE 'Asia/Kolkata',updated_at=now()
             WHERE id=? AND user_id=? AND symbol=? AND asset_type='MUTUAL_FUND'
-            AND (price_as_of IS NULL OR price_as_of::date<=?::date)
+            AND NOT EXISTS(SELECT 1 FROM mutual_fund_nav n
+              WHERE n.scheme_code=CAST(personal_holdings.symbol AS bigint) AND n.nav>0
+                AND n.nav_date<= (now() AT TIME ZONE 'Asia/Kolkata')::date
+                AND n.nav_date>?::date)
             """,nav.get(0).get("nav"),previous,nav.get(0).get("nav_date"),id,user,symbol,nav.get(0).get("nav_date"));
         }else skipped.add(issue(symbol,"SCHEME_CODE_REQUIRED"));
       }catch(FeedHttp.ProviderHttpException ex){
