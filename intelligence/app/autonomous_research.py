@@ -565,6 +565,11 @@ def read_snapshot(include_ai=True):
         except (ValueError,TypeError,KeyError,AttributeError,OverflowError,OSError,sqlite3.Error):
             snapshot["multi_strategy"]["prospective_validation"]={"status":"UNAVAILABLE","lanes":{},"notice":"Paper-tracking evidence unavailable."}
         try:
+            from . import ranking_challenger
+            snapshot["multi_strategy"]["ranking_comparison"]=ranking_challenger.summary(_connect,current) if enabled else {"status":"DISABLED"}
+        except (ValueError,TypeError,KeyError,AttributeError,OverflowError,OSError,sqlite3.Error):
+            snapshot["multi_strategy"]["ranking_comparison"]={"status":"UNAVAILABLE"}
+        try:
             snapshot["forward_earnings_validation"]=forward_earnings.summary(_connect,current) if enabled else {"status":"DISABLED"}
         except (ValueError,TypeError,OSError,sqlite3.Error):
             snapshot["forward_earnings_validation"]={"status":"UNAVAILABLE"}
@@ -830,6 +835,8 @@ def _execute_job(job):
         snapshot=read_snapshot()
         if not snapshot.get("enabled"):return "DISABLED_OR_NOT_AUTHORIZED"
         multi_strategy_prospective.publish(snapshot,_connect,instant)
+        from . import ranking_challenger
+        ranking_challenger.publish(snapshot,_connect,instant)
         from . import investment_analyst,analyst_committee,decision_quality,decision_outcomes
         today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
         report=investment_analyst.analyze(snapshot,today,instant)
