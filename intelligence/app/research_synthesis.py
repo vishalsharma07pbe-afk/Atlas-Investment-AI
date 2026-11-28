@@ -208,8 +208,11 @@ def filing_context(row,instant):
     import re
     if not isinstance(f.get("source_sha256"),str) or not re.fullmatch(r"[a-f0-9]{64}",f["source_sha256"]):return None
     revenue=c.get("status");profit=p.get("status")
+    # A filing cannot corroborate the forecast anchor if it was for a different quarter.
+    # Preserve explicit conflicting financial evidence even if the projection has no forecast.
     if revenue not in ("WITHIN_ILLUSTRATIVE_TOLERANCE","REVENUE_DIFFERENCE_REVIEW","NOT_COMPARABLE") or profit not in ("BOTH_BASES_WITHIN_TOLERANCE","ONE_REPORTED_BASIS_WITHIN_TOLERANCE","PROFIT_DIFFERENCE_REVIEW","NOT_COMPARABLE",None):return None
     status="CONFLICT_REVIEW" if revenue=="REVENUE_DIFFERENCE_REVIEW" or profit=="PROFIT_DIFFERENCE_REVIEW" else "CORROBORATED_REPORTED_QUARTER" if revenue=="WITHIN_ILLUSTRATIVE_TOLERANCE" and profit in ("BOTH_BASES_WITHIN_TOLERANCE","ONE_REPORTED_BASIS_WITHIN_TOLERANCE") else "PARTIAL_COMPARISON"
     return {"status":status,"period":f["period"],"retrieved_at":stamp.isoformat(),"source_sha256":f["source_sha256"],
         "revenue_comparison":revenue,"profit_comparison":profit,"automatic_index_source":f.get("acquisition_method")==nse_financial_filings.INDEX_METHOD,
+        "audit_opinion":f.get("audit_opinion") if f.get("audit_opinion") in ("QUALIFIED_OPINION","ADVERSE_OPINION","DISCLAIMER_OF_OPINION","ISSUER_REPORTED_AUDIT_QUALIFICATION","ISSUER_DECLARED_UNMODIFIED_NOT_SIGNED_REPORT_VERIFIED","DECLARATION_PRESENT_UNAUDITED_PERIOD","NOT_ESTABLISHED") else None,
         "qualified":False,"notice":"Issuer/provider arithmetic corroboration under illustrative tolerances; net profit accounting basis may differ. Not audit certification."}
