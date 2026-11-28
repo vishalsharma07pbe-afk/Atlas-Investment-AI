@@ -207,7 +207,7 @@ def ranked_shortlists(candidates,observations=None,instant=None):
     return distinct[:10],{k:[row for row in distinct if row["cap_category"]==k][:10] for k in CAP_GROUPS},len(distinct)
 
 def summarize(snapshot,connect,instant):
-    from . import automatic_company_evidence, amfi_equity_caps, relative_strength, governance_review
+    from . import automatic_company_evidence, amfi_equity_caps, relative_strength, governance_review, nse_financial_filings
     today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
     out={"methodology":VERSION,"status":"AWAITING_EVIDENCE","items":[],"reviewed_count":0,
          "technical_count":0,"sampled_count":0,"eligible_history_count":0,"matched_count":0,
@@ -322,7 +322,24 @@ def summarize(snapshot,connect,instant):
                 continue
             candidate={**row,**evidence,**cap,"quarterly_financials":quarter,"company_evidence":enriched[isin],
                 "benchmark_relative_strength":relative_strength.compare(row,snapshot.get("market_regime") or {},today),
-                "governance_review":governance_review.assess(row,report,today),"status":"SCREEN_MATCH_ONLY"}
+                "status":"SCREEN_MATCH_ONLY"}
+            # Steady-only candidates may not have had a company report attached
+            # when the filing adapter ran. Reconcile against the exact cached
+            # quarterly evidence before any company-level ranking or export.
+            filing=candidate.get("independent_financial_evidence")
+            if isinstance(filing,dict) and filing.get("status")=="REPORTED_CONSOLIDATED_FILING" and filing.get("isin")==isin:
+                try:
+                    comparison=nse_financial_filings.compare(filing,{"isin":isin,"quarterly_financials":quarter})
+                    previous=filing.get("comparison") or {}
+                    if comparison["status"]=="NOT_COMPARABLE" and previous.get("status")=="REVENUE_DIFFERENCE_REVIEW":
+                        comparison={**previous}
+                    elif (comparison.get("profit_comparison") or {}).get("status","NOT_COMPARABLE")=="NOT_COMPARABLE" and (previous.get("profit_comparison") or {}).get("status")=="PROFIT_DIFFERENCE_REVIEW":
+                        comparison["profit_comparison"]=previous["profit_comparison"]
+                    candidate["independent_financial_evidence"]={**filing,"comparison":comparison}
+                except (KeyError,TypeError,ValueError,AttributeError,OverflowError):
+                    # Do not discard an existing review finding on malformed data.
+                    pass
+            candidate["governance_review"]=governance_review.assess(candidate,report,today)
             strict_fip=strict.get((row["id"],isin,row["as_of"]))
             if isinstance(strict_fip,dict) and strict_fip.get("methodology")==fip_research.VERSION and strict_fip.get("adjustment_status")=="ADJUSTED" and row.get("adjustment_status")=="ADJUSTED":
                 candidate["strict_fip_evidence"]=strict_fip

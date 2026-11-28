@@ -180,6 +180,26 @@ class SteadyMomentumTests(unittest.TestCase):
                 company_reports.attach(snapshot,now)
                 self.assertIn(identity["isin"],snapshot["company_reports"]["items"])
                 self.assertFalse(snapshot["company_reports"]["items"][identity["isin"]]["qualified"])
+                # An Elite-only candidate has no company_evidence attached at
+                # filing collection time. The exact cached quarter must still
+                # be reconciled before strict suggestions are published.
+                self.assertNotIn("company_evidence",candidate)
+                candidate["independent_financial_evidence"]={
+                    "isin":identity["isin"],"status":"REPORTED_CONSOLIDATED_FILING",
+                    "period":"2026-09-30","quarter":{"revenue":100,"net_profit":16,"owners_profit":15},
+                    "comparison":{"status":"NOT_COMPARABLE"}}
+                evidence["sections"]["quarterly_income"]={"status":"AVAILABLE",
+                    "source":{"provider":"UPSTOX","endpoint":f"/v2/fundamentals/{identity['isin']}/income-statement"},
+                    "data":{"statement_type":"consolidated","time_period":"quarterly","units":"crore",
+                            "series":{"revenue":[{"period":"2026-09-30","value":100}],
+                                      "net_profit":[{"period":"2026-09-30","value":40}]}}}
+                with closing(connect()) as db,db:
+                    db.execute("UPDATE automatic_company_evidence SET payload=? WHERE isin=?",(json.dumps(evidence),identity["isin"]))
+                reviewed=steady_momentum.summarize(snapshot,connect,now)
+                self.assertEqual(reviewed["strict_suggestions"]["items"],[])
+                self.assertIn("INDEPENDENT_PROFIT_DIFFERENCE_REVIEW",reviewed["items"][0]["governance_review"]["findings"])
+                self.assertEqual(reviewed["items"][0]["independent_financial_evidence"]["comparison"]["profit_comparison"]["status"],"PROFIT_DIFFERENCE_REVIEW")
+                self.assertEqual(candidate["independent_financial_evidence"]["comparison"]["status"],"NOT_COMPARABLE")
                 with closing(connect()) as db,db:
                     db.execute("DELETE FROM automatic_company_evidence")
                 self.assertEqual(steady_momentum.summarize(snapshot,connect,now)["strict_suggestions"]["items"],[])

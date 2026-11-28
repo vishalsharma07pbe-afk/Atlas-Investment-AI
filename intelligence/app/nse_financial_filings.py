@@ -274,7 +274,7 @@ def refresh(snapshot,connect,instant,loader=load,path=PATH,index_loader=discover
     return result is not None
 
 def compare(report,company):
-    comparison={"status":"NOT_COMPARABLE","notice":"Only provider consolidated quarterly revenue vs issuer operating revenue, same period. Not verified identical definitions or source truth."}
+    comparison={"status":"NOT_COMPARABLE","notice":"Same-period consolidated revenue and available profit comparisons. Arithmetic proximity does not verify identical definitions or source truth."}
     if not company or report["isin"]!=company.get("isin"):return comparison
     q=company.get("quarterly_financials") or {}
     if q.get("latest_period")!=report["period"]:return comparison
