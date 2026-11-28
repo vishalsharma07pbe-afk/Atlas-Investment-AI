@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 import json
 import re
 import sqlite3
-from . import nav_catalog
+from . import nav_catalog,action_effectiveness as effectiveness
 from .fund_categories import COMPARABLE,LABELS
 from .market_client import backend_json
 
@@ -60,7 +60,10 @@ def decision_states(report,today):
             b=q.obj(q.obj(item.get("fund_evidence")).get("benchmark_context"))
             # A fixed category proxy, not an assumed historical fund mandate.
             benchmark=b.get("benchmark") if b.get("benchmark")==SEGMENTS.get(group["category"]) and b.get("basis") in ("MATCHED_LOCAL_TRI_EXPORT","MATCHED_AUTHORIZED_DIRECT_TRI_CSV") else None
-            result[key]={"state":state,"benchmark":benchmark}
+            policy=q.obj(report.get("decision_quality"))
+            action=item.get("action")
+            positive=action=="COMPARE_FOR_SIP" and state=="PRIORITY_RESEARCH" and not policy.get("forecast_allocation_hold") and group["category"] not in q.rows(policy.get("fund_allocation_holds")) and policy.get("status")!="UNAVAILABLE"
+            result[key]={"state":state,"benchmark":benchmark,"final_action":"CONDITIONAL" if positive else "WITHHELD" if action in ("COMPARE_FOR_SIP","WATCH_FOR_CONFIRMATION","REVIEW_BEFORE_NEW_SIP") else None}
     return {k:v for k,v in result.items() if k not in duplicates}
 
 def publish(snapshot,instant,connect=None,*,final_report=None):
@@ -91,6 +94,7 @@ def publish(snapshot,instant,connect=None,*,final_report=None):
                         from .decision_quality import VERSION as decision_version
                         e.update(decision_policy=decision_version,decision_state=decision["state"])
                         if decision["benchmark"]:e["category_tri_proxy"]=decision["benchmark"]
+                        if decision["final_action"]:e.update(action_policy=effectiveness.VERSION,final_action=decision["final_action"])
                     if not isinstance(e["date_digest"],str) or not re.fullmatch(r"[a-f0-9]{64}",e["date_digest"]):continue
                     written+=db.execute("""INSERT OR IGNORE INTO mf_prospective_watch
                       (isin,observed_date,category,scheme_code,published_date,published_at,maturity_date,evidence)
@@ -184,7 +188,7 @@ def summary(category,today,connect=None):
         rows=db.execute("""SELECT * FROM mf_prospective_watch WHERE category=? AND published_date>=?
             ORDER BY published_date,isin LIMIT 1001""",(category,(today-timedelta(days=365)).isoformat())).fetchall()
     from .decision_quality import VERSION as decision_version
-    bands=[];immature=0;selected=[];decisions={k:{"published":0,"mature":0,"observed":[],"paired":[]} for k in ("PRIORITY_RESEARCH","EVIDENCE_INCOMPLETE","REVIEW_REQUIRED")}
+    bands=[];immature=0;selected=[];actions=[];decisions={k:{"published":0,"mature":0,"observed":[],"paired":[]} for k in ("PRIORITY_RESEARCH","EVIDENCE_INCOMPLETE","REVIEW_REQUIRED")}
     for r in rows[:1000]:
         try:
             maturity=date.fromisoformat(r["maturity_date"]);e=json.loads(r["evidence"]);score=e["score"]
@@ -197,6 +201,18 @@ def summary(category,today,connect=None):
                 if not isinstance(outcome,dict):outcome={}
             except (ValueError,TypeError):outcome={}
             selected.append((r["isin"],r["published_date"],score,outcome))
+            action=None
+            if state in decisions and e.get("action_policy")==effectiveness.VERSION and e.get("final_action") in ("CONDITIONAL","WITHHELD"):
+                action={"day":date.fromisoformat(r["published_date"]),"identity":r["isin"],"group":category,"arm":e["final_action"],"endpoints":None,"net":None,"stress":None,"benchmark":None}
+                actions.append(action)
+                if outcome.get("status")=="OBSERVED_AMFI_NAV_CASE":
+                    try:
+                        start,end=date.fromisoformat(outcome["start_date"]),date.fromisoformat(outcome["end_date"]);day=action["day"]
+                        change=float(100*(nav(outcome["end_nav"])/nav(outcome["start_nav"])-1))
+                        if day<start<=day+timedelta(days=7) and maturity==day+timedelta(days=DAYS) and maturity<=end<=maturity+timedelta(days=7) and effectiveness.number(change) and abs(change-outcome["nav_change_percent"])<=.000001:
+                            # Reported NAV is net of ongoing TER, not entry/exit taxes or loads.
+                            action.update(endpoints=(start.isoformat(),end.isoformat()),net=change,stress=change)
+                    except (ValueError,TypeError,KeyError,InvalidOperation,OverflowError,ArithmeticError):pass
             if state in decisions:
                 d=decisions[state];d["mature"]+=1
                 if outcome.get("status")=="OBSERVED_AMFI_NAV_CASE" and all(type(outcome.get(k)) in (int,float) and isfinite(outcome[k]) for k in ("nav_change_percent","observed_drawdown_percent")):
@@ -206,7 +222,9 @@ def summary(category,today,connect=None):
                     if ((pair.get("source_basis")=="AUTHORIZED_LOCAL_EXPORT" and local.permitted()) or (pair.get("source_basis")=="AUTHORIZED_DIRECT_CSV" and official_tri.permitted())) and pair.get("methodology")=="FROZEN-CATEGORY-TRI-1" and pair.get("benchmark")==e.get("category_tri_proxy")==local.SEGMENTS.get(category) and pair.get("start_date")==outcome.get("start_date") and pair.get("end_date")==outcome.get("end_date"):
                         try:
                             change=float(100*(nav(pair["end_tri"])/nav(pair["start_tri"])-1))
-                            if isfinite(change) and abs(change-pair["tri_change_percent"])<=.000001:d["paired"].append((r["isin"],r["published_date"],outcome["nav_change_percent"]-change))
+                            if isfinite(change) and abs(change-pair["tri_change_percent"])<=.000001:
+                                d["paired"].append((r["isin"],r["published_date"],outcome["nav_change_percent"]-change))
+                                if action is not None and action["net"] is not None:action["benchmark"]=change
                         except (ValueError,TypeError,KeyError,InvalidOperation,OverflowError):pass
         except (ValueError,TypeError,KeyError):continue
     for name,lo,hi in (("50_TO_BELOW_65",50,65),("65_TO_BELOW_80",65,80),("80_OR_ABOVE",80,101)):
@@ -225,4 +243,5 @@ def summary(category,today,connect=None):
         "matched_tri_count":len(v["paired"]),"median_nav_minus_tri_pp":round(median(x[2] for x in v["paired"]),4) if v["paired"] else None,
         "tri_review_status":tri_state(v)} for k,v in decisions.items()}
     return {"decision_policy":decision_version,"decision_states":decision_summary,"status":"DESCRIPTIVE_OBSERVED_OUTCOMES" if any(b["observed_count"] for b in bands) else "AWAITING_MATURE_EVIDENCE",
-        "mature_count":len(selected),"immature_count":immature,"truncated":len(rows)>1000,"bands":bands,"calibrated":False,"notice":NOTICE}
+        "mature_count":len(selected),"immature_count":immature,"truncated":len(rows)>1000,"bands":bands,"calibrated":False,"notice":NOTICE,
+        "final_action_comparison":{**effectiveness.summarize(actions,DAYS,truncated=len(rows)>1000),"cost_basis":"NAV_NET_OF_ONGOING_TER_ONLY; NO_EXIT_LOAD_TAX_OR_EXTRA_STRESS_COST"}}
