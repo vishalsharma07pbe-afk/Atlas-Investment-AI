@@ -97,3 +97,14 @@ Current fixed shocks, quarterly shifts and risk caps are illustrative engineerin
 - Regression tests were added. No new paid provider or broker action is introduced.
 
 The checklist above remains authoritative; these changes do not make all six modules fully complete. Source-bound valuation needs authorized evidence files, while automatic PEAD consensus, complete canonical factor and institutional ownership inputs, independent extraction of actual filing figures, verified fund manager tenure, long point-in-time market histories and prospective maturity remain unresolved. Exact-head CI and protected local live acceptance are required.
+
+### Source-bound valuation input contract
+
+Use only authorized public documents in the existing `data/filing-reports` read-only mount. Enable `ATLAS_VALUATION_EVIDENCE_ENABLED=true` only when market-data usage rights are confirmed. The optional `valuation-evidence.json` document requires methodology `SOURCE-BOUND-VALUATION-1`, `authorization_attested: true`, and a `companies` array. Each exact ISIN record contains:
+
+- `operator_reviewed: true`, `scope: CONSOLIDATED_INR_CRORE`, fiscal period end, review date, price date, actual unadjusted INR reference price, diluted shares in crore, same-share-basis attestation.
+- `model: FCFF` for nonfinancial companies: EBIT, depreciation, explicit capex, signed working-capital increase, tax rate assumption and net debt (crore). `FCFE`: operating cash, capex and net borrowing (crore). `DIVIDEND_DISCOUNT` for financial companies: annual dividends (crore). Select the corresponding sector type.
+- Exactly three ordered BEAR/BASE/BULL scenarios with explicit growth, discount and terminal growth percentages, and optional next-year net profit amount (crore). No inferred values or default assumptions.
+- Three distinct source files in the same mount, roles FINANCIAL_STATEMENTS, SHARE_AND_PRICE_BASIS and VALUATION_ASSUMPTIONS, each with file name and actual SHA-256. Files and total read budget are bounded. No arbitrary URL or local path is fetched. Do not insert credentials, private documents or synthetic test data.
+
+The strict integrated acceptance flag now additionally requires at least one source-bound stock valuation, matched TRI evidence in all three core fund categories, and a shared-cash replay of at least two exact-session companies. It does not require manufacturing a result in an unfavorable market or bypassing evidence checks. Full independent certification remains separate.
