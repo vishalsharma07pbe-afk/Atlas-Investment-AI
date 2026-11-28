@@ -68,10 +68,16 @@ def finish(connect,job,token,instant,interval,status):
         failures=row["failures"]+1 if status=="FAILED" else 0
         # Failure never triggers a busy loop; cap backoff at the normal cadence.
         delay=min(interval,60*2**min(failures-1,8)) if failures else interval
-        if status=="WAITING_EVIDENCE":
+        if status=="WAITING_EVIDENCE" and (job.startswith("GLOBAL_") or job.startswith("RELEASE_") or job=="ECONOMIC_CALENDAR"):
+            delay=min(interval,900)
+        elif status=="WAITING_EVIDENCE" and job in ("COMPANY_EVIDENCE","FUND_COMPANY_EVIDENCE"):
+            # A truthful no-evidence outcome must not inadvertently increase
+            # the existing provider request budget.
+            delay=interval
+        elif status=="WAITING_EVIDENCE":
             # Semiannual AMFI publication can lag the period boundary. Avoid
             # minute-by-minute download retries while retaining waiting status.
-            delay=min(interval,21600 if job=="AMFI_EQUITY_CAP" else 3600 if job in ("NSE_SURVEILLANCE","NSE_PLEDGE_FILINGS","NSE_FINANCIAL_FILINGS","OFFICIAL_TRI_DOWNLOAD","OFFICIAL_AMC_FACTSHEETS") else 60)
+            delay=min(interval,21600 if job=="AMFI_EQUITY_CAP" else 3600 if job in ("NSE_SURVEILLANCE","NSE_PLEDGE_FILINGS","NSE_FINANCIAL_FILINGS","OFFICIAL_TRI_DOWNLOAD","OFFICIAL_AMC_FACTSHEETS","FUND_DISCLOSURES","FUND_PORTFOLIOS") else 60)
         db.execute("""UPDATE research_job_state SET status=?,next_due=?,finished_at=?,
             last_completed_at=CASE WHEN ?='PASS_COMPLETED' THEN ? ELSE last_completed_at END,
             claim_id=NULL,lease_until=NULL,failures=?,error_code=?

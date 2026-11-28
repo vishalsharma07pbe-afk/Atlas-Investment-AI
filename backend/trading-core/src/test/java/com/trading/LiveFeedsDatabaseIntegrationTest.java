@@ -40,6 +40,7 @@ class LiveFeedsDatabaseIntegrationTest {
  @Autowired AmfiFeedService funds;
  @Autowired FundHistoryResearchService fundResearch;
  @Autowired DiscoveryHistoryScheduler discovery;
+ @Autowired HistoryRecoveryController historyRecovery;
  @Autowired DiscoveryQuoteScheduler quoteScreen;
  @Autowired ExchangeCalendarSync exchangeCalendar;
  @Autowired MockMvc mvc;
@@ -129,9 +130,19 @@ class LiveFeedsDatabaseIntegrationTest {
      {"status":"success","data":{"candles":[["2025-01-06T00:00:00+05:30",100,110,90,105,0,0]]}}
      """);
    assertThat(service.refresh(index,"test-operator",date,date)).isEqualTo(1);
+   assertThat((Boolean)org.springframework.test.util.ReflectionTestUtils.invokeMethod(service,"targetPresent",index,date)).isTrue();
    assertThat(db.queryForObject("SELECT close FROM market_candles WHERE instrument_id=? AND candle_time=?",BigDecimal.class,index,close)).isEqualByComparingTo("105");
+   Integer revision=db.queryForObject("SELECT revision FROM market_candles WHERE instrument_id=? AND candle_time=?",Integer.class,index,close);
+   assertThat(service.refresh(index,"test-operator",date,date)).isEqualTo(1);
+   assertThat(db.queryForObject("SELECT revision FROM market_candles WHERE instrument_id=? AND candle_time=?",Integer.class,index,close)).isEqualTo(revision);
+   when(http.text(contains("NSE_INDEX%7CNifty%2050/days/1"),eq("test-operator"),anyInt())).thenReturn("""
+     {"status":"success","data":{"candles":[["2025-01-06T00:00:00+05:30",100,110,90,106,0,0]]}}
+     """);
+   assertThat(service.refresh(index,"test-operator",date,date)).isEqualTo(1);
+   assertThat(db.queryForObject("SELECT revision FROM market_candles WHERE instrument_id=? AND candle_time=?",Integer.class,index,close)).isEqualTo(revision+1);
    db.update("UPDATE market_candles SET source_id=(SELECT id FROM data_sources WHERE source_code='MANUAL_CSV'),close=99 WHERE instrument_id=? AND candle_time=?",index,close);
    assertThat(service.refresh(index,"test-operator",date,date)).isZero();
+   assertThat((Boolean)org.springframework.test.util.ReflectionTestUtils.invokeMethod(service,"targetPresent",index,date)).isFalse();
    assertThat(db.queryForObject("SELECT close FROM market_candles WHERE instrument_id=? AND candle_time=?",BigDecimal.class,index,close)).isEqualByComparingTo("99");
   }finally{
    if(index!=0)db.update("DELETE FROM market_candles WHERE instrument_id=? AND (candle_time AT TIME ZONE 'Asia/Kolkata')::date=?",index,date);
@@ -329,6 +340,115 @@ class LiveFeedsDatabaseIntegrationTest {
   assertThat((List<?>)metrics.get("rolling1Y")).isNotEmpty();
   assertThat((List<?>)metrics.get("rolling3Y")).isNotEmpty();
   assertThat(((BigDecimal)metrics.get("maxDrawdown")).doubleValue()).isLessThan(-0.20);
+ }
+
+ @Test
+ @org.springframework.transaction.annotation.Transactional
+ void discoverySessionRolloverAndExpiredClaimAreFenced(){
+  long id=seedStock();
+  db.update("DELETE FROM discovery_history_attempts WHERE instrument_id=?",id);
+  LocalDate old=LocalDate.of(2026,11,25),next=old.plusDays(1);
+  UUID first=UUID.randomUUID(),second=UUID.randomUUID(),third=UUID.randomUUID();
+  assertThat((Integer)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"claimAttempt",id,old,first)).isEqualTo(1);
+  assertThat((Integer)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"claimAttempt",id,next,second)).isZero();
+  assertThat((Integer)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"finishAttempt",id,first,true,1,720)).isEqualTo(1);
+  assertThat((Integer)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"claimAttempt",id,old,second)).isZero();
+  assertThat((Integer)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"claimAttempt",id,next,second)).isEqualTo(1);
+  db.update("UPDATE discovery_history_attempts SET next_attempt_at=now()-interval '1 second' WHERE instrument_id=?",id);
+  assertThat((Integer)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"claimAttempt",id,next,third)).isEqualTo(1);
+  assertThat((Integer)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"finishAttempt",id,second,true,1,720)).isZero();
+  assertThat((Integer)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"finishAttempt",id,third,false,1,360)).isEqualTo(1);
+  assertThat((Integer)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"claimAttempt",id,next.plusDays(1),first)).isZero();
+  assertThat(db.queryForMap("SELECT status,rows_written,target_session FROM discovery_history_attempts WHERE instrument_id=?",id))
+    .containsEntry("status","FAILED").containsEntry("rows_written",1);
+  assertThat((Boolean)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"targetPresent",id,LocalDate.of(1999,1,1))).isFalse();
+ }
+
+ @Test
+ @org.springframework.transaction.annotation.Transactional
+ void discoverySchedulerRollsOverSuccessButDoesNotRetryPartialResponseInSameSession()throws Exception{
+  db.update("UPDATE instruments SET active=false WHERE exchange_id=(SELECT id FROM exchanges WHERE code='NSE')");
+  long id=seedStock();
+  db.update("UPDATE instruments SET active=true WHERE id=?",id);
+  db.update("DELETE FROM discovery_history_attempts WHERE instrument_id=?",id);
+  db.update("DELETE FROM market_candles WHERE instrument_id=?",id);
+  LocalDate end=LocalDate.now(MarketCalendarService.IST).minusDays(1),old=end.minusDays(1),partial=old.minusDays(1);
+  String token="rollover-test-token";
+  String key="NSE_EQ%7CINE000A01001";
+  // Simulate an already completed prior-session attempt with an unexpired cooldown.
+  db.update("""
+    INSERT INTO discovery_history_attempts(instrument_id,attempted_at,next_attempt_at,status,rows_written,target_session)
+    VALUES (?,now(),now()+interval '12 hours','SUCCESS',1,?)
+    """,id,old);
+  db.update("""
+    INSERT INTO market_candles(instrument_id,timeframe,candle_time,source_id,open,high,low,close,volume,is_complete,quality_status,adjustment_status)
+    VALUES (?,'1d',(?::date::timestamp+interval '9 hours 15 minutes') AT TIME ZONE 'Asia/Kolkata',
+      (SELECT id FROM data_sources WHERE source_code='UPSTOX'),100,105,99,102,200,true,'PROVIDER_VALIDATED','RAW_UNADJUSTED')
+    """,id,old);
+  when(http.text(contains(key),eq(token),anyInt())).thenReturn(
+    "{\"status\":\"success\",\"data\":{\"candles\":[[\""+partial+"T09:15:00+05:30\",100,105,99,102,200]]}}");
+  Object oldGap=org.springframework.test.util.ReflectionTestUtils.getField(discovery,"requestGapMs");
+  org.springframework.test.util.ReflectionTestUtils.setField(discovery,"accessToken",token);
+  org.springframework.test.util.ReflectionTestUtils.setField(discovery,"requestGapMs",0L);
+  try{
+    org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"refreshExchange","NSE",end);
+    verify(http,times(1)).text(contains(key),eq(token),anyInt());
+    assertThat(db.queryForMap("SELECT status,rows_written FROM discovery_history_attempts WHERE instrument_id=?",id))
+      .containsEntry("status","FAILED").containsEntry("rows_written",1);
+    assertThat((Boolean)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"targetPresent",id,end)).isFalse();
+    org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"refreshExchange","NSE",end);
+    verify(http,times(1)).text(contains(key),eq(token),anyInt());
+    db.update("UPDATE discovery_history_attempts SET next_attempt_at=now()-interval '1 second' WHERE instrument_id=?",id);
+    when(http.text(contains(key),eq(token),anyInt())).thenReturn(
+      "{\"status\":\"success\",\"data\":{\"candles\":[[\""+end+"T09:15:00+05:30\",100,105,99,102,200]]}}");
+    org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"refreshExchange","NSE",end);
+    verify(http,times(2)).text(contains(key),eq(token),anyInt());
+    assertThat((Boolean)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"targetPresent",id,end)).isTrue();
+    assertThat(db.queryForMap("SELECT status,rows_written FROM discovery_history_attempts WHERE instrument_id=?",id))
+      .containsEntry("status","SUCCESS").containsEntry("rows_written",1);
+    verifyNoInteractions(vault);
+  }finally{
+    org.springframework.test.util.ReflectionTestUtils.setField(discovery,"accessToken","");
+    org.springframework.test.util.ReflectionTestUtils.setField(discovery,"requestGapMs",oldGap);
+  }
+ }
+
+ @Test
+ @org.springframework.transaction.annotation.Transactional
+ void historyRecoveryReportsKnownTargetAndUnknownCalendarWithoutPrivateData(){
+  LocalDate target=LocalDate.of(2026,11,27),today=target.plusDays(1);
+  db.update("UPDATE instruments SET active=false WHERE exchange_id IN (SELECT id FROM exchanges WHERE code IN ('NSE','BSE'))");
+  long id=seedStock();
+  db.update("UPDATE instruments SET active=true WHERE id=?",id);
+  db.update("DELETE FROM discovery_history_attempts WHERE instrument_id=?",id);
+  db.update("DELETE FROM market_candles WHERE instrument_id=?",id);
+  db.update("DELETE FROM market_sessions WHERE session_date=?",target);
+  db.update("DELETE FROM exchange_holidays WHERE holiday_date=?",target);
+  db.update("""
+    INSERT INTO market_sessions(exchange_id,session_date,session_type,is_trading_day,open_time,close_time)
+    VALUES ((SELECT id FROM exchanges WHERE code='NSE'),?,'REGULAR',true,?,?)
+    """,target,java.sql.Timestamp.from(target.atTime(9,15).atZone(MarketCalendarService.IST).toInstant()),
+    java.sql.Timestamp.from(target.atTime(15,30).atZone(MarketCalendarService.IST).toInstant()));
+  @SuppressWarnings("unchecked")
+  Map<String,Object> snapshot=org.springframework.test.util.ReflectionTestUtils.invokeMethod(historyRecovery,"progress",today);
+  @SuppressWarnings("unchecked")
+  List<Map<String,Object>> rows=(List<Map<String,Object>>)snapshot.get("exchanges");
+  assertThat(snapshot).containsEntry("distinct_mapped_companies",1L);
+  assertThat(rows.getFirst()).containsEntry("exchange","NSE").containsEntry("target_session",target.toString())
+    .containsEntry("mapped_listings",1L).containsEntry("current_listings",0L).containsEntry("due_missing",1L);
+  assertThat(rows.getLast()).containsEntry("exchange","BSE").containsEntry("target_session",null)
+    .containsEntry("current_listings",null).containsEntry("due_missing",null);
+  db.update("""
+    INSERT INTO market_candles(instrument_id,timeframe,candle_time,source_id,open,high,low,close,volume,is_complete,quality_status,adjustment_status)
+    VALUES (?,'1d',(?::date::timestamp+interval '9 hours 15 minutes') AT TIME ZONE 'Asia/Kolkata',
+      (SELECT id FROM data_sources WHERE source_code='UPSTOX'),100,105,99,102,200,true,'PROVIDER_VALIDATED','RAW_UNADJUSTED')
+    """,id,target);
+  snapshot=org.springframework.test.util.ReflectionTestUtils.invokeMethod(historyRecovery,"progress",today);
+  rows=(List<Map<String,Object>>)snapshot.get("exchanges");
+  assertThat(rows.getFirst()).containsEntry("current_listings",1L).containsEntry("due_missing",0L)
+    .containsEntry("adjusted_depth_listings",0L);
+  assertThat(rows.getFirst()).doesNotContainKeys("instrument_key","isin","claim_token","access_token");
+  verifyNoInteractions(http,vault);
  }
 
  @Test void discoveryBackfillsMappedEquityWithoutBorrowingOwnerToken()throws Exception{

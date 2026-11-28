@@ -8,7 +8,7 @@ import csv
 import io
 import json
 import os
-import httpx
+from .global_macro import _download
 
 INTERVAL=21600
 MAX_BYTES=512000
@@ -62,16 +62,7 @@ def parse(payload,today):
 def download(today):
     params={"format":"csvdata","detail":"dataonly","startPeriod":(today-timedelta(days=90)).isoformat(),
             "endPeriod":today.isoformat()}
-    data=bytearray()
-    deadline=monotonic()+30
-    with httpx.Client(timeout=15,follow_redirects=False,headers={"Accept-Encoding":"identity","User-Agent":"ATLAS-Research/1.0"}) as client:
-        with client.stream("GET",URL,params=params) as response:
-            response.raise_for_status()
-            for chunk in response.iter_bytes():
-                if monotonic()>deadline or len(data)+len(chunk)>MAX_BYTES:
-                    raise ValueError("FX_DOWNLOAD_LIMIT")
-                data.extend(chunk)
-    return bytes(data)
+    return _download(URL,params,max_bytes=MAX_BYTES)
 
 def _table(db):
     db.execute("""CREATE TABLE IF NOT EXISTS global_fx_snapshot(
@@ -136,11 +127,15 @@ def read(connect,instant=None):
         row=db.execute("SELECT captured_at,payload FROM global_fx_snapshot WHERE id=1").fetchone()
     if not row:
         return result
-    stamp=datetime.fromisoformat(row["captured_at"])
-    if stamp.tzinfo is None or not timedelta(0)<=instant-stamp<=timedelta(hours=24):
-        result["status"]="STALE_CAPTURE"
+    try:
+        stamp=datetime.fromisoformat(row["captured_at"])
+        if stamp.tzinfo is None or not timedelta(0)<=instant-stamp<=timedelta(hours=24):
+            result["status"]="STALE_CAPTURE"
+            return result
+        items=summarize(json.loads(row["payload"]),instant.astimezone(ZoneInfo("Europe/Berlin")).date())
+    except (ValueError,TypeError,KeyError,AttributeError,InvalidOperation,ArithmeticError):
+        result["status"]="INVALID_CACHED_EVIDENCE"
         return result
-    items=summarize(json.loads(row["payload"]),instant.astimezone(ZoneInfo("Europe/Berlin")).date())
     count=sum(item["status"]=="AVAILABLE" for item in items)
     result.update(status="REFERENCE_RATES_AVAILABLE" if count==len(items) else "PARTIAL_REFERENCE_RATES" if count else "STALE_OR_UNMATCHED_OBSERVATIONS",
                   retrieved_at=stamp.isoformat(),items=items)

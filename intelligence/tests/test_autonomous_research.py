@@ -125,7 +125,7 @@ class AutonomousResearchTests(unittest.TestCase):
              patch.object(research,"read_snapshot",side_effect=AssertionError("full snapshot not needed")), \
              patch.object(research.automatic_company_evidence,"permitted",return_value=True), \
              patch.object(research.automatic_news,"permitted",return_value=True), \
-             patch.object(research.automatic_company_evidence,"refresh") as company, \
+             patch.object(research.automatic_company_evidence,"refresh",return_value="AVAILABLE") as company, \
              patch.object(research.automatic_news,"refresh") as news, \
              patch.object(research.automatic_strategy_validation,"refresh") as replay, \
              patch.object(research.watch_outcomes,"refresh") as outcomes:
@@ -297,3 +297,44 @@ class AutonomousResearchTests(unittest.TestCase):
             with self.subTest(code=code),patch.object(research,"backend_json",side_effect=pages):
                 with self.assertRaisesRegex(ValueError,code):
                     discovery_scan.scan("NSE",research.backend_json,lambda e,p,cutoff:part,lambda:instant)
+
+    def test_display_archive_survives_empty_refresh_without_qualifying_or_redating(self):
+        from datetime import timedelta
+        instant=datetime(2026,11,26,4,tzinfo=timezone.utc)
+        initial={"exchange":"NSE","momentum_leaders":[{"id":1,"symbol":"TCS","exchange":"NSE",
+            "as_of":"2026-11-25","momentum_20d_percent":5,"private_marker":"not stored"}]}
+        with patch.dict(os.environ,{"MARKET_DATA_USAGE_RIGHTS_CONFIRMED":"true"}):
+            with patch.object(research,"now",return_value=instant):
+                research._save("NSE",initial)
+            with patch.object(research,"now",return_value=instant+timedelta(hours=2)):
+                research._save("NSE",{"exchange":"NSE","momentum_leaders":[]})
+                current=research.read_market_snapshot()
+                self.assertEqual(current["sections"][0]["status"],"READY")
+                self.assertEqual(current["sections"][0]["result"]["momentum_leaders"],[])
+                self.assertNotIn("historical_display",current)
+                archive=research.research_display_archive.display(research._connect,current,research.now())
+                self.assertEqual(archive[0]["generated_at"],instant.isoformat())
+                self.assertFalse(archive[0]["qualification_eligible"])
+                self.assertEqual(archive[0]["observations"],[{"label":"TCS","observed_date":"2026-11-25","value_percent":5}])
+                self.assertNotIn("private_marker",str(archive))
+                with patch.dict(os.environ,{"MARKET_DATA_USAGE_RIGHTS_CONFIRMED":"false"}):
+                    self.assertEqual(research.research_display_archive.display(research._connect,current,research.now()),[])
+                self.assertEqual(research.research_display_archive.display(research._connect,current,instant+timedelta(days=8)),[])
+
+    def test_legacy_fund_snapshot_is_archived_on_failed_refresh_and_hidden_after_recovery(self):
+        from datetime import timedelta
+        instant=datetime(2026,11,26,4,tzinfo=timezone.utc)
+        item={"scheme_code":123456,"scheme_name":"Example Fund","nav_date":"2026-11-25","cagr_3y_percent":12}
+        result={"category":"LARGE_CAP","historical_coverage":{"comparison_date":"2026-11-25","items":[item]}}
+        with patch.dict(os.environ,{"MARKET_DATA_USAGE_RIGHTS_CONFIRMED":"false"}),patch.object(research,"now",return_value=instant):
+            research._save("LARGE_CAP",result)
+        with patch.dict(os.environ,{"MARKET_DATA_USAGE_RIGHTS_CONFIRMED":"true"}),patch.object(research,"now",return_value=instant+timedelta(hours=2)):
+            research._save("LARGE_CAP")
+            current=research.read_snapshot(False)
+            self.assertEqual(next(s for s in current["sections"] if s["section"]=="LARGE_CAP")["status"],"FAILED")
+            archive=research.research_display_archive.display(research._connect,current,research.now())
+            self.assertEqual(archive[0]["metric"],"3_YEAR_CAGR")
+            self.assertEqual(archive[0]["generated_at"],instant.isoformat())
+            self.assertNotIn("123456",str(archive))
+            research._save("LARGE_CAP",result)
+            self.assertEqual(research.research_display_archive.display(research._connect,research.read_snapshot(False),research.now()),[])

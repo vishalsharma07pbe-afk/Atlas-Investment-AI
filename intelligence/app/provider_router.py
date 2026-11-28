@@ -47,7 +47,7 @@ class CircuitBreaker:
 def validate_quote(quote, symbol, max_age_seconds, now):
     if not isinstance(quote,Quote) or quote.symbol!=symbol or quote.asset_type!="EQUITY":
         raise ProviderFailure("INSTRUMENT_MISMATCH")
-    if quote.observed_at.tzinfo is None or quote.observed_at.utcoffset() is None:
+    if not isinstance(quote.observed_at,datetime) or quote.observed_at.tzinfo is None or quote.observed_at.utcoffset() is None:
         raise ProviderFailure("NAIVE_TIMESTAMP")
     age=(now-quote.observed_at.astimezone(timezone.utc)).total_seconds()
     if age<0 or age>max_age_seconds:
@@ -61,15 +61,16 @@ def validate_quote(quote, symbol, max_age_seconds, now):
     return quote
 
 class ReadOnlyRouter:
-    def __init__(self, adapters, breaker=None, clock=lambda:datetime.now(timezone.utc)):
+    def __init__(self, adapters, breaker=None, clock=lambda:datetime.now(timezone.utc),*,strict_provider=False):
         # adapters: ordered (name, callable, entitlement_confirmed) tuples
         self.adapters=list(adapters)
         self.breaker=breaker or CircuitBreaker()
         self.clock=clock
+        self.strict_provider=strict_provider
     def quote(self, symbol, max_age_seconds=60):
         if not re.fullmatch(r"[A-Z0-9._&-]{1,40}",symbol):
             raise ValueError("INVALID_SYMBOL")
-        if not 1<=max_age_seconds<=86400:
+        if type(max_age_seconds) is not int or not 1<=max_age_seconds<=86400:
             raise ValueError("INVALID_MAX_AGE")
         attempted=[]
         for name,fetch,authorized in self.adapters:
@@ -81,6 +82,8 @@ class ReadOnlyRouter:
                 continue
             try:
                 quote=validate_quote(fetch(symbol),symbol,max_age_seconds,self.clock())
+                if self.strict_provider and quote.provider!=name:
+                    raise ProviderFailure("INSTRUMENT_MISMATCH")
             except Exception as exc:
                 # Only fixed internal codes may leave this boundary.
                 code = str(exc) if isinstance(exc, ProviderFailure) else ""

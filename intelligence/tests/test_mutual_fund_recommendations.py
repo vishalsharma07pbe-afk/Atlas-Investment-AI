@@ -288,4 +288,28 @@ class RecommendationEngineTests(unittest.TestCase):
         self.assertNotIn("REPORTED_MULTI_YEAR_BUSINESS_REVIEW_EXPOSURE",{r["code"] for r in other["review_findings"]})
 
 
+    def test_publisher_riskometer_enters_existing_gates_without_promoting_base_fee(self):
+        today=date(2026,11,28)
+        fund=strong(identifier="123456",riskometer=None,riskometer_date=None,expense_ratio=None,benchmark_hit_rate=None)
+        row={"scheme_code":123456,"isin_growth":"INF179K01BB2","amfi_plan":"DIRECT","amfi_option":"GROWTH"}
+        source={"status":"PUBLISHER_FACTSHEET_NAV_RECONCILED","methodology":recommendations.official_amc_factsheet.VERSION,
+                "scheme_code":"123456","isin_growth":"INF179K01BB2","category":"LARGE_CAP",
+                "source_sha256":"a"*64,"source_url":"https://amc.ppfas.com/downloads/digital-factsheet/2026/october-2026/",
+                "portfolio_date":"2026-10-31","riskometer":"VERY_HIGH","base_expense_percent":0.1}
+        with patch.object(recommendations.official_amc_factsheet,"permitted",return_value=True):
+            result,used=recommendations._publisher_riskometer([fund],[row],{"123456":source},today)
+            self.assertEqual(result[0].riskometer,"VERY_HIGH")
+            self.assertIsNone(result[0].expense_ratio)
+            self.assertEqual(used["123456"]["date"],"2026-10-31")
+            decision=rank_candidates(result,"LARGE_CAP",84,"HIGH")
+            self.assertNotIn("OFFICIAL_RISKOMETER",decision["excluded"][0]["top_performer_missing"])
+            self.assertIn("EXPENSE_RATIO",decision["excluded"][0]["top_performer_missing"])
+            self.assertIn("BENCHMARK_HIT_RATE",decision["excluded"][0]["top_performer_missing"])
+            self.assertEqual(decision["top_performers"],[])
+            result,used=recommendations._publisher_riskometer([fund],[{**row,"isin_growth":"INF179K01BB3"}],{"123456":source},today)
+            self.assertEqual(result,[fund]);self.assertEqual(used,{})
+        with patch.object(recommendations.official_amc_factsheet,"permitted",return_value=False):
+            self.assertEqual(recommendations._publisher_riskometer([fund],[row],{"123456":source},today),([fund],{}))
+
+
 if __name__=="__main__":unittest.main()

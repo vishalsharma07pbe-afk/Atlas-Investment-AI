@@ -98,6 +98,13 @@ class MultiProviderTests(unittest.TestCase):
             self.assertNotIn("secret",str(result))
             self.assertTrue(multi.provider_status()["same_market_fallback_configured"])
             self.assertFalse(multi.provider_status()["automatic_fallback_available"])
+            self.assertEqual(result["route"]["status"],"SAME_MARKET_FALLBACK")
+            self.assertEqual(result["quote"]["currency"],"INR")
+            self.assertEqual(result["quote"]["instrument_key"],"NSE_EQ|INE002A01018")
+            evidence=multi.provider_status()["fallback_observation"]
+            self.assertEqual(evidence["status"],"PAST_VALIDATED_HTTP_FALLBACK")
+            self.assertEqual(evidence["observation_count"],1)
+            self.assertNotIn("INE002A01018",str(evidence))
     def test_dhan_rejects_unverified_naive_time_and_mismatched_identity(self):
         body={"status":"success","data":{"NSE_EQ":{"123":{"last_price":150,"last_trade_time":"26/11/2026 15:00:00"}}}}
         with patch.object(multi,"_request",return_value=body):
@@ -115,6 +122,24 @@ class MultiProviderTests(unittest.TestCase):
             with self.assertRaises(multi.ProviderFailure):
                 multi._request("https://api.dhan.co/v2/orders",{},payload={})
             post.assert_not_called()
+
+    def test_duplicate_json_keys_and_non_equity_identity_are_rejected(self):
+        with patch.dict("os.environ",{"ATLAS_UPSTOX_SYMBOL_MAP":'{"A":"NSE_EQ|INE002A01018","A":"BSE_EQ|INE002A01018"}'}):
+            self.assertEqual(multi._mapping(),{})
+        with patch.object(multi,"_request") as request:
+            with self.assertRaises(multi.ProviderFailure):
+                multi.upstox_quote("NIFTY","NSE_INDEX|Nifty50","test")
+            request.assert_not_called()
+
+    def test_direct_dhan_is_not_recorded_as_failover(self):
+        with patch.dict("os.environ",{
+            "ATLAS_UPSTOX_QUOTES_AUTHORIZED":"false","ATLAS_UPSTOX_SYMBOL_MAP":'{"A":"NSE_EQ|INE002A01018"}',
+            "ATLAS_DHAN_QUOTES_AUTHORIZED":"true","ATLAS_DHAN_ACCESS_TOKEN":"test","ATLAS_DHAN_CLIENT_ID":"test",
+            "ATLAS_DHAN_SYMBOL_MAP":'{"A":{"upstox_key":"NSE_EQ|INE002A01018","security_id":123}}',
+            "ATLAS_POLYGON_US_SYMBOLS":""}),patch.object(multi,"dhan_quote",return_value=multi.Quote("A","100",datetime.now(timezone.utc),"DHAN")):
+            result=multi.quote_status("A")
+        self.assertEqual(result["route"]["status"],"DIRECT_PROVIDER")
+        self.assertEqual(multi.quote_recovery.fallback_status()["status"],"NOT_OBSERVED")
 
 if __name__ == "__main__":
     unittest.main()

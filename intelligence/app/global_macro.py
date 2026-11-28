@@ -3,7 +3,11 @@ from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from time import monotonic
-from urllib.parse import urlencode
+from urllib.parse import urlencode,urlsplit
+from urllib.error import HTTPError
+from email.utils import parsedate_to_datetime
+import sqlite3
+from . import quote_recovery
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 from zoneinfo import ZoneInfo
 import json
@@ -34,23 +38,68 @@ class _NoRedirect(HTTPRedirectHandler):
     def redirect_request(self,req,fp,code,msg,headers,newurl):
         return None
 
-def _download(url,params):
-    # No redirects or HTTP client URL logging (EIA key is a query parameter).
+# Fixed publisher hosts only; ECB RSS and reference-rate endpoints share
+# a single recovery circuit, as do all FRED series and BLS publications.
+HOSTS={"api.stlouisfed.org":"FRED","api.eia.gov":"EIA","home.treasury.gov":"US_TREASURY",
+       "api.twelvedata.com":"TWELVE_DATA","data-api.ecb.europa.eu":"ECB","www.ecb.europa.eu":"ECB",
+       "www.federalreserve.gov":"FED","www.bls.gov":"BLS"}
+
+class GlobalCooldown(ValueError):
+    pass
+
+def _retry_after(value):
     try:
-        request=Request(url+"?"+urlencode(params,doseq=True),headers={"Accept-Encoding":"identity","User-Agent":"ATLAS-Research/1.0"})
+        if re.fullmatch(r"[0-9]{1,12}",value or ""):
+            return int(value)
+        requested=parsedate_to_datetime(value)
+        if requested.tzinfo is None:requested=requested.replace(tzinfo=timezone.utc)
+        return max(0,int((requested-datetime.now(timezone.utc)).total_seconds()))
+    except (TypeError,ValueError,OverflowError):
+        return None
+
+def _download(url,params,*,max_bytes=MAX_BYTES):
+    # No redirects or HTTP client URL logging (credentials can be query parameters).
+    parsed=urlsplit(url)
+    provider=HOSTS.get(parsed.netloc)
+    if parsed.scheme!="https" or not provider or parsed.query or parsed.fragment:
+        raise ValueError("GLOBAL_SOURCE_NOT_ALLOWED")
+    try:claim=quote_recovery.claim(provider)
+    except (OSError,sqlite3.Error):
+        raise GlobalCooldown("GLOBAL_RECOVERY_STORAGE_UNAVAILABLE") from None
+    if claim is None:
+        raise GlobalCooldown("GLOBAL_SOURCE_COOLDOWN")
+    reason="PROVIDER_REQUEST_FAILED";retry=None
+    try:
+        request=Request(url+("?" + urlencode(params,doseq=True) if params else ""),
+                        headers={"Accept-Encoding":"identity","User-Agent":"ATLAS-Research/1.0"})
         deadline=monotonic()+30
         data=bytearray()
         with build_opener(_NoRedirect()).open(request,timeout=12) as response:
             while True:
                 chunk=response.read(65536)
-                if monotonic()>deadline or len(data)+len(chunk)>MAX_BYTES:
+                if monotonic()>deadline or len(data)+len(chunk)>max_bytes:
                     raise ValueError("GLOBAL_SOURCE_LIMIT")
-                if not chunk:
-                    break
+                if not chunk:break
                 data.extend(chunk)
+        # Twelve Data can report rate limits/access failure inside HTTP 200.
+        if provider=="TWELVE_DATA":
+            body=json.loads(data)
+            if isinstance(body,dict) and body.get("status")=="error":
+                code=str(body.get("code"))
+                reason="PROVIDER_RATE_LIMITED" if code=="429" else "PROVIDER_ACCESS_REJECTED" if code in ("401","403") else "PROVIDER_HTTP_FAILURE"
+                raise ValueError("GLOBAL_SOURCE_REQUEST_FAILED")
+        reason=None
         return bytes(data)
+    except HTTPError as error:
+        reason="PROVIDER_RATE_LIMITED" if error.code==429 else "PROVIDER_ACCESS_REJECTED" if error.code in (401,403) else "PROVIDER_HTTP_FAILURE"
+        retry=_retry_after(error.headers.get("Retry-After") if error.headers else None)
+        error.close()
+        raise ValueError("GLOBAL_SOURCE_REQUEST_FAILED") from None
     except Exception:
         raise ValueError("GLOBAL_SOURCE_REQUEST_FAILED") from None
+    finally:
+        try:quote_recovery.finish(provider,claim,reason,retry)
+        except (OSError,sqlite3.Error):pass
 
 def _number(value,source):
     if value is None or value in ("","N/A"):
@@ -210,11 +259,15 @@ def read(connect,instant=None):
             row=db.execute("SELECT captured_at,payload FROM global_macro_snapshot WHERE source=?",(source,)).fetchone()
             if not row:
                 continue
-            stamp=datetime.fromisoformat(row["captured_at"])
-            if stamp.tzinfo is None or not timedelta(0)<=instant-stamp<=timedelta(hours=24):
-                item["status"]="STALE_CAPTURE"
+            try:
+                stamp=datetime.fromisoformat(row["captured_at"])
+                if stamp.tzinfo is None or not timedelta(0)<=instant-stamp<=timedelta(hours=24):
+                    item["status"]="STALE_CAPTURE"
+                    continue
+                items=summarize(source,json.loads(row["payload"]),today)
+            except (ValueError,TypeError,KeyError,AttributeError,InvalidOperation,ArithmeticError):
+                item["status"]="INVALID_CACHED_EVIDENCE"
                 continue
-            items=summarize(source,json.loads(row["payload"]),today)
             count=sum(v["status"]=="AVAILABLE" for v in items)
             item.update(status="AVAILABLE" if count==len(items) else "PARTIAL" if count else "STALE_OR_MISSING",
                         retrieved_at=stamp.isoformat(),items=items)

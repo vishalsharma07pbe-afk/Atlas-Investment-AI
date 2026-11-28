@@ -76,6 +76,13 @@ class ScreenerTests(unittest.TestCase):
         for candle in adjusted["candles"]:
             candle["adjustment_status"]="ADJUSTED"
         result=screen([row],lambda _:adjusted,as_of=date(2026,11,14),batch_loaded=True)
+        # A label alone cannot reconcile a recorded crossing. No event
+        # crossing remains eligible for preliminary screening as before.
+        self.assertEqual(result["eligible_count"],0)
+        self.assertEqual(result["skipped"]["ADJUSTED_ACTION_RECONCILIATION"],1)
+        self.assertEqual(result["top_gainers"],[])
+        result=screen([{**row,"latest_action_date":"2026-10-19"}],lambda _:adjusted,
+                      as_of=date(2026,11,14),batch_loaded=True)
         self.assertEqual(result["eligible_count"],1)
 
 if __name__=="__main__":

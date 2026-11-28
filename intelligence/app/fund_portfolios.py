@@ -135,15 +135,21 @@ def store(payload,today,stamp):
 def refresh():
     if not permitted():
         raise ValueError("PORTFOLIO_SOURCE_NOT_AUTHORIZED")
+    if fund_disclosures.bulk_cooldown():
+        return 0
     deadline=time.monotonic()+90
     payload=bytearray()
-    with httpx.Client(timeout=20,follow_redirects=False,headers={"User-Agent":"ATLAS-Research/1.0","Accept-Encoding":"identity"}) as client:
-        with client.stream("GET",URL) as response:
-            response.raise_for_status()
-            for part in response.iter_bytes():
-                if time.monotonic()>deadline or len(payload)+len(part)>MAX_BYTES:
-                    raise ValueError("PORTFOLIO_DOWNLOAD_LIMIT")
-                payload.extend(part)
+    try:
+        with httpx.Client(timeout=20,follow_redirects=False,headers={"User-Agent":"ATLAS-Research/1.0","Accept-Encoding":"identity"}) as client:
+            with client.stream("GET",URL) as response:
+                response.raise_for_status()
+                for part in response.iter_bytes():
+                    if time.monotonic()>deadline or len(payload)+len(part)>MAX_BYTES:
+                        raise ValueError("PORTFOLIO_DOWNLOAD_LIMIT")
+                    payload.extend(part)
+    except httpx.HTTPStatusError as error:
+        fund_disclosures.record_bulk_failure(error)
+        raise ValueError("PORTFOLIO_HTTP_FAILED") from None
     stamp=datetime.now(timezone.utc)
     return store(bytes(payload),stamp.astimezone(IST).date(),stamp.isoformat())
 
@@ -462,26 +468,25 @@ def research_identities(instant=None):
     largest={}
     try:
         with nav_catalog._LOCK,closing(nav_catalog._connect()) as db:
-            rows=db.execute("SELECT fund_id,payload,collected_at FROM fund_portfolio_snapshot ORDER BY fund_id LIMIT 100").fetchall()
-            for row in rows:
-                if not fund_disclosures._day(row["collected_at"],today,2):
+            # Evaluate all accepted fresh portfolios within the original file
+            # row budget, not an alphabetical first-100 subset. Stream rows to
+            # bound memory and keep the provider research cap at 200 identities.
+            for row in db.execute("SELECT fund_id,payload,collected_at FROM fund_portfolio_snapshot"):
+                try:
+                    if not fund_disclosures._day(row["collected_at"],today,2):
+                        continue
+                    report=json.loads(row["payload"])
+                    if report.get("fund_id")!=row["fund_id"] or not fund_disclosures._day(report["portfolio_date"],today,60):
+                        continue
+                    holdings=_validated_equities(report)
+                    if holdings is None:continue
+                    for holding in holdings:
+                        isin=holding["isin"]
+                        weight=Decimal(str(holding["weight_percent"]))
+                        weights[isin]=weights.get(isin,Decimal(0))+weight
+                        largest[isin]=max(largest.get(isin,Decimal(0)),weight)
+                except (ValueError,TypeError,KeyError,AttributeError,InvalidOperation):
                     continue
-                report=json.loads(row["payload"])
-                if report.get("fund_id")!=row["fund_id"] or not fund_disclosures._day(report["portfolio_date"],today,60):
-                    continue
-                local={}
-                for holding in report["equities"]:
-                    isin=holding["isin"]
-                    weight=Decimal(str(holding["weight_percent"]))
-                    if not isinstance(isin,str) or not ISIN.fullmatch(isin) or not weight.is_finite() or not 0<weight<=100 or isin in local:
-                        local={}
-                        break
-                    local[isin]=weight
-                if sum(local.values(),Decimal(0))>Decimal("100.5"):
-                    continue
-                for isin,weight in local.items():
-                    weights[isin]=weights.get(isin,Decimal(0))+weight
-                    largest[isin]=max(largest.get(isin,Decimal(0)),weight)
     except (OSError,sqlite3.Error,ValueError,TypeError,KeyError,AttributeError,InvalidOperation):
         return []
     # Sum of original public fund weights is a collection priority, not an

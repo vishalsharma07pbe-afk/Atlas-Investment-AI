@@ -125,3 +125,15 @@ class StockQualificationTests(unittest.TestCase):
         self.assertIn("NONPOSITIVE_PROSPECTIVE_NET_INDEX_DIFFERENCE",item["stock_qualification"]["review_findings"])
         self.assertIn("INDEPENDENT_PROSPECTIVE_STRATEGY_VALIDATION_REQUIRED",item["stock_qualification"]["blockers"])
         self.assertEqual(snap["stock_qualification"]["horizons"]["SWING"]["recommendations"],[])
+
+    def test_raw_current_observations_remain_separate_from_adjusted_watches(self):
+        snap,item,_=fixture()
+        item["adjustment_status"]="RAW_UNADJUSTED"
+        qualification.attach(snap,TODAY)
+        result=snap["stock_qualification"]["horizons"]["SWING"]
+        self.assertEqual(result["selection"]["watch_refs"],[])
+        self.assertEqual(result["selection"]["preliminary_watch_refs"],[{"exchange":"NSE","id":1,"isin":item["isin"]}])
+        self.assertEqual(result["recommendations"],[])
+        item["as_of"]="2026-11-20"
+        qualification.attach(snap,TODAY)
+        self.assertEqual(snap["stock_qualification"]["horizons"]["SWING"]["selection"]["preliminary_watch_refs"],[])

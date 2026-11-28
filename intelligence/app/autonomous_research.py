@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from .market_client import backend_json
 from . import steady_momentum, amfi_equity_caps, company_reports, nse_surveillance, nse_pledge_filings, nse_financial_filings, sector_price_context, sector_benchmarks, score_calibration, fip_research, bracket_research
 from .screener import screen
-from . import discovery_scan
+from . import discovery_scan, research_display_archive
 from .mutual_fund_recommendations import CATEGORIES, dashboard
 from . import forward_earnings, official_amc_factsheet, official_tri, fund_ai_review, unified_decision, stock_qualification, market_regime, release_reconciliation, economic_calendar, global_releases, global_context, global_markets, global_macro, global_fx, automatic_deals, fund_portfolios, fund_disclosures, fund_prospective, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
 
@@ -53,8 +53,28 @@ def _connect():
 
 
 def _save(section, result=None):
-    stamp = now().isoformat()
+    instant=now()
+    stamp=instant.isoformat()
     with closing(_connect()) as db, db:
+        # Seed a legacy last-successful payload even when the first post-upgrade
+        # refresh fails. A historical capture always retains its original date.
+        if research_display_archive.permitted():
+            old=db.execute("SELECT generated_at,payload FROM research_sections WHERE section=?",(section,)).fetchone()
+            if old and old["generated_at"] and old["payload"]:
+                try:
+                    original=datetime.fromisoformat(old["generated_at"])
+                    previous=json.loads(old["payload"])
+                    if original.tzinfo is not None and original<=instant:
+                        research_display_archive.capture(db,section,previous,original,
+                            _published_evidence_current(section,previous,original.astimezone(ZoneInfo("Asia/Kolkata")).date()))
+                except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
+                    pass
+            if result is not None:
+                try:
+                    research_display_archive.capture(db,section,result,instant,
+                        _published_evidence_current(section,result,instant.astimezone(ZoneInfo("Asia/Kolkata")).date()))
+                except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
+                    pass
         if result is None:
             db.execute("""INSERT INTO research_sections(section,attempted_at,status,error_code)
                 VALUES(?,?,'FAILED','RESEARCH_REFRESH_FAILED')
@@ -193,7 +213,9 @@ def _fund_qualification_counts(summary):
 
 
 def fund_snapshot(category):
-    result = dashboard(category, 60, "MODERATE")
+    # Public category discovery is not a personalized recommendation. Keep
+    # the existing suitability filters authoritative for the qualified lists.
+    result = dashboard(category, 60, "MODERATE",category_only=True)
     # Keep strict rankings and compact counts, not the individual exclusions.
     snapshot={key: result[key] for key in (
         "category", "coverage", "top_performers", "growth_outlook",
@@ -218,7 +240,7 @@ def fund_snapshot(category):
     shortlist=result.get("historical_research_shortlist") or {}
     if shortlist.get("methodology")=="MF-MATCHED-PEER-1" and shortlist.get("category")==category:
         snapshot["historical_research_shortlist"]={k:shortlist.get(k) for k in
-            ("methodology","category","status","eligible_count","matched_count","cohort_count","first_date","last_date","date_digest","notice")}
+            ("methodology","category","status","eligible_count","matched_count","cohort_count","first_date","last_date","date_digest","notice","scope","selected_suitability")}
         snapshot["historical_research_shortlist"]["items"]=[
             {k:r.get(k) for k in ("identifier","name","isin_growth","nav","nav_date","score","weekly_cagr_percent","relative_risk","status","qualified")}
             for r in shortlist.get("items",[])[:5] if isinstance(r,dict) and r.get("qualified") is False and r.get("status")=="HISTORICAL_RESEARCH_ONLY"]
@@ -453,6 +475,13 @@ def read_snapshot(include_ai=True):
     return snapshot
 
 
+def read_overview():
+    """UI-only projection, appended after all current qualification consumers."""
+    snapshot=read_snapshot()
+    snapshot["historical_display"]=research_display_archive.display(_connect,snapshot,now())
+    return snapshot
+
+
 def job_status():
     enabled,_=config()
     if not enabled:
@@ -462,6 +491,8 @@ def job_status():
     calendar_job=next(j for j in result["jobs"] if j["job"]=="CALENDAR_CONTEXT")
     result["calendar"]=research_calendar.read(_connect,current) if calendar_job["status"]=="PASS_COMPLETED" else {"status":"CALENDAR_UNAVAILABLE_OR_PENDING","sessions":[]}
     result["company_acquisition"]=automatic_company_evidence.acquisition_status(read_market_snapshot(),_connect,current)
+    result["fund_disclosure_acquisition"]=fund_disclosures.ingestion_coverage(current)
+    result["global_source_recovery"]=global_macro.quote_recovery.status(current.timestamp(),global_sources=True)
     return result
 
 
@@ -561,18 +592,16 @@ def _execute_job(job):
         ids=fund_portfolios.research_identities()
         if not ids:
             return "WAITING_EVIDENCE"
-        automatic_company_evidence.refresh({"enabled":True,"sections":[]},_connect,explicit_isins=ids)
-        return "PASS_COMPLETED"
+        outcome=automatic_company_evidence.refresh({"enabled":True,"sections":[]},_connect,explicit_isins=ids)
+        return "PASS_COMPLETED" if outcome in ("AVAILABLE","PARTIAL") else "WAITING_EVIDENCE"
     if job=="FUND_PORTFOLIOS":
         if not fund_portfolios.permitted():
             return "DISABLED_OR_NOT_AUTHORIZED"
-        fund_portfolios.refresh()
-        return "PASS_COMPLETED"
+        return "PASS_COMPLETED" if fund_portfolios.refresh()>0 else "WAITING_EVIDENCE"
     if job=="FUND_DISCLOSURES":
         if not fund_disclosures.permitted():
             return "DISABLED_OR_NOT_AUTHORIZED"
-        fund_disclosures.refresh()
-        return "PASS_COMPLETED"
+        return "PASS_COMPLETED" if fund_disclosures.refresh()>0 else "WAITING_EVIDENCE"
     if job=="CALENDAR_CONTEXT":
         research_calendar.refresh(_connect)
         return "PASS_COMPLETED"
@@ -624,7 +653,8 @@ def _execute_job(job):
     if not any(s["section"] in ("NSE","BSE") and s["status"]=="READY" for s in snapshot["sections"]):
         return "WAITING_EVIDENCE"
     if job=="COMPANY_EVIDENCE":
-        automatic_company_evidence.refresh(snapshot,_connect)
+        outcome=automatic_company_evidence.refresh(snapshot,_connect)
+        return "PASS_COMPLETED" if outcome in ("AVAILABLE","PARTIAL") else "WAITING_EVIDENCE"
     elif job=="COMPANY_NEWS":
         automatic_news.refresh(snapshot,_connect)
     elif job=="STRATEGY_REPLAY":
@@ -637,6 +667,19 @@ def _execute_job(job):
     return "PASS_COMPLETED"
 
 
+def company_success_interval(interval):
+    """Bounded stock acquisition cadence; only successful evidence passes.
+
+    One company per pass, single local worker, existing transport cooldowns.
+    Invalid operator configuration falls back to the normal job cadence.
+    """
+    try:
+        configured=int(os.getenv("ATLAS_COMPANY_RESEARCH_INTERVAL_SECONDS","300"))
+        if not 300<=configured<=86400:return interval
+        return configured
+    except (ValueError,TypeError):return interval
+
+
 def run_one_job(interval):
     """Claim one due job, run it outside the transaction, persist its result."""
     claimed=research_jobs.claim(_connect,research_jobs.definitions(SECTIONS),now().timestamp())
@@ -645,9 +688,11 @@ def run_one_job(interval):
     job,token=claimed
     try:
         outcome=_execute_job(job)
+    except global_macro.GlobalCooldown:
+        outcome="WAITING_EVIDENCE"
     except Exception:
         outcome="FAILED"
-    research_jobs.finish(_connect,job,token,now().timestamp(),(research_calendar.POLL_SECONDS if job=="CALENDAR_CONTEXT" else economic_calendar.INTERVAL if job=="ECONOMIC_CALENDAR" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_releases.INTERVAL if job in global_releases.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_markets.INTERVAL if job in global_markets.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_macro.INTERVAL if job in global_macro.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_fx.INTERVAL if job=="GLOBAL_FX" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else 3600 if job=="FORWARD_EARNINGS_BASELINE" else 900 if job=="OFFICIAL_TRI_DOWNLOAD" else sector_benchmarks.INTERVAL if job=="SECTOR_BENCHMARKS" else nse_financial_filings.INTERVAL if job=="NSE_FINANCIAL_FILINGS" else nse_pledge_filings.INTERVAL if job=="NSE_PLEDGE_FILINGS" else nse_surveillance.INTERVAL if job=="NSE_SURVEILLANCE" else amfi_equity_caps.INTERVAL if job=="AMFI_EQUITY_CAP" else fund_disclosures.INTERVAL if job in ("FUND_DISCLOSURES","FUND_PORTFOLIOS") and outcome!="DISABLED_OR_NOT_AUTHORIZED" else interval),outcome)
+    research_jobs.finish(_connect,job,token,now().timestamp(),(company_success_interval(interval) if job=="COMPANY_EVIDENCE" and outcome=="PASS_COMPLETED" else research_calendar.POLL_SECONDS if job=="CALENDAR_CONTEXT" else economic_calendar.INTERVAL if job=="ECONOMIC_CALENDAR" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_releases.INTERVAL if job in global_releases.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_markets.INTERVAL if job in global_markets.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_macro.INTERVAL if job in global_macro.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_fx.INTERVAL if job=="GLOBAL_FX" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else 3600 if job=="FORWARD_EARNINGS_BASELINE" else 900 if job=="OFFICIAL_TRI_DOWNLOAD" else sector_benchmarks.INTERVAL if job=="SECTOR_BENCHMARKS" else nse_financial_filings.INTERVAL if job=="NSE_FINANCIAL_FILINGS" else nse_pledge_filings.INTERVAL if job=="NSE_PLEDGE_FILINGS" else nse_surveillance.INTERVAL if job=="NSE_SURVEILLANCE" else amfi_equity_caps.INTERVAL if job=="AMFI_EQUITY_CAP" else fund_disclosures.INTERVAL if job in ("FUND_DISCLOSURES","FUND_PORTFOLIOS") and outcome!="DISABLED_OR_NOT_AUTHORIZED" else interval),outcome)
     return True
 
 

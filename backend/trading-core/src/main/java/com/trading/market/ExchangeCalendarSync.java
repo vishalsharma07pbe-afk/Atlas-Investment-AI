@@ -133,8 +133,9 @@ public class ExchangeCalendarSync {
     WHERE (a.next_attempt_at IS NULL OR a.next_attempt_at<=now())
       AND (SELECT count(DISTINCT e.code) FROM market_sessions s JOIN exchanges e ON e.id=s.exchange_id
            WHERE s.session_date=CAST(? AS date)-n AND e.code IN ('NSE','BSE'))<2
-    ORDER BY n LIMIT ?
-    """,(rs,i)->rs.getObject("day",LocalDate.class),today,today,today,BATCH);
+    ORDER BY CASE WHEN n<=7 THEN 0
+                 WHEN extract(isodow FROM CAST(? AS date)-n) BETWEEN 1 AND 5 THEN 1 ELSE 2 END,n LIMIT ?
+    """,(rs,i)->rs.getObject("day",LocalDate.class),today,today,today,today,BATCH);
   for(LocalDate day:due){
    if(OperatorFeedCooldown.blocked(jdbc))return;
    UUID claim=UUID.randomUUID();
@@ -149,10 +150,7 @@ public class ExchangeCalendarSync {
    try{
     var rows=fetch(day,token);
     int written=store(rows);
-    boolean complete=Boolean.TRUE.equals(jdbc.queryForObject("""
-       SELECT count(DISTINCT e.code)=2 FROM market_sessions s JOIN exchanges e ON e.id=s.exchange_id
-       WHERE s.session_date=? AND e.code IN ('NSE','BSE')
-       """,Boolean.class,day));
+    boolean complete=resolved(day);
     finish(day,claim,complete?"SUCCESS":"WAITING_EVIDENCE",written,complete?null:"MISSING_OR_CONFLICTING_SESSION_EVIDENCE",complete?86400:21600);
     if(complete)OperatorFeedCooldown.recovered(jdbc);
    }catch(Exception ex){
@@ -162,6 +160,17 @@ public class ExchangeCalendarSync {
     if(OperatorFeedCooldown.record(jdbc,ex))return;
    }
   }
+ }
+ // A stored row alone is not proof of usable calendar evidence. Existing
+ // contradictory/manual records are retained for review, not overwritten.
+ boolean resolved(LocalDate day){
+  var calendar=new MarketCalendarService(jdbc);
+  for(String venue:List.of("NSE","BSE")){
+   var context=calendar.sessionContext(venue,day.atTime(12,0).atZone(MarketCalendarService.IST).toInstant());
+   String phase=(String)context.get("phase");
+   if("CALENDAR_UNVERIFIED".equals(phase)||"SPECIAL_SESSION_UNSUPPORTED".equals(phase))return false;
+  }
+  return true;
  }
  private void finish(LocalDate day,UUID claim,String status,int written,String error,int delay){
   jdbc.update("""

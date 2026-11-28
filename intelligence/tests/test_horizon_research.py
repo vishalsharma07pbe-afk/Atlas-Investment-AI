@@ -47,3 +47,20 @@ class HorizonResearchTests(unittest.TestCase):
         self.assertEqual(result["matched_count"],8)
         self.assertEqual(len(result["candidates"]),5)
         self.assertEqual(result["status"],"TECHNICAL_WATCH_ONLY")
+
+    def test_valid_adjusted_identity_is_not_crowded_out_by_raw_watches(self):
+        from app.discovery_scan import _horizon
+        rows=[]
+        for i in range(6):
+            result=evaluate(fixture(60),indicators(),{"id":i,"symbol":f"TEST{i}","exchange":"NSE"})
+            candidate=result["SWING"][1]
+            candidate.update(rank_score=100-i,adjustment_status="RAW_UNADJUSTED")
+            if i==5:
+                candidate.update(adjustment_status="ADJUSTED",isin="INE002A01018",
+                                 replay_evidence_hash="a"*64,security_state="UNKNOWN")
+            rows.append(result)
+        summary=summarize(rows)["SWING"]
+        self.assertEqual(summary["matched_count"],6)
+        self.assertEqual([r["id"] for r in summary["candidates"]],[5,0,1,2,3])
+        self.assertEqual(sorted([r["SWING"][1] for r in rows],key=_horizon)[0]["id"],5)
+        self.assertEqual(summary["status"],"TECHNICAL_WATCH_ONLY")

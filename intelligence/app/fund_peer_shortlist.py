@@ -21,13 +21,17 @@ def num(x,lo,hi):
     return type(x) in (float,int) and isfinite(x) and lo<=x<=hi
 def percentile(value,values):
     return 100*(sum(v<value for v in values)+.5*(sum(v==value for v in values)-1))/(len(values)-1)
-def build(candidates,source_rows,category,fit,today,rolling_context):
+def build(candidates,source_rows,category,fit,today,rolling_context,*,category_only=False):
     report={"methodology":VERSION,"status":"AWAITING_MATCHED_HISTORY","category":category,"eligible_count":0,
-        "matched_count":0,"cohort_count":0,"items":[],"notice":NOTICE}
+        "matched_count":0,"cohort_count":0,"items":[],"notice":NOTICE,
+        "scope":"CATEGORY_RESEARCH_ONLY" if category_only else "SELECTED_FILTER_RESEARCH",
+        "selected_suitability":fit.get("status")}
     if category not in COMPARABLE:
         report["status"]="CATEGORY_SPECIFIC_MODEL_REQUIRED";return report
-    if fit.get("status")!="POTENTIALLY_SUITABLE":
+    if fit.get("status")!="POTENTIALLY_SUITABLE" and not category_only:
         report["status"]="SELECTED_HORIZON_OR_RISK_REVIEW";return report
+    if category_only:
+        report["notice"]+=" Category-wide comparison only; selected personal suitability is not established."
     if not isinstance(source_rows,list) or len(source_rows)>40 or len(candidates)>40:return report
     ids=Counter(str(r.get("scheme_code")) for r in source_rows if isinstance(r,dict))
     isins=Counter(r.get("isin_growth") for r in source_rows if isinstance(r,dict) and isinstance(r.get("isin_growth"),str))

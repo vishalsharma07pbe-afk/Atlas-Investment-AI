@@ -64,3 +64,17 @@ class UnifiedDecisionTests(unittest.TestCase):
         r=d.summarize(snapshot,TODAY)
         self.assertEqual(len(r["equity_companies"][0]["observations"]),1)
         self.assertTrue(r["canonical_projection_complete"])
+
+    def test_explicit_strict_elite_selection_excludes_preliminary_cards(self):
+        snapshot,item=fixture()
+        elite={**item,"status":"SCREEN_MATCH_ONLY","elite_assessment":{"methodology":elite_assessment.VERSION,
+          "status":"SCORE_WITHHELD","qualified":False,"blockers":["FINAL_QUALIFICATION_VALIDATION_REQUIRED"]}}
+        snapshot["steady_momentum"]={"items":[elite],"strict_suggestions":{"status":"NO_JOINT_SCREEN_MATCHES",
+            "qualification_eligible":False,"items":[]}}
+        result=d.summarize(snapshot,TODAY)
+        self.assertEqual([r["horizon"] for r in result["equity_companies"][0]["observations"]],["SWING"])
+        strict={**elite}
+        snapshot["steady_momentum"]["strict_suggestions"].update(status="JOINT_SCREEN_MATCHES",items=[strict])
+        result=d.summarize(snapshot,TODAY)
+        self.assertEqual({r["horizon"] for r in result["equity_companies"][0]["observations"]},{"SWING","ELITE"})
+        self.assertFalse(result["equity_companies"][0]["qualified"])

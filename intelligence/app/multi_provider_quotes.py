@@ -1,5 +1,7 @@
 """Read-only authorized quote adapters; never submit orders or silently invent timestamps."""
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from math import ceil
 from zoneinfo import ZoneInfo
 from decimal import Decimal, InvalidOperation
 import json
@@ -16,10 +18,31 @@ from .provider_router import Quote, ProviderFailure, ReadOnlyRouter, CircuitBrea
 SYMBOL_RE = re.compile(r"^[A-Z0-9._&-]{1,40}$")
 KEY_RE = re.compile(r"^[A-Z0-9_|.-]{3,120}$")
 DEFAULT_TIMEOUT = 5
+EQ_KEY_RE=re.compile(r"(?:NSE_EQ|BSE_EQ)\|INE[A-Z0-9]{9}")
 # Circuit state survives separate HTTP requests within this process.
 quote_breaker = CircuitBreaker()
 
+def _retry_after(value):
+    try:
+        if isinstance(value,str) and re.fullmatch(r"[0-9]{1,12}",value):
+            return int(value)
+        stamp=parsedate_to_datetime(value)
+        if stamp.tzinfo is None:stamp=stamp.replace(tzinfo=timezone.utc)
+        return max(0,ceil((stamp-datetime.now(timezone.utc)).total_seconds()))
+    except (ValueError,TypeError,OverflowError):
+        return None
+
+def _unique_keys(pairs):
+    out={}
+    for key,value in pairs:
+        if key in out:raise ValueError("DUPLICATE_MAPPING_KEY")
+        out[key]=value
+    return out
+
 def _request(url, headers, *, payload=None):
+    parsed=urlsplit(url)
+    if parsed.scheme!="https" or parsed.netloc not in ("api.upstox.com","api.polygon.io","api.dhan.co") or parsed.fragment:
+        raise ProviderFailure("PROVIDER_REQUEST_FAILED")
     provider={"api.upstox.com":"UPSTOX","api.polygon.io":"POLYGON","api.dhan.co":"DHAN"}.get(urlsplit(url).hostname)
     # The only POST supported by this market-data transport is this fixed
     # read-only quote endpoint. Never forward arbitrary paths or order requests.
@@ -42,12 +65,11 @@ def _request(url, headers, *, payload=None):
         else:
             response = httpx.get(url, headers=safe_headers, timeout=DEFAULT_TIMEOUT,
                                  follow_redirects=False)
+        if response.status_code in (401,403,429,503):
+            retry_after=_retry_after(response.headers.get("Retry-After","")) if hasattr(response.headers,"get") else None
         if response.status_code in (401, 403):
             raise ProviderFailure("PROVIDER_ACCESS_REJECTED")
         if response.status_code == 429:
-            raw=response.headers.get("Retry-After","")
-            if isinstance(raw,str) and raw.isascii() and raw.isdigit() and len(raw)<=6:
-                retry_after=int(raw)
             raise ProviderFailure("PROVIDER_RATE_LIMITED")
         if response.status_code != 200:
             raise ProviderFailure("PROVIDER_HTTP_FAILURE" if response.status_code>=500 else "PROVIDER_REQUEST_REJECTED")
@@ -107,7 +129,7 @@ def _price(value):
 
 def upstox_quote(symbol, instrument_key, token):
     """Upstox V3 full quote; requires an explicit, verified NSE/BSE instrument mapping."""
-    if not SYMBOL_RE.fullmatch(symbol) or not KEY_RE.fullmatch(instrument_key) or not token:
+    if not SYMBOL_RE.fullmatch(symbol) or not EQ_KEY_RE.fullmatch(instrument_key) or not token:
         raise ProviderFailure("INVALID_UPSTOX_CONFIGURATION")
     url = "https://api.upstox.com/v3/market-quote/quotes?" + urlencode({"instrument_key": instrument_key})
     body = _request(url, {"Authorization": "Bearer " + token, "Accept": "application/json"})
@@ -182,7 +204,7 @@ def _dhan_mapping(mapping):
     if len(raw)>40000:
         return {}
     try:
-        parsed=json.loads(raw)
+        parsed=json.loads(raw,object_pairs_hook=_unique_keys)
     except (ValueError,TypeError):
         return {}
     if not isinstance(parsed,dict) or len(parsed)>300:
@@ -207,7 +229,7 @@ def _mapping():
     if len(raw) > 20000:
         return {}
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(raw,object_pairs_hook=_unique_keys)
     except (ValueError, TypeError):
         return {}
     if not isinstance(parsed, dict) or len(parsed) > 300:
@@ -227,7 +249,7 @@ def configured_router():
     dhan_allowed=(os.getenv("ATLAS_DHAN_QUOTES_AUTHORIZED","false").lower()=="true"
                   and bool(dhan_token.strip()) and bool(dhan_client.strip()) and bool(dhan_mapping))
     upstox_allowed = (os.getenv("ATLAS_UPSTOX_QUOTES_AUTHORIZED", "false").lower() == "true"
-                      and bool(upstox_token) and bool(mapping))
+                      and bool(upstox_token.strip()) and any(EQ_KEY_RE.fullmatch(k) for k in mapping.values()))
     polygon_allowed = (os.getenv("ATLAS_POLYGON_QUOTES_AUTHORIZED", "false").lower() == "true"
                        and bool(polygon_key))
     # Never substitute a US ticker quote for an Indian equity with the same symbol.
@@ -248,11 +270,25 @@ def configured_router():
                 # The legacy symbol-only endpoint cannot distinguish venues.
                 return {"status":"UNAVAILABLE","live":False,"quote":None,"attempts":[],
                         "notice":"Ambiguous Indian/US symbol mapping; use an unambiguous instrument identity.","reason":"AMBIGUOUS_MARKET_IDENTITY"}
-            self.adapters = [(name,fetch,enabled and (symbol in mapping if name=="UPSTOX"
+            self.adapters = [(name,fetch,enabled and (symbol in mapping and bool(EQ_KEY_RE.fullmatch(mapping[symbol])) if name=="UPSTOX"
                               else symbol in dhan_mapping if name=="DHAN" else symbol in us_symbols))
                              for name,fetch,enabled in adapters]
-            return super().quote(symbol, max_age_seconds)
-    return SymbolScopedRouter(adapters, breaker=quote_breaker)
+            result=super().quote(symbol,max_age_seconds)
+            if result["status"]=="VALIDATED":
+                source=result["quote"]["source"]
+                if source in ("UPSTOX","DHAN"):
+                    result["quote"].update(market=mapping[symbol].split("|")[0],instrument_key=mapping[symbol],currency="INR")
+                elif source=="POLYGON":
+                    result["quote"].update(market="US",currency="USD")
+                # A Dhan quote with an unconfigured primary is an alternate,
+                # not an observed failover. A blocked primary circuit counts.
+                failover=source=="DHAN" and any(a["provider"]=="UPSTOX" and a["status"] in ("FAILED_OR_INVALID","CIRCUIT_OPEN") for a in result["attempts"])
+                result["route"]={"status":"SAME_MARKET_FALLBACK" if failover else "DIRECT_PROVIDER",
+                                 "source":source,"historical_or_streaming_eligible":False}
+                if failover:
+                    result["route"]["aggregate_observation_recorded"]=quote_recovery.record_fallback()
+            return result
+    return SymbolScopedRouter(adapters, breaker=quote_breaker,strict_provider=True)
 
 def quote_status(symbol, max_age_seconds=60):
     result = configured_router().quote(symbol, max_age_seconds)
@@ -275,5 +311,6 @@ def provider_status():
         "automatic_fallback_available": False, "same_market_fallback_configured":dhan_configured and dhan_gate,
         "streaming_verified": False,
         "http_recovery":quote_recovery.status(),
+        "fallback_observation":quote_recovery.fallback_status(),
         "circuits":[quote_breaker.status(name) for name in ("UPSTOX","POLYGON","DHAN")],
         "notice":"Optional same-market Dhan HTTP fallback requires independently verified mappings, quote entitlement and timestamp semantics. Configuration does not prove live availability. Indian and US instruments cannot substitute for one another."}

@@ -26,6 +26,9 @@ NORMALIZATION_VERSION=2
 ANNUAL_HISTORY_CACHE_DAYS=7
 ANNUAL_SECTIONS=("income_statement","balance_sheet","cash_flow")
 MAX_PRIORITY_STREAK=3
+FRESH_REPORT_HOURS=24
+PARTIAL_REUSE_HOURS=18
+GLOBAL_DIAGNOSTICS={"PROVIDER_ACCESS_REJECTED","PROVIDER_RATE_LIMITED","PROVIDER_RECOVERY_COOLDOWN","PROVIDER_REQUEST_FAILED","PROVIDER_HTTP_FAILURE","RECOVERY_STORAGE_UNAVAILABLE","UPSTOX_TOKEN_MISSING"}
 REFRESH_OUTCOMES=("NO_CANDIDATES","PROVIDER_COOLDOWN","NO_DUE_CANDIDATES","CLAIM_NOT_ACQUIRED","AVAILABLE","PARTIAL","UNAVAILABLE")
 
 
@@ -47,7 +50,11 @@ def identify(snapshot):
                     yield item,isin
 
 
-def identify_priority(snapshot):
+def identify_priority(snapshot,instant=None):
+    # Reuse the strict, current, cross-venue FIP shortlist, not a new score.
+    if instant is not None:
+        for item,isin in identify_fip_priority(snapshot,instant):
+            yield item,isin
     yield from identify(snapshot)
     # Deepen the actual Elite candidates without expanding report attachment.
     for section in snapshot.get("sections",[]):
@@ -61,6 +68,22 @@ def identify_priority(snapshot):
                 isin=item.get("isin")
                 if isinstance(isin,str) and ISIN.fullmatch(isin) and item.get("exchange")==section["section"] and item.get("as_of")==expected and item.get("security_state") not in ("PCA","SME","RELIST","IPO","SUSPENDED_REPORTED"):
                     yield item,isin
+
+
+def identify_fip_priority(snapshot,instant):
+    from . import fip_research
+    try:
+        result=fip_research.rank(snapshot,instant)
+        if result.get("status")!="PRICE_MATCHES_AVAILABLE":
+            return
+        for item in result.get("items",[])[:10]:
+            isin=item.get("isin")
+            if (isinstance(isin,str) and re.fullmatch(r"INE[A-Z0-9]{9}",isin)
+                    and item.get("exchange") in ("NSE","BSE")
+                    and not item.get("review_findings")):
+                yield item,isin
+    except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
+        return
 
 
 def identify_sample(snapshot,instant):
@@ -103,21 +126,30 @@ def _table(db):
 
 
 def annual_capture(report,isin,instant):
-    """One coherent exact-source annual capture, never refreshed by a cache read."""
+    """Retain coherent exact-source annual evidence at its own original vintage.
+
+    The overall report can now contain reused nonannual sections, so the oldest
+    report timestamp is not necessarily the annual statement capture timestamp.
+    Never combine different annual vintages or advance their dates.
+    """
     try:
         if not re.fullmatch(r"INE[A-Z0-9]{9}",isin) or report.get("isin")!=isin:
             return None
-        stamp=datetime.fromisoformat(report["retrieved_at"])
-        if stamp.tzinfo is None or not instant-timedelta(days=ANNUAL_HISTORY_CACHE_DAYS)<=stamp<=instant:
-            return None
         from .financial_strength import _block
-        sections={}
+        sections={};stamps=set()
         for key in ANNUAL_SECTIONS:
             data,source=_block(report,key)
-            if data and source and data.get("rows") and datetime.fromisoformat(source["retrieved_at"])==stamp:
-                sections[key]=report["sections"][key]
-        if not sections:
+            if not data or not source or not data.get("rows"):continue
+            stamp=datetime.fromisoformat(source["retrieved_at"])
+            if stamp.tzinfo is None or not instant-timedelta(days=ANNUAL_HISTORY_CACHE_DAYS)<=stamp<=instant:return None
+            stamps.add(stamp)
+            sections[key]=report["sections"][key]
+        if not sections or len(stamps)!=1:
             return None
+        stamp=next(iter(stamps))
+        # Reject a capture that could not have existed at the latest report attempt.
+        latest=datetime.fromisoformat(report.get("last_refresh_at") or report["retrieved_at"])
+        if latest.tzinfo is None or not stamp<=latest<=instant:return None
         return {"isin":isin,"retrieved_at":stamp.isoformat(),"sections":sections,
                 "available_sections":len(sections),"historical_cache_only":True,
                 "notice":"Retained exact-source annual capture only. Not fresh company evidence or a forward estimate."}
@@ -290,10 +322,75 @@ def refresh(snapshot, connect, loader=company_research, instant=None, *, explici
     return outcome
 
 
+def _global_block(rows,instant):
+    # A company-specific absence or unsupported field is not a provider outage.
+    # The shared HTTP adapter independently enforces actual 429/access backoff.
+    cutoff=(instant-timedelta(hours=1)).isoformat()
+    for row in rows.values():
+        if row["status"]!="UNAVAILABLE" or not cutoff<row["attempted_at"]<=instant.isoformat():
+            continue
+        try:
+            payload=json.loads(row["payload"])
+            if any((block or {}).get("diagnostic") in GLOBAL_DIAGNOSTICS
+                   for block in payload.get("sections",{}).values()):
+                return True
+        except (ValueError,TypeError,AttributeError,KeyError):
+            continue
+    return False
+
+def _retained_sections(previous,isin,key,instant):
+    """Keep only exact, still-fresh normalized blocks; never redate a cache hit.
+
+    The annual statement trio is retained as one coherent capture or fetched
+    together. A partial annual capture cannot become a mixed-vintage trio.
+    """
+    if not previous or previous["status"]!="PARTIAL" or not previous["payload"]:
+        return {}
+    try:
+        report=json.loads(previous["payload"])
+        if report.get("isin")!=isin or report.get("normalization_version")!=NORMALIZATION_VERSION:
+            return {}
+        kept={}
+        suffix={"profile":"profile","ratios":"key-ratios","income_statement":"income-statement",
+                "quarterly_income":"income-statement","balance_sheet":"balance-sheet","cash_flow":"cash-flow",
+                "shareholding":"share-holdings","corporate_actions":"corporate-actions","competitors":"competitors"}
+        for name in SECTIONS:
+            block=report.get("sections",{}).get(name) or {}
+            source=block.get("source") or {}
+            endpoint="/v2/fundamentals/"+isin+"/"+suffix[name]
+            if name=="competitors" and key in ("NSE_EQ|"+isin,"BSE_EQ|"+isin):
+                endpoint="/v2/fundamentals/"+key.replace("|","%7C")+"/competitors"
+            if block.get("status")!="AVAILABLE" or not block.get("data") or source.get("provider")!="UPSTOX" or source.get("endpoint")!=endpoint:
+                continue
+            try: stamp=datetime.fromisoformat(source["retrieved_at"])
+            except (ValueError,TypeError,KeyError):continue
+            if stamp.tzinfo is not None and instant-timedelta(hours=PARTIAL_REUSE_HOURS)<=stamp<=instant:
+                kept[name]=block
+        annual=[kept.get(name) for name in ANNUAL_SECTIONS]
+        if not all(annual) or len({block["source"]["retrieved_at"] for block in annual if block})!=1:
+            for name in ANNUAL_SECTIONS:kept.pop(name,None)
+        return kept
+    except (ValueError,TypeError,AttributeError,KeyError,OverflowError):
+        return {}
+
+def _merge_refresh(report,retained,instant):
+    # No successful new section means no current report is promoted. Existing
+    # historical archive policy continues independently.
+    if not retained or not report["available_sections"]:
+        return report
+    sections={**report["sections"],**retained}
+    stamps=[datetime.fromisoformat(block["source"]["retrieved_at"]) for block in sections.values()
+            if block.get("status")=="AVAILABLE" and block.get("data")]
+    return {**report,"sections":sections,
+            "retrieved_at":min(stamps).isoformat(),"last_refresh_at":instant.isoformat(),
+            "available_sections":len(stamps),"reused_sections":sorted(retained),
+            "notice":report["notice"]+" Retained sections preserve their original retrieval dates; report freshness uses the oldest available section."}
+
 def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None):
     stamp=instant.isoformat()
     candidates={}
-    for item,isin in identify_priority(snapshot):
+    fip_order={isin:index for index,(_,isin) in enumerate(identify_fip_priority(snapshot,instant))} if explicit_isins is None else {}
+    for item,isin in identify_priority(snapshot,instant):
         # Exact public discovery venue/ISIN; no name matching.
         if isin not in candidates or item["exchange"]=="NSE":
             candidates[isin]=item["exchange"]+"_EQ|"+isin
@@ -312,13 +409,16 @@ def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None):
         _table(db)
         rows={r["isin"]:r for r in db.execute("SELECT isin,attempted_at,next_attempt_at,status,payload FROM automatic_company_evidence")}
         # Avoid repeated requests across the universe when the provider rejects access.
-        if any(r["status"]=="UNAVAILABLE" and r["attempted_at"]>(instant-timedelta(hours=1)).isoformat() for r in rows.values()):
+        if _global_block(rows,instant):
             return "PROVIDER_COOLDOWN"
-        priority={isin:i for i,isin in enumerate(candidates)} if explicit_isins is not None else {}
+        priority={isin:i for i,isin in enumerate(candidates)} if explicit_isins is not None else fip_order
         def due_now(i):
             return i not in rows or rows[i]["next_attempt_at"]<=stamp
+        # Oldest attempted first prevents starvation. Among never-attempted or
+        # equally old identities use strict FIP rank as the tie-breaker.
         due=sorted((isin for isin in candidates if due_now(isin)),
-                   key=lambda isin:(rows[isin]["attempted_at"] if isin in rows else "",priority.get(isin,0),isin))
+                   key=lambda isin:(rows[isin]["attempted_at"] if isin in rows else "",
+                                    priority.get(isin,len(fip_order) if explicit_isins is None else 0),isin))
         broad=False
         streak=0
         if explicit_isins is None:
@@ -360,7 +460,12 @@ def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None):
                 ON CONFLICT(scope) DO UPDATE SET priority_streak=excluded.priority_streak""",
                 (0 if broad else min(MAX_PRIORITY_STREAK,streak+1),))
     try:
-        report=normalize(loader(isin,candidates[isin]),isin,instant)
+        # Selective requests apply to the production adapter only. Existing
+        # injected two-argument loaders remain compatible and full-report.
+        retained=_retained_sections(previous,isin,candidates[isin],instant) if loader is company_research else {}
+        requested=[name for name in SECTIONS if name not in retained]
+        raw=loader(isin,candidates[isin],section_names=requested) if retained and requested else loader(isin,candidates[isin])
+        report=_merge_refresh(normalize(raw,isin,instant),retained,instant)
         status="AVAILABLE" if report["available_sections"]==len(SECTIONS) else "PARTIAL" if report["available_sections"] else "UNAVAILABLE"
     except Exception:
         report={"isin":isin,"retrieved_at":stamp,"normalization_version":NORMALIZATION_VERSION,
@@ -369,10 +474,16 @@ def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None):
                     "diagnostic":"COLLECTION_OR_NORMALIZATION_FAILED"} for key in SECTIONS}}
         status="UNAVAILABLE"
     with closing(connect()) as db, db:
+        retry=instant+timedelta(hours=24 if status=="AVAILABLE" else 6)
+        if status!="UNAVAILABLE":
+            # Never let the normal cooldown extend past expiration of retained
+            # evidence, otherwise the entire report can disappear unnecessarily.
+            expires=datetime.fromisoformat(report["retrieved_at"])+timedelta(hours=FRESH_REPORT_HOURS)
+            retry=min(retry,max(instant+timedelta(minutes=5),expires))
         updated=db.execute("""UPDATE automatic_company_evidence SET status=?,payload=?,next_attempt_at=?
             WHERE isin=? AND attempted_at=? AND status='RUNNING'""",
             (status,json.dumps(report,allow_nan=False),
-             (instant+timedelta(hours=24 if status=="AVAILABLE" else 6)).isoformat(),isin,stamp))
+             retry.isoformat(),isin,stamp))
         if updated.rowcount==1 and status!="UNAVAILABLE":
             _archive(db,report,isin,instant)
         db.execute("DELETE FROM automatic_company_evidence WHERE attempted_at<?",((instant-timedelta(days=30)).isoformat(),))
@@ -387,7 +498,8 @@ def acquisition_status(snapshot,connect,instant):
     import sqlite3
     from collections import Counter
     sample={isin for _,isin in identify_sample(snapshot,instant)}
-    primary={isin for _,isin in identify_priority(snapshot)}
+    primary={isin for _,isin in identify_priority(snapshot,instant)}
+    fip={isin for _,isin in identify_fip_priority(snapshot,instant)}
     stamp=instant.isoformat()
     try:
         with closing(connect()) as db:
@@ -454,6 +566,8 @@ def acquisition_status(snapshot,connect,instant):
                 counts["fresh_reports"]+=1
                 if report.get("normalization_version")==NORMALIZATION_VERSION:
                     counts["fresh_current_normalization"]+=1
+                if report.get("reused_sections"):
+                    counts["incremental_reports"]+=1
                 for key in SECTIONS:
                     block=report["sections"].get(key) or {}
                     if block.get("status")=="AVAILABLE" and block.get("data"):
@@ -463,14 +577,15 @@ def acquisition_status(snapshot,connect,instant):
             except (ValueError,TypeError,AttributeError,KeyError,OverflowError):
                 continue
         return {"status":"LOCAL_ACQUISITION_AUDIT","sample_identities":len(sample),
-                "primary_identities":len(primary),"due_sample":sum(due(i) for i in sample),
+                "primary_identities":len(primary),"fip_priority_identities":len(fip),
+                "due_fip_priority":sum(due(i) for i in fip),"due_sample":sum(due(i) for i in sample),
                 "due_primary":sum(due(i) for i in primary),"counts":dict(counts),
                 "fresh_sections":dict(sections),"fresh_detailed_statements":dict(detail),
                 "annual_archive_companies":len(archived),
                 "annual_archive_section_counts":dict(Counter(key for capture in archived.values() for key in capture["sections"])),
                 "priority_streak":rotation["priority_streak"] if rotation else 0,
                 "recent_section_diagnostics":{k:dict(v) for k,v in diagnostic_counts.items() if v},
-                "global_company_cooldown":any(r["status"]=="UNAVAILABLE" and r["attempted_at"]>(instant-timedelta(hours=1)).isoformat() for r in rows.values()),
+                "global_company_cooldown":_global_block(rows,instant),
                 "last_passes":outcomes,
                 "notice":"Latest bounded pass outcomes and validated sample coverage, not full market coverage. A completed scheduler pass may have made no request."}
     except (OSError,sqlite3.Error,ValueError,TypeError,KeyError,AttributeError,OverflowError):

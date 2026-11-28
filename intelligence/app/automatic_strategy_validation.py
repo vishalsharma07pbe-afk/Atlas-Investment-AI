@@ -22,7 +22,7 @@ def _table(db):
     db.execute("""CREATE TABLE IF NOT EXISTS strategy_replay_rotation(
         exchange TEXT PRIMARY KEY, selection_basis TEXT NOT NULL)""")
 
-def _ready_ids(snapshot,exchange,registry,today):
+def _ready_observations(snapshot,exchange,registry,today):
     """Exact eligible public identities, independent of watch scores."""
     for section in snapshot.get("sections",[]):
         if section.get("section")!=exchange or section.get("status")!="READY":
@@ -31,12 +31,12 @@ def _ready_ids(snapshot,exchange,registry,today):
         rows=result.get("replay_research_universe")
         count=result.get("eligible_count")
         if not isinstance(rows,list) or type(count) is not int or not 0<=len(rows)<=count<=20000:
-            return set()
-        ids=set()
+            return {}
+        ids={}
         seen=set()
         for row in rows:
             if not isinstance(row,dict) or type(row.get("id")) is not int or row["id"] in seen:
-                return set()
+                return {}
             i=row["id"]
             seen.add(i)
             identity=registry.get(i)
@@ -45,11 +45,15 @@ def _ready_ids(snapshot,exchange,registry,today):
             try:
                 age=(today-date.fromisoformat(row["as_of"])).days
                 if 1<=age<=4:
-                    ids.add(i)
+                    ids[i]=row["as_of"]
             except (ValueError,KeyError,TypeError):
                 continue
         return ids
-    return set()
+    return {}
+
+
+def _ready_ids(snapshot,exchange,registry,today):
+    return set(_ready_observations(snapshot,exchange,registry,today))
 
 
 def _payload(row):
@@ -83,11 +87,26 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
             _table(db)
             db.execute("BEGIN IMMEDIATE")
             existing={r["instrument_id"]:r for r in db.execute("SELECT * FROM strategy_validation WHERE exchange=?",(exchange,))}
-            due=[r for i,r in registry.items() if i not in existing or existing[i]["methodology"]!=CACHE_VERSION
-                or existing[i]["attempted_at"]<=(instant-timedelta(hours=24)).isoformat()]
+            ready=_ready_observations(snapshot,exchange,registry,today)
+            def due_now(i):
+                previous=existing.get(i)
+                if previous is None or previous["methodology"]!=CACHE_VERSION or previous["attempted_at"]<=(instant-timedelta(hours=24)).isoformat():
+                    return True
+                # A newly observed completed adjusted session invalidates a
+                # yesterday replay match; permit one earlier local re-audit.
+                # Only advance the target after an attempted refresh, even on
+                # failure, and never retry on a same-session hash fluctuation.
+                if i not in ready or previous["attempted_at"]>(instant-timedelta(minutes=30)).isoformat():
+                    return False
+                payload=_payload(previous)
+                attempted=payload.get("selection_observed_date") or payload.get("as_of")
+                try:
+                    return (payload.get("isin")==registry[i]["isin"] and
+                            date.fromisoformat(attempted)<date.fromisoformat(ready[i]))
+                except (ValueError,TypeError):return False
+            due=[r for i,r in registry.items() if due_now(i)]
             if not due:
                 continue
-            ready=_ready_ids(snapshot,exchange,registry,today)
             eligible=[r for r in due if r["id"] in ready]
             general=[r for r in due if r["id"] not in ready]
             rotation=db.execute("SELECT selection_basis FROM strategy_replay_rotation WHERE exchange=?",(exchange,)).fetchone()
@@ -175,6 +194,7 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
         # per-date digests stay in this local cache, not in research responses.
         result["isin"]=selected["isin"]
         result["selection_basis"]=basis
+        if i in ready:result["selection_observed_date"]=ready[i]
         if manifest is not None or prior_manifest is not None:
             result["_history_manifest"]=manifest if manifest is not None else prior_manifest
         with closing(connect()) as db,db:

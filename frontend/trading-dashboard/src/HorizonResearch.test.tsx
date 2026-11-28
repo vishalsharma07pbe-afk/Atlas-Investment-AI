@@ -338,3 +338,14 @@ it("does not reopen a report from stale market evidence",async()=>{
  expect(await screen.findByText(/No substitute report was opened/)).toBeTruthy();
  expect(screen.queryByText("Open complete stock research report")).toBeNull();
 });
+
+it("shows raw current observations separately without selecting a strict watch",async()=>{
+ const raw={...candidate,isin:"INE002A01018"};
+ const market={...section,result:{...section.result,horizons:{...section.result.horizons,SWING:{...section.result.horizons.SWING,candidates:[raw]}}}};
+ const selection={unique_company_count:1,unidentified_listing_count:0,conflicting_listing_count:0,cross_venue_company_count:0,review_company_count:0,ready_markets:["NSE"],watch_refs:[],preliminary_watch_refs:[{exchange:"NSE",id:1,isin:raw.isin}],notice:"Research only"};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[market],stock_qualification:{horizons:{SWING:{selection,status:"NO_QUALIFIED_IN_REVIEWED_SAMPLE",reviewed_count:1,review_required_count:0,qualified_count:0,recommendations:[],leading_blockers:[],notice:"Not qualified"}}}})})));
+ render(<HorizonResearch horizon="SWING" onSettings={()=>{}}>{null}</HorizonResearch>);
+ expect(await screen.findByRole("heading",{name:"Raw-price research observations"})).toBeTruthy();
+ expect(screen.getByText("TEST")).toBeTruthy();
+ expect(screen.getByText(/do not qualify for the strategy or recommendations/)).toBeTruthy();
+});

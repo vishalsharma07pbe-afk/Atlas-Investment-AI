@@ -266,7 +266,7 @@ class CompanyEvidenceTests(unittest.TestCase):
     def test_empty_and_cooldown_pass_outcomes_without_extra_provider_calls(self):
         empty={"enabled":True,"sections":[]}
         self.assertEqual(company.refresh(empty,research._connect,lambda *a:self.fail("unexpected call"),self.now),"NO_CANDIDATES")
-        self.assertEqual(company.refresh(self.snapshot,research._connect,lambda *a:{"isin":self.isin,"sections":{}},self.now),"UNAVAILABLE")
+        self.assertEqual(company.refresh(self.snapshot,research._connect,lambda *a:{"isin":self.isin,"sections":{"profile":{"status":"UNAVAILABLE","error":"PROVIDER_ACCESS_REJECTED"}}},self.now),"UNAVAILABLE")
         self.assertEqual(company.refresh(self.snapshot,research._connect,lambda *a:self.fail("cooldown bypass"),self.now+timedelta(minutes=1)),"PROVIDER_COOLDOWN")
         audit=company.acquisition_status(self.snapshot,research._connect,self.now+timedelta(minutes=1))
         self.assertTrue(audit["global_company_cooldown"])
@@ -317,3 +317,86 @@ class CompanyEvidenceTests(unittest.TestCase):
         self.assertEqual(set(loaded[self.isin]["sections"]),{"income_statement"})
         self.assertEqual(loaded[self.isin]["retrieved_at"],self.now.isoformat())
         self.assertEqual(fund.load([{"isin":self.isin}],self.now+timedelta(days=8)),{})
+
+    def test_empty_company_does_not_pause_other_exact_identities(self):
+        other="INE009A01021"
+        self.snapshot["sections"][0]["result"]["horizons"]["LONG_TERM"]["candidates"].append(
+            {"isin":other,"exchange":"NSE","symbol":"OTHER"})
+        calls=[]
+        def loader(isin,key):
+            calls.append(isin)
+            return {"isin":isin,"sections":{}}
+        self.assertEqual(company.refresh(self.snapshot,research._connect,loader,self.now),"UNAVAILABLE")
+        self.assertEqual(company.refresh(self.snapshot,research._connect,loader,self.now+timedelta(minutes=1)),"UNAVAILABLE")
+        self.assertEqual(set(calls),{self.isin,other})
+        self.assertFalse(company.acquisition_status(self.snapshot,research._connect,self.now+timedelta(minutes=2))["global_company_cooldown"])
+
+    def test_incremental_refresh_preserves_dates_and_requests_only_missing_sections(self):
+        from contextlib import closing
+        import json
+        def loader(isin,key,*,section_names=None):
+            endpoint="/v2/fundamentals/"+isin+"/"
+            if section_names is None:
+                return {"isin":isin,"sections":{"profile":{"status":"AVAILABLE","data":{"sector":"Example"},
+                    "source":{"endpoint":endpoint+"profile"}}}}
+            self.assertNotIn("profile",section_names)
+            self.assertTrue(set(company.ANNUAL_SECTIONS)<=set(section_names))
+            return {"isin":isin,"sections":{"ratios":{"status":"AVAILABLE","data":[{"name":"P/E","company_value":20}],
+                "source":{"endpoint":endpoint+"key-ratios"}}}}
+        with patch.object(company,"company_research",loader):
+            company.refresh(self.snapshot,research._connect,loader,self.now)
+            later=self.now+timedelta(hours=7)
+            company.refresh(self.snapshot,research._connect,loader,later)
+        with closing(research._connect()) as db:
+            report=json.loads(db.execute("SELECT payload FROM automatic_company_evidence WHERE isin=?",(self.isin,)).fetchone()[0])
+        self.assertEqual(report["available_sections"],2)
+        self.assertEqual(report["retrieved_at"],self.now.isoformat())
+        self.assertEqual(report["sections"]["profile"]["source"]["retrieved_at"],self.now.isoformat())
+        self.assertEqual(report["sections"]["ratios"]["source"]["retrieved_at"],later.isoformat())
+        self.assertEqual(report["reused_sections"],["profile"])
+
+    def test_incremental_no_new_evidence_is_not_promoted(self):
+        from contextlib import closing
+        import json
+        def loader(isin,key,*,section_names=None):
+            return {"isin":isin,"sections":{"profile":{"status":"AVAILABLE","data":{"sector":"Example"},
+                "source":{"endpoint":"/v2/fundamentals/"+isin+"/profile"}}} if section_names is None else {}}
+        with patch.object(company,"company_research",loader):
+            company.refresh(self.snapshot,research._connect,loader,self.now)
+            later=self.now+timedelta(hours=7)
+            self.assertEqual(company.refresh(self.snapshot,research._connect,loader,later),"UNAVAILABLE")
+        with closing(research._connect()) as db:
+            row=db.execute("SELECT status,payload FROM automatic_company_evidence WHERE isin=?",(self.isin,)).fetchone()
+            self.assertEqual(row["status"],"UNAVAILABLE")
+            self.assertEqual(json.loads(row["payload"])["available_sections"],0)
+
+    def test_strict_fip_shortlist_is_prioritized_within_existing_budget(self):
+        from app import fip_research
+        fip="INE467B01029"
+        item={"isin":fip,"exchange":"BSE","review_findings":[]}
+        calls=[]
+        def loader(isin,key):
+            calls.append((isin,key))
+            return {"isin":isin,"sections":{"profile":{"status":"AVAILABLE","data":{"sector":"Example"}}}}
+        with patch.object(fip_research,"rank",return_value={"status":"PRICE_MATCHES_AVAILABLE","items":[item]}):
+            self.assertEqual(company.refresh(self.snapshot,research._connect,loader,self.now),"PARTIAL")
+            self.assertEqual(calls,[(fip,"BSE_EQ|"+fip)])
+            audit=company.acquisition_status(self.snapshot,research._connect,self.now)
+            self.assertEqual(audit["fip_priority_identities"],1)
+            self.assertEqual(audit["due_fip_priority"],0)
+        with patch.object(fip_research,"rank",return_value={"status":"PRICE_MATCHES_AVAILABLE","items":[{**item,"review_findings":["REPORTED_PCA_AT_BSE"]}]}):
+            self.assertEqual(list(company.identify_fip_priority(self.snapshot,self.now)),[])
+
+    def test_annual_archive_uses_coherent_annual_vintage_not_reused_profile_date(self):
+        def statement(name):
+            return {"status":"AVAILABLE","data":{"statement_type":"consolidated","time_period":"yearly",
+                "units":"crore","rows":[{"name":"revenue","history":[{"period":"Mar 2026","value":100}]}]},
+                "source":{"provider":"UPSTOX","endpoint":"/v2/fundamentals/"+self.isin+"/"+name.replace("_","-"),
+                          "retrieved_at":self.now.isoformat()}}
+        report={"isin":self.isin,"retrieved_at":(self.now-timedelta(hours=6)).isoformat(),
+                "last_refresh_at":self.now.isoformat(),"sections":{k:statement(k) for k in company.ANNUAL_SECTIONS}}
+        captured=company.annual_capture(report,self.isin,self.now)
+        self.assertEqual(captured["retrieved_at"],self.now.isoformat())
+        self.assertEqual(captured["available_sections"],3)
+        report["sections"]["cash_flow"]["source"]["retrieved_at"]=(self.now-timedelta(hours=1)).isoformat()
+        self.assertIsNone(company.annual_capture(report,self.isin,self.now))

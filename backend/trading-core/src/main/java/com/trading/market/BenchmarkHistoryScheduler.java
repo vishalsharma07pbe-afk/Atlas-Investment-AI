@@ -1,6 +1,7 @@
 package com.trading.market;
 
 import java.time.LocalDate;
+import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -25,9 +26,8 @@ public class BenchmarkHistoryScheduler {
   public void scheduled(){
     if(!enabled||!rights||!entitlement||token.isBlank())return;
     LocalDate today=LocalDate.now(MarketCalendarService.IST);
-    LocalDate end;
-    try{end=calendar.lastTradingDay("NSE",today);}catch(IllegalStateException ex){return;}
-    if(end.isBefore(today.minusDays(7)))return;
+    LocalDate end=DiscoveryHistoryScheduler.verifiedPriorSession(calendar,"NSE",today);
+    if(end==null)return;
     refresh(end);
   }
   void refresh(LocalDate end){
@@ -43,30 +43,33 @@ public class BenchmarkHistoryScheduler {
   boolean refreshOne(LocalDate end,String key){
     Long id=BenchmarkHistoryService.KEY.equals(key)?history.ensureIndex():history.ensureIndex(key);
     if(id==null)return false;
-    int claimed=jdbc.update("""
-      INSERT INTO discovery_history_attempts(instrument_id,attempted_at,next_attempt_at,status)
-      VALUES (?,now(),now()+interval '6 hours','RUNNING')
-      ON CONFLICT(instrument_id) DO UPDATE SET attempted_at=now(),
-        next_attempt_at=now()+interval '6 hours',status='RUNNING'
-      WHERE discovery_history_attempts.next_attempt_at<=now()
-      """,id);
-    if(claimed!=1)return false;
+    // No early rollover for an already-current benchmark. Revisit depth/gaps
+    // on the ordinary cooldown; stale successes can recover the new session.
+    if(history.targetPresent(id,end) && Boolean.TRUE.equals(jdbc.queryForObject("""
+      SELECT EXISTS(SELECT 1 FROM discovery_history_attempts
+        WHERE instrument_id=? AND next_attempt_at>now())
+      """,Boolean.class,id)))return false;
+    UUID claim=UUID.randomUUID();
+    if(DiscoveryHistoryScheduler.claimAttempt(jdbc,id,end,claim)!=1)return false;
     int written=0;
-    try{written=BenchmarkHistoryService.KEY.equals(key)?history.refresh(id,token,end.minusDays(470),end):
-      history.refresh(id,key,token,end.minusDays(470),end);}catch(Exception ex){
+    try{
+      if(OperatorFeedCooldown.blocked(jdbc)){
+        DiscoveryHistoryScheduler.finishAttempt(jdbc,id,claim,false,0,15);
+        return true;
+      }
+      written=BenchmarkHistoryService.KEY.equals(key)?history.refresh(id,token,end.minusDays(470),end):
+        history.refresh(id,key,token,end.minusDays(470),end);
+      boolean complete=written>0&&history.targetPresent(id,end);
+      DiscoveryHistoryScheduler.finishAttempt(jdbc,id,claim,complete,written,complete?720:360);
+      if(complete)OperatorFeedCooldown.recovered(jdbc);
+    }catch(InterruptedException ex){
+      Thread.currentThread().interrupt();
+      DiscoveryHistoryScheduler.finishAttempt(jdbc,id,claim,false,written,15);
+    }catch(Exception ex){
       // Never persist provider bodies, URLs or credentials.
+      DiscoveryHistoryScheduler.finishAttempt(jdbc,id,claim,false,written,360);
       OperatorFeedCooldown.record(jdbc,ex);
     }
-    if(written>0){
-      OperatorFeedCooldown.recovered(jdbc);
-      jdbc.update("""
-      UPDATE discovery_history_attempts SET status='SUCCESS',rows_written=?,
-        next_attempt_at=now()+interval '12 hours' WHERE instrument_id=?
-      """,written,id);
-    }else jdbc.update("""
-      UPDATE discovery_history_attempts SET status='FAILED',rows_written=0,
-        next_attempt_at=now()+interval '6 hours' WHERE instrument_id=?
-      """,id);
     return true;
   }
 }

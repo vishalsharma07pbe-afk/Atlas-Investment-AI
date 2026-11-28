@@ -16,8 +16,8 @@ public class DiscoveryHistoryScheduler {
   // Acquisition target, not a qualification rule: 252 daily return intervals need
   // 253 closes. A 15-month window leaves room for exchange holidays and gaps.
   // Keep existing per-pass request budgets and raw/adjusted separation.
-  private static final int REQUIRED_DAILY_CANDLES=253;
-  private static final int BACKFILL_MONTHS=15;
+  static final int REQUIRED_DAILY_CANDLES=253;
+  static final int BACKFILL_MONTHS=15;
   private final JdbcTemplate jdbc;
   private final UpstoxFeedService stocks;
   private final MarketCalendarService calendar;
@@ -38,7 +38,7 @@ public class DiscoveryHistoryScheduler {
     LocalDate today=LocalDate.now(MarketCalendarService.IST);
     // Up to ten requests per venue; adaptive allocation reserves six maintenance
     // and four expansion slots when both pools are due, and borrows unused slots.
-    // Oldest eligible work in each pool is protected from priority starvation.
+    // Oldest eligible work in each pool is protected in quote-screen mode.
     // Sequential, paced REST calls; shared operator cooldown remains authoritative.
     for(String exchange:List.of("NSE","BSE")){
       LocalDate end=verifiedPriorSession(exchange,today);
@@ -50,6 +50,9 @@ public class DiscoveryHistoryScheduler {
   // must not be silently skipped to an older regular session.
   // Keep the prior-day-only policy until same-day publication is validated.
   LocalDate verifiedPriorSession(String exchange,LocalDate today){
+    return verifiedPriorSession(calendar,exchange,today);
+  }
+  static LocalDate verifiedPriorSession(MarketCalendarService calendar,String exchange,LocalDate today){
     for(int i=1;i<=7;i++){
       LocalDate day=today.minusDays(i);
       String phase=(String)calendar.sessionContext(exchange,day.atTime(12,0).atZone(MarketCalendarService.IST).toInstant()).get("phase");
@@ -58,6 +61,49 @@ public class DiscoveryHistoryScheduler {
       return null;
     }
     return null;
+  }
+
+  // The existing lease remains authoritative for legacy rows. New claims have a
+  // shorter bounded lease and a fencing token so a late worker cannot overwrite
+  // a reclaimed attempt. Expiry permits retry, not exactly-once provider I/O.
+  int claimAttempt(long id,LocalDate end,UUID claim){
+    return claimAttempt(jdbc,id,end,claim);
+  }
+  static int claimAttempt(JdbcTemplate jdbc,long id,LocalDate end,UUID claim){
+    return jdbc.update("""
+      INSERT INTO discovery_history_attempts(instrument_id,attempted_at,next_attempt_at,status,target_session,claim_token)
+      VALUES (?,now(),now()+interval '30 minutes','RUNNING',?,?)
+      ON CONFLICT(instrument_id) DO UPDATE SET attempted_at=now(),
+        next_attempt_at=now()+interval '30 minutes',status='RUNNING',
+        target_session=EXCLUDED.target_session,claim_token=EXCLUDED.claim_token,rows_written=0
+      WHERE (discovery_history_attempts.target_session IS NULL
+          OR discovery_history_attempts.target_session<=EXCLUDED.target_session)
+        AND (discovery_history_attempts.next_attempt_at<=now()
+          OR (discovery_history_attempts.status='SUCCESS' AND
+            (discovery_history_attempts.target_session IS NULL
+              OR discovery_history_attempts.target_session<EXCLUDED.target_session)))
+      """,id,end,claim);
+  }
+
+  boolean targetPresent(long id,LocalDate end){
+    return Boolean.TRUE.equals(jdbc.queryForObject("""
+      SELECT EXISTS(SELECT 1 FROM market_candles
+        WHERE instrument_id=? AND timeframe='1d' AND is_complete
+          AND quality_status IN ('VALIDATED_MANUAL','PROVIDER_VALIDATED')
+          AND candle_time>=?::date::timestamp AT TIME ZONE 'Asia/Kolkata'
+          AND candle_time<(?::date+1)::timestamp AT TIME ZONE 'Asia/Kolkata')
+      """,Boolean.class,id,end,end));
+  }
+
+  int finishAttempt(long id,UUID claim,boolean complete,int written,int retryMinutes){
+    return finishAttempt(jdbc,id,claim,complete,written,retryMinutes);
+  }
+  static int finishAttempt(JdbcTemplate jdbc,long id,UUID claim,boolean complete,int written,int retryMinutes){
+    return jdbc.update("""
+      UPDATE discovery_history_attempts SET status=?,rows_written=?,
+        next_attempt_at=now()+(? * interval '1 minute')
+      WHERE instrument_id=? AND status='RUNNING' AND claim_token=?
+      """,complete?"SUCCESS":"FAILED",Math.max(0,written),retryMinutes,id,claim);
   }
 
   private static LocalDate localDate(Object raw){
@@ -118,7 +164,9 @@ public class DiscoveryHistoryScheduler {
         AND coalesce(quality.security_state,'UNKNOWN')<>'SUSPENDED_REPORTED'
         AND NOT coalesce(h.has_adjusted,false)
         AND (h.candle_count<? OR h.latest_date IS NULL OR h.latest_date<? OR g.first_missing_date IS NOT NULL)
-        AND (a.next_attempt_at IS NULL OR a.next_attempt_at<=now())
+        AND (a.next_attempt_at IS NULL OR a.next_attempt_at<=now()
+          OR (a.status='SUCCESS' AND (a.target_session IS NULL OR a.target_session<?)
+            AND (h.latest_date IS NULL OR h.latest_date<?)))
       ), oldest AS (
         SELECT *,row_number() OVER (PARTITION BY workload ORDER BY attempted_at ASC NULLS FIRST,candle_count DESC,id) AS oldest_position
         FROM candidates
@@ -135,9 +183,10 @@ public class DiscoveryHistoryScheduler {
                     WHEN workload=1 AND position<=4 THEN 2 ELSE 3 END,
         workload,position LIMIT 10
       """:"""
-      WHERE (workload=0 AND position<=8) OR (workload=1 AND position<=2)
-      ORDER BY workload,position LIMIT 10
-      """),exchange,end.minusMonths(BACKFILL_MONTHS),end,end,end.minusMonths(BACKFILL_MONTHS),end,end,exchange,REQUIRED_DAILY_CANDLES,end);
+      ORDER BY CASE WHEN workload=0 AND position<=8 THEN 0
+                    WHEN workload=1 AND position<=2 THEN 1 ELSE 2 END,
+        workload,position LIMIT 10
+      """),exchange,end.minusMonths(BACKFILL_MONTHS),end,end,end.minusMonths(BACKFILL_MONTHS),end,end,exchange,REQUIRED_DAILY_CANDLES,end,end,end);
     for(var row:rows){
       if(OperatorFeedCooldown.blocked(jdbc))return;
       long id=((Number)row.get("id")).longValue();
@@ -146,39 +195,38 @@ public class DiscoveryHistoryScheduler {
       LocalDate missing=localDate(row.get("first_missing_date"));
       // Claim before network I/O; a restart or duplicate invocation cannot
       // repeatedly fetch the same instrument in a tight loop.
-      int claimed=jdbc.update("""
-        INSERT INTO discovery_history_attempts(instrument_id,attempted_at,next_attempt_at,status)
-        VALUES (?,now(),now()+interval '6 hours','RUNNING')
-        ON CONFLICT(instrument_id) DO UPDATE SET attempted_at=now(),
-          next_attempt_at=now()+interval '6 hours',status='RUNNING'
-        WHERE discovery_history_attempts.next_attempt_at<=now()
-        """,id);
+      UUID claim=UUID.randomUUID();
+      int claimed=claimAttempt(id,end,claim);
       if(claimed==0)continue;
       try{
         // Pace even incremental requests; cancellation must not launch another provider call.
         if(requestGapMs>0)Thread.sleep(Math.max(1000,requestGapMs));
         if(OperatorFeedCooldown.blocked(jdbc)){
-          jdbc.update("UPDATE discovery_history_attempts SET status='FAILED',rows_written=0,next_attempt_at=now()+interval '15 minutes' WHERE instrument_id=?",id);
+          finishAttempt(id,claim,false,0,15);
           return;
         }
         LocalDate floor=end.minusMonths(BACKFILL_MONTHS);
-        LocalDate from=count<REQUIRED_DAILY_CANDLES||latest==null||latest.isBefore(floor)?floor:latest.plusDays(1);
-        // Repair an interior known-session hole even if the latest candle is current.
-        if(missing!=null&&!missing.isBefore(floor)&&!missing.isAfter(end)&&missing.isBefore(from))from=missing;
-        if(from.isAfter(end))from=floor;
+        // Recover current observations first for established stale histories.
+        // A later pass repairs depth and interior gaps, retaining the expansion budget.
+        boolean catchUp=count>=25 && latest!=null && !latest.isBefore(floor) && latest.isBefore(end);
+        LocalDate from=catchUp?latest.plusDays(1):floor;
+        if(!catchUp && count>=REQUIRED_DAILY_CANDLES && latest!=null && !latest.isBefore(floor)){
+          from=latest.plusDays(1);
+          if(missing!=null&&!missing.isBefore(floor)&&!missing.isAfter(end)&&missing.isBefore(from))from=missing;
+          if(from.isAfter(end))from=floor;
+        }
         int written=stocks.discoveryDailyCandles(accessToken,(String)row.get("instrument_key"),from,end);
-        if(written>0){
-          jdbc.update("UPDATE discovery_history_attempts SET status='SUCCESS',rows_written=?,next_attempt_at=now()+interval '12 hours' WHERE instrument_id=?",written,id);
-          OperatorFeedCooldown.recovered(jdbc);
-        }else
-          jdbc.update("UPDATE discovery_history_attempts SET status='FAILED',rows_written=0,next_attempt_at=now()+interval '6 hours' WHERE instrument_id=?",id);
+        boolean complete=written>0 && targetPresent(id,end);
+        // Positive row count alone does not establish completion of the target session.
+        finishAttempt(id,claim,complete,written,complete?720:360);
+        if(complete)OperatorFeedCooldown.recovered(jdbc);
       }catch(InterruptedException ex){
         Thread.currentThread().interrupt();
-        jdbc.update("UPDATE discovery_history_attempts SET status='FAILED',rows_written=0,next_attempt_at=now()+interval '15 minutes' WHERE instrument_id=?",id);
+        finishAttempt(id,claim,false,0,15);
         return;
       }catch(Exception ex){
         // Never store provider response bodies, URLs or credentials.
-        jdbc.update("UPDATE discovery_history_attempts SET status='FAILED',rows_written=0,next_attempt_at=now()+interval '6 hours' WHERE instrument_id=?",id);
+        finishAttempt(id,claim,false,0,360);
         if(OperatorFeedCooldown.record(jdbc,ex))return;
       }
     }

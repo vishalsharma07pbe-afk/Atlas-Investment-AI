@@ -36,6 +36,12 @@ class ProviderRouterTests(unittest.TestCase):
         self.assertFalse(readiness()["automatic_live_failover_enabled"])
         self.assertFalse(readiness()["quote_available"])
         self.assertEqual(ReadOnlyRouter([]).quote("RELIANCE")["status"],"UNAVAILABLE")
+    def test_strict_provider_identity_does_not_relabel_wrong_source(self):
+        router=ReadOnlyRouter([("UPSTOX",lambda s:self.q(),True)],clock=lambda:NOW,strict_provider=True)
+        result=router.quote("RELIANCE")
+        self.assertEqual(result["status"],"UNAVAILABLE")
+        self.assertEqual(result["attempts"][0]["reason"],"INSTRUMENT_MISMATCH")
+
     def test_invalid_input(self):
         for symbol in ("","../secret","reliance"):
             with self.assertRaises(ValueError): ReadOnlyRouter([]).quote(symbol)

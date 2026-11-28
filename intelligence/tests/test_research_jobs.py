@@ -104,7 +104,7 @@ class DurableResearchJobsTests(unittest.TestCase):
 
     def test_dependencies_and_permission_gate_without_network_calls(self):
         with patch.object(research.automatic_company_evidence,"permitted",return_value=True), \
-             patch.object(research.automatic_company_evidence,"refresh") as refresh:
+             patch.object(research.automatic_company_evidence,"refresh",return_value="AVAILABLE") as refresh:
             self.assertEqual(research._execute_job("COMPANY_EVIDENCE"),"WAITING_EVIDENCE")
             refresh.assert_not_called()
             research._save("BSE",{"exchange":"BSE"})
@@ -118,3 +118,22 @@ class DurableResearchJobsTests(unittest.TestCase):
     def test_disabled_scheduler_status_excludes_persisted_states(self):
         with patch.dict(os.environ,{"ATLAS_AUTONOMOUS_RESEARCH_ENABLED":"false"}):
             self.assertEqual(research.job_status(),{"status":"DISABLED","jobs":[]})
+
+    def test_company_waiting_evidence_does_not_accelerate_provider_requests(self):
+        definitions={"COMPANY_EVIDENCE":0}
+        job,token=jobs.claim(self.connect,definitions,self.clock)
+        self.assertTrue(jobs.finish(self.connect,job,token,self.clock,900,"WAITING_EVIDENCE"))
+        self.assertIsNone(jobs.claim(self.connect,definitions,self.clock+899))
+        self.assertEqual(jobs.claim(self.connect,definitions,self.clock+900)[0],job)
+
+    def test_successful_company_acquisition_has_bounded_separate_cadence(self):
+        with patch.dict(os.environ,{"ATLAS_COMPANY_RESEARCH_INTERVAL_SECONDS":"300"}):
+            self.assertEqual(research.company_success_interval(900),300)
+        for invalid in ("0","299","86401","bad"):
+            with patch.dict(os.environ,{"ATLAS_COMPANY_RESEARCH_INTERVAL_SECONDS":invalid}):
+                self.assertEqual(research.company_success_interval(900),900)
+        definitions={"COMPANY_EVIDENCE":0}
+        with patch.object(jobs,"definitions",return_value=definitions),patch.object(research,"now",return_value=datetime.fromtimestamp(self.clock,timezone.utc)),patch.dict(os.environ,{"ATLAS_COMPANY_RESEARCH_INTERVAL_SECONDS":"300"}),patch.object(research,"_execute_job",return_value="PASS_COMPLETED"):
+            self.assertTrue(research.run_one_job(900))
+        self.assertIsNone(jobs.claim(self.connect,definitions,self.clock+299))
+        self.assertEqual(jobs.claim(self.connect,definitions,self.clock+300)[0],"COMPANY_EVIDENCE")

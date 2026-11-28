@@ -37,3 +37,15 @@ class FundPeerTests(unittest.TestCase):
         self.assertFalse(s["items"][0]["qualified"])
         metric["positive_growth_weight_percent"]=61
         self.assertEqual(p.quality_watch(f,[row],"LARGE_CAP",FIT,TODAY)["items"],[])
+
+    def test_public_category_research_does_not_imply_personal_suitability(self):
+        from dataclasses import replace
+        funds,rows=fixture()
+        funds=[replace(f,category="SMALL_CAP") for f in funds]
+        poor={"status":"POOR_FIT"}
+        self.assertEqual(p.build(funds,rows,"SMALL_CAP",poor,TODAY,rolling)["items"],[])
+        result=p.build(funds,rows,"SMALL_CAP",poor,TODAY,rolling,category_only=True)
+        self.assertTrue(result["items"])
+        self.assertEqual(result["scope"],"CATEGORY_RESEARCH_ONLY")
+        self.assertEqual(result["selected_suitability"],"POOR_FIT")
+        self.assertTrue(all(x["qualified"] is False for x in result["items"]))

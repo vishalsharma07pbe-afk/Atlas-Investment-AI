@@ -4,7 +4,7 @@ The connected catalog is useful for discovery but is not silently promoted into
 recommendations. Rankings require dated, source-attributed evidence.
 """
 from __future__ import annotations
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, replace
 from datetime import datetime, timezone, date
 from zoneinfo import ZoneInfo
 from math import isfinite
@@ -515,7 +515,40 @@ def _history_gate_counts(historical):
     return {k:counts[k] for k in keys}
 
 
-def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str="MODERATE"):
+def _publisher_riskometer(candidates,source_rows,publisher_reports,today):
+    """Use only the existing reconciled, authorized monthly publisher evidence.
+
+    Riskometer is scheme-level, not a plan fee, forecast, or historical
+    benchmark mandate. Do not substitute secondary or base expense figures.
+    """
+    if not official_amc_factsheet.permitted():return candidates,{}
+    output=[];used={}
+    for fund in candidates:
+        e=publisher_reports.get(fund.identifier)
+        matches=[r for r in source_rows if isinstance(r,dict) and str(r.get("scheme_code"))==fund.identifier]
+        try:
+            if (not isinstance(e,dict) or len(matches)!=1 or fund.plan!="DIRECT" or fund.option!="GROWTH"
+                or e.get("status")!="PUBLISHER_FACTSHEET_NAV_RECONCILED" or e.get("methodology")!=official_amc_factsheet.VERSION
+                or e.get("scheme_code")!=fund.identifier or e.get("category")!=fund.category
+                or e.get("isin_growth")!=matches[0].get("isin_growth")
+                or not re.fullmatch(r"INF[A-Z0-9]{9}",e.get("isin_growth",""))
+                or not re.fullmatch(r"[a-f0-9]{64}",e.get("source_sha256",""))
+                or matches[0].get("amfi_plan")!="DIRECT" or matches[0].get("amfi_option")!="GROWTH"):
+                raise ValueError("UNMATCHED_PUBLISHER")
+            period=official_amc_factsheet.month(e["source_url"],today)
+            if period.isoformat()!=e["portfolio_date"] or e["riskometer"] not in {"LOW","LOW_TO_MODERATE","MODERATE","MODERATELY_HIGH","HIGH","VERY_HIGH"}:
+                raise ValueError("INVALID_RISKOMETER")
+            # A different already established official risk value is not silently overwritten.
+            if fund.riskometer is not None and (fund.riskometer,fund.riskometer_date)!=(e["riskometer"],e["portfolio_date"]):
+                raise ValueError("CONFLICTING_RISKOMETER")
+            fund=replace(fund,riskometer=e["riskometer"],riskometer_date=period.isoformat())
+            used[fund.identifier]={"provider":"AMC_FACTSHEET","date":period.isoformat(),"source_sha256":e["source_sha256"]}
+        except (ValueError,TypeError,KeyError,AttributeError,OverflowError):pass
+        output.append(fund)
+    return output,used
+
+
+def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str="MODERATE",*,category_only=False):
     if category not in CATEGORIES:raise ValueError("UNSUPPORTED_CATEGORY")
     if horizon_months<12 or horizon_months>360:raise ValueError("INVALID_HORIZON")
     if risk_tolerance not in RISK_LEVELS:raise ValueError("INVALID_RISK_TOLERANCE")
@@ -548,7 +581,7 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
         for field in ("ter_percent","riskometer","benchmark","aum_cr_all_plans","fund_managers","exit_load")}
     fit=suitability(category,horizon_months,risk_tolerance)
     today=datetime.now(ZoneInfo("Asia/Kolkata")).date()
-    shortlist=fund_peer_shortlist.build(official,source_rows,category,fit,today,_rolling_peer_context)
+    shortlist=fund_peer_shortlist.build(official,source_rows,category,fit,today,_rolling_peer_context,category_only=category_only)
     # Prioritize matched shortlist portfolio drilldowns within the existing
     # five-report budget, without claiming the rest of the cohort was assessed.
     priority={r["identifier"]:i for i,r in enumerate(shortlist["items"])}
@@ -562,8 +595,10 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
     publisher_reports=official_amc_factsheet.matched(official,source_rows,datetime.now(timezone.utc))
     coverage["secondary_portfolio_composition_matches"]=len(compositions)
     coverage["secondary_portfolio_matches"]=len(portfolios)
-    # Public catalog discovery remains separate from exact AMFI scheme evidence.
-    # Unknown fee, benchmark, holdings and risk data still block recommendations.
+    # Connect the verified scheme-level publisher risk field to the existing
+    # qualification engine; all other missing gates remain intact.
+    official,risk_sources=_publisher_riskometer(official,source_rows,publisher_reports,today)
+    coverage["official_riskometer_matches"]=len(risk_sources)
     ranked=rank_candidates(official,category,horizon_months,risk_tolerance)
     blockers=["OFFICIAL_CATEGORY_SOURCE_NOT_CONNECTED","DATED_NAV_HISTORY_INSUFFICIENT",
               "BENCHMARK_TRI_NOT_CONNECTED","OFFICIAL_RISKOMETER_NOT_CONNECTED",
@@ -576,11 +611,15 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
             blockers.remove("DATED_NAV_HISTORY_INSUFFICIENT")
     else:
         blockers.append("AMFI_HISTORY_READ_MODEL_UNAVAILABLE")
+    if official and len(risk_sources)==len(official):
+        blockers.remove("OFFICIAL_RISKOMETER_NOT_CONNECTED")
     if category in SPECIALIZED:
         blockers.append("CATEGORY_SPECIFIC_RISK_MODEL_REQUIRED")
     generated=datetime.now(timezone.utc).isoformat()
     reports=_research_reports(official,ranked,source_rows,disclosed,portfolios,compositions)
     for report in reports:
+        if report["identifier"] in risk_sources:
+            report["official_riskometer_source"]=risk_sources[report["identifier"]]
         if report["identifier"] in local_reports:report["local_export_evidence"]=local_reports[report["identifier"]]
         if report["identifier"] in publisher_reports:
             e=publisher_reports[report["identifier"]]

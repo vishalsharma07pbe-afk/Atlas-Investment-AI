@@ -224,3 +224,27 @@ class AutomaticValidationTests(unittest.TestCase):
                 "app.automatic_strategy_validation.replay",return_value={"status":"HISTORICAL_REPLAY_ONLY","horizons":{}}):
                 refresh(snapshot,connect,loader,later)
             self.assertEqual(read(connect,later)["horizons"]["SWING"]["counts"],{"ACTION_CONTEXT_UNAVAILABLE":1})
+
+    def test_new_adjusted_session_replays_before_daily_cooldown_but_only_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            def connect():
+                db=sqlite3.connect(directory+"/replay.sqlite")
+                db.row_factory=sqlite3.Row
+                return db
+            instant=datetime(2026,11,27,15,tzinfo=timezone.utc)
+            identity={"id":1,"symbol":"TEST","exchange":"NSE","isin":"INE002A01018","active":True,
+                      "listing_status":"ACTIVE","series":"EQ","instrument_type":"EQUITY"}
+            observation={"id":1,"exchange":"NSE","isin":identity["isin"],"as_of":"2026-11-26"}
+            snapshot={"enabled":True,"sections":[{"section":"NSE","status":"READY","result":{"eligible_count":1,"replay_research_universe":[observation]}}]}
+            calls=[]
+            def loader(path):
+                if "discovery-universe" in path:return [identity]
+                calls.append(path)
+                return {"instrument":identity,"candles":[]}
+            with patch("app.automatic_strategy_validation.replay",return_value={"status":"INSUFFICIENT_HISTORY","horizons":{}}):
+                refresh(snapshot,connect,loader,instant)
+                observation["as_of"]="2026-11-27"
+                later=instant+timedelta(hours=13)
+                refresh(snapshot,connect,loader,later)
+                refresh(snapshot,connect,loader,later+timedelta(hours=1))
+            self.assertEqual(len(calls),2)
