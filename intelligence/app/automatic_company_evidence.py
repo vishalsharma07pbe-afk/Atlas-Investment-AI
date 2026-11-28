@@ -50,7 +50,11 @@ def identify(snapshot):
                     yield item,isin
 
 
-def identify_priority(snapshot):
+def identify_priority(snapshot,instant=None):
+    # Reuse the strict, current, cross-venue FIP shortlist, not a new score.
+    if instant is not None:
+        for item,isin in identify_fip_priority(snapshot,instant):
+            yield item,isin
     yield from identify(snapshot)
     # Deepen the actual Elite candidates without expanding report attachment.
     for section in snapshot.get("sections",[]):
@@ -64,6 +68,22 @@ def identify_priority(snapshot):
                 isin=item.get("isin")
                 if isinstance(isin,str) and ISIN.fullmatch(isin) and item.get("exchange")==section["section"] and item.get("as_of")==expected and item.get("security_state") not in ("PCA","SME","RELIST","IPO","SUSPENDED_REPORTED"):
                     yield item,isin
+
+
+def identify_fip_priority(snapshot,instant):
+    from . import fip_research
+    try:
+        result=fip_research.rank(snapshot,instant)
+        if result.get("status")!="PRICE_MATCHES_AVAILABLE":
+            return
+        for item in result.get("items",[])[:10]:
+            isin=item.get("isin")
+            if (isinstance(isin,str) and re.fullmatch(r"INE[A-Z0-9]{9}",isin)
+                    and item.get("exchange") in ("NSE","BSE")
+                    and not item.get("review_findings")):
+                yield item,isin
+    except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
+        return
 
 
 def identify_sample(snapshot,instant):
@@ -360,7 +380,8 @@ def _merge_refresh(report,retained,instant):
 def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None):
     stamp=instant.isoformat()
     candidates={}
-    for item,isin in identify_priority(snapshot):
+    fip_order={isin:index for index,(_,isin) in enumerate(identify_fip_priority(snapshot,instant))} if explicit_isins is None else {}
+    for item,isin in identify_priority(snapshot,instant):
         # Exact public discovery venue/ISIN; no name matching.
         if isin not in candidates or item["exchange"]=="NSE":
             candidates[isin]=item["exchange"]+"_EQ|"+isin
@@ -381,11 +402,14 @@ def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None):
         # Avoid repeated requests across the universe when the provider rejects access.
         if _global_block(rows,instant):
             return "PROVIDER_COOLDOWN"
-        priority={isin:i for i,isin in enumerate(candidates)} if explicit_isins is not None else {}
+        priority={isin:i for i,isin in enumerate(candidates)} if explicit_isins is not None else fip_order
         def due_now(i):
             return i not in rows or rows[i]["next_attempt_at"]<=stamp
+        # Oldest attempted first prevents starvation. Among never-attempted or
+        # equally old identities use strict FIP rank as the tie-breaker.
         due=sorted((isin for isin in candidates if due_now(isin)),
-                   key=lambda isin:(rows[isin]["attempted_at"] if isin in rows else "",priority.get(isin,0),isin))
+                   key=lambda isin:(rows[isin]["attempted_at"] if isin in rows else "",
+                                    priority.get(isin,len(fip_order) if explicit_isins is None else 0),isin))
         broad=False
         streak=0
         if explicit_isins is None:
@@ -465,7 +489,8 @@ def acquisition_status(snapshot,connect,instant):
     import sqlite3
     from collections import Counter
     sample={isin for _,isin in identify_sample(snapshot,instant)}
-    primary={isin for _,isin in identify_priority(snapshot)}
+    primary={isin for _,isin in identify_priority(snapshot,instant)}
+    fip={isin for _,isin in identify_fip_priority(snapshot,instant)}
     stamp=instant.isoformat()
     try:
         with closing(connect()) as db:
@@ -543,7 +568,8 @@ def acquisition_status(snapshot,connect,instant):
             except (ValueError,TypeError,AttributeError,KeyError,OverflowError):
                 continue
         return {"status":"LOCAL_ACQUISITION_AUDIT","sample_identities":len(sample),
-                "primary_identities":len(primary),"due_sample":sum(due(i) for i in sample),
+                "primary_identities":len(primary),"fip_priority_identities":len(fip),
+                "due_fip_priority":sum(due(i) for i in fip),"due_sample":sum(due(i) for i in sample),
                 "due_primary":sum(due(i) for i in primary),"counts":dict(counts),
                 "fresh_sections":dict(sections),"fresh_detailed_statements":dict(detail),
                 "annual_archive_companies":len(archived),

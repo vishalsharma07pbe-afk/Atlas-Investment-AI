@@ -369,3 +369,20 @@ class CompanyEvidenceTests(unittest.TestCase):
             row=db.execute("SELECT status,payload FROM automatic_company_evidence WHERE isin=?",(self.isin,)).fetchone()
             self.assertEqual(row["status"],"UNAVAILABLE")
             self.assertEqual(json.loads(row["payload"])["available_sections"],0)
+
+    def test_strict_fip_shortlist_is_prioritized_within_existing_budget(self):
+        from app import fip_research
+        fip="INE467B01029"
+        item={"isin":fip,"exchange":"BSE","review_findings":[]}
+        calls=[]
+        def loader(isin,key):
+            calls.append((isin,key))
+            return {"isin":isin,"sections":{"profile":{"status":"AVAILABLE","data":{"sector":"Example"}}}}
+        with patch.object(fip_research,"rank",return_value={"status":"PRICE_MATCHES_AVAILABLE","items":[item]}):
+            self.assertEqual(company.refresh(self.snapshot,research._connect,loader,self.now),"PARTIAL")
+            self.assertEqual(calls,[(fip,"BSE_EQ|"+fip)])
+            audit=company.acquisition_status(self.snapshot,research._connect,self.now)
+            self.assertEqual(audit["fip_priority_identities"],1)
+            self.assertEqual(audit["due_fip_priority"],0)
+        with patch.object(fip_research,"rank",return_value={"status":"PRICE_MATCHES_AVAILABLE","items":[{**item,"review_findings":["REPORTED_PCA_AT_BSE"]}]}):
+            self.assertEqual(list(company.identify_fip_priority(self.snapshot,self.now)),[])
