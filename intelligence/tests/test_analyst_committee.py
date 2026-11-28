@@ -48,7 +48,7 @@ class CommitteeTest(unittest.TestCase):
             with patch.object(c.ai,"providers",return_value=["OLLAMA","GEMINI"]):
                 self.assertTrue(c.refresh(report(),connect,now,run))
                 self.assertTrue(c.refresh(report(),connect,now+timedelta(minutes=15),run))
-                self.assertEqual(calls,["OLLAMA","GEMINI"])
+                self.assertEqual(calls,["GEMINI","OLLAMA"])
                 r=c.attach(report(),connect,now+timedelta(minutes=16))
                 self.assertEqual(r["stocks"][0]["action"],"WATCH_FOR_CONFIRMATION")
                 self.assertEqual(r["stocks"][0]["ai_review"]["state"],"DISAGREEMENT")
@@ -58,3 +58,16 @@ class CommitteeTest(unittest.TestCase):
                 self.assertEqual(c.attach(report(),connect,now+timedelta(days=2))["committee"]["reviewed_providers"],0)
             with patch.object(c.ai,"providers",return_value=[]):
                 self.assertEqual(c.attach(report(),connect,now+timedelta(minutes=17))["committee"]["reviewed_providers"],0)
+
+    def test_new_fund_cost_conflict_blocks_positive_model_decision(self):
+        import json
+        report={"status":"RESEARCH_AVAILABLE","stocks":[],"funds":[{"category":"MID_CAP","items":[
+            {"identifier":"123456","qualified":False,"tier":"DRIVER_SUPPORTED","nav_date":"2026-11-27",
+             "fund_evidence":{"ter_status":"CONFLICTING_SAME_DATE_TER","reported_metadata":{"fund_managers":"private test text"}}}]}]}
+        e=c.pack(report);key="MID_CAP1"
+        self.assertIn("CONFLICTING_TER",e[key]["allowed_reasons"])
+        self.assertNotIn("private test text",json.dumps(e))
+        def row(decision,reason):
+            return {"statement":json.dumps({"candidate":key,"decision":decision,"reason":reason}),"evidence_ids":[key]}
+        self.assertEqual(c.validate({"findings":[row("PRIORITIZE_REVIEW","GROWTH_DRIVERS")]},e),{})
+        self.assertEqual(c.validate({"findings":[row("DEFER_REVIEW","CONFLICTING_TER")]},e)[key]["reason"],"CONFLICTING_TER")

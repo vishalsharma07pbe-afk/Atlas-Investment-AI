@@ -4,6 +4,7 @@ Fixed, documented proxy rules. No model vote or observed match constitutes
 strategy validation. Full academic factor portfolios require point-in-time data.
 """
 from collections import Counter,defaultdict
+from bisect import bisect_left,bisect_right
 from datetime import date,datetime,timedelta
 from math import isfinite,sqrt
 from statistics import median,pstdev,mean
@@ -43,6 +44,8 @@ def price_features(candles,calendar=()):
     changes=[b/a-1 for a,b in zip(prices,prices[1:])]
     if any(not number(v,-1,100) for v in changes):return None
     vol=pstdev(changes[-126:])*sqrt(252)*100
+    # Explicit research guard: a large recent one-day jump is not steady momentum.
+    max_day_jump=100*max(changes[-20:])
     turn=median(c.close*c.volume for c in sample[-20:])/1e7
     if not number(turn,0,1e12) or not number(vol,.00001,1e5):return None
     # Momentum excludes the latest 21 sessions (short-term reversal).
@@ -58,18 +61,51 @@ def price_features(candles,calendar=()):
     return {"methodology":VERSION,"adjustment_status":sample[-1].adjustment_status,"professional_patterns":patterns,
         "calendar_matched":len(calendar)>=len(sample) and list(calendar[-len(sample):])==dates,
         "observations":len(sample),"first_date":dates[0],"last_date":dates[-1],
-        "dates_digest":date_digest(dates[-127:]),"close":round(prices[-1],4),
+        "full_dates_digest":date_digest(dates),"dates_digest":date_digest(dates[-127:]),"close":round(prices[-1],4),
         "turnover_cr":round(turn,4),"volatility_126_percent":round(vol,4),
         "momentum_6_ex_recent":round(r6,4),"momentum_12_ex_recent":round(r12,4) if r12 is not None else None,
+        "max_daily_gain_20_percent":round(max_day_jump,4),
         "return_60_percent":round(r60,4),"return_200_percent":round(r200,4),
         "return_252_percent":round(r252,4) if r252 is not None else None,
         "near_annual_high_percent":round(100*prices[-1]/max(c.high for c in sample),4) if len(sample)==253 else None,
         "above_sma200":prices[-1]>mean(prices[-200:]),"sma50_above_sma200":mean(prices[-50:])>mean(prices[-200:]),
         "range_20_percent":round(recent,4),"prior_range_40_percent":round(prior,4)}
 
+def pump_or_extended(f):
+    """Known excessive one-day jumps or annual extension; missing != failed."""
+    jump=f.get("max_daily_gain_20_percent");annual=f.get("return_252_percent")
+    return number(jump,10,1e6) or number(annual,100,1e6)
+
+def sample_momentum_ranks(candidates):
+    """Tie-aware 6/12-month volatility-adjusted percentile, exact date cohorts.
+
+    Both windows exclude the latest month. No mixing horizons or imputing
+    missing 12-month observations. Ranks are sampled, not exchange-wide.
+    """
+    cohorts=defaultdict(list)
+    for r in candidates:
+        f=obj(r.get("multi_strategy_price"));isin=r.get("isin")
+        if (not exact_isin(isin) or f.get("adjustment_status")!="ADJUSTED"
+            or f.get("calendar_matched") is not True or f.get("observations")!=253
+            or not isinstance(f.get("full_dates_digest"),str)
+            or not number(f.get("volatility_126_percent"),.0001,1e5)
+            or not all(number(f.get(k)) for k in ("momentum_6_ex_recent","momentum_12_ex_recent"))):continue
+        vol=f["volatility_126_percent"]
+        cohorts[f["full_dates_digest"]].append((isin,f["momentum_6_ex_recent"]/vol,f["momentum_12_ex_recent"]/vol))
+    result={}
+    for cohort in cohorts.values():
+        if len({r[0] for r in cohort})!=len(cohort) or len(cohort)<20:continue
+        columns=[sorted(r[i] for r in cohort) for i in (1,2)]
+        for isin,x,y in cohort:
+            ranks=[50*(bisect_left(col,v)+bisect_right(col,v))/len(cohort) for col,v in zip(columns,(x,y))]
+            result[isin]={"percentile":round(mean(ranks),2),"sample_size":len(cohort),
+                "six_month_percentile":round(ranks[0],2),"twelve_month_percentile":round(ranks[1],2)}
+    return result
+
 def price_lanes(f):
     if not isinstance(f,dict) or f.get("methodology")!=VERSION:return []
     if not number(f.get("turnover_cr"),5,1e12):return []
+    if pump_or_extended(f):return []
     annual=f.get("return_252_percent")
     # Preserve the user's no-overextended-stock preference for trend leads.
     not_extended=number(annual,-100,99.9999) if annual is not None else number(f.get("return_200_percent"),-100,70)
@@ -158,7 +194,7 @@ def summarize(snapshot,connect,instant):
         "CAN_SLIM_FULL":"Quarterly share-adjusted EPS, institutional sponsorship and verified catalyst evidence required",
         "SEPA_FULL":"Complete audited earnings, growth and valuation evidence required beyond the trend template",
         "VCP_FULL":"Discretionary pattern definition; objective contraction proxy is implemented",
-        "TURTLE_FULL":"Pyramiding, portfolio risk sizing and channel/ATR exits require a distinct portfolio simulator"},
+        "TURTLE_FULL":"Shared-cash close-confirmed replay is implemented; canonical intraday fills, historical universe and portfolio validation remain unverified"},
         "notice":NOTICE}
     if snapshot.get("enabled") is not True:return result
     observations=company_venues.collect(snapshot,instant)
@@ -200,18 +236,23 @@ def summarize(snapshot,connect,instant):
             prepared[isin]=company._enrich(report,today,instant)
         except (ValueError,TypeError,KeyError,AttributeError,OverflowError):continue
     qmj=pro.quality_ranks(prepared,classifications,today)
+    momentum_ranks=sample_momentum_ranks(candidates)
     from . import earnings_expectations
     surprises=earnings_expectations.read(instant)
     if surprises:
         result["unavailable_strategies"].pop("PEAD",None)
     result["expectations_evidence_basis"]="AUTHORIZED_OPERATOR_REVIEWED_IMPORT" if surprises else "NO_AUTHORIZED_EVENT_INPUT"
-    counts=Counter();items=[]
+    from . import emerging_opportunities
+    emerging=[]
+    counts=Counter();items=[];excluded_price_risk=0
     for r in candidates:
         f=r["multi_strategy_price"];isin=r["isin"];report=prepared.get(isin,{})
         if governance_review.assess(r,report,today)["findings"]:continue
         # Known company-level warnings in the established report remain authoritative.
         existing=obj(obj(obj(snapshot.get("company_reports")).get("items")).get(isin))
         if existing.get("review_findings"):continue
+        setup=emerging_opportunities.assess(r,f,report,today)
+        if setup:emerging.append(setup)
         lanes=price_lanes(f);facts={"return_60_percent":f["return_60_percent"],"median_daily_turnover_cr":f["turnover_cr"]}
         adjusted=f.get("adjustment_status")=="ADJUSTED" and f.get("calendar_matched") is True
         if adjusted:
@@ -255,30 +296,62 @@ def summarize(snapshot,connect,instant):
                 facts["historical_beta"]=beta
                 if 0<=beta<=.75:lanes.append("LOW_BETA")
         # Unadjusted prices may be observed, but never pass price-only lanes.
+        if isin in momentum_ranks:
+            rank=momentum_ranks[isin]
+            facts.update(sample_momentum_percentile=rank["percentile"],sample_momentum_cohort_size=rank["sample_size"])
+        # Known adjusted price risks exclude the company from the independent
+        # opportunity list even when a financial-only rule also matches.
+        # The separate strict FIP shortlist/export is not modified.
+        if adjusted and pump_or_extended(f):
+            excluded_price_risk+=1
+            continue
         if not adjusted:lanes=[v for v in lanes if LANES[v] in ("QUALITY","VALUE","GROWTH") and v not in ("GROWTH_LEADERSHIP_PROXY","CAN_SLIM_PROXY","PEAD")]
         lanes=list(dict.fromkeys(lanes))
         if not lanes:continue
         families=sorted({LANES[v] for v in lanes})
         counts.update(lanes)
+        plan=pro.strategy_risk_plan(f,lanes) if adjusted else None
+        from . import forward_earnings
+        growth=forward_earnings.baseline(report,instant) if report else None
+        cash_sensitivity=obj(report.get("valuation_sensitivity")) if report else None
+        if cash_sensitivity and cash_sensitivity.get("status")!="HYPOTHETICAL_CASH_STREAM_ONLY":cash_sensitivity=None
+        patterns=obj(f.get("professional_patterns"))
+        diagnostics={k:patterns[k] for k in ("trend_template_checks","contraction_checks") if k in patterns} if adjusted else {}
         items.append({"id":r["id"],"isin":isin,"symbol":r["symbol"],"exchange":r["exchange"],"as_of":r["as_of"],
             "close":f["close"],"strategies":lanes,"families":families,"adjustment_verified_for_screen":adjusted,
             "observed_facts":facts,"price_volatility_percent":f["volatility_126_percent"],
-            "risk":None,"qualified":False,"status":"RESEARCH_MATCH_ONLY"})
+            "risk":None,"price_plan":plan,"earnings_baseline":growth,"cash_sensitivity":cash_sensitivity,"strategy_diagnostics":diagnostics,"qualified":False,"status":"RESEARCH_MATCH_ONLY"})
     # Independent family breadth, not correlated-indicator voting. Regime is
     # a descriptive review lens only; no unvalidated regime performance claim.
-    trend=regime.get("trend") if regime.get("as_of") in {r["as_of"] for r in candidates} else None
+    trend=regime.get("trend") if (regime.get("calendar_checked_on")==today.isoformat()
+        and regime.get("as_of") in {r["as_of"] for r in candidates}) else None
+    from . import strategy_adaptation
+    try:
+        adaptive=strategy_adaptation.read(connect,instant,LANES,trend)
+    except (ValueError,TypeError,KeyError,AttributeError,OSError,__import__("sqlite3").Error):
+        adaptive={"methodology":strategy_adaptation.VERSION,"status":"UNAVAILABLE","lanes":{},"qualified":False,"notice":strategy_adaptation.NOTICE}
+    for r in items:
+        r["regime_priority"]=strategy_adaptation.priority(r["strategies"],adaptive)
+        # Only a same-session regime is frozen for prospective comparison.
+        r["publication_regime"]=trend if r["as_of"]==regime.get("as_of") and trend in strategy_adaptation.REGIMES else None
+        if r["publication_regime"] is None:r["regime_priority"]="UNVALIDATED"
     def order(r):
         preferred={"QUALITY","VALUE","DEFENSIVE"} if trend=="FALLING" else {"MOMENTUM","GROWTH","SECTOR"} if trend=="RISING" else {"VALUE","REVERSAL","QUALITY"} if trend=="SIDEWAYS" else set()
-        return (-len(r["families"]),-len(preferred.intersection(r["families"])),not r["adjustment_verified_for_screen"],-r["observed_facts"]["median_daily_turnover_cr"],r["isin"])
+        rank=r["observed_facts"].get("sample_momentum_percentile") if "MOMENTUM" in r["families"] else None
+        return ({"SUPPORTED_CONTEXT":0,"UNVALIDATED":1,"CAUTION":2}[r["regime_priority"]],-len(r["families"]),-len(preferred.intersection(r["families"])),not r["adjustment_verified_for_screen"],-(rank if rank is not None else 0),-r["observed_facts"]["median_daily_turnover_cr"],r["isin"])
+    from . import ranking_challenger
+    result["ranking_experiment"]=ranking_challenger.selection(items,order)
     items.sort(key=order)
     # Round-robin family coverage prevents a momentum-only top list.
     selected=[];seen=set()
     for family in ("QUALITY","VALUE","GROWTH","MOMENTUM","DEFENSIVE","SECTOR","REVERSAL"):
-        row=next((r for r in items if family in r["families"] and r["isin"] not in seen),None)
+        row=next((r for r in items if family in r["families"] and r["isin"] not in seen and r["regime_priority"]!="CAUTION"),None)
         if row:selected.append(row);seen.add(row["isin"])
     selected.extend(r for r in items if r["isin"] not in seen)
+    emerging.sort(key=lambda x:({"EARLY_CONVERGENCE_RESEARCH":0,"PRICE_SETUP_BUSINESS_CONFIRMATION_PENDING":1,"PRICE_SETUP_AWAITING_BUSINESS_EVIDENCE":2,"BUSINESS_TREND_CAUTION":3}[x["state"]],x["isin"]))
+    result["emerging_opportunities"]={"methodology":emerging_opportunities.VERSION,"items":emerging[:10],"matched_count":len(emerging),"notice":emerging_opportunities.NOTICE,"qualified":False}
     result.update(status="RESEARCH_AVAILABLE" if selected else "NO_SUPPORTED_MATCHES",items=selected[:10],
-        coverage={"eligible_companies":len(candidates),"cached_company_reports":len(reports),"comparable_cohorts":len(bounds),"matched_companies":len(items)},
-        lane_counts=dict(counts),regime=trend,regime_basis="DESCRIPTIVE_PRIORITY_ONLY",
+        coverage={"eligible_companies":len(candidates),"cached_company_reports":len(reports),"comparable_cohorts":len(bounds),"matched_companies":len(items),"excluded_known_price_risk":excluded_price_risk},
+        lane_counts=dict(counts),regime=trend,regime_basis="PROSPECTIVE_CONTEXT_WITH_STATIC_FALLBACK",adaptive_priority=adaptive,
         strategy_catalog=pro.catalog(counts,expectations_available=bool(surprises)))
     return result

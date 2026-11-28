@@ -10,6 +10,7 @@ from math import isfinite
 import re
 from . import company_reports, company_venues, steady_momentum, fip_research, forward_earnings, quarterly_financials
 from .replay_evidence import exact_isin
+from . import research_synthesis
 
 VERSION="INVESTMENT-ANALYST-1"
 CORE_FUNDS=("LARGE_CAP","MID_CAP","SMALL_CAP")
@@ -45,11 +46,16 @@ def stock_growth(row,instant):
     company=obj(row.get("company_evidence"))
     if company.get("isin")!=row.get("isin"):return None
     baseline=forward_earnings.baseline(company,instant)
+    return baseline_growth(baseline)
+
+def baseline_growth(baseline):
     if not baseline:return None
     return {"status":"UNCALIBRATED_EARNINGS_SCENARIO","observed_quarter":baseline["observed_quarter"],
         "target_quarter":baseline["target_quarter"],
         "revenue_yoy_percent":baseline["metrics"]["revenue"]["persisted_growth_percent"],
         "profit_yoy_percent":baseline["metrics"]["net_profit"]["persisted_growth_percent"],
+        "amount_scenarios":research_synthesis.quarter_scenarios(baseline),
+        "forecast_challengers":research_synthesis.forecast_challengers(baseline),
         "notice":"Quarterly persistence scenario, not consensus earnings or stock return forecast."}
 
 def fund_growth(driver,today):
@@ -66,6 +72,7 @@ def fund_growth(driver,today):
             "target_quarter":e["target_quarter"],"coverage_percent":e["covered_weight_percent"],
             "revenue_yoy_percent":e["covered_subset_revenue_persistence_percent"],
             "profit_yoy_percent":e["covered_subset_profit_persistence_percent"],
+            "driver_scenarios":[{"case":case,"revenue_yoy_percent":round(e["covered_subset_revenue_persistence_percent"]+shift,4),"profit_yoy_percent":round(e["covered_subset_profit_persistence_percent"]+shift,4)} for case,shift in (("BEAR",-10),("BASE",0),("BULL",10))],
             "notice":"Persistence scenario for covered original fund weight only; not a fund NAV forecast."}
     except (ValueError,TypeError,KeyError):return None
 
@@ -96,6 +103,7 @@ def stock_projection(snapshot,instant=None):
             {"tier":tier,"horizon":horizon,"score":score,"reasons":reasons,"limitations":gaps,
              "qualified":False,"price_plan":price_plan(r,horizon),
              "risk":risk,"risk_basis":"HISTORICAL_PRICE_RISK_PROXY","growth_outlook":growth,"observed_facts":facts,
+             "cash_sensitivity":research_synthesis.cash_context(obj(r.get("company_evidence")).get("valuation_sensitivity")),
              "evidence_confidence":"MODERATE" if tier=="ADJUSTED_JOINT" and growth else "LIMITED" if tier in ("ADJUSTED_JOINT","REPORTED_JOINT","BUSINESS_SCREEN") else "LOW",
              "action":"RESEARCH_FOR_ENTRY" if tier=="ADJUSTED_JOINT" else "WATCH_FOR_CONFIRMATION"})
     for report,status,tier,key,basis in ((strict,"JOINT_SCREEN_MATCHES","ADJUSTED_JOINT","strict_fip_evidence","ADJUSTED"),
@@ -136,16 +144,36 @@ def stock_projection(snapshot,instant=None):
     # to three discovery slots without changing strict FIP exports/qualification.
     alternatives=obj(snapshot.get("multi_strategy"))
     if alternatives.get("methodology")=="MULTI-STRATEGY-1":
-        alt=[r for r in rows(alternatives.get("items")) if isinstance(r,dict) and r.get("qualified") is False and exact_isin(r.get("isin")) and r["isin"] not in prohibited and r["isin"] not in seen and num(r.get("close"),.0001,1e9)]
+        # Do not promote a cached candidate from an older completed session.
+        current_sessions=set()
+        for section in rows(snapshot.get("sections")):
+            if not isinstance(section,dict) or section.get("status")!="READY" or section.get("section") not in ("NSE","BSE"):continue
+            coverage=obj(obj(section.get("result")).get("discovery_coverage"))
+            if (coverage.get("calendar_checked_on")==snapshot.get("research_date") and coverage.get("calendar_status")=="PUBLISHED_SESSION"
+                and isinstance(coverage.get("expected_session"),str)):
+                current_sessions.add((section["section"],coverage["expected_session"]))
+        alt=[r for r in rows(alternatives.get("items")) if isinstance(r,dict) and r.get("qualified") is False and exact_isin(r.get("isin")) and r["isin"] not in prohibited and r["isin"] not in seen and num(r.get("close"),.0001,1e9)
+             and (r.get("exchange"),r.get("as_of")) in current_sessions]
         if alt:
             out=out[:max(7,10-min(3,len(alt)))]
             for r in alt:
                 if len(out)>=10:break
                 if r["isin"] in seen:continue
                 seen.add(r["isin"])
+                plan=obj(r.get("price_plan"))
+                if (r.get("adjustment_verified_for_screen") is not True or plan.get("qualified") is not False
+                    or plan.get("method")!="STRATEGY_RISK_GEOMETRY_V1" or plan.get("strategy") not in r["strategies"]
+                    or not all(num(plan.get(k),.01,1e9) for k in ("reference","stop_scenario","target_scenario"))
+                    or not num(plan.get("reward_risk"),0,1e9) or not named(plan.get("notice"))
+                    or not plan["stop_scenario"]<plan["reference"]<plan["target_scenario"]
+                    or abs(plan["reference"]-r["close"])>.0051):plan=None
+                baseline=obj(r.get("earnings_baseline"))
+                growth=baseline_growth(baseline) if research_synthesis.current_baseline(baseline,r["isin"],instant) else None
                 out.append({**{k:r[k] for k in ("id","isin","symbol","exchange","as_of","close")},
                     "tier":"MULTI_STRATEGY_RESEARCH","horizon":"RESEARCH","score":None,"qualified":False,"action":"WATCH_FOR_CONFIRMATION",
-                    "risk":None,"growth_outlook":None,"price_plan":None,"evidence_confidence":"LIMITED",
+                    "risk":None,"growth_outlook":growth,"price_plan":plan,"evidence_confidence":"LIMITED",
+                    "strategy_diagnostics":obj(r.get("strategy_diagnostics")),"regime_priority":r.get("regime_priority"),
+                    "cash_sensitivity":research_synthesis.cash_context(r.get("cash_sensitivity")),
                     "strategies":r["strategies"],"strategy_families":r["families"],"observed_facts":r["observed_facts"],
                     "reasons":["Independent strategy research matches: "+", ".join(x.replace("_"," ").lower() for x in r["strategies"])],
                     "limitations":["Fixed research proxies; independent strategy performance not established.","No allocation or execution qualification; price adjustment and valuation evidence may be incomplete."]})
@@ -175,6 +203,7 @@ def fund_projection(snapshot,today):
             or shortlist.get("category")!=category or not fresh(shortlist.get("last_date"),today,7)):continue
         drows=[d for d in rows(driver.get("items"))[:5] if isinstance(d,dict)] if driver.get("methodology")=="MF-QUARTERLY-DRIVERS-1" else []
         counts=Counter(r.get("identifier") for r in rows(shortlist.get("items"))[:5] if isinstance(r,dict) and isinstance(r.get("identifier"),str))
+        detailed=rows(report.get("research_reports"))
         items=[]
         for r in rows(shortlist.get("items"))[:5]:
             if not isinstance(r,dict):continue
@@ -198,9 +227,14 @@ def fund_projection(snapshot,today):
             facts={"historical_cagr_percent":r["weekly_cagr_percent"]}
             if matched:
                 facts.update({k:d[k] for k in ("joint_coverage_weight_percent","joint_growth_weight_percent","review_weight_percent")})
-            items.append({"identifier":code,"name":r["name"],"nav_date":day,"score":r["score"],
+            exact=[v for v in detailed if isinstance(v,dict) and v.get("identifier")==code and v.get("nav_date")==day and v.get("category")==category]
+            context=research_synthesis.fund_context(r,exact[0] if len(exact)==1 else {},today)
+            if "fund_decision_evidence" in report:
+                from . import official_amfi_ter,fund_local_evidence,official_tri,fund_disclosures
+                context=research_synthesis.saved_fund_context(r,rows(report["fund_decision_evidence"]),category,today,website=official_amfi_ter.permitted(),local=fund_local_evidence.permitted(),tri=official_tri.permitted(),secondary=fund_disclosures.permitted())
+            items.append({"fund_evidence":context,"identifier":code,"name":r["name"],"nav_date":day,"score":r["score"],
                 "tier":"DRIVER_SUPPORTED" if positive else "DRIVER_REVIEW" if adverse else "HISTORICAL_ONLY",
-                "action":"REVIEW_BEFORE_NEW_SIP" if adverse else "COMPARE_FOR_SIP" if positive else "WATCH_FOR_CONFIRMATION",
+                "action":"REVIEW_BEFORE_NEW_SIP" if adverse or context.get("ter_status")=="CONFLICTING_SAME_DATE_TER" else "COMPARE_FOR_SIP" if positive else "WATCH_FOR_CONFIRMATION",
                 "relative_risk":r.get("relative_risk"),"reasons":reasons,"growth_outlook":growth,"observed_facts":facts,
                 "evidence_confidence":"MODERATE" if positive and growth else "LIMITED" if positive else "LOW",
                 "limitations":["Past returns and reported underlying growth do not establish future NAV returns.",
@@ -215,7 +249,41 @@ def analyze(snapshot,today,instant=None):
     out["status"]="AWAITING_CURRENT_RESEARCH"
     if snapshot.get("research_date")!=today.isoformat():return out
     stocks=stock_projection(snapshot,instant);funds=fund_projection(snapshot,today)
+    if instant is not None and stocks:
+        from . import independent_valuation
+        valuations=independent_valuation.read(instant,identities={r["isin"] for r in stocks})
+        for row in stocks:
+            v=valuations.get(row["isin"])
+            if v and v["price_date"]==row["as_of"]:row["valuation_scenario"]=v
+    # Join exact current listing observations only, not a different company or period.
+    evidence=list(company_reports.entries(snapshot))
+    for row in stocks:
+        # Financial statements are company-level, not venue price evidence.
+        # Include same-session exact ISIN observations across both venues; no
+        # transfer of price, stop, replay or execution evidence.
+        contexts=[research_synthesis.filing_context(r,instant) for _,r in evidence if r.get("isin")==row.get("isin") and r.get("as_of")==row.get("as_of")]
+        contexts=[c for c in contexts if c]
+        if contexts:
+            if any(c.get("status")=="CONFLICT_REVIEW" for c in contexts) or len({(c.get("period"),c.get("source_sha256"),c.get("revenue_comparison"),c.get("profit_comparison")) for c in contexts})>1:
+                row["filing_context"]={"status":"CONFLICT_REVIEW","qualified":False,"notice":"Conflicting exact-listing filing comparisons."}
+            else:row["filing_context"]=contexts[0]
+        # A strict FIP row must also inherit a current FIP performance caution,
+        # even if the independent multi-strategy list omitted this company.
+        regime=obj(snapshot.get("market_regime"));adaptive=obj(obj(snapshot.get("multi_strategy")).get("adaptive_priority"))
+        if row["tier"]=="ADJUSTED_JOINT" and regime.get("as_of")==row["as_of"] and regime.get("calendar_checked_on")==today.isoformat() and adaptive.get("regime")==regime.get("trend"):
+            from . import strategy_adaptation
+            row["regime_priority"]=strategy_adaptation.priority(["FIP"],adaptive)
+        row["research_thesis"]=research_synthesis.thesis(row,False)
+    for group in funds:
+        for row in group["items"]:row["research_thesis"]=research_synthesis.thesis(row,True)
     out["multi_strategy"]=obj(snapshot.get("multi_strategy"))
+    out["forecast_model_review"]=obj(obj(snapshot.get("forward_earnings_validation")).get("model_review"))
+    out["common_forecast_review"]=obj(obj(snapshot.get("forward_earnings_validation")).get("common_model_review"))
+    out["long_history_validation"]=obj(snapshot.get("long_history_validation"))
+    regime=obj(snapshot.get("market_regime"))
+    if regime.get("status")=="OBSERVED_BENCHMARK_REGIME" and regime.get("calendar_checked_on")==today.isoformat() and fresh(regime.get("as_of"),today,4):
+        out["market_context"]={k:regime.get(k) for k in ("trend","as_of","volatility_regime","status")}
+    else:out["market_context"]={"status":"AWAITING_CURRENT_MARKET_CONTEXT"}
     out.update(stocks=stocks,funds=funds,status="RESEARCH_AVAILABLE" if stocks or any(f["items"] for f in funds) else "NO_SUPPORTED_CANDIDATES")
     if stocks:out["next_steps"].append("Review the highest evidence-tier stock first; confirm current price and independent business evidence before allocating cash.")
     else:out["next_steps"].append("Do not force a new equity position from the current sample.")

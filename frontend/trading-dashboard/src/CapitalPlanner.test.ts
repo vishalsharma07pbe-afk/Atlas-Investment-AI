@@ -2,7 +2,7 @@ import {describe,it,expect} from "vitest";
 import {makeCapitalPlan,type OwnerReview} from "./CapitalPlanner";
 import type {InvestmentAnalysis} from "./InvestmentAnalystPanel";
 const now=Date.parse("2026-11-28T05:00:00Z");
-const stock={id:1,isin:"INE002A01018",symbol:"RELIANCE",exchange:"NSE",as_of:"2026-11-27",close:100,tier:"ADJUSTED_JOINT",horizon:"ELITE",score:80,reasons:[],limitations:[],qualified:false as const,action:"RESEARCH_FOR_ENTRY",risk:"MEDIUM"};
+const stock={id:1,isin:"INE002A01018",symbol:"RELIANCE",exchange:"NSE",as_of:"2026-11-27",close:100,tier:"ADJUSTED_JOINT",horizon:"ELITE",score:80,reasons:[],limitations:[],qualified:false as const,action:"RESEARCH_FOR_ENTRY",risk:"MEDIUM",price_plan:{reference:100,stop_scenario:96,target_scenario:108,reward_risk:2,notice:"Scenario only"}};
 const fund={identifier:"123456",name:"Fund",nav_date:"2026-11-27",score:80,tier:"DRIVER_SUPPORTED",action:"COMPARE_FOR_SIP",relative_risk:"AT_OR_BELOW_PEER_MEDIAN_DOWNSIDE",reasons:[],limitations:[],qualified:false as const};
 const report:InvestmentAnalysis={methodology:"INVESTMENT-ANALYST-1",status:"RESEARCH_AVAILABLE",research_date:"2026-11-28",stocks:[stock],funds:[{category:"LARGE_CAP",items:[fund]}],next_steps:[],notice:"Research"};
 const empty:OwnerReview={generated_at:"2026-11-28T04:59:00Z",holding_count:0,holdings:[],investment_analysis:{scope:"OWNER_LOCAL",recent_weight_coverage:false}};
@@ -26,4 +26,54 @@ describe("local conditional capital planner",()=>{
   expect(p.allocations.every(a=>!a.identity.startsWith("S:"))).toBe(true);
  });
  it("does not allocate on stale review",()=>expect(makeCapitalPlan(report,empty,100000,"HIGH",60,now+700000).planned).toBe(0));
+});
+
+it("requires a stock risk scenario and caps a high-stop-risk position",()=>{
+ const risky={...stock,price_plan:{...stock.price_plan,stop_scenario:90}};
+ const p=makeCapitalPlan({...report,stocks:[risky]},empty,100000,"HIGH",60,now);
+ expect(p.allocations.find(a=>a.identity==="S:"+stock.isin)?.amount).toBe(5000);
+ const missing={...stock,price_plan:undefined};
+ expect(makeCapitalPlan({...report,stocks:[missing]},empty,100000,"HIGH",60,now).allocations.every(a=>!a.identity.startsWith("S:"))).toBe(true);
+});
+
+it("reserves capital when existing portfolio look-through is flagged",()=>{
+ const review:OwnerReview={...empty,portfolio_level_risk:{look_through_status:"DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE",attention:[{kind:"HIDDEN_EQUITY_CONCENTRATION",label:"Observed exposure",value:30,unit:"PERCENT"}]}};
+ const p=makeCapitalPlan(report,review,100000,"HIGH",60,now);
+ expect(p.reserved).toBeGreaterThanOrEqual(60000);
+ expect(p.allocations.every(a=>!a.identity.startsWith("S:"))).toBe(true);
+});
+
+it("does not allocate when final decision policy is incomplete or unavailable",()=>{
+ const decision_quality={methodology:"FINAL-DECISION-QUALITY-1",qualified:false as const,notice:"research",counts:{EVIDENCE_INCOMPLETE:2}};
+ const p=makeCapitalPlan({...report,decision_quality},empty,100000,"HIGH",60,now);
+ expect(p.planned).toBe(0);
+ expect(makeCapitalPlan({...report,decision_quality:{...decision_quality,status:"UNAVAILABLE"}},empty,100000,"HIGH",60,now).planned).toBe(0);
+});
+
+it("caps aggregate stock risk, reserves costs and sizes whole shares",()=>{
+ const a={...stock,price_plan:{...stock.price_plan,stop_scenario:90}};
+ const b={...a,id:2,isin:"INE467B01029",symbol:"OTHER"};
+ const p=makeCapitalPlan({...report,stocks:[a,b],funds:[]},empty,100000,"HIGH",60,now);
+ expect(p.estimatedStockStopRisk).toBeLessThanOrEqual(750);
+ expect(p.illustrativeBuyCharges).toBeGreaterThan(0);
+ expect(p.allocations.every(x=>Number.isInteger(x.wholeShares)&&x.amount===x.wholeShares!*100)).toBe(true);
+ expect(p.planned+p.reserved).toBe(100000);
+});
+
+
+it("does not add direct stock risk over a known indirect concentration or without dated fund look-through",()=>{
+ const review:OwnerReview={...empty,holding_count:1,holdings:[{id:1,symbol:"123456",exact_scheme_code:"123456",asset_type:"MUTUAL_FUND",recorded_market_value:100000,recorded_valuation_recent:true}],investment_analysis:{scope:"OWNER_LOCAL",recent_weight_coverage:true}};
+ expect(makeCapitalPlan(report,review,100000,"HIGH",60,now).allocations.every(x=>x.category!=="EQUITY")).toBe(true);
+ const look={...review,diversification:{look_through:{status:"DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE",portfolio_date:"2026-10-31",exposures:[{isin:stock.isin,estimatedValue:12000,indirectValue:12000}]}}};
+ expect(makeCapitalPlan(report,look,100000,"HIGH",60,now).allocations.every(x=>x.category!=="EQUITY")).toBe(true);
+});
+
+
+it("enforces explicit category and stock holds even with positive candidate actions",()=>{
+ const quality={methodology:"FINAL-DECISION-QUALITY-1",state:"PRIORITY_RESEARCH",supported_checks:[],missing_checks:[],adverse_findings:[],evidence_checks_met:8,evidence_checks_total:8,qualified:false as const,notice:"Research"};
+ const policy={methodology:"FINAL-DECISION-QUALITY-1",qualified:false as const,notice:"Research",stock_allocation_hold:"ADVERSE",fund_allocation_holds:["LARGE_CAP"]};
+ const r={...report,decision_quality:policy,stocks:[{...stock,decision_quality:quality}],funds:[{category:"LARGE_CAP",items:[{...fund,decision_quality:quality}]}]};
+ expect(makeCapitalPlan(r,empty,100000,"HIGH",60,now).planned).toBe(0);
+ const unheld=makeCapitalPlan(report,empty,100000,"HIGH",60,now);
+ expect(unheld.estimatedDoubleStopRisk).toBe(2*unheld.estimatedStockStopRisk);
 });

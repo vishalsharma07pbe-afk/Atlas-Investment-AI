@@ -74,3 +74,29 @@ class ForwardEarningsTest(unittest.TestCase):
                 self.assertEqual(f.due_identities(connect,datetime(2027,8,1,5,tzinfo=timezone.utc)),[])
             with patch.object(f.company,"permitted",return_value=False):
                 self.assertEqual(f.due_identities(connect,datetime(2027,2,1,5,tzinfo=timezone.utc)),[])
+
+    def test_challengers_are_frozen_and_not_backfilled(self):
+        evidence=f.baseline(report(),NOW)
+        self.assertEqual(evidence["challengers"]["revenue"]["HALF_PERSISTENCE"]["amount_cr"],126)
+        self.assertNotIn("DAMPED_ACCELERATION",evidence["challengers"]["revenue"])
+        later=datetime(2027,2,1,5,tzinfo=timezone.utc)
+        row={"isin":ISIN,"target_quarter":evidence["target_quarter"],"published_at":NOW.isoformat(),"evidence":json.dumps(evidence)}
+        result=f.evaluate(row,report(later,True),later)
+        self.assertEqual(result["metrics"]["revenue"]["challenger_absolute_errors_pp"]["HALF_PERSISTENCE"],7.5)
+        evidence.pop("challenger_policy")
+        row["evidence"]=json.dumps(evidence)
+        self.assertNotIn("challenger_absolute_errors_pp",f.evaluate(row,report(later,True),later)["metrics"]["revenue"])
+
+
+    def test_four_models_use_common_two_metric_cohort(self):
+        import copy
+        metric={"unchanged_absolute_error_pp":10,"persistence_absolute_error_pp":3,
+                "challenger_absolute_errors_pp":{"HALF_PERSISTENCE":5,"DAMPED_ACCELERATION":2},
+                "signed_errors_pp":{"UNCHANGED":10,"PERSISTENCE":-3,"HALF_PERSISTENCE":5,"DAMPED_ACCELERATION":-2}}
+        rows=[{k:copy.deepcopy(metric) for k in f.METRICS} for _ in range(30)]
+        result=f.matched_model_comparison(rows,35)
+        self.assertEqual(result["status"],"MATCHED_FOUR_MODEL_DESCRIPTIVE_SAMPLE")
+        self.assertEqual(result["models"][1]["metrics"]["revenue"]["mean_signed_error_pp"],-3)
+        rows[-1]["net_profit"]["signed_errors_pp"].pop("DAMPED_ACCELERATION")
+        self.assertEqual(f.matched_model_comparison(rows,35)["matched_count"],29)
+        self.assertEqual(f.matched_model_comparison(rows,35)["status"],"INSUFFICIENT_COMMON_COHORT")

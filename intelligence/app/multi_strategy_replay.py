@@ -10,6 +10,7 @@ from statistics import mean,pstdev
 from . import multi_strategy as m, strategy_validation as sv, fip_research, regime_features
 
 VERSION="MULTI-STRATEGY-REPLAY-1"
+SIGNAL_POLICY="RECENT_JUMP_FILTER_V1"
 LANES=("FIP","TREND_FOLLOWING","HIGH_52_WEEK","CONTRACTION_PROXY","DONCHIAN_BREAKOUT","TURTLE_LONG_BREAKOUT","STAGE2_PROXY","SEPA_TREND_TEMPLATE","VCP_PROXY","MEAN_REVERSION","WYCKOFF_ACCUMULATION_PROXY","ANCHORED_VWAP_RECLAIM")
 HOLD=20
 FOLD=63
@@ -70,6 +71,43 @@ def positions_for(signal_map,lane,start,end):
             result.append(i);next_signal=i+HOLD
     return result
 
+def turtle_channel_replay(candles,signal_map,start,end,bps=30):
+    """Single-instrument cash-only next-open experiment; no portfolio claims.
+
+    Close-confirmed stop/channel exit executes at next open. Gaps are retained.
+    No same-bar look-ahead or simulated intraday fills. No pyramiding.
+    """
+    from .professional_strategies import channel_risk_inputs,turtle_unit_size
+    equity=100000.;cash=equity;shares=0;stop=None;pending=None;trades=0;path=[equity]
+    cost=bps/10000
+    if "TURTLE_LONG_BREAKOUT" in signal_map.get(start-1,set()):
+        evidence=channel_risk_inputs(candles[max(0,start-253):start])
+        if evidence:pending=("ENTRY",evidence["n"])
+    for i in range(start,end+1):
+        bar=candles[i]
+        if pending=="EXIT" and shares:
+            cash+=shares*bar.open*(1-cost);shares=0;stop=None;trades+=1
+        elif isinstance(pending,tuple) and not shares:
+            atr=pending[1]
+            size=turtle_unit_size(cash,atr,bar.open*(1+cost),cash)
+            if size and size["shares"]>0:
+                shares=size["shares"];cash-=shares*bar.open*(1+cost);stop=bar.open-2*atr
+        pending=None
+        if shares:
+            channel=min(v.low for v in candles[i-20:i])
+            if bar.close<=max(stop,channel):pending="EXIT"
+        elif "TURTLE_LONG_BREAKOUT" in signal_map.get(i,set()):
+            evidence=channel_risk_inputs(candles[max(0,i-252):i+1])
+            if evidence:pending=("ENTRY",evidence["n"])
+        path.append(cash+shares*bar.close)
+    peak=path[0];drawdown=0.
+    for v in path:
+        peak=max(peak,v);drawdown=min(drawdown,v/peak-1)
+    return {"status":"DESCRIPTIVE_SINGLE_INSTRUMENT_CHANNEL_REPLAY","completed_trades":trades,
+        "open_position":shares>0,"net_marked_return_percent":round(100*(path[-1]/path[0]-1),6),
+        "max_drawdown_percent":round(100*drawdown,6),"cost_bps_per_side":bps,"qualified":False,
+        "notice":"Close-confirmed next-open channel/stop research with 1% initial 2N risk cap; final open holdings marked at close. No pyramiding, portfolio capacity or realized performance."}
+
 def pearson(a,b):
     if len(a)!=len(b) or len(a)<4:return None
     x,y=pstdev(a),pstdev(b)
@@ -115,22 +153,26 @@ def replay(payload,benchmark,today):
         for b in LANES[i+1:]:
             x=pearson(fold_values[a],fold_values[b])
             if x is not None:correlation.append({"a":a,"b":b,"fold_return_correlation":x,"folds":len(folds)})
-    return {"methodology":VERSION,"status":"DESCRIPTIVE_REPLAY_ONLY","as_of":c[-1].date,
+    return {"methodology":VERSION,"signal_policy":SIGNAL_POLICY,"status":"DESCRIPTIVE_REPLAY_ONLY","as_of":c[-1].date,
         "history_count":len(c),"history_start":c[0].date,"test_start":c[start].date,"test_end":c[end].date,
+        "turtle_channel_experiment":turtle_channel_replay(c,{**signal_map,**{i:signals(c,i) for i in range(end-HOLD+1,end)}},start,end),
         "full_folds":len(folds),"lanes":lanes,"fold_correlation":correlation,"qualified":False,
         "historical_universe_verified":False,"total_return_benchmark_verified":False,"notice":NOTICE}
 
 def summarize(payloads,today):
     # Per-instrument simulations are not portfolio backtests. Report sample
     # counts rather than aggregate compounding of overlapping capital.
-    seen=set();counts={lane:{"companies":0,"trades":0,"positive_holdout_companies":0,"matched_price_index_companies":0} for lane in LANES}
+    seen=set();turtle_experiments=0;turtle_completed=0;counts={lane:{"companies":0,"trades":0,"positive_holdout_companies":0,"matched_price_index_companies":0} for lane in LANES}
     for p in payloads:
         report=p.get("multi_strategy_replay") or {}
         identity=p.get("isin")
         try:
-            if not m.exact_isin(identity) or identity in seen or report.get("methodology")!=VERSION or report.get("status")!="DESCRIPTIVE_REPLAY_ONLY" or not 1<=(today-date.fromisoformat(report["as_of"])).days<=5:continue
+            if not m.exact_isin(identity) or identity in seen or report.get("methodology")!=VERSION or report.get("signal_policy")!=SIGNAL_POLICY or report.get("status")!="DESCRIPTIVE_REPLAY_ONLY" or not 1<=(today-date.fromisoformat(report["as_of"])).days<=5:continue
         except (ValueError,TypeError,KeyError):continue
         seen.add(identity)
+        experiment=m.obj(report.get("turtle_channel_experiment"))
+        if experiment.get("status")=="DESCRIPTIVE_SINGLE_INSTRUMENT_CHANNEL_REPLAY" and experiment.get("qualified") is False and type(experiment.get("completed_trades")) is int and experiment["completed_trades"]>=0:
+            turtle_experiments+=1;turtle_completed+=experiment["completed_trades"]
         for lane in LANES:
             r=report.get("lanes",{}).get(lane,{})
             scenarios=r.get("cost_scenarios",[])
@@ -141,5 +183,6 @@ def summarize(payloads,today):
             if r.get("gross_nifty50_price_index_percent") is not None:counts[lane]["matched_price_index_companies"]+=1
     return {"methodology":VERSION,"status":"DESCRIPTIVE_SAMPLE_AVAILABLE" if seen else "AWAITING_REPLAY",
             "companies":len(seen),"lanes":counts,"qualified":False,"notice":NOTICE,
+             "turtle_channel_experiments":turtle_experiments,"turtle_channel_completed_trades":turtle_completed,
             "blockers":["FIVE_TO_TEN_YEAR_HISTORY_REQUIRED","HISTORICAL_CONSTITUENT_MEMBERSHIP_REQUIRED",
             "POINT_IN_TIME_FINANCIALS_REQUIRED","TOTAL_RETURN_BENCHMARK_REQUIRED","PORTFOLIO_WALK_FORWARD_REQUIRED","PROSPECTIVE_VALIDATION_REQUIRED"]}

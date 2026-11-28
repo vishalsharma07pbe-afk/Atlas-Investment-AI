@@ -12,6 +12,7 @@ from . import automatic_ai_review as ai, ai_failover
 from .investment_analyst import obj, rows, num
 
 VERSION="ANALYST-COMMITTEE-1"
+EVIDENCE_POLICY="CONDITIONAL_VALUE_FILING_ADVERSARIAL_V3"
 NOTICE="Model judgments are conditional research priorities, not independently verified facts, return probabilities or order instructions. Disagreement is caution, not a vote to trade."
 TIERS={"ADJUSTED_JOINT","REPORTED_JOINT","BUSINESS_SCREEN","TECHNICAL_LEAD","MULTI_STRATEGY_RESEARCH","DRIVER_SUPPORTED","HISTORICAL_ONLY","DRIVER_REVIEW"}
 REASONS={
@@ -28,6 +29,11 @@ REASONS={
  "ADJUSTMENT_UNKNOWN":"Price adjustment is not independently verified.",
  "DRIVER_RISK":"Reported underlying-business evidence requires review.",
  "LIMITED_EVIDENCE":"Missing independent evidence limits the conclusion.",
+ "CONFLICTING_TER":"Conflicting reported expense evidence prevents an informed new SIP comparison.",
+ "CONDITIONAL_VALUE_DOWNSIDE":"The operator-reviewed base valuation scenario is below the recorded reference price; verify assumptions.",
+ "BENCHMARK_LAG":"Matched historical TRI comparison shows lag; verify the benchmark mandate and future thesis.",
+ "FILING_CONFLICT":"Issuer/provider quarter reconciliation contains a discrepancy.",
+ "REGIME_CAUTION":"Recent matched regime-specific strategy outcome evidence warrants caution.",
 }
 def pack(report):
     if report.get("status")!="RESEARCH_AVAILABLE":return {}
@@ -49,6 +55,21 @@ def pack(report):
             "quarterly_profit_growth_percent":(10,100),"quarterly_growth_acceleration_pp":(2,100)}
         facts={k:round(raw[k],4) for k,(lo,hi) in bounds.items() if num(raw.get(k),lo,hi)}
         allowed=["LIMITED_EVIDENCE"]
+        fund=obj(row.get("fund_evidence"));benchmark=obj(fund.get("benchmark_context"))
+        valuation=obj(row.get("valuation_scenario"))
+        base=[x for x in rows(valuation.get("scenarios")) if isinstance(x,dict) and x.get("case")=="BASE"]
+        if group=="EQUITY" and valuation.get("status")=="OPERATOR_SOURCE_BOUND_VALUATION_SCENARIO" and valuation.get("isin")==identity and valuation.get("qualified") is False and len(base)==1 and num(base[0].get("upside_downside_percent"),-1e6,1e6):
+            facts["conditional_valuation_upside_percent"]=base[0]["upside_downside_percent"]
+            if facts["conditional_valuation_upside_percent"]<0:allowed.append("CONDITIONAL_VALUE_DOWNSIDE")
+        if group=="EQUITY":
+            if obj(row.get("filing_context")).get("status")=="CONFLICT_REVIEW":allowed.append("FILING_CONFLICT")
+            if row.get("regime_priority")=="CAUTION":allowed.append("REGIME_CAUTION")
+        if group!="EQUITY":
+            if fund.get("ter_status")=="CONFLICTING_SAME_DATE_TER":allowed.append("CONFLICTING_TER")
+            if num(fund.get("ter_percent"),0,100) and fund.get("ter_status")=="REPORTED_NOT_INDEPENDENTLY_AUTHENTICATED":facts["reported_ter_percent"]=fund["ter_percent"]
+            if benchmark.get("basis") in ("MATCHED_LOCAL_TRI_EXPORT","MATCHED_AUTHORIZED_DIRECT_TRI_CSV") and num(benchmark.get("three_year_difference_pp"),-1e6,1e6):
+                facts["matched_tri_difference_pp"]=benchmark["three_year_difference_pp"]
+                if facts["matched_tri_difference_pp"]<0:allowed.append("BENCHMARK_LAG")
         if tier in ("ADJUSTED_JOINT","REPORTED_JOINT","BUSINESS_SCREEN") and all(k in facts for k in ("earnings_growth_percent","reported_pe","reported_sector_pe")):
             if facts["reported_pe"]<=facts["reported_sector_pe"] and facts["earnings_growth_percent"]>=15:allowed.append("GROWTH_AND_VALUATION")
             elif facts["reported_pe"]>facts["reported_sector_pe"]:allowed.append("VALUATION_CAUTION")
@@ -75,7 +96,7 @@ def pack(report):
     return out
 
 def key(evidence,providers,today):
-    return sha256(json.dumps([VERSION,today,evidence,providers],sort_keys=True,separators=(",",":"),allow_nan=False).encode()).hexdigest()
+    return sha256(json.dumps([VERSION,EVIDENCE_POLICY,today,evidence,providers],sort_keys=True,separators=(",",":"),allow_nan=False).encode()).hexdigest()
 
 def validate(response,evidence):
     """Retain only allowed decision/rationale pairs with exact candidate citations."""
@@ -89,8 +110,8 @@ def validate(response,evidence):
             if candidate not in evidence or r.get("evidence_ids")!=[candidate] or reason not in evidence[candidate]["allowed_reasons"]:continue
             if decision not in ("PRIORITIZE_REVIEW","DEFER_REVIEW"):continue
             if decision=="PRIORITIZE_REVIEW" and (reason not in ("JOINT_SCREEN","BUSINESS_SCREEN","STRATEGY_MATCH","HISTORICAL_PEERS","GROWTH_DRIVERS","POSITIVE_SCENARIO","GROWTH_AND_VALUATION")
-                or evidence[candidate]["tier"]=="DRIVER_REVIEW"):continue
-            if decision=="DEFER_REVIEW" and reason not in ("LIMITED_EVIDENCE","HIGH_HISTORICAL_RISK","ADJUSTMENT_UNKNOWN","DRIVER_RISK","NEGATIVE_SCENARIO","VALUATION_CAUTION"):continue
+                or evidence[candidate]["tier"]=="DRIVER_REVIEW" or any(x in evidence[candidate]["allowed_reasons"] for x in ("CONFLICTING_TER","FILING_CONFLICT","REGIME_CAUTION"))):continue
+            if decision=="DEFER_REVIEW" and reason not in ("LIMITED_EVIDENCE","HIGH_HISTORICAL_RISK","ADJUSTMENT_UNKNOWN","DRIVER_RISK","NEGATIVE_SCENARIO","VALUATION_CAUTION","CONFLICTING_TER","CONDITIONAL_VALUE_DOWNSIDE","BENCHMARK_LAG","FILING_CONFLICT","REGIME_CAUTION"):continue
             if candidate in found:duplicate.add(candidate)
             found[candidate]={"decision":decision,"reason":reason}
         except (ValueError,TypeError,KeyError,AttributeError):continue
@@ -99,7 +120,8 @@ def validate(response,evidence):
 def providers_for_analyst():
     # The plan is lead reviewer only after explicit account and external consent.
     allowed=ai.providers()
-    return sorted(allowed,key=lambda p:p!="CHATGPT_PLAN")
+    roles={"CHATGPT_PLAN":0,"GEMINI":1,"OLLAMA":2,"GROQ":3}
+    return sorted(allowed,key=lambda p:roles.get(p,4))
 
 def refresh(report,connect,instant,runner=ai_failover.grounded_research):
     providers=providers_for_analyst();evidence=pack(report)
@@ -125,7 +147,7 @@ def refresh(report,connect,instant,runner=ai_failover.grounded_research):
             "Return up to eight findings, each statement a JSON string with exactly candidate, decision, reason. "
             "decision must be PRIORITIZE_REVIEW or DEFER_REVIEW. Use only allowed_reasons for that candidate; "
             "cite exactly its candidate ID. No prose is retained. A score is not return probability. "
-            "A positive earnings scenario is an uncalibrated assumption, not a forecast. Evidence: "+
+            "A positive earnings scenario is an uncalibrated assumption, not a forecast. Conditional valuation uses operator assumptions, and historical TRI lag is not predictive. Evidence: "+
             json.dumps(evidence,separators=(",",":"),ensure_ascii=True,allow_nan=False))
         result=runner(prompt,list(evidence),providers=[p])
         if result.get("status")=="MODEL_GROUNDED" and result.get("provider")==p:
@@ -139,7 +161,7 @@ def refresh(report,connect,instant,runner=ai_failover.grounded_research):
 def attach(report,connect,instant):
     providers=providers_for_analyst();evidence=pack(report)
     result={"methodology":VERSION,"status":"AWAITING_REVIEW" if providers and evidence else "DISABLED_OR_NO_EVIDENCE",
-        "reviewed_providers":0,"configured_reviewers":len(providers),"review_agreement":"NOT_REVIEWED","notice":NOTICE}
+        "reviewed_providers":0,"reviewed_provider_ids":[],"configured_reviewers":len(providers),"review_agreement":"NOT_REVIEWED","notice":NOTICE}
     report["committee"]=result
     if not providers or not evidence:return report
     cached=ai._read(connect,key(evidence,providers,report["research_date"]))
@@ -154,14 +176,15 @@ def attach(report,connect,instant):
         raw=obj(decisions.get(p))
         v=validate({"findings":[{"statement":json.dumps({"candidate":k,**d}),"evidence_ids":[k]} for k,d in raw.items() if isinstance(d,dict)]},evidence)
         if v:accepted[p]=v
-    result.update(status="REVIEW_AVAILABLE" if accepted else "AWAITING_REVIEW",reviewed_providers=len(accepted),
+    result.update(status="REVIEW_AVAILABLE" if accepted else "AWAITING_REVIEW",reviewed_providers=len(accepted),reviewed_provider_ids=list(accepted),
         review_agreement="MULTI_PROVIDER_REVIEW" if len(accepted)>=2 else "SINGLE_PROVIDER_REVIEW" if accepted else "NOT_REVIEWED")
     def annotate(row,k):
         votes=[(p,v[k]) for p,v in accepted.items() if k in v]
         if not votes:return
+        adversarial=next((v for p,v in votes if p=="OLLAMA"),None)
         decisions={v["decision"] for _,v in votes}
         state="DISAGREEMENT" if len(decisions)>1 else next(iter(decisions))
-        row["ai_review"]={"state":state,"agreement":"DISAGREEMENT" if len(decisions)>1 else "MULTI_PROVIDER_AGREEMENT" if len(votes)>=2 else "SINGLE_PROVIDER_ONLY","providers":[p for p,_ in votes],"reasons":[REASONS[c] for c in sorted({v["reason"] for _,v in votes})]}
+        row["ai_review"]={"adversarial_status":"DEFERRED_BY_LOCAL_RISK_REVIEWER" if adversarial and adversarial["decision"]=="DEFER_REVIEW" else "LOCAL_RISK_REVIEW_RECEIVED" if adversarial else "LOCAL_RISK_REVIEW_PENDING","state":state,"agreement":"DISAGREEMENT" if len(decisions)>1 else "MULTI_PROVIDER_AGREEMENT" if len(votes)>=2 else "SINGLE_PROVIDER_ONLY","providers":[p for p,_ in votes],"reasons":[REASONS[c] for c in sorted({v["reason"] for _,v in votes})]}
         if state in ("DISAGREEMENT","DEFER_REVIEW"):row["action"]="WATCH_FOR_CONFIRMATION" if row.get("action")!="REVIEW_BEFORE_NEW_SIP" else row["action"]
     for i,r in enumerate(report["stocks"]):annotate(r,"S"+str(i+1))
     for g in report["funds"]:

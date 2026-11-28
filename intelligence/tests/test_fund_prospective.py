@@ -32,3 +32,29 @@ class ProspectiveTests(unittest.TestCase):
     def test_private_scope_not_published(self):
         s=snap();s["scope"]="PRIVATE"
         self.assertEqual(f.publish(s,NOW,lambda: self.fail("private scope must not access db")),0)
+
+    def test_final_fund_decision_frozen_only_on_original_publication(self):
+        from app import decision_quality as q
+        with tempfile.TemporaryDirectory() as tmp:
+            def connect():
+                db=sqlite3.connect(tmp+"/fund.sqlite");db.row_factory=sqlite3.Row;return db
+            item={"identifier":"123456","nav_date":"2026-11-26","qualified":False,
+                  "decision_quality":{"methodology":q.VERSION,"qualified":False,"state":"EVIDENCE_INCOMPLETE"}}
+            report={"research_date":TODAY.isoformat(),"status":"RESEARCH_AVAILABLE",
+                "decision_quality":{"methodology":q.VERSION},"funds":[{"category":"LARGE_CAP","items":[item]}]}
+            self.assertEqual(f.publish(snap(),NOW,connect,final_report=report),1)
+            item["decision_quality"]["state"]="PRIORITY_RESEARCH"
+            self.assertEqual(f.publish(snap(),NOW,connect,final_report=report),0)
+            states=f.summary("LARGE_CAP",TODAY,connect)["decision_states"]
+            self.assertEqual(states["EVIDENCE_INCOMPLETE"]["published"],1)
+            self.assertEqual(states["PRIORITY_RESEARCH"]["published"],0)
+
+    def test_frozen_tri_exact_endpoints_only(self):
+        row={"category":"LARGE_CAP","evidence":json.dumps({"category_tri_proxy":"NIFTY 100 TRI"})}
+        outcome={"start_date":"2026-11-27","end_date":"2027-02-25"}
+        series={"NIFTY 100 TRI":{date(2026,11,27):100,date(2027,2,25):110}}
+        pair=f.paired_tri(row,outcome,series,"AUTHORIZED_LOCAL_EXPORT")
+        self.assertEqual(pair["tri_change_percent"],10)
+        self.assertIsNone(f.paired_tri(row,{**outcome,"end_date":"2027-02-26"},series,"AUTHORIZED_LOCAL_EXPORT"))
+        self.assertIsNone(f.paired_tri(row,outcome,series,"UNKNOWN"))
+        self.assertIsNone(f.paired_tri({**row,"category":"MID_CAP"},outcome,series,"AUTHORIZED_LOCAL_EXPORT"))

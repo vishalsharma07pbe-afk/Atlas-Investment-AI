@@ -32,7 +32,14 @@ def price_patterns(s):
     recent=span(s[-10:]);middle=span(s[-30:-10]);older=span(s[-60:-30])
     sd=pstdev(p[-21:-1]);z=(p[-1]-mean(p[-21:-1]))/sd if sd else None
     ranges=[span(s[-61:-31]),span(s[-31:-1])]
-    return {"breakout20":p[-1]>prior20,"breakout55":p[-1]>prior55,"volume_ratio":round(volume_ratio,4),
+    template_checks={"above_50_day":p[-1]>mean(p[-50:]),"50_above_150":mean(p[-50:])>mean(p[-150:]),
+        "150_above_200":mean(p[-150:])>sma200,"rising_200":prior200 is not None and sma200>prior200,
+        "above_annual_low_30_percent":len(s)>=252 and p[-1]>=1.3*low,
+        "within_25_percent_of_annual_high":len(s)>=252 and p[-1]>=.75*high}
+    contraction_checks={"older_range_percent":round(older,4),"middle_range_percent":round(middle,4),"recent_range_percent":round(recent,4),
+        "recent_to_prior_volume":round(mean(v[-10:])/mean(v[-30:-10]),4) if mean(v[-30:-10])>0 else None,
+        "prior_pivot":prior20,"pivot_confirmed":p[-1]>prior20 and volume_ratio>=1.5}
+    return {"trend_template_checks":template_checks,"contraction_checks":contraction_checks,"channel_risk_inputs":channel_risk_inputs(s),"breakout20":p[-1]>prior20,"breakout55":p[-1]>prior55,"volume_ratio":round(volume_ratio,4),
         "stage2":p[-1]>weekly_sma>prior_weekly and p[-1]>prior55,
         "sepa_template":len(s)==253 and prior200 is not None and p[-1]>mean(p[-50:])>mean(p[-150:])>sma200>prior200 and p[-1]>=1.3*low and p[-1]>=.75*high,
         "vcp":older>middle>recent and middle<=.8*older and recent<=.8*middle and mean(v[-10:])<.8*mean(v[-30:-10]) and p[-1]>=.95*max(c.high for c in s[-60:]),
@@ -41,6 +48,71 @@ def price_patterns(s):
         "avwap_reclaim":current is not None and previous is not None and p[-2]<=previous and p[-1]>current and volume_ratio>=1,
         "beta_dates_digest":date_digest([c.date for c in s[-61:]]),
         "beta_returns":[round(b/a-1,9) for a,b in zip(p[-61:-1],p[-60:])]}
+
+def channel_risk_inputs(candles):
+    """Completed-session Wilder N and causal channels, not execution quotes."""
+    if len(candles)<56:return None
+    if any(not n(c.close,.00001,1e9) or not n(c.low,.00001,c.close)
+           or not n(c.high,c.close,1e9) for c in candles):return None
+    tr=[max(b.high-b.low,abs(b.high-a.close),abs(b.low-a.close))
+        for a,b in zip(candles,candles[1:])]
+    atr=mean(tr[:20])
+    for value in tr[20:]:atr=(19*atr+value)/20
+    if not n(atr,.00001,1e9):return None
+    return {"n":atr,"close":candles[-1].close,
+        "entry20":max(c.high for c in candles[-21:-1]),
+        "entry55":max(c.high for c in candles[-56:-1]),
+        "exit10":min(c.low for c in candles[-10:]),
+        "exit20":min(c.low for c in candles[-20:]),
+        "mean20":mean(c.close for c in candles[-21:-1])}
+
+def strategy_risk_plan(features,strategies):
+    """Conditional price geometry, not a forecast or an execution signal."""
+    if features.get("adjustment_status")!="ADJUSTED" or features.get("calendar_matched") is not True:return None
+    a=obj(obj(features.get("professional_patterns")).get("channel_risk_inputs"))
+    close,atr=a.get("close"),a.get("n")
+    if not n(close,.01,1e8) or not n(atr,.00001,1e9) or atr/close>.05:return None
+    if not n(features.get("close"),.01,1e8) or abs(features["close"]-close)>.000051:return None
+    for rule in ("TURTLE_LONG_BREAKOUT","DONCHIAN_BREAKOUT","MEAN_REVERSION","VCP_PROXY","STAGE2_PROXY","SEPA_TREND_TEMPLATE","TREND_FOLLOWING"):
+        if rule not in strategies:continue
+        if rule in ("TURTLE_LONG_BREAKOUT","DONCHIAN_BREAKOUT"):
+            turtle=rule=="TURTLE_LONG_BREAKOUT"
+            trigger=a.get("entry55" if turtle else "entry20")
+            channel=a.get("exit20" if turtle else "exit10")
+            if not n(trigger,.01,close) or not n(channel,.01,close) or trigger>=close:continue
+            stop=close-2*atr if turtle else max(close-2*atr,channel)
+            exit_rule="20_SESSION_LOW_OR_2N_STOP" if turtle else "10_SESSION_LOW_OR_2ATR_STOP"
+            target=close+2*(close-stop)
+        elif rule=="MEAN_REVERSION":
+            trigger=close;stop=close-2*atr;target=a.get("mean20")
+            exit_rule="PRIOR_20_SESSION_MEAN_OR_2ATR_STOP"
+            if not n(target,close,1e9):continue
+        else:
+            trigger=close;low=a.get("exit10")
+            if not n(low,.01,close):continue
+            stop=max(close-2*atr,low);target=close+2*(close-stop)
+            exit_rule="RECENT_10_SESSION_LOW_OR_2ATR_STOP"
+        entry,stop,target=round(close,2),round(stop,2),round(target,2)
+        if not 0<stop<entry<target:continue
+        risk=entry-stop
+        result={"reference":entry,"entry_trigger":round(trigger,2),"stop_scenario":stop,
+            "target_scenario":target,"reward_risk":round((target-entry)/risk,2),
+            "method":"STRATEGY_RISK_GEOMETRY_V1","strategy":rule,"exit_rule":exit_rule,
+            "n_or_atr":round(atr,4),"risk_per_share":round(risk,2),
+            "risk_percent":round(100*risk/entry,4),"qualified":False,
+            "notice":"Prior-close research scenario only; target is illustrative, not fair value or a forecast. Recheck live spread, gaps, costs and corporate actions."}
+        if rule=="TURTLE_LONG_BREAKOUT":
+            result.update(channel_exit=round(channel,2),hypothetical_add_interval=round(.5*atr,4),
+                notice="Turtle channel exit has no fixed profit target; the displayed 2R target is comparison geometry only. No fills or portfolio allocation inferred.")
+        return result
+    return None
+
+def turtle_unit_size(capital,atr,entry,available_cash,risk_budget_percent=1):
+    """Conservative cash-only hypothetical unit, not an order quantity."""
+    if not all(n(v,.01,1e12) for v in (capital,atr,entry)) or not n(available_cash,0,capital) or not n(risk_budget_percent,.01,1):return None
+    shares=int(min(capital*risk_budget_percent/100/(2*atr),available_cash/entry))
+    return {"shares":shares,"initial_stop_risk":round(shares*2*atr,2),
+        "notional":round(shares*entry,2),"qualified":False}
 
 def price_matches(f,not_extended):
     a=obj(f.get("professional_patterns"));out=[]
@@ -113,6 +185,8 @@ def financial_matches(report,today):
     score=piotroski(inputs,today)
     if score:
         facts["piotroski_score"]=score["score"]
+        facts["piotroski_checks"]=score["checks"]
+        facts["piotroski_period"]=score["period"]
         if score["score"]>=7:out.append("PIOTROSKI_F_SCORE")
     trends=obj(report.get("financial_trends")).get("items",[])
     profit=next((r for r in trends if r.get("metric")=="NET_PROFIT" and r.get("latest_period_may_be_stale") is False and r.get("period_basis")=="DECLARED_ANNUAL_MONTH_END" and r.get("statement_type")=="consolidated"),{})

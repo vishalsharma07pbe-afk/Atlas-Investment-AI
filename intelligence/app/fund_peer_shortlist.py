@@ -21,6 +21,27 @@ def num(x,lo,hi):
     return type(x) in (float,int) and isfinite(x) and lo<=x<=hi
 def percentile(value,values):
     return 100*(sum(v<value for v in values)+.5*(sum(v==value for v in values)-1))/(len(values)-1)
+def recovery_context(row):
+    """Observed weekly underwater duration, with an open drawdown censored."""
+    from hashlib import sha256
+    points=row.get("weekly_anchor_series");w=row.get("matched_weekly_comparison") or {}
+    if not isinstance(points,list) or len(points)!=157 or w.get("anchor_count")!=157:return None
+    try:
+        days=[date.fromisoformat(p["date"]) for p in points];values=[p["nav"] for p in points]
+        if any(not num(v,.000001,1e9) for v in values) or any(not 4<=(b-a).days<=10 for a,b in zip(days,days[1:])):return None
+        if days[0].isoformat()!=w.get("first_date") or days[-1].isoformat()!=w.get("last_date") or sha256("".join(d.isoformat()+"\n" for d in days).encode()).hexdigest()!=w.get("date_digest"):return None
+        peak=values[0];peak_day=days[0];recovered=[];underwater=False
+        for day,value in zip(days[1:],values[1:]):
+            if value>=peak:
+                if underwater:recovered.append((day-peak_day).days)
+                peak=value;peak_day=day;underwater=False
+            else:underwater=True
+        open_days=(days[-1]-peak_day).days if underwater else 0
+        return {"basis":"MATCHED_WEEKLY_NAV_ANCHORS","last_date":days[-1].isoformat(),"completed_recoveries":len(recovered),
+            "longest_completed_recovery_days":max(recovered) if recovered else None,"current_underwater_days":open_days,
+            "current_drawdown_percent":round(100*(values[-1]/peak-1),4),"qualified":False}
+    except (ValueError,TypeError,KeyError,AttributeError,OverflowError,ZeroDivisionError):return None
+
 def build(candidates,source_rows,category,fit,today,rolling_context,*,category_only=False):
     report={"methodology":VERSION,"status":"AWAITING_MATCHED_HISTORY","category":category,"eligible_count":0,
         "matched_count":0,"cohort_count":0,"items":[],"notice":NOTICE,
@@ -71,7 +92,7 @@ def build(candidates,source_rows,category,fit,today,rolling_context,*,category_o
             "score":score,"components":points,"weekly_cagr_percent":values[0],"worst_rolling_year_percent":values[1],
             "weekly_drawdown_percent":values[2],"annualized_volatility_percent":-values[3],
             "rolling_peer_above_median_percent":rolling["above_median_percent"],"relative_risk":risk,
-            "status":"HISTORICAL_RESEARCH_ONLY","qualified":False})
+            "status":"HISTORICAL_RESEARCH_ONLY","qualified":False,"recovery_context":recovery_context(source[f.identifier])})
     output.sort(key=lambda r:(-r["score"],r["identifier"]))
     report.update(status="HISTORICAL_SHORTLIST_AVAILABLE" if output else "NO_HISTORICAL_MATCHES",
         matched_count=len(rows),first_date=key[0],last_date=key[1],date_digest=key[2],

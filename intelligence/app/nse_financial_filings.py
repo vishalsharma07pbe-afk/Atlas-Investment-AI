@@ -337,8 +337,18 @@ def attach(snapshot,connect,instant,path=PATH):
             else:continue
             if e["isin"]!=isin or e["period"]!=period.isoformat() or e["source_url"]!=url:continue
         except (ValueError,TypeError,KeyError,AttributeError):continue
+        # Recompute from the normalized provider statement, not an arbitrary
+        # cached summary; its original section timestamp must still be current.
+        company=item.get("company_evidence") or {}
+        current_company={}
+        try:
+            from . import quarterly_financials
+            block=company["sections"]["quarterly_income"];stamp=datetime.fromisoformat(block["source"]["retrieved_at"])
+            if company.get("isin")==isin and stamp.tzinfo is not None and instant-timedelta(hours=24)<=stamp<=instant:
+                current_company={"isin":isin,"quarterly_financials":quarterly_financials.summarize(company,today)}
+        except (ValueError,TypeError,KeyError,AttributeError):pass
         item["independent_financial_evidence"]={**e,"retrieved_at":row["attempted_at"],"status":"REPORTED_CONSOLIDATED_FILING",
-            "comparison":compare(e,item.get("company_evidence")),"notice":NOTICE}
+            "comparison":compare(e,current_company),"notice":NOTICE}
         matched.add(isin)
     summary.update(status="REPORTED_FILINGS_AVAILABLE" if matched else "AWAITING_EVIDENCE" if links or index_permitted() else "AWAITING_OFFICIAL_LINKS",matched_companies=len(matched),supplied_links=len(links))
     return snapshot

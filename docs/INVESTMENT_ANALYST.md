@@ -21,3 +21,11 @@ python3 scripts/local_research_acceptance.py --investment-analyst-audit --qualif
 For a positive-output acceptance observation also run with `--require-analyst-results`. That requires actual current stock and all three core fund decision lists plus at least one cached model review. It is not a reason to fabricate a candidate when none exists. Use `--require-live` only during a verified live market session. The script emits aggregate counts and does not report private identifiers. Confirm actual model provider permission and availability locally.
 
 The implementation and mocked provider tests do not certify market data coverage, model quality, prospective investment outcomes or actual populated local acceptance. These remain separately verified release criteria.
+
+## Integrated decision cards and owner-local risk
+
+The analyst now exposes supporting/adverse cases and invalidation text. Current exact-company alternate lanes can reuse the frozen quarterly persistence baseline; the bear/base/bull amounts are fixed ±10 percentage-point growth sensitivities, not forecast earnings. The hypothetical discounted cash stream is not intrinsic value. Exact Direct Growth fund costs can be shown with their evidence date/basis; conflicting same-date TER is withheld and excludes the scheme from the conditional capital budget. Observed weekly drawdown and volatility are descriptive.
+
+The owner-local plan adds simultaneous equity/fund shock scenarios (-30/-20, zero, +20/+15 percent) only for fully covered recorded weights; concentration HHI is based on recorded positions, not look-through exposure. Equity capital planning requires a valid prior-close stop scenario and limits hypothetical initial risk to 0.5% of fresh investable capital per new stock before gap risk, taxes and costs. No trade, tax recommendation or certified allocation is implied.
+
+Add `--require-advanced-engine-results` to the local acceptance command to observe integrated paths and four actual model reviewer IDs. No claim of full live acceptance is made from code or mocked fixtures.

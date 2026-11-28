@@ -277,8 +277,10 @@ def fund_snapshot(category):
         snapshot["historical_research_shortlist"]={k:shortlist.get(k) for k in
             ("methodology","category","status","eligible_count","matched_count","cohort_count","first_date","last_date","date_digest","notice","scope","selected_suitability")}
         snapshot["historical_research_shortlist"]["items"]=[
-            {k:r.get(k) for k in ("identifier","name","isin_growth","nav","nav_date","score","weekly_cagr_percent","relative_risk","status","qualified")}
+            {k:r.get(k) for k in ("identifier","name","isin_growth","nav","nav_date","score","weekly_cagr_percent","weekly_drawdown_percent","worst_rolling_year_percent","annualized_volatility_percent","rolling_peer_above_median_percent","relative_risk","status","qualified","recovery_context")}
             for r in shortlist.get("items",[])[:5] if isinstance(r,dict) and r.get("qualified") is False and r.get("status")=="HISTORICAL_RESEARCH_ONLY"]
+        from . import research_synthesis
+        snapshot["fund_decision_evidence"]=research_synthesis.compact_fund_context(shortlist.get("items",[]),result.get("research_reports",[]),category,now().astimezone(ZoneInfo("Asia/Kolkata")).date())
     return snapshot
 
 
@@ -418,6 +420,16 @@ def _read_sections(section_names,enabled,interval,current):
         if section in CATEGORIES and isinstance(result,dict):
             if not official_tri.permitted():result.pop("official_tri_coverage",None)
             if not official_amc_factsheet.permitted():result.pop("official_amc_coverage",None)
+            # Only retain source-specific context while the respective permissions remain enabled.
+            from . import research_synthesis, fund_local_evidence
+            fund_records=result.pop("fund_decision_evidence",[])
+            if not isinstance(fund_records,list):fund_records=[]
+            kept=[]
+            for item in (result.get("historical_research_shortlist") or {}).get("items",[])[:5]:
+                if not isinstance(item,dict):continue
+                context=research_synthesis.saved_fund_context(item,fund_records,section,today,website=official_amfi_ter.permitted(),local=fund_local_evidence.permitted(),tri=official_tri.permitted(),secondary=fund_disclosures.permitted())
+                kept.append({k:item.get(k) for k in ("identifier","isin_growth","nav_date")} | {"category":section,"context":context})
+            if kept:result["fund_decision_evidence"]=kept
         sections.append({"section": section, "status": status,
                          "generated_at": row["generated_at"], "attempted_at": row["attempted_at"],
                          "result": result, "error_code": error_code})
@@ -444,6 +456,11 @@ def read_snapshot(include_ai=True):
             snapshot["strategy_validation"] = automatic_strategy_validation.read(_connect,current,snapshot=snapshot) if enabled else {"status":"DISABLED"}
         except (ValueError, OSError, sqlite3.Error):
             snapshot["strategy_validation"] = {"status":"UNAVAILABLE"}
+        from . import long_history_validation
+        try:
+            snapshot["long_history_validation"]=long_history_validation.read(_connect) if enabled else {"status":"DISABLED"}
+        except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,AttributeError):
+            snapshot["long_history_validation"]={"status":"UNAVAILABLE","qualified":False,"notice":long_history_validation.NOTICE}
         try:
             snapshot["institutional_activity"] = automatic_institutional.read(_connect) if enabled else {"status":"AUTOMATION_DISABLED"}
         except (ValueError, OSError, sqlite3.Error):
@@ -548,6 +565,11 @@ def read_snapshot(include_ai=True):
         except (ValueError,TypeError,KeyError,AttributeError,OverflowError,OSError,sqlite3.Error):
             snapshot["multi_strategy"]["prospective_validation"]={"status":"UNAVAILABLE","lanes":{},"notice":"Paper-tracking evidence unavailable."}
         try:
+            from . import ranking_challenger
+            snapshot["multi_strategy"]["ranking_comparison"]=ranking_challenger.summary(_connect,current) if enabled else {"status":"DISABLED"}
+        except (ValueError,TypeError,KeyError,AttributeError,OverflowError,OSError,sqlite3.Error):
+            snapshot["multi_strategy"]["ranking_comparison"]={"status":"UNAVAILABLE"}
+        try:
             snapshot["forward_earnings_validation"]=forward_earnings.summary(_connect,current) if enabled else {"status":"DISABLED"}
         except (ValueError,TypeError,OSError,sqlite3.Error):
             snapshot["forward_earnings_validation"]={"status":"UNAVAILABLE"}
@@ -584,6 +606,63 @@ def read_overview():
         analyst_source_discovery.attach(snapshot["investment_analyst"],_connect,instant)
     except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,AttributeError):
         snapshot["investment_analyst"]["source_discovery"]={"status":"UNAVAILABLE","links":[],"notice":analyst_source_discovery.NOTICE}
+    from . import decision_quality,decision_outcomes
+    try:
+        snapshot["investment_analyst"]["decision_outcomes"]=decision_outcomes.summary(_connect,instant)
+    except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,AttributeError):
+        snapshot["investment_analyst"]["decision_outcomes"]={"status":"UNAVAILABLE","states":{},"notice":decision_outcomes.NOTICE}
+    try:
+        decision_quality.attach(snapshot["investment_analyst"],instant.astimezone(ZoneInfo("Asia/Kolkata")).date())
+        # Category-scoped NAV outcome evidence is descriptive; no cross-asset ranking.
+        fund_outcomes={}
+        for group in snapshot["investment_analyst"].get("funds",[]):
+            category=group.get("category")
+            if category not in investment_analyst.CORE_FUNDS:continue
+            try:
+                observation=fund_prospective.summary(category,instant.astimezone(ZoneInfo("Asia/Kolkata")).date())
+                fund_outcomes[category]={"states":observation.get("decision_states",{}),"truncated":observation.get("truncated",False),"final_action_comparison":observation.get("final_action_comparison")}
+            except (sqlite3.Error,OSError,ValueError,TypeError,KeyError):continue
+        report=snapshot["investment_analyst"]
+        report["fund_decision_outcomes"]=fund_outcomes
+        held=[]
+        for group in report.get("funds",[]):
+            category=group.get("category")
+            sample=(fund_outcomes.get(category,{}).get("states") or {}).get("PRIORITY_RESEARCH") or {}
+            if sample.get("tri_review_status")!="ADVERSE_DESCRIPTIVE_SAMPLE":continue
+            held.append(category)
+            for row in group.get("items",[]):
+                if row.get("action")=="COMPARE_FOR_SIP":row["action"]="WATCH_FOR_CONFIRMATION"
+        if held:
+            report.setdefault("decision_quality",{})["fund_allocation_holds"]=held
+            report.setdefault("next_steps",[]).insert(0,"Defer new SIP research allocations in categories with adverse mature paired TRI evidence.")
+    except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
+        # Failure of final policy must not leave a positive allocation action.
+        report=snapshot["investment_analyst"]
+        for row in report.get("stocks",[]):row["action"]="WATCH_FOR_CONFIRMATION"
+        for group in report.get("funds",[]):
+            for row in group.get("items",[]):row["action"]="WATCH_FOR_CONFIRMATION"
+        report["decision_quality"]={"methodology":decision_quality.VERSION,"status":"UNAVAILABLE","qualified":False,"notice":decision_quality.NOTICE}
+    from . import decision_lifecycle,performance_protection,action_effectiveness
+    try:
+        if snapshot.get("enabled") is True:
+            snapshot["investment_analyst"]["daily_action_audit"]=action_effectiveness.daily_summary(_connect,instant.astimezone(ZoneInfo("Asia/Kolkata")).date())
+    except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,AttributeError):
+        snapshot["investment_analyst"]["daily_action_audit"]={"status":"UNAVAILABLE"}
+    try:
+        if snapshot.get("enabled") is True:performance_protection.attach(snapshot["investment_analyst"],_connect)
+    except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,AttributeError):
+        report=snapshot["investment_analyst"]
+        report["performance_protection"]={"status":"UNAVAILABLE","held_scopes":[],"notice":performance_protection.NOTICE}
+        report.setdefault("decision_quality",{})["status"]="UNAVAILABLE"
+        for row in report.get("stocks",[]):row["action"]="WATCH_FOR_CONFIRMATION"
+        for group in report.get("funds",[]):
+            for row in group.get("items",[]):row["action"]="WATCH_FOR_CONFIRMATION"
+    try:
+        if snapshot.get("enabled") is True:
+            report=snapshot["investment_analyst"]
+            report["lifecycle_review"]=decision_lifecycle.attach(report,decision_lifecycle.original_stocks(_connect,instant),research_jobs.status(_connect,research_jobs.definitions(SECTIONS),instant.timestamp()))
+    except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,AttributeError,OverflowError):
+        snapshot["investment_analyst"]["lifecycle_review"]={"methodology":decision_lifecycle.VERSION,"status":"UNAVAILABLE","recovery":[],"changes":{},"notice":decision_lifecycle.NOTICE}
     return snapshot
 
 
@@ -716,7 +795,10 @@ def _execute_job(job):
         enabled,interval=config()
         if not enabled:return "DISABLED_OR_NOT_AUTHORIZED"
         current=now()
-        fund_prospective.refresh(_read_sections(CATEGORIES,enabled,interval,current),current)
+        snapshot=read_overview()
+        fund_prospective.refresh(snapshot,current,final_report=snapshot.get("investment_analyst"))
+        from . import performance_protection
+        performance_protection.update(snapshot.get("investment_analyst",{}),_connect,current)
         return "PASS_COMPLETED"
     if job=="FUND_COMPANY_EVIDENCE":
         if not fund_portfolios.permitted() or not automatic_company_evidence.permitted():
@@ -766,9 +848,16 @@ def _execute_job(job):
     if job=="MULTI_STRATEGY_PUBLICATION":
         from . import multi_strategy_prospective
         instant=now()
-        snapshot=read_snapshot()
+        snapshot=read_overview()
         if not snapshot.get("enabled"):return "DISABLED_OR_NOT_AUTHORIZED"
         multi_strategy_prospective.publish(snapshot,_connect,instant)
+        from . import ranking_challenger
+        ranking_challenger.publish(snapshot,_connect,instant)
+        from . import decision_outcomes,performance_protection,action_effectiveness
+        report=snapshot.get("investment_analyst",{})
+        action_effectiveness.capture(snapshot,_connect,instant)
+        performance_protection.update(report,_connect,instant)
+        decision_outcomes.publish(report,_connect,instant)
         return "PASS_COMPLETED"
     if job=="INVESTMENT_ANALYST_SOURCES":
         from . import investment_analyst,analyst_source_discovery
@@ -814,6 +903,10 @@ def _execute_job(job):
         automatic_news.refresh(snapshot,_connect)
     elif job=="STRATEGY_REPLAY":
         automatic_strategy_validation.refresh(snapshot,_connect)
+        from . import long_history_validation
+        # Independent offline experiment must not prevent existing replay.
+        try:long_history_validation.refresh(_connect,now())
+        except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,AttributeError):pass
     elif job=="AI_REVIEW":
         # Same cached public evidence assembly as the dashboard; no extra provider calls.
         automatic_ai_review.refresh(snapshot,_connect)

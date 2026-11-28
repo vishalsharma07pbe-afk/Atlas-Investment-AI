@@ -448,11 +448,13 @@ def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None, followu
         # The documented fundamentals adapter accepts ISIN without an exchange key.
         # This input is used only for bounded, public, exact as-filed fund equities.
         candidates={i:None for i in explicit_isins[:200] if isinstance(i,str) and re.fullmatch(r"INE[A-Z0-9]{9}",i)}
-    sample={}
+    sample={};emerging=set()
     if explicit_isins is None:
         for exchange,isin in identify_sample(snapshot,instant):
             if isin not in sample or exchange=="NSE":
                 sample[isin]=exchange+"_EQ|"+isin
+        from . import emerging_opportunities
+        emerging=emerging_opportunities.recovery_order(snapshot,instant.astimezone(ZoneInfo("Asia/Kolkata")).date())
     # The public scheduler supplies only matured frozen earnings publications.
     # Private and fund-only calls cannot enter this rotation.
     followups={i:None for i in followup_isins[:100] if isinstance(i,str) and ISIN.fullmatch(i)} if explicit_isins is None and snapshot.get("scope")=="PUBLIC_MARKET_RESEARCH_ONLY" else {}
@@ -483,7 +485,7 @@ def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None, followu
                             key=lambda i:(rows[i]["attempted_at"] if i in rows else "",i))
             sample_due=sorted((i for i in sample if i not in candidates and i not in peers and due_now(i)),
                               key=lambda i:(0 if _legacy(rows.get(i)) else 1,
-                                            rows[i]["attempted_at"] if i in rows else "",i))
+                                            rows[i]["attempted_at"] if i in rows else "",i not in emerging,i))
             # Reserve one bounded pass after three priority claims when broad
             # work is due. Never increase the request budget or bypass due gates.
             followup_due=sorted((i for i in followups if due_now(i)),
