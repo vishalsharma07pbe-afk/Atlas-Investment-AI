@@ -10,7 +10,7 @@ from .automatic_company_evidence import cached_action_reports, cached_action_eve
 from .corporate_action_normalization import reported_crossings, archived_crossings
 from .replay_evidence import (VERSION as EVIDENCE_VERSION, exact_isin, fingerprint,
     full_manifest, corporate_action_status, revision_audit, session_audit, listing_audit)
-CACHE_VERSION = VERSION + ':' + EVIDENCE_VERSION + ':market-price-index-v1:signal-regime-v1:chronological-folds-v1:execution-proxy-v1:full-provenance-v1:session-continuity-v1:listing-evidence-v1:scoped-action-v1:provider-action-and-rotation-v1:multi-strategy-v2'
+CACHE_VERSION = VERSION + ':' + EVIDENCE_VERSION + ':market-price-index-v1:signal-regime-v1:chronological-folds-v1:execution-proxy-v1:full-provenance-v1:session-continuity-v1:listing-evidence-v1:scoped-action-v1:provider-action-and-rotation-v1:multi-strategy-v3-channel-and-pump'
 
 IST=ZoneInfo("Asia/Kolkata")
 def _table(db):
