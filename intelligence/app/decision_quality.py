@@ -96,6 +96,12 @@ def attach(report,today):
     for g in groups:apply(rows(g.get("items")),"FUND")
     report["decision_quality"]={"methodology":VERSION,"counts":{k:counts[k] for k in ("PRIORITY_RESEARCH","EVIDENCE_INCOMPLETE","REVIEW_REQUIRED")},
         "qualified":False,"notice":NOTICE}
+    performance=obj(obj(report.get("decision_outcomes")).get("states")).get("PRIORITY_RESEARCH",{})
+    if obj(performance).get("status")=="ADVERSE_OBSERVED_SAMPLE":
+        report["decision_quality"]["stock_allocation_hold"]="ADVERSE_OBSERVED_PRIORITY_SAMPLE"
+        for r in stocks:
+            if r.get("action")=="RESEARCH_FOR_ENTRY":r["action"]="WATCH_FOR_CONFIRMATION"
+        report["next_steps"]=["Observed priority stock cohort has nonpositive median net excess versus the matched price index. Defer new stock allocations and reassess the policy.",*rows(report.get("next_steps"))[1:]]
     if not counts["PRIORITY_RESEARCH"]:
         report["next_steps"]=["No complete priority-research case under the current evidence policy. Keep new capital uncommitted to these candidates; inspect the missing or adverse evidence first.",*rows(report.get("next_steps"))[1:]]
     return report
