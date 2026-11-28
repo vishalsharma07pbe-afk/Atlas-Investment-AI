@@ -149,7 +149,7 @@ def models(s):
     return [v["slug"] for v in data.get("models",[]) if isinstance(v,dict) and v.get("visibility")=="list"
         and isinstance(v.get("slug"),str) and MODEL.fullmatch(v["slug"])][:100]
 
-def parse_stream(lines):
+def parse_stream(lines,*,source_links=None):
     result=[];size=0;total=0;completed=False
     for line in lines:
         total+=len(line)
@@ -169,23 +169,36 @@ def parse_stream(lines):
             raise PlanError(error_code(0,e.get("response",e)))
         elif e.get("type")=="response.incomplete":raise PlanError("PLAN_INCOMPLETE")
         elif e.get("type")=="response.completed":
-            completed=True;break
+            completed=True
+            if source_links is not None:
+                for item in e.get("response",{}).get("output",[]):
+                    if not isinstance(item,dict) or item.get("type")!="message":continue
+                    for content in item.get("content",[]):
+                        if not isinstance(content,dict) or content.get("type")!="output_text":continue
+                        for annotation in content.get("annotations",[]):
+                            if isinstance(annotation,dict) and annotation.get("type")=="url_citation":
+                                source_links.append(annotation.get("url"))
+            break
     if not completed or not "".join(result).strip():raise PlanError("PLAN_INCOMPLETE")
     return "".join(result).strip()
 
-def generate(prompt,schema,schema_name):
+def generate(prompt,schema,schema_name,*,source_links=None):
     if configuration_status()!="READY_TO_CALL":raise PlanError("PLAN_NOT_READY")
     with locked() as p:
         s=session(p)
         try:
             # The preview rejects max_output_tokens and non-streaming requests.
             payload={"model":s["model"],"input":[{"role":"user","content":prompt}],
-                     "store":False,"stream":True,"text":{"format":{"type":"json_schema","name":schema_name,"strict":True,"schema":schema}}}
+                     "store":False,"stream":True}
+            if source_links is None:
+                payload["text"]={"format":{"type":"json_schema","name":schema_name,"strict":True,"schema":schema}}
+            else:
+                payload["tools"]=[{"type":"web_search","filters":{"allowed_domains":["nseindia.com","bseindia.com","amfiindia.com","sebi.gov.in","rbi.org.in"]}}]
             with client() as c,c.stream("POST",RESOURCE+"/responses",json=payload,
                     headers={"Authorization":"Bearer "+s["access_token"],"Accept":"text/event-stream"}) as r:
                 if r.status_code!=200:
                     raise PlanError(error_code(r.status_code,{}))
-                return parse_stream(r.iter_lines())
+                return parse_stream(r.iter_lines(),source_links=source_links)
         except PlanError as e:
             if str(e)=="PLAN_USAGE_LIMIT":
                 s["cooldown_until"]=time.time()+18000;save(p,"session.json",s)

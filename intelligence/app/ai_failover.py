@@ -119,6 +119,11 @@ def _configuration_status(provider):
     if provider=="CHATGPT_PLAN":
         from . import chatgpt_plan
         return chatgpt_plan.configuration_status()
+    if os.getenv("ATLAS_AI_INCLUDED_ONLY","false").lower()=="true":
+        if provider in ("OPENAI","XAI"):
+            return "PAID_DISABLED"
+        if provider in ("GEMINI","GROQ") and os.getenv("ATLAS_"+provider+"_FREE_TIER_CONFIRMED","false").lower()!="true":
+            return "FREE_TIER_CONFIRMATION_REQUIRED"
     key_var="GEMINI_API_KEY" if provider=="GEMINI" else (CHAT_ENDPOINTS.get(provider) or RESPONSES_ENDPOINTS[provider])[1]
     if not os.getenv(key_var):
         return "API_KEY_REQUIRED"

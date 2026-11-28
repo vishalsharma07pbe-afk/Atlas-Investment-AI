@@ -9,7 +9,9 @@ Official local application OAuth. No OpenAI API key, Codex credential reuse, bro
 ```dotenv
 ATLAS_CHATGPT_PLAN_ENABLED=true
 ATLAS_CHATGPT_PLAN_INCLUDED_ONLY_CONFIRMED=true
-ATLAS_AI_PROVIDER_ORDER=CHATGPT_PLAN,OLLAMA
+ATLAS_AI_PROVIDER_ORDER=CHATGPT_PLAN,GEMINI,OLLAMA,GROQ
+ATLAS_AI_INCLUDED_ONLY=true
+ATLAS_CHATGPT_PLAN_WEB_RESEARCH=true
 ATLAS_EXTERNAL_AI_ALLOWED=true
 ATLAS_AUTOMATIC_AI_REVIEW_ENABLED=true
 ATLAS_AUTOMATIC_EXTERNAL_AI_ALLOWED=true
@@ -25,3 +27,6 @@ ATLAS_CHATGPT_PLAN_RPD=8
 Public evidence only. Automatic committee reviews prioritize ChatGPT when enabled; existing local validation remains authoritative. Streaming must complete successfully. Usage-limit responses set a five-hour cooldown. Local caps are illustrative and not equivalent to remaining ChatGPT allowance. No paid API fallback is enabled by the documented configuration. Hosted web search capability and live subscription inference still need acceptance; the reasoning adapter does not itself execute a web search.
 
 Official docs: https://developers.openai.com/siwc/token-sharing-open-source
+
+## Independent review and source discovery
+Enable Ollama and download a local model suitable for available memory. Gemini and Groq require separate free-tier accounts/API keys and explicit ATLAS_GEMINI_FREE_TIER_CONFIRMED / ATLAS_GROQ_FREE_TIER_CONFIRMED flags. Do not enable billing on those projects. Free model availability and quota are provider-controlled; choose from the actual account catalog. Included-only mode blocks paid OPENAI/XAI routes even when configured. It cannot inspect provider billing accounts. No automatic purchase or paid migration. The committee uses independent roles and reports per-candidate agreement separately from objective evidence. Optional ChatGPT web research returns only official-domain citation leads with bounded caching and shared budget. No search result is treated as a verified financial figure or automatically alters qualification; independent evidence acquisition/validation still applies. Search support depends on the selected account and model.

@@ -2,10 +2,10 @@ import CapitalPlanner from "./CapitalPlanner";
 import {useState} from "react";
 import type {EliteTarget} from "./SteadyMomentumCard";
 
-type AdvancedEvidence={evidence_confidence?:string;growth_outlook?:{status:string;observed_quarter:string;target_quarter:string;revenue_yoy_percent:number;profit_yoy_percent:number;coverage_percent?:number;notice:string}|null;ai_review?:{state:string;providers:string[];reasons:string[]}};
+type AdvancedEvidence={evidence_confidence?:string;growth_outlook?:{status:string;observed_quarter:string;target_quarter:string;revenue_yoy_percent:number;profit_yoy_percent:number;coverage_percent?:number;notice:string}|null;ai_review?:{state:string;agreement?:string;providers:string[];reasons:string[]}};
 type Stock=AdvancedEvidence&EliteTarget&{as_of:string;close:number;tier:string;horizon:string;score:number|null;reasons:string[];limitations:string[];qualified:false;action:string;risk?:string|null;price_plan?:{reference:number;stop_scenario:number;target_scenario:number;reward_risk:number;notice:string}|null};
 type Fund=AdvancedEvidence&{identifier:string;name:string;nav_date:string;score:number;tier:string;action:string;relative_risk?:string;reasons:string[];limitations:string[];qualified:false};
-export type InvestmentAnalysis={methodology:string;status:string;research_date:string;stocks:Stock[];funds:{category:string;items:Fund[]}[];next_steps:string[];notice:string;committee?:{status:string;reviewed_providers:number;notice:string}};
+export type InvestmentAnalysis={methodology:string;status:string;research_date:string;stocks:Stock[];funds:{category:string;items:Fund[]}[];next_steps:string[];notice:string;committee?:{status:string;reviewed_providers:number;configured_reviewers?:number;review_agreement?:string;notice:string};source_discovery?:{status:string;links:string[];notice:string}};
 const money=(v:number)=>"₹"+v.toLocaleString("en-IN",{maximumFractionDigits:2});
 const stockTiers:Record<string,string>={ADJUSTED_JOINT:"Joint stock screen · adjusted history",REPORTED_JOINT:"Joint stock screen · unverified adjustment",BUSINESS_SCREEN:"Business-screen candidate",TECHNICAL_LEAD:"Technical lead only"};
 const fundTiers:Record<string,string>={DRIVER_SUPPORTED:"Reported growth drivers",DRIVER_REVIEW:"Underlying-business review needed",HISTORICAL_ONLY:"Historical peer evidence only"};
@@ -14,7 +14,7 @@ function AdvancedReview({row}:{row:AdvancedEvidence}){
  const g=row.growth_outlook,a=row.ai_review;
  return <>{row.evidence_confidence&&<p className="muted tiny">Evidence confidence: {row.evidence_confidence.toLowerCase()} · not a return probability</p>}
  {g&&<div className="research-action"><strong>Next-quarter business scenario</strong><p>{g.target_quarter} · Revenue {g.revenue_yoy_percent.toFixed(1)}% · Profit {g.profit_yoy_percent.toFixed(1)}% year-on-year{g.coverage_percent!=null?" · "+g.coverage_percent.toFixed(1)+"% covered weight":""}</p><small>{g.notice}</small></div>}
- {a&&<div className="research-action"><strong>AI committee · {a.state.replace(/_/g," ").toLowerCase()}</strong><small> {a.providers.join(", ")}</small><ul>{a.reasons.map((v,i)=><li key={i}>{v}</li>)}</ul></div>}</>;
+ {a&&<div className="research-action"><strong>AI committee · {a.state.replace(/_/g," ").toLowerCase()}</strong><small> {a.providers.join(", ")}{a.agreement?" · "+a.agreement.replace(/_/g," ").toLowerCase():""}</small><ul>{a.reasons.map((v,i)=><li key={i}>{v}</li>)}</ul></div>}</>;
 }
 export default function InvestmentAnalystPanel({report,onOpenStock,onFunds,onPortfolio}:{report:InvestmentAnalysis;onOpenStock?:(target:EliteTarget)=>void;onFunds:()=>void;onPortfolio:()=>void}){
  const [showAll,setShowAll]=useState(false);
@@ -24,7 +24,8 @@ export default function InvestmentAnalystPanel({report,onOpenStock,onFunds,onPor
  return <section className="visual-research-panel" aria-label="Investment analyst">
   <div className="sectionhead"><div><small className="section-kicker">INVESTMENT INTELLIGENCE</small><h3>Investment analyst</h3><small>Conditional research priorities · {report.research_date}</small></div><span className="tag">RESEARCH ONLY</span></div>
   <div className="research-action"><strong>Your next moves</strong>{report.next_steps.length?<ol>{report.next_steps.map((step,i)=><li key={i}>{step}</li>)}</ol>:<p>Awaiting current supported research.</p>}<button type="button" className="secondary" onClick={onPortfolio}>Review my holdings</button></div>
-  {report.committee&&<p className="muted tiny">AI committee: {report.committee.reviewed_providers} model reviews for this evidence set. {report.committee.notice}</p>}
+  {report.committee&&<p className="muted tiny">AI committee: {report.committee.reviewed_providers} model reviews{report.committee.configured_reviewers!=null?" of "+report.committee.configured_reviewers+" configured":""} for this evidence set. {report.committee.notice}</p>}
+  {report.source_discovery?.links.length? <details className="research-action"><summary>Official document leads ({report.source_discovery.links.length})</summary><p>{report.source_discovery.notice}</p><ul>{report.source_discovery.links.filter(v=>/^https:\/\/(?:[a-z0-9-]+\.)*(?:nseindia\.com|bseindia\.com|amfiindia\.com|sebi\.gov\.in|rbi\.org\.in)(?::443)?\//i.test(v)).map(v=><li key={v}><a href={v} target="_blank" rel="noopener noreferrer">{v}</a></li>)}</ul></details>:null}
   <CapitalPlanner report={report}/>
   <h3>Stock research recommendations</h3>
   {!stocks.length?<p>No supported stock candidates in the current sample. Do not force a position.</p>:<div className="elite-stock-grid">{stocks.slice(0,showAll?10:3).map(s=><article key={s.isin} className="elite-stock">

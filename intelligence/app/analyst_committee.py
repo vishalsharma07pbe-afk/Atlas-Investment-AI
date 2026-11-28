@@ -112,7 +112,11 @@ def refresh(report,connect,instant,runner=ai_failover.grounded_research):
         return bool(reviews)
     p=pending[0];attempted.add(p)
     try:
-        prompt=("Act as an investment research committee member. Compare candidates only within their group and evidence tier. "
+        role={"CHATGPT_PLAN":"Lead research reviewer: compare business growth, valuation and risks.",
+              "GEMINI":"Independent financial reviewer: challenge business and valuation assumptions.",
+              "OLLAMA":"Independent adversarial reviewer: identify downside and missing evidence.",
+              "GROQ":"Independent quantitative reviewer: challenge price momentum and risk interpretation."}.get(p,"Independent evidence reviewer.")
+        prompt=(role+" Act as an investment research committee member. Compare candidates only within their group and evidence tier. "
             "Select the strongest research priority or caution; do not give buy/sell, allocations or forecasts. "
             "Return up to eight findings, each statement a JSON string with exactly candidate, decision, reason. "
             "decision must be PRIORITIZE_REVIEW or DEFER_REVIEW. Use only allowed_reasons for that candidate; "
@@ -131,7 +135,7 @@ def refresh(report,connect,instant,runner=ai_failover.grounded_research):
 def attach(report,connect,instant):
     providers=providers_for_analyst();evidence=pack(report)
     result={"methodology":VERSION,"status":"AWAITING_REVIEW" if providers and evidence else "DISABLED_OR_NO_EVIDENCE",
-        "reviewed_providers":0,"notice":NOTICE}
+        "reviewed_providers":0,"configured_reviewers":len(providers),"review_agreement":"NOT_REVIEWED","notice":NOTICE}
     report["committee"]=result
     if not providers or not evidence:return report
     cached=ai._read(connect,key(evidence,providers,report["research_date"]))
@@ -146,13 +150,14 @@ def attach(report,connect,instant):
         raw=obj(decisions.get(p))
         v=validate({"findings":[{"statement":json.dumps({"candidate":k,**d}),"evidence_ids":[k]} for k,d in raw.items() if isinstance(d,dict)]},evidence)
         if v:accepted[p]=v
-    result.update(status="REVIEW_AVAILABLE" if accepted else "AWAITING_REVIEW",reviewed_providers=len(accepted))
+    result.update(status="REVIEW_AVAILABLE" if accepted else "AWAITING_REVIEW",reviewed_providers=len(accepted),
+        review_agreement="MULTI_PROVIDER_REVIEW" if len(accepted)>=2 else "SINGLE_PROVIDER_REVIEW" if accepted else "NOT_REVIEWED")
     def annotate(row,k):
         votes=[(p,v[k]) for p,v in accepted.items() if k in v]
         if not votes:return
         decisions={v["decision"] for _,v in votes}
         state="DISAGREEMENT" if len(decisions)>1 else next(iter(decisions))
-        row["ai_review"]={"state":state,"providers":[p for p,_ in votes],"reasons":[REASONS[c] for c in sorted({v["reason"] for _,v in votes})]}
+        row["ai_review"]={"state":state,"agreement":"DISAGREEMENT" if len(decisions)>1 else "MULTI_PROVIDER_AGREEMENT" if len(votes)>=2 else "SINGLE_PROVIDER_ONLY","providers":[p for p,_ in votes],"reasons":[REASONS[c] for c in sorted({v["reason"] for _,v in votes})]}
         if state in ("DISAGREEMENT","DEFER_REVIEW"):row["action"]="WATCH_FOR_CONFIRMATION" if row.get("action")!="REVIEW_BEFORE_NEW_SIP" else row["action"]
     for i,r in enumerate(report["stocks"]):annotate(r,"S"+str(i+1))
     for g in report["funds"]:

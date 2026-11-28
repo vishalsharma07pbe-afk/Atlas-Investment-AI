@@ -563,6 +563,11 @@ def read_overview():
     except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,AttributeError,OverflowError):
         snapshot["investment_analyst"]["committee"]={"methodology":analyst_committee.VERSION,
             "status":"UNAVAILABLE","reviewed_providers":0,"notice":analyst_committee.NOTICE}
+    from . import analyst_source_discovery
+    try:
+        analyst_source_discovery.attach(snapshot["investment_analyst"],_connect,instant)
+    except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,AttributeError):
+        snapshot["investment_analyst"]["source_discovery"]={"status":"UNAVAILABLE","links":[],"notice":analyst_source_discovery.NOTICE}
     return snapshot
 
 
@@ -742,6 +747,12 @@ def _execute_job(job):
         return "DISABLED_OR_NOT_AUTHORIZED"
     if job=="COMPANY_NEWS" and not automatic_news.permitted():
         return "DISABLED_OR_NOT_AUTHORIZED"
+    if job=="INVESTMENT_ANALYST_SOURCES":
+        from . import investment_analyst,analyst_source_discovery
+        if not analyst_source_discovery.enabled():return "DISABLED_OR_NOT_AUTHORIZED"
+        instant=now()
+        report=investment_analyst.analyze(read_snapshot(),instant.astimezone(ZoneInfo("Asia/Kolkata")).date(),instant)
+        return "PASS_COMPLETED" if analyst_source_discovery.refresh(report,_connect,instant) else "WAITING_EVIDENCE"
     if job=="INVESTMENT_ANALYST_AI":
         from . import investment_analyst,analyst_committee
         if not automatic_ai_review.providers():return "DISABLED_OR_NOT_AUTHORIZED"
