@@ -84,3 +84,18 @@ class FinancialFilingTests(unittest.TestCase):
                 with patch.object(f,"index_permitted",return_value=False):
                     f.attach(snapshot,connect,instant,path=manifest)
                     self.assertNotIn("independent_financial_evidence",item)
+
+    def test_profit_reconciliation_keeps_total_and_parent_bases_distinct(self):
+        e=f.parse(html(),ISIN,PERIOD,TODAY)
+        company={"isin":ISIN,"quarterly_financials":{"latest_period":PERIOD.isoformat(),
+            "items":[{"metric":"revenue","latest_value":100},{"metric":"net_profit","latest_value":15}]}}
+        comparison=f.compare(e,company)
+        self.assertEqual(comparison["profit_comparison"]["status"],"ONE_REPORTED_BASIS_WITHIN_TOLERANCE")
+        self.assertEqual(comparison["profit_comparison"]["matching_bases"],["OWNERS_PROFIT"])
+        company["quarterly_financials"]["items"][1]["latest_value"]=40
+        comparison=f.compare(e,company)
+        self.assertEqual(comparison["profit_comparison"]["status"],"PROFIT_DIFFERENCE_REVIEW")
+        row={"isin":ISIN,"exchange":"NSE","independent_financial_evidence":{**e,
+            "status":"REPORTED_CONSOLIDATED_FILING","comparison":comparison}}
+        self.assertIn("INDEPENDENT_PROFIT_DIFFERENCE_REVIEW",governance_review.assess(row,company,TODAY)["findings"])
+        self.assertFalse(governance_review.assess(row,company,TODAY)["clearance_verified"])

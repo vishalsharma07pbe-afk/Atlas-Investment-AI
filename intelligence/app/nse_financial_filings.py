@@ -286,8 +286,30 @@ def compare(report,company):
     observed=report["quarter"]["revenue"]
     difference=round(v-observed,6)
     tolerance=max(0.1,abs(observed)*.01)
-    return {**comparison,"status":"WITHIN_ILLUSTRATIVE_TOLERANCE" if abs(difference)<=tolerance else "REVENUE_DIFFERENCE_REVIEW",
+    result={**comparison,"status":"WITHIN_ILLUSTRATIVE_TOLERANCE" if abs(difference)<=tolerance else "REVENUE_DIFFERENCE_REVIEW",
             "provider_revenue_cr":v,"issuer_operating_revenue_cr":observed,"difference_cr":difference,"tolerance_cr":tolerance}
+    # Provider net profit may refer to total consolidated profit or profit
+    # attributable to owners. Compare both and disclose the ambiguity.
+    # A match is arithmetic corroboration, not identical accounting scope.
+    profit=[r for r in q.get("items",[]) if r.get("metric")=="net_profit"]
+    result["profit_comparison"]={"status":"NOT_COMPARABLE"}
+    if len(profit)!=1:return result
+    actual=profit[0].get("latest_value")
+    if type(actual) not in (float,int) or not isfinite(actual):return result
+    refs=[]
+    for field in ("net_profit","owners_profit"):
+        reported=report.get("quarter",{}).get(field)
+        if type(reported) not in (int,float) or not isfinite(reported):continue
+        delta=round(actual-reported,6);limit=max(.1,abs(reported)*.01)
+        refs.append({"basis":field.upper(),"issuer_profit_cr":reported,"difference_cr":delta,
+            "tolerance_cr":limit,"within_tolerance":abs(delta)<=limit})
+    if len(refs)!=2:return result
+    matched=[r["basis"] for r in refs if r["within_tolerance"]]
+    result["profit_comparison"]={"status":"PROFIT_DIFFERENCE_REVIEW" if not matched else
+        "BOTH_BASES_WITHIN_TOLERANCE" if len(matched)==2 else "ONE_REPORTED_BASIS_WITHIN_TOLERANCE",
+        "provider_profit_cr":actual,"references":refs,"matching_bases":matched,
+        "notice":"Total consolidated and owners' profit are different reported concepts. Arithmetic proximity does not independently establish identical definitions."}
+    return result
 
 def attach(snapshot,connect,instant,path=PATH):
     summary={"status":"DISABLED_OR_NOT_AUTHORIZED","matched_companies":0,"notice":NOTICE}
