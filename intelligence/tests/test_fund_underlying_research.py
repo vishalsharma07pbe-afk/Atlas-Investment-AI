@@ -54,7 +54,7 @@ class FundUnderlyingResearchTests(unittest.TestCase):
         with patch.object(coordinator.fund_portfolios,"permitted",return_value=False),patch.object(coordinator.automatic_company_evidence,"refresh") as refresh:
             self.assertEqual(coordinator._execute_job("FUND_COMPANY_EVIDENCE"),"DISABLED_OR_NOT_AUTHORIZED")
             refresh.assert_not_called()
-        with patch.object(coordinator.fund_portfolios,"permitted",return_value=True),patch.object(coordinator.automatic_company_evidence,"permitted",return_value=True),patch.object(coordinator.fund_portfolios,"research_identities",return_value=[A,B]),patch.object(coordinator.automatic_company_evidence,"refresh") as refresh:
+        with patch.object(coordinator.fund_portfolios,"permitted",return_value=True),patch.object(coordinator.automatic_company_evidence,"permitted",return_value=True),patch.object(coordinator.fund_portfolios,"research_identities",return_value=[A,B]),patch.object(coordinator.automatic_company_evidence,"refresh",return_value="PARTIAL") as refresh:
             self.assertEqual(coordinator._execute_job("FUND_COMPANY_EVIDENCE"),"PASS_COMPLETED")
             refresh.assert_called_once_with({"enabled":True,"sections":[]},coordinator._connect,explicit_isins=[A,B])
 

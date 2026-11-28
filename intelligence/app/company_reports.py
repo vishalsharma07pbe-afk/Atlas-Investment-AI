@@ -29,7 +29,7 @@ def entries(snapshot):
             for row in group.get("candidates",[])[:5]:
                 if valid(row) and row["exchange"]==section["section"] and row["as_of"]==coverage.get("expected_session"):yield horizon,row
     screen=snapshot.get("steady_momentum") or {}
-    lists=[screen.get("items",[])]+[screen.get("category_items",{}).get(k,[]) for k in ("LARGE_CAP","MID_CAP","SMALL_CAP")]
+    lists=[(screen.get("strict_suggestions") or {}).get("items",[]),screen.get("items",[])]+[screen.get("category_items",{}).get(k,[]) for k in ("LARGE_CAP","MID_CAP","SMALL_CAP")]
     for rows in lists:
         for row in rows[:10]:
             if valid(row) and row.get("status")=="SCREEN_MATCH_ONLY" and row["as_of"]==current_venues.get(row["exchange"]):yield "ELITE",row

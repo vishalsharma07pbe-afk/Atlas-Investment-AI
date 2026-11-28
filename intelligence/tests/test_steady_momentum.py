@@ -107,3 +107,23 @@ class SteadyMomentumTests(unittest.TestCase):
         self.assertEqual(periods(date(2026,11,27)),[date(2026,6,30)])
         self.assertEqual(periods(date(2027,1,3)),[date(2026,12,31),date(2026,6,30)])
         self.assertTrue(url_for(date(2026,12,31)).endswith("31Dec2026.xlsx"))
+
+    def test_joint_strict_screen_ranks_after_fundamental_filters_and_deduplicates(self):
+        from datetime import datetime,timezone
+        from app import fip_research
+        from app.steady_momentum import strict_suggestions
+        now=datetime(2026,11,28,5,tzinfo=timezone.utc)
+        rows=[]
+        for i in range(13):
+            rows.append({"id":i+1,"isin":f"INE000A{i:05d}","exchange":"NSE","symbol":f"T{i}",
+              "adjustment_status":"ADJUSTED","as_of":"2026-11-27","median_daily_turnover_cr":10,
+              "strict_fip_evidence":{"methodology":fip_research.VERSION,"status":"FIP_PRICE_MATCH","score":100-i,
+                 "calendar_status":"STORED_SESSIONS_MATCHED","adjustment_status":"ADJUSTED","as_of":"2026-11-27"}})
+        rows[0]["governance_review"]={"findings":["REVIEW"]}
+        rows[1]["adjustment_status"]="RAW_UNADJUSTED"
+        rows[2]["strict_fip_evidence"]={**rows[2]["strict_fip_evidence"],"as_of":"2026-11-26"}
+        obs={rows[3]["isin"]:[{"exchange":"BSE","id":50,"security_state":"PCA"}]}
+        matches,count=strict_suggestions(rows+[{**rows[4],"exchange":"BSE","id":51}],obs,now)
+        self.assertEqual(count,9)
+        self.assertEqual([r["id"] for r in matches],[5,6,7,8,9,10,11,12,13])
+        self.assertEqual(len({r["isin"] for r in matches}),len(matches))

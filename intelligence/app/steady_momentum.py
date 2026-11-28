@@ -123,6 +123,32 @@ def fundamentals(report,today):
 
 CAP_GROUPS=("LARGE_CAP","MID_CAP","SMALL_CAP")
 
+def strict_fip_match(row):
+    from . import fip_research
+    e=row.get("strict_fip_evidence") or {}
+    return (row.get("adjustment_status")=="ADJUSTED" and e.get("methodology")==fip_research.VERSION
+            and e.get("status")=="FIP_PRICE_MATCH" and e.get("calendar_status")=="STORED_SESSIONS_MATCHED"
+            and e.get("adjustment_status")=="ADJUSTED" and e.get("as_of")==row.get("as_of")
+            and numeric(e.get("score")) and 0<=e["score"]<=100
+            and not (row.get("governance_review") or {}).get("findings")
+            and not (row.get("company_venue_context") or {}).get("review_findings"))
+
+
+def strict_suggestions(candidates,observations,instant):
+    """Join all full screen matches before top-ten truncation, not two top-ten lists.
+    Reported earnings/PE and current observed prices remain research evidence,
+    not independently certified valuation, execution or prospective results.
+    """
+    def rank(row):
+        return (-row["strict_fip_evidence"]["score"],-row["median_daily_turnover_cr"],row["isin"],row["exchange"])
+    matches=[row for row in candidates if strict_fip_match(row)]
+    # Keep restrictions found on non-matching venues, and reject duplicate listings.
+    matches=company_venues.consolidate(matches,observations,instant,rank)
+    matches=[r for r in matches if strict_fip_match(r)]
+    matches.sort(key=rank)
+    return matches[:10],len(matches)
+
+
 def ranked_shortlists(candidates,observations=None,instant=None):
     def rank(row):
         assessment=row.get("elite_assessment") or {}
@@ -147,7 +173,8 @@ def summarize(snapshot,connect,instant):
     today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
     out={"methodology":VERSION,"status":"AWAITING_EVIDENCE","items":[],"reviewed_count":0,
          "technical_count":0,"sampled_count":0,"eligible_history_count":0,"matched_count":0,
-         "qualified_count":0,"category_items":{k:[] for k in CAP_GROUPS},"exclusions":[],"notice":NOTICE}
+         "qualified_count":0,"category_items":{k:[] for k in CAP_GROUPS},"exclusions":[],"notice":NOTICE,
+         "strict_suggestions":{"status":"AWAITING_EVIDENCE","matched_count":0,"items":[],"qualification_eligible":False}}
     if not snapshot.get("enabled"):
         out["status"]="DISABLED"
         return out
@@ -255,6 +282,10 @@ def summarize(snapshot,connect,instant):
             candidates.append(candidate)
     # Category tabs rank the entire deduplicated matched cohort independently.
     out["items"],out["category_items"],out["matched_count"]=ranked_shortlists(candidates,observations,instant)
+    strict_items,strict_count=strict_suggestions(candidates,observations,instant)
+    out["strict_suggestions"]={"status":"JOINT_SCREEN_MATCHES" if strict_items else "NO_JOINT_SCREEN_MATCHES",
+        "matched_count":strict_count,"items":strict_items,"qualification_eligible":False,
+        "notice":"Four-window FIP, bullish technical, reported earnings/EPS, relative P/E, cap and turnover screens all passed. No known review findings in observed venues. Not TradingView Strong Buy, independent valuation, or final investment qualification."}
     out["exclusions"]=[{"reason":k,"count":v} for k,v in excluded.most_common()]
     out["status"]="SCREEN_MATCHES_AVAILABLE" if out["items"] else "NO_SCREEN_MATCHES" if out["technical_count"] else "AWAITING_EVIDENCE"
     return out
