@@ -32,3 +32,13 @@ describe("Automatic mutual-fund catalog",()=>{
     expect(screen.getByText("No licensed rating or cost feed")).toBeTruthy();
   });
 });
+
+it("offers a holding shortcut only for exact numeric AMFI records",async()=>{
+  const record=vi.fn();
+  vi.stubGlobal("fetch",vi.fn(async(input:RequestInfo|URL)=>String(input).includes("/status")?{ok:true,json:async()=>({scheme_count:2,automatic_collection_enabled:false})}:{ok:true,json:async()=>({items:[fund,{...fund,scheme_code:"123456",scheme_name:"Exact AMFI Fund",source:"AMFI_MANUAL_DOWNLOAD",nav_date_status:"DECLARED"}]})}));
+  render(<NavCatalog onRecordHolding={record}/>);
+  const button=await screen.findByRole("button",{name:"Record holding"});
+  fireEvent.click(button);
+  expect(record).toHaveBeenCalledWith("123456");
+  expect(screen.getAllByRole("button",{name:"Record holding"})).toHaveLength(1);
+});

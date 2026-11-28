@@ -58,3 +58,17 @@ it("reports the actual fund refresh outcome",async()=>{
  expect(await screen.findByText(/Refreshed 0 of 1 saved fund valuations/)).toBeTruthy();
  expect(refresh).toHaveBeenCalledOnce();
 });
+
+it("calculates weighted purchase NAV from total cost and allotted units",async()=>{
+  vi.spyOn(globalThis,"fetch").mockImplementation(async()=>new Response(JSON.stringify([{scheme_code:123456,scheme_name:"Example Growth",nav:120,nav_date:"2026-11-25"}]),{status:200}));
+  const save=vi.fn().mockResolvedValue(undefined);
+  render(<MutualFundHoldings holdings={[]} onSave={save}/>);
+  fireEvent.click(screen.getByRole("button",{name:/Add mutual fund holding/}));
+  fireEvent.change(screen.getByLabelText("Symbol"),{target:{value:"Example"}});
+  fireEvent.click(await screen.findByText("Example Growth"));
+  fireEvent.change(screen.getByLabelText("Quantity"),{target:{value:"12.5"}});
+  fireEvent.change(screen.getByLabelText("Purchase cost entry"),{target:{value:"TOTAL"}});
+  fireEvent.change(screen.getByLabelText("Total invested"),{target:{value:"1250"}});
+  fireEvent.click(screen.getByRole("button",{name:/Save holding/}));
+  await waitFor(()=>expect(save).toHaveBeenCalledWith(expect.objectContaining({symbol:"123456",quantity:12.5,averageCost:100})));
+});

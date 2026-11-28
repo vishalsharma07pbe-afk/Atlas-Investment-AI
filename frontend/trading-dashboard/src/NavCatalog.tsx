@@ -18,7 +18,7 @@ const readable=(value:string)=>value.replace(/_/g," ").toLowerCase().replace(/^.
 const when=(value:string)=>new Intl.DateTimeFormat("en-IN",{dateStyle:"medium",timeStyle:"short",timeZone:"Asia/Kolkata"}).format(new Date(value));
 const money=(value:string|number|null)=>value===null||value===0?"Not specified":new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",maximumFractionDigits:2}).format(Number(value));
 
-export default function NavCatalog() {
+export default function NavCatalog({onRecordHolding}:{onRecordHolding?:(code:string)=>void}={}) {
   const [q,setQ]=useState("");
   const [items,setItems]=useState<Fund[]>([]);
   const [status,setStatus]=useState<Status|null>(null);
@@ -91,7 +91,7 @@ export default function NavCatalog() {
     <p role="status">{message}</p>
     <p>No Upstox account or token is required for the daily public catalog. An authenticated account is required only for importing your personal holdings.</p>
     <div className="tablewrap mf-catalog-table"><table><thead><tr><th>Scheme ID / ISIN</th><th>Scheme</th><th>NAV (₹)</th><th>As of</th><th>Freshness</th></tr></thead>
-      <tbody>{items.map(f=><tr key={f.source+f.scheme_code}><td>{f.scheme_code}</td><td><button className="mf-fund-link" type="button" onClick={()=>void openFund(f)}>{f.scheme_name}<small>View fund details →</small></button></td><td>{f.nav}</td><td>{f.nav_date_status==="DECLARED"?f.nav_date:when(f.as_of)}</td><td>{f.nav_date_status==="DECLARED"?(f.stale?"Older NAV":"Recent NAV"):f.stale?"Catalog stale · NAV date unavailable":"Catalog checked recently · NAV date unavailable"}</td></tr>)}
+      <tbody>{items.map(f=><tr key={f.source+f.scheme_code}><td>{f.scheme_code}</td><td><button className="mf-fund-link" type="button" onClick={()=>void openFund(f)}>{f.scheme_name}<small>View fund details →</small></button>{onRecordHolding&&/^[1-9][0-9]{0,8}$/.test(f.scheme_code)&&f.source==="AMFI_MANUAL_DOWNLOAD"&&<button type="button" className="secondary" onClick={()=>onRecordHolding(f.scheme_code)}>Record holding</button>}</td><td>{f.nav}</td><td>{f.nav_date_status==="DECLARED"?f.nav_date:when(f.as_of)}</td><td>{f.nav_date_status==="DECLARED"?(f.stale?"Older NAV":"Recent NAV"):f.stale?"Catalog stale · NAV date unavailable":"Catalog checked recently · NAV date unavailable"}</td></tr>)}
         {!items.length&&<tr><td colSpan={5}>No imported schemes match this search.</td></tr>}</tbody></table></div>
     {detailLoading&&<div className="mf-detail-loading" role="status">Loading verified fund details…</div>}
     {detailError&&<div className="mf-attention" role="alert"><span>!</span><div><strong>Fund details unavailable</strong><p>{detailError}</p></div></div>}

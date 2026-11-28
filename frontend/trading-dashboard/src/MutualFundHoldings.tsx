@@ -29,10 +29,11 @@ export default function MutualFundHoldings({holdings,busy=false,onSave,onRemove,
   const [view,setView]=useState<"research"|"overview"|"find"|"compare"|"plan"|"risk"|"more">("research");
   const [editorOpen,setEditorOpen]=useState(false);
   const [editing,setEditing]=useState<ExistingFund|null>(null);
+  const [initialCode,setInitialCode]=useState<string|undefined>();
   const [editorKey,setEditorKey]=useState(0);
   const [message,setMessage]=useState("");
   const [refreshing,setRefreshing]=useState(false);
-  function openEditor(fund:ExistingFund|null=null){setView("overview");setEditing(fund);setEditorKey(k=>k+1);setEditorOpen(true);setMessage("");}
+  function openEditor(fund:ExistingFund|null=null,code?:string){setView("overview");setEditing(fund);setInitialCode(code);setEditorKey(k=>k+1);setEditorOpen(true);setMessage("");}
   async function saveFund(draft:HoldingDraft){if(!onSave)throw Error("Holding save unavailable");await onSave(draft);setEditorOpen(false);setEditing(null);setMessage("Fund holding saved. Your portfolio reflects the saved units and available dated NAV.");}
   async function refresh(){if(!onRefresh)return;setRefreshing(true);setMessage("");try{const result=await onRefresh();setMessage(result.total===0?"No fund holdings to refresh.":`Refreshed ${result.updated} of ${result.total} saved fund valuations from dated NAV records. Check the observation dates below.`);}catch{setMessage("NAV refresh unavailable. Existing saved values were retained.");}finally{setRefreshing(false);}}
   const [validatedHistory,setValidatedHistory]=useState<SharedNavHistory|null>(null);
@@ -70,9 +71,9 @@ export default function MutualFundHoldings({holdings,busy=false,onSave,onRemove,
 
     <nav className="mf-nav" aria-label="Mutual fund tasks">{views.map(item=><button key={item.id} type="button" aria-current={view===item.id?"page":undefined} className={view===item.id?"active":""} onClick={()=>setView(item.id)}><i>{item.icon}</i><span><strong>{item.label}</strong><small>{item.hint}</small></span></button>)}<button type="button" aria-current={view==="more"?"page":undefined} className={view==="more"?"active":""} onClick={()=>setView("more")}><i>•••</i><span><strong>More tools</strong><small>Imports and data checks</small></span></button></nav>
 
-    {view==="research"&&<div className="mf-task-pane active"><MutualFundResearchDashboard onExplore={()=>setView("find")}/></div>}
+    {view==="research"&&<div className="mf-task-pane active"><MutualFundResearchDashboard onExplore={()=>setView("find")} onRecordHolding={onSave?code=>openEditor(funds.find(f=>f.symbol===code)??null,code):undefined}/></div>}
     {view==="overview"&&<div className="mf-task-pane active">
-      {editorOpen&&onSave&&<section className="mf-card glass" aria-label="Add or edit mutual fund holding"><div className="mf-card-head"><div><small className="section-kicker">EXISTING INVESTMENT</small><h2>{editing?"Update fund holding":"Add fund holding"}</h2><p>Search the exact scheme and plan, then enter total units and average purchase NAV.</p></div><button type="button" className="secondary" onClick={()=>{setEditorOpen(false);setEditing(null);}}>Cancel</button></div><HoldingEditor key={editorKey} busy={busy} fundOnly initialFund={editing} existingFunds={funds} onSave={saveFund}/></section>}
+      {editorOpen&&onSave&&<section className="mf-card glass" aria-label="Add or edit mutual fund holding"><div className="mf-card-head"><div><small className="section-kicker">EXISTING INVESTMENT</small><h2>{editing?"Update fund holding":"Add fund holding"}</h2><p>Search the exact scheme and plan, then enter total units and average purchase NAV.</p></div><button type="button" className="secondary" onClick={()=>{setEditorOpen(false);setEditing(null);}}>Cancel</button></div><HoldingEditor key={editorKey} busy={busy} fundOnly initialFund={editing} initialSchemeCode={initialCode} existingFunds={funds} onSave={saveFund}/></section>}
       <div className="mf-stats">
         <article><span>Amount invested</span><strong>{fmt(invested)}</strong><small>What you originally paid</small></article>
         <article><span>Current value</span><strong>{priced.length?fmt(pricedValue):"—"}</strong><small>{aged?`${aged} aged or undated · recorded total`:"Using your saved NAVs"}</small></article>
@@ -89,7 +90,7 @@ export default function MutualFundHoldings({holdings,busy=false,onSave,onRemove,
       </section>
     </div>}
 
-    {view==="find"&&<div className="mf-task-pane active"><div className="mf-explainer"><strong>Find the exact fund you want</strong><p>Search using the fund name or scheme code. NAV means the price of one fund unit and is usually updated once per business day.</p></div><NavCatalog/></div>}
+    {view==="find"&&<div className="mf-task-pane active"><div className="mf-explainer"><strong>Find the exact fund you want</strong><p>Search using the fund name or scheme code. NAV means the price of one fund unit and is usually updated once per business day.</p></div><NavCatalog onRecordHolding={onSave?code=>openEditor(funds.find(f=>f.symbol===code)??null,code):undefined}/></div>}
     {view==="compare"&&<div className="mf-task-pane active"><div className="mf-explainer"><strong>Compare funds fairly</strong><p>Add historical NAV files for two funds. ATLAS compares the same date range so you can review growth and falls without mixing periods.</p></div><MutualFundHistoryImport onValidated={acceptHistory}/><MutualFundComparison validatedHistories={validatedHistories} onRemoveValidated={code=>setValidatedHistories(previous=>previous.filter(item=>item.schemeCode!==code))}/></div>}
     {view==="plan"&&<div className="mf-task-pane active"><div className="mf-explainer"><strong>Save your SIPs, then plan the goal</strong><p>Keep your monthly fund plans in one place. The calculators below help with scenarios; their return rate is an assumption, not a forecast.</p></div><SavedSipPlans/><MutualFundGoals/><MutualFundPlanning holdings={holdings}/></div>}
     {view==="risk"&&<div className="mf-task-pane active"><div className="mf-explainer"><strong>Understand concentration and past falls</strong><p>Check whether too much money sits in one fund and, when history is available, see the largest past drop. Past performance does not predict future returns.</p></div><MutualFundRisk holdings={holdings}/><MutualFundHistoricalRisk validatedHistory={validatedHistory}/></div>}
