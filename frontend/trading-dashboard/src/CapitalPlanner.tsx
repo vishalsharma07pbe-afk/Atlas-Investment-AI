@@ -33,11 +33,12 @@ export function makeCapitalPlan(report:InvestmentAnalysis,review:OwnerReview|nul
   total+=h.recorded_market_value;
  }
  if(!Number.isFinite(total)||review.holdings.length>0&&review.investment_analysis.recent_weight_coverage!==true)return out;
- const eligibleStocks=report.stocks.filter(s=>s.qualified===false&&s.tier==="ADJUSTED_JOINT"&&s.action==="RESEARCH_FOR_ENTRY"&&
+ const policyOk=(r:{decision_quality?:{state:string;qualified:false}})=>!report.decision_quality||report.decision_quality.status!=="UNAVAILABLE"&&r.decision_quality?.state==="PRIORITY_RESEARCH"&&r.decision_quality.qualified===false;
+ const eligibleStocks=report.stocks.filter(s=>policyOk(s)&&s.qualified===false&&s.tier==="ADJUSTED_JOINT"&&s.action==="RESEARCH_FOR_ENTRY"&&
   s.ai_review?.state!=="DEFER_REVIEW"&&s.ai_review?.state!=="DISAGREEMENT"&&s.risk!=="HIGH"&&
   /^INE[A-Z0-9]{9}$/.test(s.isin)&&!stockIds.has(s.isin)&&age(s.as_of,today)>=1&&age(s.as_of,today)<=4&&
   !!s.price_plan&&finite(s.price_plan.reference)&&finite(s.price_plan.stop_scenario)&&s.price_plan.stop_scenario>0&&s.price_plan.reference>s.price_plan.stop_scenario&&Math.abs(s.price_plan.reference-s.close)<=.0051);
- const eligibleFunds=report.funds.flatMap(g=>g.items.filter(f=>f.qualified===false&&f.tier==="DRIVER_SUPPORTED"&&f.action==="COMPARE_FOR_SIP"&&
+ const eligibleFunds=report.funds.flatMap(g=>g.items.filter(f=>policyOk(f)&&f.qualified===false&&f.tier==="DRIVER_SUPPORTED"&&f.action==="COMPARE_FOR_SIP"&&
   f.ai_review?.state!=="DEFER_REVIEW"&&f.ai_review?.state!=="DISAGREEMENT"&&scheme(f.identifier)&&!fundIds.has(f.identifier)&&
   age(f.nav_date,today)>=0&&age(f.nav_date,today)<=7&&f.fund_evidence?.ter_status!=="CONFLICTING_SAME_DATE_TER").map(f=>({...f,category:g.category})));
  // Exact identity, same-date upstream comparisons; historical advantages are
