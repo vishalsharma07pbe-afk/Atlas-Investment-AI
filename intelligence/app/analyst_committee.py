@@ -140,7 +140,7 @@ def refresh(report,connect,instant,runner=ai_failover.grounded_research):
 def attach(report,connect,instant):
     providers=providers_for_analyst();evidence=pack(report)
     result={"methodology":VERSION,"status":"AWAITING_REVIEW" if providers and evidence else "DISABLED_OR_NO_EVIDENCE",
-        "reviewed_providers":0,"configured_reviewers":len(providers),"review_agreement":"NOT_REVIEWED","notice":NOTICE}
+        "reviewed_providers":0,"reviewed_provider_ids":[],"configured_reviewers":len(providers),"review_agreement":"NOT_REVIEWED","notice":NOTICE}
     report["committee"]=result
     if not providers or not evidence:return report
     cached=ai._read(connect,key(evidence,providers,report["research_date"]))
@@ -155,7 +155,7 @@ def attach(report,connect,instant):
         raw=obj(decisions.get(p))
         v=validate({"findings":[{"statement":json.dumps({"candidate":k,**d}),"evidence_ids":[k]} for k,d in raw.items() if isinstance(d,dict)]},evidence)
         if v:accepted[p]=v
-    result.update(status="REVIEW_AVAILABLE" if accepted else "AWAITING_REVIEW",reviewed_providers=len(accepted),
+    result.update(status="REVIEW_AVAILABLE" if accepted else "AWAITING_REVIEW",reviewed_providers=len(accepted),reviewed_provider_ids=list(accepted),
         review_agreement="MULTI_PROVIDER_REVIEW" if len(accepted)>=2 else "SINGLE_PROVIDER_REVIEW" if accepted else "NOT_REVIEWED")
     def annotate(row,k):
         votes=[(p,v[k]) for p,v in accepted.items() if k in v]
