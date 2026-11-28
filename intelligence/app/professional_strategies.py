@@ -32,7 +32,14 @@ def price_patterns(s):
     recent=span(s[-10:]);middle=span(s[-30:-10]);older=span(s[-60:-30])
     sd=pstdev(p[-21:-1]);z=(p[-1]-mean(p[-21:-1]))/sd if sd else None
     ranges=[span(s[-61:-31]),span(s[-31:-1])]
-    return {"channel_risk_inputs":channel_risk_inputs(s),"breakout20":p[-1]>prior20,"breakout55":p[-1]>prior55,"volume_ratio":round(volume_ratio,4),
+    template_checks={"above_50_day":p[-1]>mean(p[-50:]),"50_above_150":mean(p[-50:])>mean(p[-150:]),
+        "150_above_200":mean(p[-150:])>sma200,"rising_200":prior200 is not None and sma200>prior200,
+        "above_annual_low_30_percent":len(s)>=252 and p[-1]>=1.3*low,
+        "within_25_percent_of_annual_high":len(s)>=252 and p[-1]>=.75*high}
+    contraction_checks={"older_range_percent":round(older,4),"middle_range_percent":round(middle,4),"recent_range_percent":round(recent,4),
+        "recent_to_prior_volume":round(mean(v[-10:])/mean(v[-30:-10]),4) if mean(v[-30:-10])>0 else None,
+        "prior_pivot":prior20,"pivot_confirmed":p[-1]>prior20 and volume_ratio>=1.5}
+    return {"trend_template_checks":template_checks,"contraction_checks":contraction_checks,"channel_risk_inputs":channel_risk_inputs(s),"breakout20":p[-1]>prior20,"breakout55":p[-1]>prior55,"volume_ratio":round(volume_ratio,4),
         "stage2":p[-1]>weekly_sma>prior_weekly and p[-1]>prior55,
         "sepa_template":len(s)==253 and prior200 is not None and p[-1]>mean(p[-50:])>mean(p[-150:])>sma200>prior200 and p[-1]>=1.3*low and p[-1]>=.75*high,
         "vcp":older>middle>recent and middle<=.8*older and recent<=.8*middle and mean(v[-10:])<.8*mean(v[-30:-10]) and p[-1]>=.95*max(c.high for c in s[-60:]),
@@ -178,6 +185,8 @@ def financial_matches(report,today):
     score=piotroski(inputs,today)
     if score:
         facts["piotroski_score"]=score["score"]
+        facts["piotroski_checks"]=score["checks"]
+        facts["piotroski_period"]=score["period"]
         if score["score"]>=7:out.append("PIOTROSKI_F_SCORE")
     trends=obj(report.get("financial_trends")).get("items",[])
     profit=next((r for r in trends if r.get("metric")=="NET_PROFIT" and r.get("latest_period_may_be_stale") is False and r.get("period_basis")=="DECLARED_ANNUAL_MONTH_END" and r.get("statement_type")=="consolidated"),{})
