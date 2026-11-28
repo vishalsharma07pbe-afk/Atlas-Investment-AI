@@ -101,6 +101,7 @@ def stock_projection(snapshot,instant=None):
             {"tier":tier,"horizon":horizon,"score":score,"reasons":reasons,"limitations":gaps,
              "qualified":False,"price_plan":price_plan(r,horizon),
              "risk":risk,"risk_basis":"HISTORICAL_PRICE_RISK_PROXY","growth_outlook":growth,"observed_facts":facts,
+             "cash_sensitivity":research_synthesis.cash_context(obj(r.get("company_evidence")).get("valuation_sensitivity")),
              "evidence_confidence":"MODERATE" if tier=="ADJUSTED_JOINT" and growth else "LIMITED" if tier in ("ADJUSTED_JOINT","REPORTED_JOINT","BUSINESS_SCREEN") else "LOW",
              "action":"RESEARCH_FOR_ENTRY" if tier=="ADJUSTED_JOINT" else "WATCH_FOR_CONFIRMATION"})
     for report,status,tier,key,basis in ((strict,"JOINT_SCREEN_MATCHES","ADJUSTED_JOINT","strict_fip_evidence","ADJUSTED"),
@@ -243,6 +244,12 @@ def analyze(snapshot,today,instant=None):
     out["status"]="AWAITING_CURRENT_RESEARCH"
     if snapshot.get("research_date")!=today.isoformat():return out
     stocks=stock_projection(snapshot,instant);funds=fund_projection(snapshot,today)
+    if instant is not None and stocks:
+        from . import independent_valuation
+        valuations=independent_valuation.read(instant)
+        for row in stocks:
+            v=valuations.get(row["isin"])
+            if v and v["price_date"]==row["as_of"]:row["valuation_scenario"]=v
     for row in stocks:row["research_thesis"]=research_synthesis.thesis(row,False)
     for group in funds:
         for row in group["items"]:row["research_thesis"]=research_synthesis.thesis(row,True)
