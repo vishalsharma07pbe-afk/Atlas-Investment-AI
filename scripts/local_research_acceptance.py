@@ -718,7 +718,38 @@ def result_acceptance(overview,review,instant=None):
         "final_investment_qualification":"NOT_CERTIFIED",
         "notice":"Current descriptive output check only. A zero or absent match may be legitimate; never manufacture picks to satisfy this optional acceptance criterion."}
 
-def collect(request,include_qualification_audit=False,include_advanced_audit=False,include_recovery_audit=False,include_result_acceptance=False):
+def analyst_acceptance(overview,review,instant=None):
+    """Observe the actual decision layer, not the existence of its source modules."""
+    instant=instant or datetime.now(timezone.utc)
+    today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    a=_obj(overview.get("investment_analyst"));o=_obj(review.get("investment_analysis"))
+    stocks=a.get("stocks");funds=a.get("funds");holdings=review.get("holdings")
+    stock_count=_distinct_stock_count(stocks,10)
+    stock_ok=stock_count is not None and all(r.get("qualified") is False and r.get("tier") in ("ADJUSTED_JOINT","REPORTED_JOINT","BUSINESS_SCREEN","TECHNICAL_LEAD")
+        and isinstance(r.get("reasons"),list) and bool(r["reasons"]) and r.get("evidence_confidence") in ("LOW","LIMITED","MODERATE") for r in stocks)
+    fund_counts={}
+    for category in ("LARGE_CAP","MID_CAP","SMALL_CAP"):
+        matches=[g for g in _list(funds) if isinstance(g,dict) and g.get("category")==category]
+        items=matches[0].get("items") if len(matches)==1 else None
+        ok=isinstance(items,list) and len(items)<=5 and all(isinstance(r,dict) and isinstance(r.get("identifier"),str)
+            and re.fullmatch(r"[1-9][0-9]{5,8}",r["identifier"]) and r.get("qualified") is False
+            and r.get("tier") in ("DRIVER_SUPPORTED","HISTORICAL_ONLY","DRIVER_REVIEW") and bool(r.get("reasons"))
+            for r in items)
+        fund_counts[category]=len(items) if ok and len({r["identifier"] for r in items})==len(items) else None
+    public_ok=a.get("methodology")=="INVESTMENT-ANALYST-1" and a.get("research_date")==today and a.get("status") in ("RESEARCH_AVAILABLE","NO_SUPPORTED_CANDIDATES") and stock_ok and isinstance(funds,list) and bool(a.get("next_steps"))
+    owner_ok=(o.get("methodology")=="OWNER-INVESTMENT-ANALYST-1" and o.get("scope")=="OWNER_LOCAL"
+        and isinstance(holdings,list) and type(review.get("holding_count")) is int and review["holding_count"]==len(holdings)
+        and o.get("holding_count")==len(holdings) and bool(o.get("next_steps"))
+        and all(_obj(h.get("investment_analysis")).get("qualified") is False and bool(_obj(h.get("investment_analysis")).get("next_move")) for h in holdings if isinstance(h,dict))
+        and all(isinstance(h,dict) for h in holdings))
+    committee=_obj(a.get("committee"));model_count=_bounded_count(committee.get("reviewed_providers"),5)
+    return {"status":"CONTRACTS_OBSERVED" if public_ok and owner_ok else "BLOCKED",
+        "stock_candidates":stock_count if stock_ok else None,"core_fund_candidates":fund_counts,
+        "owner_holding_decisions":len(holdings) if owner_ok else None,"model_reviews":model_count,
+        "populated_outputs_observed":bool(public_ok and owner_ok and stock_count and all(fund_counts.values())),
+        "investment_qualification":"NOT_CERTIFIED"}
+
+def collect(request,include_qualification_audit=False,include_advanced_audit=False,include_recovery_audit=False,include_result_acceptance=False,include_analyst_audit=False):
     readiness=request("/intelligence/api/v1/intelligence/data-readiness")
     overview=request("/intelligence/api/v1/intelligence/research/overview")
     review=request("/api/v1/portfolio/review")
@@ -740,6 +771,8 @@ def collect(request,include_qualification_audit=False,include_advanced_audit=Fal
         result["qualification_audit"]=qualification_audit(overview,readiness,intraday)
     if include_result_acceptance:
         result["result_acceptance"]=result_acceptance(overview,review)
+    if include_analyst_audit:
+        result["analyst_acceptance"]=analyst_acceptance(overview,review)
     if include_recovery_audit:
         history=request("/api/v1/data-health/history-recovery")
         providers=request("/intelligence/api/v1/intelligence/data-hub/provider-adapters")
@@ -756,6 +789,7 @@ def main():
     parser.add_argument("--advanced-audit",action="store_true",help="Audit advanced decision and validation contracts; require them to pass")
     parser.add_argument("--recovery-audit",action="store_true",help="Audit recovery diagnostics and historical display isolation; require contracts to pass")
     parser.add_argument("--require-research-results",action="store_true",help="Require observed current Elite research, all three core fund categories and applicable portfolio history, not final qualification")
+    parser.add_argument("--investment-analyst-audit",action="store_true",help="Verify current public and owner-local decision contracts; report actual populated output and model review counts separately")
     args=parser.parse_args()
     session=LocalSession(args.base_url)
     result=None
@@ -771,7 +805,7 @@ def main():
         session.token=token
         del login,token
         session.request("/api/v1/auth/me")
-        result=collect(session.request,include_qualification_audit=args.qualification_audit,include_advanced_audit=args.advanced_audit,include_recovery_audit=args.recovery_audit,include_result_acceptance=args.require_research_results)
+        result=collect(session.request,include_qualification_audit=args.qualification_audit,include_advanced_audit=args.advanced_audit,include_recovery_audit=args.recovery_audit,include_result_acceptance=args.require_research_results,include_analyst_audit=args.investment_analyst_audit)
     except (RuntimeError,ValueError,TypeError,KeyError,AttributeError):
         print(json.dumps({"runtime":"BLOCKED","reason":"LOCAL_ACCEPTANCE_REQUEST_OR_CONTRACT_FAILED"}))
         return 1
@@ -782,7 +816,7 @@ def main():
                 if result is not None:result["runtime"]="BLOCKED";result["checks"]["session_logout"]="BLOCKED"
             finally:session.token=None
     print(json.dumps(result,indent=2,sort_keys=True))
-    return 0 if result["runtime"]==result["stored_provider_evidence"]=="PASS" and (not args.require_live or result["live_feed"]=="OBSERVED") and (not args.advanced_audit or result["advanced_audit"]["status"]=="PASS") and (not args.recovery_audit or result["recovery_audit"]["status"]=="PASS") and (not args.require_research_results or result["result_acceptance"]["status"]=="POPULATED_RESEARCH_OBSERVED") else 1
+    return 0 if result["runtime"]==result["stored_provider_evidence"]=="PASS" and (not args.require_live or result["live_feed"]=="OBSERVED") and (not args.advanced_audit or result["advanced_audit"]["status"]=="PASS") and (not args.recovery_audit or result["recovery_audit"]["status"]=="PASS") and (not args.require_research_results or result["result_acceptance"]["status"]=="POPULATED_RESEARCH_OBSERVED") and (not args.investment_analyst_audit or result["analyst_acceptance"]["status"]=="CONTRACTS_OBSERVED") else 1
 
 if __name__=="__main__":
     raise SystemExit(main())

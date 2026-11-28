@@ -106,7 +106,8 @@ final class PortfolioOpportunityContext {
         !seen.add(h.path("isin").asText()+":"+isin))continue;
      rows.add(Map.of("asset_type","EQUITY","holding",h.path("symbol").asText(),"alternative",item.path("symbol").asText(),
        "first_date",held.path("first_date").asText(),"last_date",held.path("last_date").asText(),
-       "holding_return_percent",old,"alternative_return_percent",value,"basis","60_MATCHED_SESSIONS_PRICE_ONLY"));
+       "holding_return_percent",old,"alternative_return_percent",value,"basis","60_MATCHED_SESSIONS_PRICE_ONLY",
+       "holding_identity",h.path("isin").asText(),"alternative_identity",isin));
      if(rows.size()>=30)return rows;
     }
    }else if("MUTUAL_FUND".equals(h.path("asset_type").asText())&&!unknownFund&&!unresolvedFundIsin){
@@ -128,7 +129,8 @@ final class PortfolioOpportunityContext {
         !seen.add(history.path("scheme_code").asText()+":"+code))continue;
      rows.add(Map.of("asset_type","MUTUAL_FUND","holding",h.path("symbol").asText(),"alternative",item.path("name").asText(),
        "first_date",held.path("first_date").asText(),"last_date",held.path("last_date").asText(),
-       "holding_return_percent",old,"alternative_return_percent",value,"basis","157_MATCHED_WEEKLY_NAV_CAGR_AND_DRAWDOWN"));
+       "holding_return_percent",old,"alternative_return_percent",value,"basis","157_MATCHED_WEEKLY_NAV_CAGR_AND_DRAWDOWN",
+       "holding_identity",history.path("scheme_code").asText(),"alternative_identity",code));
      if(rows.size()>=30)return rows;
     }
    }
