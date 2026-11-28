@@ -50,10 +50,10 @@ def identify(snapshot):
                     yield item,isin
 
 
-def identify_priority(snapshot,instant=None):
+def identify_priority(snapshot,instant=None,*,fip_items=None):
     # Reuse the strict, current, cross-venue FIP shortlist, not a new score.
     if instant is not None:
-        for item,isin in identify_fip_priority(snapshot,instant):
+        for item,isin in (identify_fip_priority(snapshot,instant) if fip_items is None else fip_items):
             yield item,isin
     yield from identify(snapshot)
     # Deepen the actual Elite candidates without expanding report attachment.
@@ -73,15 +73,34 @@ def identify_priority(snapshot,instant=None):
 def identify_fip_priority(snapshot,instant):
     from . import fip_research
     try:
-        result=fip_research.rank(snapshot,instant)
-        if result.get("status")!="PRICE_MATCHES_AVAILABLE":
-            return
-        for item in result.get("items",[])[:10]:
-            isin=item.get("isin")
-            if (isinstance(isin,str) and re.fullmatch(r"INE[A-Z0-9]{9}",isin)
-                    and item.get("exchange") in ("NSE","BSE")
-                    and not item.get("review_findings")):
-                yield item,isin
+        today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date().isoformat()
+        refs=set()
+        for section in snapshot.get("sections",[]):
+            venue=section.get("section")
+            if venue not in ("NSE","BSE") or section.get("status")!="READY":continue
+            result=section.get("result") or {};coverage=result.get("discovery_coverage") or {}
+            if coverage.get("calendar_checked_on")!=today or coverage.get("calendar_status")!="PUBLISHED_SESSION":continue
+            for row in result.get("steady_momentum_candidates",[]):
+                if (row.get("exchange")==venue and row.get("as_of")==coverage.get("expected_session")
+                    and row.get("adjustment_status")=="ADJUSTED" and type(row.get("id")) is int
+                    and row.get("security_state") not in ("PCA","SME","RELIST","IPO","SUSPENDED_REPORTED")):
+                    refs.add((venue,row["id"],row.get("isin"),row["as_of"]))
+        # Apply the intersection BEFORE FIP's top-ten and representative
+        # selection. Fill remaining slots with price-only research as before.
+        seen=set()
+        results=[fip_research.rank(snapshot,instant,required_refs=refs)] if refs else []
+        if not results or len([i for i in results[0].get("items",[]) if not i.get("review_findings")])<10:
+            results.append(fip_research.rank(snapshot,instant))
+        for result in results:
+            if result.get("status")!="PRICE_MATCHES_AVAILABLE":continue
+            for item in result.get("items",[])[:10]:
+                isin=item.get("isin")
+                if (isinstance(isin,str) and re.fullmatch(r"INE[A-Z0-9]{9}",isin)
+                        and item.get("exchange") in ("NSE","BSE")
+                        and not item.get("review_findings") and isin not in seen):
+                    seen.add(isin)
+                    yield item,isin
+                    if len(seen)>=10:return
     except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
         return
 
@@ -419,8 +438,9 @@ def _merge_refresh(report,retained,instant):
 def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None):
     stamp=instant.isoformat()
     candidates={}
-    fip_order={isin:index for index,(_,isin) in enumerate(identify_fip_priority(snapshot,instant))} if explicit_isins is None else {}
-    for item,isin in identify_priority(snapshot,instant):
+    fip_items=list(identify_fip_priority(snapshot,instant)) if explicit_isins is None else []
+    fip_order={isin:index for index,(_,isin) in enumerate(fip_items)}
+    for item,isin in identify_priority(snapshot,instant,fip_items=fip_items):
         # Exact public discovery venue/ISIN; no name matching.
         if isin not in candidates or item["exchange"]=="NSE":
             candidates[isin]=item["exchange"]+"_EQ|"+isin
@@ -447,7 +467,8 @@ def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None):
         # Oldest attempted first prevents starvation. Among never-attempted or
         # equally old identities use strict FIP rank as the tie-breaker.
         due=sorted((isin for isin in candidates if due_now(isin)),
-                   key=lambda isin:(rows[isin]["attempted_at"] if isin in rows else "",
+                   key=lambda isin:(isin not in fip_order if explicit_isins is None else False,
+                                    rows[isin]["attempted_at"] if isin in rows else "",
                                     priority.get(isin,len(fip_order) if explicit_isins is None else 0),isin))
         broad=False
         streak=0
@@ -529,8 +550,9 @@ def acquisition_status(snapshot,connect,instant):
     import sqlite3
     from collections import Counter
     sample={isin for _,isin in identify_sample(snapshot,instant)}
-    primary={isin for _,isin in identify_priority(snapshot,instant)}
-    fip={isin for _,isin in identify_fip_priority(snapshot,instant)}
+    fip_items=list(identify_fip_priority(snapshot,instant))
+    primary={isin for _,isin in identify_priority(snapshot,instant,fip_items=fip_items)}
+    fip={isin for _,isin in fip_items}
     stamp=instant.isoformat()
     try:
         with closing(connect()) as db:

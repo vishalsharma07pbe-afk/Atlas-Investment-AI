@@ -52,3 +52,22 @@ class FipTests(unittest.TestCase):
             f.publish(snap,research._connect,NOW)
             with research._connect() as db:
                 self.assertEqual(db.execute("SELECT count(*) FROM watch_outcomes WHERE horizon='FIP'").fetchone()[0],1)
+
+    def test_acquisition_intersection_precedes_price_only_top_ten(self):
+        from app import automatic_company_evidence as company
+        raw,c=fixture();report=f.observe(raw,f.calendar_suffix(c,"NSE",TODAY),TODAY)
+        rows=[]
+        for i in range(12):
+            rows.append({"id":i+1,"isin":f"INE000A{i:05d}","exchange":"NSE","as_of":report["as_of"],
+                "security_state":"NORMAL","fip_research":{**report,"score":90-i},"symbol":f"T{i}","close":100})
+        technical={**rows[-1],"adjustment_status":"ADJUSTED"}
+        snap={"enabled":True,"sections":[{"section":"NSE","status":"READY","result":{
+            "discovery_coverage":{"calendar_checked_on":TODAY.isoformat(),"calendar_status":"PUBLISHED_SESSION","expected_session":report["as_of"]},
+            "company_research_universe":rows,"venue_observations":rows,"steady_momentum_candidates":[technical]}}]}
+        self.assertNotIn(rows[-1]["isin"],[x["isin"] for x in f.rank(snap,NOW)["items"]])
+        priority=list(company.identify_fip_priority(snap,NOW))
+        self.assertEqual(priority[0][1],rows[-1]["isin"])
+        self.assertEqual(len(priority),10)
+        self.assertEqual(len({i for _,i in priority}),10)
+        technical["as_of"]="2026-11-25"
+        self.assertEqual(list(company.identify_fip_priority(snap,NOW))[0][1],rows[0]["isin"])

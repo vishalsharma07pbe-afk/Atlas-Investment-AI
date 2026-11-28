@@ -120,7 +120,7 @@ def replay(raw,today):
     return {"status":"DESCRIPTIVE_FIXED_RULE_REPLAY","methodology":VERSION,"windows":result,"signal_count":len(signals),
         "as_of":rows[-1]["trade_date"],"notice":"Fixed rules, next closing mark, nonoverlapping positions, earlier/later disjoint windows. No fitting, no execution, no point-in-time universe or independent walk-forward certification."}
 
-def rank(snapshot,instant):
+def rank(snapshot,instant,*,required_refs=None):
     today=instant.astimezone(IST).date()
     summary={"methodology":VERSION,"status":"AWAITING_STRICT_HISTORY","eligible_listings":0,"matched_listings":0,"matched_companies":0,
         "exclusions":{},"items":[],"notice":NOTICE}
@@ -137,6 +137,7 @@ def rank(snapshot,instant):
         for row in rows:
             f=row.get("fip_research") or {};isin=row.get("isin")
             if not exact_isin(isin) or counts[isin]!=1 or row.get("exchange")!=venue or row.get("as_of")!=coverage.get("expected_session") or row.get("security_state") in company_venues.SPECIAL:continue
+            if required_refs is not None and (venue,row.get("id"),isin,row.get("as_of")) not in required_refs:continue
             if f.get("methodology")!=VERSION or f.get("calendar_status")!="STORED_SESSIONS_MATCHED" or f.get("as_of")!=row.get("as_of") or f.get("adjustment_status")!="ADJUSTED":continue
             summary["eligible_listings"]+=1
             if f.get("status")!="FIP_PRICE_MATCH":
