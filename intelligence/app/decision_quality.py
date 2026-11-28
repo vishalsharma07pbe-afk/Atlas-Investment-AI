@@ -48,6 +48,9 @@ def stock(row,today):
         "CURRENT_QUARTER_SCENARIO":growth,
         "SOURCE_BOUND_VALUE_SCENARIO":valuation}
     adverse=[]
+    filing=obj(row.get("filing_context"))
+    if filing.get("status")=="CONFLICT_REVIEW":adverse.append("INDEPENDENT_FILING_CONFLICT")
+    if row.get("regime_priority")=="CAUTION":adverse.append("ADVERSE_MATCHED_REGIME_STRATEGY_SAMPLE")
     if row.get("risk")=="HIGH":adverse.append("HIGH_HISTORICAL_PRICE_RISK")
     if relative and pe>sector:adverse.append("REPORTED_VALUATION_PREMIUM_REVIEW")
     if growth and min(g["revenue_yoy_percent"],g["profit_yoy_percent"])<=0:adverse.append("NONPOSITIVE_GROWTH_SCENARIO")
@@ -96,6 +99,15 @@ def attach(report,today):
     for g in groups:apply(rows(g.get("items")),"FUND")
     report["decision_quality"]={"methodology":VERSION,"counts":{k:counts[k] for k in ("PRIORITY_RESEARCH","EVIDENCE_INCOMPLETE","REVIEW_REQUIRED")},
         "qualified":False,"notice":NOTICE}
+    model_review=obj(report.get("forecast_model_review"))
+    baseline=next((m for m in rows(model_review.get("models")) if isinstance(m,dict) and m.get("model")=="PERSISTENCE"),{})
+    if model_review.get("status")=="MATURE_MODEL_COMPARISON" and baseline.get("status")=="REVIEW_WEAK_BASELINE":
+        report["decision_quality"]["forecast_allocation_hold"]="PERSISTENCE_BASELINE_WEAK_ON_MATURE_QUARTERS"
+        for r in stocks:
+            if r.get("action")=="RESEARCH_FOR_ENTRY":r["action"]="WATCH_FOR_CONFIRMATION"
+        for group in groups:
+            for r in rows(group.get("items")):
+                if r.get("action")=="COMPARE_FOR_SIP":r["action"]="WATCH_FOR_CONFIRMATION"
     performance=obj(obj(report.get("decision_outcomes")).get("states")).get("PRIORITY_RESEARCH",{})
     if obj(performance).get("status")=="ADVERSE_OBSERVED_SAMPLE":
         report["decision_quality"]["stock_allocation_hold"]="ADVERSE_OBSERVED_PRIORITY_SAMPLE"
