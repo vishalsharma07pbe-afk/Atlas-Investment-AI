@@ -5,6 +5,8 @@ not canonical intraday Turtle fills, not historical constituent membership.
 """
 from math import isfinite,sqrt
 from statistics import mean,pstdev
+from functools import lru_cache
+import json
 from .professional_strategies import channel_risk_inputs
 from .technical import Candle
 from .replay_evidence import exact_isin
@@ -34,6 +36,7 @@ def simulate(histories,*,capital=1000000,bps=30):
     if not isinstance(histories,dict) or not 2<=len(histories)<=12:return None
     names=sorted(histories)
     if any(not exact_isin(k) for k in names):return None
+    if any(not isinstance(histories[k],list) or any(c.adjustment_status!="ADJUSTED" for c in histories[k]) for k in names):return None
     dates=[c.date for c in histories[names[0]]]
     if len(dates)<316 or any([c.date for c in histories[k]]!=dates for k in names):return None
     start=max(253,int(len(dates)*.6));cost=bps/10000
@@ -98,6 +101,12 @@ def simulate(histories,*,capital=1000000,bps=30):
         "position_return_profit_factor":round(gain/loss,6) if loss else None,"qualified":False,
         "notice":"Current-registry matched sample only; shared capital, close-confirmed next-open fills, illustrative caps/costs, no point-in-time universe or total-return benchmark. Open positions marked, not liquidated."}
 
+@lru_cache(maxsize=2)
+def _cached_result(encoded):
+    histories={k:unpack(v) for k,v in json.loads(encoded).items()}
+    if any(v is None for v in histories.values()):return None
+    return simulate(histories)
+
 def from_cache(payloads,today):
     from datetime import date
     from collections import defaultdict
@@ -115,4 +124,4 @@ def from_cache(payloads,today):
     cohort=cohorts[key]
     if len(cohort)<2:return None
     # deterministic selection, not based on later returns.
-    return simulate({k:cohort[k] for k in sorted(cohort)[:12]})
+    return _cached_result(json.dumps({k:pack(cohort[k]) for k in sorted(cohort)[:12]},separators=(",",":")))
