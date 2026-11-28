@@ -54,7 +54,8 @@ def parse(raw,amc,month,today,mapping):
     obj=json.loads(raw,object_pairs_hook=local.unique,parse_constant=lambda x: (_ for _ in ()).throw(ValueError("NONFINITE")))
     rows=obj["data"];meta=obj["meta"]
     if (not isinstance(rows,list) or not isinstance(meta,dict) or type(meta.get("total")) is not int
-        or meta["total"]!=len(rows) or not 1<=len(rows)<=PAGE_SIZE or meta.get("page")!=1 or meta.get("pageCount")!=1):
+        or meta["total"]!=len(rows) or not 0<=len(rows)<=PAGE_SIZE or meta.get("page")!=1
+        or type(meta.get("pageCount")) is not int or meta["pageCount"] not in ((1,) if rows else (0,1))):
         raise ValueError("RESPONSE_INCOMPLETE")
     out={};seen=set();digest=sha256(raw).hexdigest()
     for row in rows:
@@ -118,12 +119,18 @@ def refresh(instant=None,loader=_download,path=PATH):
         ids=sorted({k[0] for k in mapping},key=lambda a:(attempts[a]["attempted_at"] if a in attempts else 0,a))
         amc=next((a for a in ids if a not in attempts or attempts[a]["next_due"]<=ts),None)
         if amc is None:return 0
+        month=today.strftime("%m-%Y")
+        # During the first week, alternate to the prior period after a
+        # complete response without current matches. Never increase the
+        # existing AMC/day or global request budget.
+        if today.day<=7 and today.day%2==0 and amc in attempts and attempts[amc]["status"]=="NO_CURRENT_MATCHES":
+            month=(today.replace(day=1)-timedelta(days=1)).strftime("%m-%Y")
         db.execute("""INSERT INTO official_amfi_ter_attempt VALUES(?,?,?,'RUNNING')
           ON CONFLICT(amc_id) DO UPDATE SET attempted_at=excluded.attempted_at,next_due=excluded.next_due,status='RUNNING'""",(amc,ts,ts+1800))
         db.execute("""INSERT INTO official_amfi_ter_cooldown VALUES(1,?)
           ON CONFLICT(singleton) DO UPDATE SET until=MAX(until,excluded.until)""",(ts+INTERVAL,))
     try:
-        month=today.strftime("%m-%Y");items=parse(loader(amc,month),amc,month,today,mapping)
+        items=parse(loader(amc,month),amc,month,today,mapping)
         status="AVAILABLE" if items else "NO_CURRENT_MATCHES";delay=86400;block=0
     except (httpx.HTTPError,ValueError,TypeError,KeyError,AttributeError,InvalidOperation,OverflowError) as error:
         items={};status="UNAVAILABLE";delay=21600;block=ts+delay
@@ -141,7 +148,22 @@ def refresh(instant=None,loader=_download,path=PATH):
             # New successful snapshot replaces this AMC; a failed attempt
             # does not redate or destroy the last successful evidence.
             if status!="UNAVAILABLE":
-                db.execute("DELETE FROM official_amfi_ter_cache WHERE amc_id=?",(amc,))
+                # A successful response supersedes its own monthly scope,
+                # not still-current observations from an adjacent month.
+                # A prior-month fallback must never overwrite a newer date.
+                for row in db.execute("SELECT * FROM official_amfi_ter_cache WHERE amc_id=?",(amc,)).fetchall():
+                    code=row["scheme_code"]
+                    try:
+                        old=json.loads(row["payload"])
+                        day=local.day(old["ter_date"])
+                        keep=(row["mapping_hash"]==digest and 0<=(today-day).days<=7
+                            and day.strftime("%m-%Y")!=month)
+                    except (ValueError,TypeError,KeyError,AttributeError):
+                        keep=False
+                    if not keep:
+                        db.execute("DELETE FROM official_amfi_ter_cache WHERE scheme_code=?",(code,))
+                    elif code in items and day.isoformat()>=items[code]["ter_date"]:
+                        del items[code]
                 db.executemany("INSERT OR REPLACE INTO official_amfi_ter_cache VALUES(?,?,?,?,?)",
                     [(c,amc,digest,instant.isoformat(),json.dumps(v,allow_nan=False)) for c,v in items.items()])
             if block:
@@ -157,11 +179,15 @@ def read(today,path=PATH):
         with nav_catalog._LOCK,closing(nav_catalog._connect()) as db:
             _table(db)
             for row in db.execute("SELECT * FROM official_amfi_ter_cache WHERE mapping_hash=?",(digest,)):
-                code=row["scheme_code"];v=json.loads(row["payload"]);expected=identities.get(code)
-                if (not expected or any(v.get(k)!=value for k,value in expected.items()) or not 0<=(today-local.day(v["ter_date"])).days<=7
-                    or v.get("source")!="AMFI_WEBSITE_OPERATOR_CROSSWALK" or not re.fullmatch(r"[a-f0-9]{64}",v.get("source_sha256",""))
-                    or not all(local.num(v.get(k),0,100) for k in FIELDS)
-                    or abs(sum(v[k] for k in FIELDS if k!="ter_percent")-v["ter_percent"])>.0002):continue
+                code=row["scheme_code"];expected=identities.get(code)
+                try:
+                    v=json.loads(row["payload"])
+                    if (not expected or any(v.get(k)!=value for k,value in expected.items()) or not 0<=(today-local.day(v["ter_date"])).days<=7
+                        or v.get("source")!="AMFI_WEBSITE_OPERATOR_CROSSWALK" or not re.fullmatch(r"[a-f0-9]{64}",v.get("source_sha256",""))
+                        or not all(local.num(v.get(k),0,100) for k in FIELDS)
+                        or abs(sum(v[k] for k in FIELDS if k!="ter_percent")-v["ter_percent"])>.0002):continue
+                except (ValueError,TypeError,KeyError,AttributeError):
+                    continue
                 out["items"][code]=v
         if out["items"]:out["status"]="CURRENT_MAPPED_RESPONSES"
     except (OSError,ValueError,TypeError,KeyError,AttributeError,sqlite3.Error):out["items"]={};out["status"]="AWAITING_CURRENT_MAPPED_RESPONSE"

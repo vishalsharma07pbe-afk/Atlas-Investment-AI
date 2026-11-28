@@ -35,3 +35,27 @@ class OfficialTerTest(unittest.TestCase):
                 self.assertEqual(t.read(NOW.date()+timedelta(days=8),path)["items"],{})
             with patch.object(t,"permitted",return_value=False):
                 self.assertEqual(t.refresh(NOW,loader,path),0)
+
+    def test_month_rollover_and_valid_empty_response(self):
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/"map.json"
+            path.write_text(json.dumps({"schema":t.VERSION,"authorization_attested":True,"schemes":[{"amc_id":9,"nsdl_scheme_code":KEY[1],"verified_date":"2026-11-27",**MAPPING[KEY]}]}))
+            def connect():
+                db=sqlite3.connect(Path(d)/"test.sqlite");db.row_factory=sqlite3.Row;return db
+            calls=[]
+            empty={"meta":{"page":1,"pageCount":0,"total":0},"data":[]}
+            def loader(a,m):
+                calls.append((a,m))
+                return json.dumps(response() if m=="11-2026" else empty).encode()
+            first=datetime(2026,12,1,5,tzinfo=timezone.utc)
+            with patch.object(t,"permitted",return_value=True),patch.object(t.nav_catalog,"_connect",side_effect=connect):
+                self.assertEqual(t.refresh(first,loader,path),0)
+                self.assertEqual(t.refresh(first+timedelta(days=1),loader,path),1)
+                self.assertEqual(t.refresh(first+timedelta(days=2),loader,path),0)
+                self.assertEqual(calls,[(9,"12-2026"),(9,"11-2026"),(9,"12-2026")])
+                self.assertEqual(t.read((first+timedelta(days=2)).date(),path)["items"]["123456"]["ter_date"],"2026-11-27")
+                self.assertEqual(t.read((first+timedelta(days=4)).date(),path)["items"],{})
+    def test_empty_incomplete_response_rejected(self):
+        bad={"meta":{"page":1,"pageCount":2,"total":0},"data":[]}
+        with self.assertRaises(ValueError):
+            t.parse(json.dumps(bad).encode(),9,"11-2026",NOW.date(),MAPPING)
