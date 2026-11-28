@@ -50,6 +50,7 @@ def stock(row,today):
     adverse=[]
     filing=obj(row.get("filing_context"))
     if filing.get("status")=="CONFLICT_REVIEW":adverse.append("INDEPENDENT_FILING_CONFLICT")
+    if filing.get("audit_opinion") in ("QUALIFIED_OPINION","ADVERSE_OPINION","DISCLAIMER_OF_OPINION","ISSUER_REPORTED_AUDIT_QUALIFICATION"):adverse.append("ISSUER_REPORTED_AUDIT_CAUTION")
     if row.get("regime_priority")=="CAUTION":adverse.append("ADVERSE_MATCHED_REGIME_STRATEGY_SAMPLE")
     if row.get("risk")=="HIGH":adverse.append("HIGH_HISTORICAL_PRICE_RISK")
     if relative and pe>sector:adverse.append("REPORTED_VALUATION_PREMIUM_REVIEW")
@@ -86,6 +87,11 @@ def attach(report,today):
             q=stock(r,today) if kind=="STOCK" else fund(r,today)
             r["decision_quality"]=q
             counts[q["state"]]+=1
+            if kind=="STOCK" and r.get("action")=="RESEARCH_FOR_ENTRY":
+                filing=obj(r.get("filing_context"));growth=obj(r.get("growth_outlook"))
+                if filing.get("status")!="CORROBORATED_REPORTED_QUARTER" or not filing.get("period") or filing.get("period")!=growth.get("observed_quarter"):
+                    r["allocation_evidence_hold"]="CURRENT_FORECAST_ANCHOR_FILING_REQUIRED"
+                    r["action"]="WATCH_FOR_CONFIRMATION"
             # No positive override of the earlier action. Unknown evidence is
             # a watch, not a reason to manufacture a buy.
             if q["state"]=="REVIEW_REQUIRED":r["action"]="REVIEW_BEFORE_NEW_SIP" if kind=="FUND" else "WATCH_FOR_CONFIRMATION"
