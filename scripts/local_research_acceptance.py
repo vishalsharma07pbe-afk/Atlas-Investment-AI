@@ -798,7 +798,20 @@ def advanced_engine_acceptance(overview,review):
     owner=_obj(review.get("investment_analysis"));stress=_obj(owner.get("stress_test"))
     stress_ok=stress.get("status")=="ILLUSTRATIVE_SHOCKS" and len(_list(stress.get("scenarios")))==3
     empty=owner.get("holding_count")==0 and owner.get("scope")=="OWNER_LOCAL"
+    policy=_obj(a.get("decision_quality"))
+    decision_counts=policy.get("counts")
+    states=("PRIORITY_RESEARCH","EVIDENCE_INCOMPLETE","REVIEW_REQUIRED")
+    quality_counts={k:0 for k in states}
+    policy_ok=policy.get("methodology")=="FINAL-DECISION-QUALITY-1" and policy.get("qualified") is False and isinstance(decision_counts,dict)
+    for r in stocks+funds:
+        q=_obj(r.get("decision_quality"));state=q.get("state")
+        if q.get("methodology")!="FINAL-DECISION-QUALITY-1" or q.get("qualified") is not False or state not in states:
+            policy_ok=False;continue
+        quality_counts[state]+=1
+        if state!="PRIORITY_RESEARCH" and r.get("action") in ("RESEARCH_FOR_ENTRY","COMPARE_FOR_SIP"):policy_ok=False
+    policy_ok=policy_ok and decision_counts==quality_counts
     blockers=[]
+    if not policy_ok:blockers.append("FINAL_DECISION_POLICY_CONTRACT_REQUIRED")
     if not stocks or not all(thesis(r) for r in stocks):blockers.append("STOCK_THESIS_OUTPUT_REQUIRED")
     if not stock_plans:blockers.append("STOCK_RISK_SCENARIO_REQUIRED")
     if not amount_scenarios:blockers.append("STOCK_QUARTER_SCENARIO_REQUIRED")
@@ -813,7 +826,7 @@ def advanced_engine_acceptance(overview,review):
     if not stress_ok and not empty:blockers.append("OWNER_STRESS_SCENARIO_REQUIRED")
     if any(r.get("qualified") is not False for r in stocks+funds):blockers.append("UNSUPPORTED_QUALIFICATION")
     return {"status":"INTEGRATED_OUTPUTS_OBSERVED" if not blockers else "AWAITING_INTEGRATED_OUTPUTS",
-        "stock_risk_scenarios":stock_plans,"stock_amount_scenarios":amount_scenarios,"source_bound_stock_valuations":valuations,"fund_matched_ter_counts":fund_costs,"fund_matched_tri_counts":benchmark_counts,
+        "final_decision_state_counts":quality_counts,"final_decision_policy_observed":policy_ok,"stock_risk_scenarios":stock_plans,"stock_amount_scenarios":amount_scenarios,"source_bound_stock_valuations":valuations,"fund_matched_ter_counts":fund_costs,"fund_matched_tri_counts":benchmark_counts,
         "actual_review_providers":providers,"official_document_receipt_count":receipts,
         "turtle_channel_experiments":channel_count,"shared_cash_channel_companies":shared_count,"owner_stress_status":"OBSERVED" if stress_ok else "NOT_APPLICABLE_EMPTY_PORTFOLIO" if empty else "AWAITING_EVIDENCE",
         "blockers":blockers,"investment_qualification":"NOT_CERTIFIED"}
