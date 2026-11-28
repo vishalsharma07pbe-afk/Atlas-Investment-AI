@@ -18,7 +18,8 @@ VERSION="ATLAS-LONG-HISTORY-1"
 PATH=Path("/app/filing-reports/long-history.json")
 MAX_BYTES=64_000_000
 COST=.003
-NOTICE="Operator-attested historical membership, adjusted total-return marks and terminal events. Fixed monthly momentum versus equal-weight eligible universe and gross TRI; next-session closing mark, fractional return-index units, full turnover friction. No point-in-time financial inputs, execution, tax, independent source certification or qualification."
+REPLAY_VERSION="BASELINE-COST-SENSITIVITY-2"
+NOTICE="Operator-attested historical membership, adjusted total-return marks and terminal events. Fixed monthly momentum versus equal-weight eligible universe and gross TRI; next-session closing mark, fractional return-index units, full turnover friction at 15/30/60 bps per side, including terminal proceeds. No point-in-time financial inputs, execution, tax, independent source certification or qualification."
 
 def permitted():
     return os.getenv("ATLAS_LONG_HISTORY_VALIDATION_ENABLED","false").lower()=="true" and os.getenv("MARKET_DATA_USAGE_RIGHTS_CONFIRMED","false").lower()=="true"
@@ -59,15 +60,15 @@ def metrics(path,days):
         "max_drawdown_percent":round(100*drawdown,4),"annualized_sharpe_rf_zero":round(mean(changes)/sd*sqrt(252),4) if sd else None,
         "annualized_sortino_rf_zero":round(mean(changes)/downside*sqrt(252),4) if downside else None}
 
-def replay(root,today):
-    days,marks,members,terminal,benchmark,start=parse(root,today)
+def _replay(parsed,root,cost):
+    days,marks,members,terminal,benchmark,start=parsed
     cash=[1.,1.];held=[{},{}];paths=[[1.],[1.]];turnover=[0,0];rebalance=0;candidate_counts=[]
     for i in range(start,len(days)):
         current=marks[i]
         for j in range(2):
             for k in list(held[j]):
                 if k not in current:raise ValueError("MISSING_HELD_MARK_OR_TERMINAL_EVENT")
-                if k in terminal[i]:cash[j]+=held[j].pop(k)*current[k][0]
+                if k in terminal[i]:cash[j]+=held[j].pop(k)*current[k][0]*(1-cost)
         if days[i].month!=days[i-1].month:
             # Prior session membership and 126 earlier sessions. Exclude
             # latest 21 sessions; require contiguous history, no IPO imputation.
@@ -84,12 +85,12 @@ def replay(root,today):
                 # Close-confirmed signal is executed at following session's
                 # closing return-index mark, not same-session close.
                 for k,units in held[j].items():
-                    proceeds=units*current[k][0];cash[j]+=proceeds*(1-COST);turnover[j]+=1
+                    proceeds=units*current[k][0];cash[j]+=proceeds*(1-cost);turnover[j]+=1
                 held[j]={}
-                amount=cash[j]/len(selection)/(1+COST)
+                amount=cash[j]/len(selection)/(1+cost)
                 for _,k in selection:
                     if k not in current or current[k][0]<=0 or k in terminal[i]:raise ValueError("MISSING_NEXT_SESSION_ENTRY_MARK")
-                    held[j][k]=amount/current[k][0];cash[j]-=amount*(1+COST);turnover[j]+=1
+                    held[j][k]=amount/current[k][0];cash[j]-=amount*(1+cost);turnover[j]+=1
                 cash[j]=max(0,cash[j])
         for j in range(2):paths[j].append(cash[j]+sum(units*current[k][0] for k,units in held[j].items()))
     # First daily observation is before the first rebalance cost; label
@@ -98,13 +99,24 @@ def replay(root,today):
     # Duplicate initial date is only the initial wealth at the first mark.
     index=[1.,*[v/benchmark[start] for v in benchmark[start:]]]
     result={"methodology":VERSION,"status":"OPERATOR_ATTESTED_BASELINE_COMPARISON","qualified":False,"start":days[start].isoformat(),"end":days[-1].isoformat(),
-        "sessions":len(days)-start,"monthly_rebalances":rebalance,"min_eligible_companies":min(candidate_counts),"terminal_events_in_corpus":sum(map(len,terminal)),"cost_bps_per_side":30,"benchmark":root["benchmark"],
+        "sessions":len(days)-start,"monthly_rebalances":rebalance,"min_eligible_companies":min(candidate_counts),"terminal_events_in_corpus":sum(map(len,terminal)),"cost_bps_per_side":round(10000*cost),"benchmark":root["benchmark"],
         "momentum_top10":metrics(paths[0],dates),"equal_weight_eligible":metrics(paths[1],dates),"benchmark_tri":metrics(index,dates),
         "trade_mark_events":{"momentum":turnover[0],"equal_weight":turnover[1]},"notice":NOTICE}
     # Predeclared chronological halves, with original portfolio path carried
     # forward. No parameter fitting or choosing the best period.
     cut=len(dates)//2
     result["chronological_windows"]=[{"start":dates[a].isoformat(),"end":dates[b-1].isoformat(),"momentum":metrics(paths[0][a:b],dates[a:b]),"equal_weight":metrics(paths[1][a:b],dates[a:b]),"benchmark":metrics(index[a:b],dates[a:b])} for a,b in ((0,cut+1),(cut,len(dates)))]
+    return result
+
+def replay(root,today):
+    parsed=parse(root,today)
+    result=_replay(parsed,root,COST)
+    result["replay_version"]=REPLAY_VERSION
+    result["cost_sensitivity"]=[]
+    for bps in (15,30,60):
+        r=result if bps==30 else _replay(parsed,root,bps/10000)
+        row={"cost_bps_per_side":bps,"momentum_cagr_percent":r["momentum_top10"]["cagr_percent"],"equal_weight_cagr_percent":r["equal_weight_eligible"]["cagr_percent"],"benchmark_cagr_percent":r["benchmark_tri"]["cagr_percent"],"momentum_max_drawdown_percent":r["momentum_top10"]["max_drawdown_percent"],"momentum_minus_equal_weight_cagr_pp":round(r["momentum_top10"]["cagr_percent"]-r["equal_weight_eligible"]["cagr_percent"],4),"momentum_minus_tri_cagr_pp":round(r["momentum_top10"]["cagr_percent"]-r["benchmark_tri"]["cagr_percent"],4)}
+        result["cost_sensitivity"].append(row)
     return result
 
 def _file_key(path):
@@ -126,7 +138,7 @@ def read(connect,path=PATH):
             row=db.execute("SELECT payload FROM atlas_long_history_validation WHERE id=1 AND file_key=?",(key,)).fetchone()
         if row:
             result=json.loads(row[0])
-            if result.get("methodology")==VERSION and result.get("qualified") is False:return result
+            if result.get("methodology")==VERSION and result.get("replay_version")==REPLAY_VERSION and result.get("qualified") is False:return result
     except (OSError,ValueError,TypeError,KeyError):pass
     return out
 
