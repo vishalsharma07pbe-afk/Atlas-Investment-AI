@@ -49,3 +49,13 @@ it("does not allocate when final decision policy is incomplete or unavailable",(
  expect(p.planned).toBe(0);
  expect(makeCapitalPlan({...report,decision_quality:{...decision_quality,status:"UNAVAILABLE"}},empty,100000,"HIGH",60,now).planned).toBe(0);
 });
+
+it("caps aggregate stock risk, reserves costs and sizes whole shares",()=>{
+ const a={...stock,price_plan:{...stock.price_plan,stop_scenario:90}};
+ const b={...a,id:2,isin:"INE467B01029",symbol:"OTHER"};
+ const p=makeCapitalPlan({...report,stocks:[a,b],funds:[]},empty,100000,"HIGH",60,now);
+ expect(p.estimatedStockStopRisk).toBeLessThanOrEqual(750);
+ expect(p.illustrativeBuyCharges).toBeGreaterThan(0);
+ expect(p.allocations.every(x=>Number.isInteger(x.wholeShares)&&x.amount===x.wholeShares!*100)).toBe(true);
+ expect(p.planned+p.reserved).toBe(100000);
+});
