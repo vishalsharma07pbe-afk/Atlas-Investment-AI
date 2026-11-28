@@ -56,3 +56,21 @@ class ForwardEarningsTest(unittest.TestCase):
         self.assertIsNone(f.baseline(raw,NOW))
         raw["sections"]["quarterly_income"]["source"]["retrieved_at"]=(NOW-timedelta(hours=7)).isoformat()
         self.assertIsNone(f.baseline(raw,NOW))
+
+    def test_due_publication_lookup_uses_original_maturity_and_excludes_malformed_rows(self):
+        with tempfile.TemporaryDirectory() as d:
+            def connect():
+                db=sqlite3.connect(Path(d)/"test.db");db.row_factory=sqlite3.Row;return db
+            e=f.baseline(report(),NOW)
+            with connect() as db:
+                f._table(db)
+                db.execute("INSERT INTO earnings_persistence(isin,target_quarter,published_at,evidence) VALUES(?,?,?,?)",
+                    (ISIN,e["target_quarter"],NOW.isoformat(),json.dumps(e)))
+                db.execute("INSERT INTO earnings_persistence(isin,target_quarter,published_at,evidence) VALUES(?,?,?,?)",
+                    ("INE009A01021",e["target_quarter"],NOW.isoformat(),json.dumps(e)))
+            with patch.object(f.company,"permitted",return_value=True):
+                self.assertEqual(f.due_identities(connect,NOW),[])
+                self.assertEqual(f.due_identities(connect,datetime(2027,2,1,5,tzinfo=timezone.utc)),[ISIN])
+                self.assertEqual(f.due_identities(connect,datetime(2027,8,1,5,tzinfo=timezone.utc)),[])
+            with patch.object(f.company,"permitted",return_value=False):
+                self.assertEqual(f.due_identities(connect,datetime(2027,2,1,5,tzinfo=timezone.utc)),[])

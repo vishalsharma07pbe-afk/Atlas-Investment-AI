@@ -728,12 +728,15 @@ def _execute_job(job):
         except (ValueError,TypeError,OSError,sqlite3.Error):pass
         watch_outcomes.refresh(snapshot,_connect)
         return "PASS_COMPLETED"
+    if job=="COMPANY_EVIDENCE":
+        followups=forward_earnings.due_identities(_connect,now())
+        if not followups and not any(s["section"] in ("NSE","BSE") and s["status"]=="READY" for s in snapshot["sections"]):
+            return "WAITING_EVIDENCE"
+        outcome=automatic_company_evidence.refresh(snapshot,_connect,followup_isins=followups) if followups else automatic_company_evidence.refresh(snapshot,_connect)
+        return "PASS_COMPLETED" if outcome in ("AVAILABLE","PARTIAL") else "WAITING_EVIDENCE"
     if not any(s["section"] in ("NSE","BSE") and s["status"]=="READY" for s in snapshot["sections"]):
         return "WAITING_EVIDENCE"
-    if job=="COMPANY_EVIDENCE":
-        outcome=automatic_company_evidence.refresh(snapshot,_connect)
-        return "PASS_COMPLETED" if outcome in ("AVAILABLE","PARTIAL") else "WAITING_EVIDENCE"
-    elif job=="COMPANY_NEWS":
+    if job=="COMPANY_NEWS":
         automatic_news.refresh(snapshot,_connect)
     elif job=="STRATEGY_REPLAY":
         automatic_strategy_validation.refresh(snapshot,_connect)

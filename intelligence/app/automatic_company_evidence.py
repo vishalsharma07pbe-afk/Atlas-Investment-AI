@@ -356,11 +356,11 @@ def _refresh_table(db):
         scope TEXT PRIMARY KEY, observed_at TEXT NOT NULL, outcome TEXT NOT NULL)""")
 
 
-def refresh(snapshot, connect, loader=company_research, instant=None, *, explicit_isins=None):
+def refresh(snapshot, connect, loader=company_research, instant=None, *, explicit_isins=None, followup_isins=()):
     if not snapshot["enabled"] or not permitted():
         return
     instant=instant or datetime.now(timezone.utc)
-    outcome=_refresh(snapshot,connect,loader,instant,explicit_isins=explicit_isins)
+    outcome=_refresh(snapshot,connect,loader,instant,explicit_isins=explicit_isins,followup_isins=followup_isins)
     scope="FUND" if explicit_isins is not None else "STOCK"
     with closing(connect()) as db,db:
         _refresh_table(db)
@@ -435,7 +435,7 @@ def _merge_refresh(report,retained,instant):
             "available_sections":len(stamps),"reused_sections":sorted(retained),
             "notice":report["notice"]+" Retained sections preserve their original retrieval dates; report freshness uses the oldest available section."}
 
-def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None):
+def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None, followup_isins=()):
     stamp=instant.isoformat()
     candidates={}
     fip_items=list(identify_fip_priority(snapshot,instant)) if explicit_isins is None else []
@@ -453,7 +453,10 @@ def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None):
         for exchange,isin in identify_sample(snapshot,instant):
             if isin not in sample or exchange=="NSE":
                 sample[isin]=exchange+"_EQ|"+isin
-    if not candidates and not sample:
+    # The public scheduler supplies only matured frozen earnings publications.
+    # Private and fund-only calls cannot enter this rotation.
+    followups={i:None for i in followup_isins[:100] if isinstance(i,str) and ISIN.fullmatch(i)} if explicit_isins is None and snapshot.get("scope")=="PUBLIC_MARKET_RESEARCH_ONLY" else {}
+    if not candidates and not sample and not followups:
         return "NO_CANDIDATES"
     with closing(connect()) as db, db:
         _table(db)
@@ -483,10 +486,15 @@ def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None):
                                             rows[i]["attempted_at"] if i in rows else "",i))
             # Reserve one bounded pass after three priority claims when broad
             # work is due. Never increase the request budget or bypass due gates.
-            if sample_due and (streak>=MAX_PRIORITY_STREAK or not (due or peer_due)):
+            followup_due=sorted((i for i in followups if due_now(i)),
+                key=lambda i:(rows[i]["attempted_at"] if i in rows else "",i))
+            if sample_due and (streak>=MAX_PRIORITY_STREAK or not (due or peer_due or followup_due)):
                 due=sample_due
                 candidates.update(sample)
                 broad=True
+            elif followup_due and (streak==1 or not (due or peer_due)):
+                due=followup_due
+                for i in followup_due:candidates.setdefault(i,None)
             elif not due and peer_due:
                 due=peer_due
                 candidates.update(peers)

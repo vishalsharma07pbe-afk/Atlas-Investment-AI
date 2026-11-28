@@ -411,3 +411,22 @@ class CompanyEvidenceTests(unittest.TestCase):
         self.assertEqual(section["diagnostic"],"NO_EVENTS_REPORTED_NOT_VERIFIED_COMPLETE")
         report["sections"]["corporate_actions"]["source"]["endpoint"]="/v2/fundamentals/WRONG/corporate-actions"
         self.assertEqual(company.normalize(report,self.isin,self.now)["sections"]["corporate_actions"]["status"],"UNAVAILABLE")
+
+    def test_public_frozen_earnings_followup_has_bounded_rotation_and_cooldown(self):
+        from contextlib import closing
+        other="INE009A01021"
+        self.snapshot["scope"]="PUBLIC_MARKET_RESEARCH_ONLY"
+        calls=[]
+        def loader(isin,key):
+            calls.append((isin,key))
+            return {"isin":isin,"sections":{"profile":{"status":"AVAILABLE","data":{"sector":"Example"}}}}
+        company.refresh(self.snapshot,research._connect,loader,self.now,followup_isins=[other])
+        self.assertEqual(calls,[(self.isin,"NSE_EQ|"+self.isin)])
+        company.refresh(self.snapshot,research._connect,loader,self.now+timedelta(minutes=5),followup_isins=[other])
+        self.assertEqual(calls[-1],(other,None))
+        company.refresh(self.snapshot,research._connect,loader,self.now+timedelta(minutes=10),followup_isins=[other])
+        self.assertEqual(len(calls),2)
+        self.snapshot["scope"]="PRIVATE"
+        self.snapshot["sections"]=[]
+        company.refresh(self.snapshot,research._connect,loader,self.now+timedelta(days=1),followup_isins=[other])
+        self.assertEqual(len(calls),2)
