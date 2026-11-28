@@ -67,3 +67,13 @@ it("does not add direct stock risk over a known indirect concentration or withou
  const look={...review,diversification:{look_through:{status:"DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE",portfolio_date:"2026-10-31",exposures:[{isin:stock.isin,estimatedValue:12000,indirectValue:12000}]}}};
  expect(makeCapitalPlan(report,look,100000,"HIGH",60,now).allocations.every(x=>x.category!=="EQUITY")).toBe(true);
 });
+
+
+it("enforces explicit category and stock holds even with positive candidate actions",()=>{
+ const quality={methodology:"FINAL-DECISION-QUALITY-1",state:"PRIORITY_RESEARCH",supported_checks:[],missing_checks:[],adverse_findings:[],evidence_checks_met:8,evidence_checks_total:8,qualified:false as const,notice:"Research"};
+ const policy={methodology:"FINAL-DECISION-QUALITY-1",qualified:false as const,notice:"Research",stock_allocation_hold:"ADVERSE",fund_allocation_holds:["LARGE_CAP"]};
+ const r={...report,decision_quality:policy,stocks:[{...stock,decision_quality:quality}],funds:[{category:"LARGE_CAP",items:[{...fund,decision_quality:quality}]}]};
+ expect(makeCapitalPlan(r,empty,100000,"HIGH",60,now).planned).toBe(0);
+ const unheld=makeCapitalPlan(report,empty,100000,"HIGH",60,now);
+ expect(unheld.estimatedDoubleStopRisk).toBe(2*unheld.estimatedStockStopRisk);
+});
