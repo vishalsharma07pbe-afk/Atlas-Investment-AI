@@ -4,6 +4,7 @@ Fixed, documented proxy rules. No model vote or observed match constitutes
 strategy validation. Full academic factor portfolios require point-in-time data.
 """
 from collections import Counter,defaultdict
+from bisect import bisect_left,bisect_right
 from datetime import date,datetime,timedelta
 from math import isfinite,sqrt
 from statistics import median,pstdev,mean
@@ -43,6 +44,8 @@ def price_features(candles,calendar=()):
     changes=[b/a-1 for a,b in zip(prices,prices[1:])]
     if any(not number(v,-1,100) for v in changes):return None
     vol=pstdev(changes[-126:])*sqrt(252)*100
+    # Explicit research guard: a large recent one-day jump is not steady momentum.
+    max_day_jump=100*max(changes[-20:])
     turn=median(c.close*c.volume for c in sample[-20:])/1e7
     if not number(turn,0,1e12) or not number(vol,.00001,1e5):return None
     # Momentum excludes the latest 21 sessions (short-term reversal).
@@ -58,18 +61,51 @@ def price_features(candles,calendar=()):
     return {"methodology":VERSION,"adjustment_status":sample[-1].adjustment_status,"professional_patterns":patterns,
         "calendar_matched":len(calendar)>=len(sample) and list(calendar[-len(sample):])==dates,
         "observations":len(sample),"first_date":dates[0],"last_date":dates[-1],
-        "dates_digest":date_digest(dates[-127:]),"close":round(prices[-1],4),
+        "full_dates_digest":date_digest(dates),"dates_digest":date_digest(dates[-127:]),"close":round(prices[-1],4),
         "turnover_cr":round(turn,4),"volatility_126_percent":round(vol,4),
         "momentum_6_ex_recent":round(r6,4),"momentum_12_ex_recent":round(r12,4) if r12 is not None else None,
+        "max_daily_gain_20_percent":round(max_day_jump,4),
         "return_60_percent":round(r60,4),"return_200_percent":round(r200,4),
         "return_252_percent":round(r252,4) if r252 is not None else None,
         "near_annual_high_percent":round(100*prices[-1]/max(c.high for c in sample),4) if len(sample)==253 else None,
         "above_sma200":prices[-1]>mean(prices[-200:]),"sma50_above_sma200":mean(prices[-50:])>mean(prices[-200:]),
         "range_20_percent":round(recent,4),"prior_range_40_percent":round(prior,4)}
 
+def pump_or_extended(f):
+    """Known excessive one-day jumps or annual extension; missing != failed."""
+    jump=f.get("max_daily_gain_20_percent");annual=f.get("return_252_percent")
+    return number(jump,10,1e6) or number(annual,100,1e6)
+
+def sample_momentum_ranks(candidates):
+    """Tie-aware 6/12-month volatility-adjusted percentile, exact date cohorts.
+
+    Both windows exclude the latest month. No mixing horizons or imputing
+    missing 12-month observations. Ranks are sampled, not exchange-wide.
+    """
+    cohorts=defaultdict(list)
+    for r in candidates:
+        f=obj(r.get("multi_strategy_price"));isin=r.get("isin")
+        if (not exact_isin(isin) or f.get("adjustment_status")!="ADJUSTED"
+            or f.get("calendar_matched") is not True or f.get("observations")!=253
+            or not isinstance(f.get("full_dates_digest"),str)
+            or not number(f.get("volatility_126_percent"),.0001,1e5)
+            or not all(number(f.get(k)) for k in ("momentum_6_ex_recent","momentum_12_ex_recent"))):continue
+        vol=f["volatility_126_percent"]
+        cohorts[f["full_dates_digest"]].append((isin,f["momentum_6_ex_recent"]/vol,f["momentum_12_ex_recent"]/vol))
+    result={}
+    for cohort in cohorts.values():
+        if len({r[0] for r in cohort})!=len(cohort) or len(cohort)<20:continue
+        columns=[sorted(r[i] for r in cohort) for i in (1,2)]
+        for isin,x,y in cohort:
+            ranks=[50*(bisect_left(col,v)+bisect_right(col,v))/len(cohort) for col,v in zip(columns,(x,y))]
+            result[isin]={"percentile":round(mean(ranks),2),"sample_size":len(cohort),
+                "six_month_percentile":round(ranks[0],2),"twelve_month_percentile":round(ranks[1],2)}
+    return result
+
 def price_lanes(f):
     if not isinstance(f,dict) or f.get("methodology")!=VERSION:return []
     if not number(f.get("turnover_cr"),5,1e12):return []
+    if pump_or_extended(f):return []
     annual=f.get("return_252_percent")
     # Preserve the user's no-overextended-stock preference for trend leads.
     not_extended=number(annual,-100,99.9999) if annual is not None else number(f.get("return_200_percent"),-100,70)
@@ -200,6 +236,7 @@ def summarize(snapshot,connect,instant):
             prepared[isin]=company._enrich(report,today,instant)
         except (ValueError,TypeError,KeyError,AttributeError,OverflowError):continue
     qmj=pro.quality_ranks(prepared,classifications,today)
+    momentum_ranks=sample_momentum_ranks(candidates)
     from . import earnings_expectations
     surprises=earnings_expectations.read(instant)
     if surprises:
@@ -255,6 +292,14 @@ def summarize(snapshot,connect,instant):
                 facts["historical_beta"]=beta
                 if 0<=beta<=.75:lanes.append("LOW_BETA")
         # Unadjusted prices may be observed, but never pass price-only lanes.
+        if isin in momentum_ranks:
+            rank=momentum_ranks[isin]
+            facts.update(sample_momentum_percentile=rank["percentile"],sample_momentum_cohort_size=rank["sample_size"])
+        # Do not change strict FIP or its export. Keep financial-only observations,
+        # but suppress alternate price-dependent leads after a known pump/extension.
+        if pump_or_extended(f):
+            lanes=[v for v in lanes if v in ("FIP","QUALITY_PROXY","QUALITY_VALUE","PIOTROSKI_PARTIAL","PIOTROSKI_F_SCORE","QMJ_STYLE","GARP_PROXY","EARNINGS_ACCELERATION")]
+            facts["price_lead_exclusion"]="RECENT_JUMP_OR_ANNUAL_EXTENSION"
         if not adjusted:lanes=[v for v in lanes if LANES[v] in ("QUALITY","VALUE","GROWTH") and v not in ("GROWTH_LEADERSHIP_PROXY","CAN_SLIM_PROXY","PEAD")]
         lanes=list(dict.fromkeys(lanes))
         if not lanes:continue
@@ -270,7 +315,8 @@ def summarize(snapshot,connect,instant):
     trend=regime.get("trend") if regime.get("as_of") in {r["as_of"] for r in candidates} else None
     def order(r):
         preferred={"QUALITY","VALUE","DEFENSIVE"} if trend=="FALLING" else {"MOMENTUM","GROWTH","SECTOR"} if trend=="RISING" else {"VALUE","REVERSAL","QUALITY"} if trend=="SIDEWAYS" else set()
-        return (-len(r["families"]),-len(preferred.intersection(r["families"])),not r["adjustment_verified_for_screen"],-r["observed_facts"]["median_daily_turnover_cr"],r["isin"])
+        rank=r["observed_facts"].get("sample_momentum_percentile") if "MOMENTUM" in r["families"] else None
+        return (-len(r["families"]),-len(preferred.intersection(r["families"])),not r["adjustment_verified_for_screen"],-(rank if rank is not None else 0),-r["observed_facts"]["median_daily_turnover_cr"],r["isin"])
     items.sort(key=order)
     # Round-robin family coverage prevents a momentum-only top list.
     selected=[];seen=set()
