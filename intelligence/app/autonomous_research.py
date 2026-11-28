@@ -422,11 +422,12 @@ def _read_sections(section_names,enabled,interval,current):
             if not official_amc_factsheet.permitted():result.pop("official_amc_coverage",None)
             # Only retain source-specific context while the respective permissions remain enabled.
             from . import research_synthesis, fund_local_evidence
-            records=result.pop("fund_decision_evidence",[])
+            fund_records=result.pop("fund_decision_evidence",[])
+            if not isinstance(fund_records,list):fund_records=[]
             kept=[]
             for item in (result.get("historical_research_shortlist") or {}).get("items",[])[:5]:
                 if not isinstance(item,dict):continue
-                context=research_synthesis.saved_fund_context(item,records,section,today,website=official_amfi_ter.permitted(),local=fund_local_evidence.permitted(),tri=official_tri.permitted(),secondary=fund_disclosures.permitted())
+                context=research_synthesis.saved_fund_context(item,fund_records,section,today,website=official_amfi_ter.permitted(),local=fund_local_evidence.permitted(),tri=official_tri.permitted(),secondary=fund_disclosures.permitted())
                 kept.append({k:item.get(k) for k in ("identifier","isin_growth","nav_date")} | {"category":section,"context":context})
             if kept:result["fund_decision_evidence"]=kept
         sections.append({"section": section, "status": status,
