@@ -6,7 +6,7 @@ from .technical import Candle, compute
 from .horizon_research import evaluate, summarize, MIN_HISTORY as HORIZON_MIN_HISTORY
 from .price_structure import analyze as price_structure
 from .corporate_action_normalization import preview as action_preview, reported_crossings, archived_crossings
-from .replay_evidence import fingerprint, exact_isin
+from .replay_evidence import fingerprint, exact_isin, full_manifest
 from . import price_volume_pressure, steady_momentum, relative_strength, company_venues, sector_price_context, score_calibration, fip_research, bracket_research
 
 MIN_HISTORY = 21
@@ -221,6 +221,8 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                     from . import multi_strategy
                     features=multi_strategy.price_features(candles,fip_dates)
                     if features is not None:
+                        if features["calendar_matched"] and full_manifest(raw[-features["observations"]:],today) is None:
+                            features["calendar_matched"]=False
                         identity["symbol"]=row["symbol"]
                         identity["multi_strategy_price"]=features
                 company_research_universe.append(identity)

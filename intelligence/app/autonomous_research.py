@@ -100,7 +100,10 @@ def market_snapshot(exchange):
         dates=fip_research.calendar_suffix(calendar,exchange,now().astimezone(ZoneInfo("Asia/Kolkata")).date())
         return discovery_scan.scan(exchange,backend_json,lambda e,rows,cutoff:_market_page(e,rows,cutoff,fip_dates=dates),now)
     instruments = backend_json("/api/v1/market-data/discovery-universe?" + urlencode({"exchange": exchange}))
-    return _market_page(exchange,instruments)
+    try:calendar=backend_json(f"/api/v1/market-data/strategy-calendar?exchange={exchange}")
+    except Exception:calendar=None
+    dates=fip_research.calendar_suffix(calendar,exchange,now().astimezone(ZoneInfo("Asia/Kolkata")).date())
+    return _market_page(exchange,instruments,fip_dates=dates)
 
 
 def _market_page(exchange,instruments,cutoff=None,*,fip_dates=()):
@@ -534,11 +537,14 @@ def read_snapshot(include_ai=True):
         from . import multi_strategy
         try:
             snapshot["multi_strategy"]=multi_strategy.summarize(snapshot,_connect,current)
-            snapshot["multi_strategy"]["historical_validation"]=(snapshot.get("strategy_validation") or {}).get("multi_strategy")
+        except (ValueError,TypeError,KeyError,AttributeError,OverflowError,OSError,sqlite3.Error):
+            snapshot["multi_strategy"]={"methodology":multi_strategy.VERSION,"status":"UNAVAILABLE","items":[],"notice":multi_strategy.NOTICE}
+        snapshot["multi_strategy"]["historical_validation"]=(snapshot.get("strategy_validation") or {}).get("multi_strategy")
+        try:
             from . import multi_strategy_prospective
             snapshot["multi_strategy"]["prospective_validation"]=multi_strategy_prospective.summary(_connect,current)
         except (ValueError,TypeError,KeyError,AttributeError,OverflowError,OSError,sqlite3.Error):
-            snapshot["multi_strategy"]={"methodology":multi_strategy.VERSION,"status":"UNAVAILABLE","items":[],"notice":multi_strategy.NOTICE}
+            snapshot["multi_strategy"]["prospective_validation"]={"status":"UNAVAILABLE","lanes":{},"notice":"Paper-tracking evidence unavailable."}
         try:
             snapshot["forward_earnings_validation"]=forward_earnings.summary(_connect,current) if enabled else {"status":"DISABLED"}
         except (ValueError,TypeError,OSError,sqlite3.Error):

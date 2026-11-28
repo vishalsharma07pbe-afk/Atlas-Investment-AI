@@ -19,3 +19,11 @@ Paper tracking freezes at most three adjusted company leads per scheduler pass w
 
 ## Release blockers
 Actual populated results, independent 5–10 year adjusted histories, historical constituent/delisted coverage, point-in-time financial and expectation data, verified total-return benchmarks, actual costs and portfolio-level walk-forward, independent factor incremental predictive value, and mature paper evidence are not supplied by this change. No qualification gate is lifted. All thresholds/weights are engineering starting assumptions, not backtested optimum. Validate these explicitly before using strategy results as certified buy/sell decisions.
+
+## Local result acceptance
+Run after CI and your existing protected local deployment:
+
+```bash
+python3 scripts/local_research_acceptance.py --investment-analyst-audit --require-analyst-results --require-multi-strategy-results
+```
+This requires actual company research across at least two strategy families, current stock/fund decisions, a model review, historical replay companies and frozen paper publications. It is deliberately not strategy certification. A weekend can use the last completed session; do not request live-feed acceptance outside a trading session.

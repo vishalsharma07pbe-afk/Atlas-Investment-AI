@@ -119,6 +119,19 @@ def stock_projection(snapshot,instant=None):
             gaps=["Independent filing/valuation and prospective performance not certified."]
             if basis!="ADJUSTED":gaps.append("Historical adjustment basis unverified; no price plan.")
             add(r,tier,"ELITE",e["score"],reasons,gaps)
+    # Use already-consolidated business screens only when joint FIP is absent.
+    # Never describe a business-only match as having passed FIP.
+    if not out:
+        for r in rows(screen.get("items"))[:10]:
+            if id(r) not in elite_ids or r.get("technical_rating")!="ATLAS_STRONG_BULLISH":continue
+            a=obj(r.get("elite_assessment"));score=a.get("score")
+            if a.get("status")!="PRELIMINARY_SCORE_ONLY" or not num(score,0,100):continue
+            w=obj(obj(r.get("momentum_windows")).get("252"))
+            if not num(w.get("return_percent"),0,99.99999) or w.get("last_date")!=r.get("as_of"):continue
+            if not num(r.get("earnings_growth_percent"),10,100) or not num(r.get("reported_pe"),.0001,40):continue
+            add(r,"BUSINESS_SCREEN","ELITE",score,["Bullish technical and reported business screen passed.",
+                f"Reported profit growth {r['earnings_growth_percent']:.1f}%; reported P/E {r['reported_pe']:.1f}."],
+                ["Joint Frog in the Pan qualification not established.","Reported valuation and price adjustment may be unverified."])
     # Independent strategy lanes can surface non-FIP opportunities. Reserve up
     # to three discovery slots without changing strict FIP exports/qualification.
     alternatives=obj(snapshot.get("multi_strategy"))
@@ -136,19 +149,6 @@ def stock_projection(snapshot,instant=None):
                     "strategies":r["strategies"],"strategy_families":r["families"],"observed_facts":r["observed_facts"],
                     "reasons":["Independent strategy research matches: "+", ".join(x.replace("_"," ").lower() for x in r["strategies"])],
                     "limitations":["Fixed research proxies; independent strategy performance not established.","No allocation or execution qualification; price adjustment and valuation evidence may be incomplete."]})
-    # Use already-consolidated business screens only when joint FIP is absent.
-    # Never describe a business-only match as having passed FIP.
-    if not out:
-        for r in rows(screen.get("items"))[:10]:
-            if id(r) not in elite_ids or r.get("technical_rating")!="ATLAS_STRONG_BULLISH":continue
-            a=obj(r.get("elite_assessment"));score=a.get("score")
-            if a.get("status")!="PRELIMINARY_SCORE_ONLY" or not num(score,0,100):continue
-            w=obj(obj(r.get("momentum_windows")).get("252"))
-            if not num(w.get("return_percent"),0,99.99999) or w.get("last_date")!=r.get("as_of"):continue
-            if not num(r.get("earnings_growth_percent"),10,100) or not num(r.get("reported_pe"),.0001,40):continue
-            add(r,"BUSINESS_SCREEN","ELITE",score,["Bullish technical and reported business screen passed.",
-                f"Reported profit growth {r['earnings_growth_percent']:.1f}%; reported P/E {r['reported_pe']:.1f}."],
-                ["Joint Frog in the Pan qualification not established.","Reported valuation and price adjustment may be unverified."])
     # A separate technical-only fallback is a lead to investigate, not a buy.
     # Horizon rank scores are deliberately not compared across horizons.
     if not out:

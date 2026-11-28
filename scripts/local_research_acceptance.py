@@ -725,7 +725,7 @@ def analyst_acceptance(overview,review,instant=None):
     a=_obj(overview.get("investment_analyst"));o=_obj(review.get("investment_analysis"))
     stocks=a.get("stocks");funds=a.get("funds");holdings=review.get("holdings")
     stock_count=_distinct_stock_count(stocks,10)
-    stock_ok=stock_count is not None and all(r.get("qualified") is False and r.get("tier") in ("ADJUSTED_JOINT","REPORTED_JOINT","BUSINESS_SCREEN","TECHNICAL_LEAD")
+    stock_ok=stock_count is not None and all(r.get("qualified") is False and r.get("tier") in ("ADJUSTED_JOINT","REPORTED_JOINT","BUSINESS_SCREEN","TECHNICAL_LEAD","MULTI_STRATEGY_RESEARCH")
         and isinstance(r.get("reasons"),list) and bool(r["reasons"]) and r.get("evidence_confidence") in ("LOW","LIMITED","MODERATE") for r in stocks)
     fund_counts={}
     for category in ("LARGE_CAP","MID_CAP","SMALL_CAP"):
@@ -749,7 +749,29 @@ def analyst_acceptance(overview,review,instant=None):
         "populated_outputs_observed":bool(public_ok and owner_ok and stock_count and all(fund_counts.values())),
         "investment_qualification":"NOT_CERTIFIED"}
 
-def collect(request,include_qualification_audit=False,include_advanced_audit=False,include_recovery_audit=False,include_result_acceptance=False,include_analyst_audit=False):
+def multi_strategy_acceptance(overview):
+    a=_obj(overview.get("investment_analyst"));r=_obj(a.get("multi_strategy"))
+    items=r.get("items")
+    count=_distinct_stock_count(items,10)
+    families={"QUALITY","VALUE","GROWTH","MOMENTUM","DEFENSIVE","SECTOR"}
+    observed=set()
+    ok=count is not None and all(item.get("qualified") is False and item.get("status")=="RESEARCH_MATCH_ONLY"
+        and isinstance(item.get("families"),list) and bool(item["families"])
+        and all(f in families for f in item["families"]) and isinstance(item.get("strategies"),list)
+        and bool(item["strategies"]) for item in items)
+    if ok:
+        for item in items:observed.update(item["families"])
+    history=_obj(r.get("historical_validation"));prospective=_obj(r.get("prospective_validation"))
+    replay_companies=_bounded_count(history.get("companies"),20000)
+    tracked=sum(_bounded_count(_obj(v).get("published"),5000) or 0 for v in _obj(prospective.get("lanes")).values())
+    # Lane counts are intentionally not presented as unique companies.
+    return {"status":"CONTRACTS_OBSERVED" if ok and r.get("methodology")=="MULTI-STRATEGY-1" and r.get("qualified") is False else "BLOCKED",
+        "research_candidates":count if ok else None,"represented_families":sorted(observed),
+        "replay_companies":replay_companies,"paper_publication_lane_observations":tracked,
+        "populated_results_observed":bool(ok and count and len(observed)>=2 and replay_companies and tracked),
+        "investment_qualification":"NOT_CERTIFIED"}
+
+def collect(request,include_qualification_audit=False,include_advanced_audit=False,include_recovery_audit=False,include_result_acceptance=False,include_analyst_audit=False,include_multi_strategy_audit=False):
     readiness=request("/intelligence/api/v1/intelligence/data-readiness")
     overview=request("/intelligence/api/v1/intelligence/research/overview")
     review=request("/api/v1/portfolio/review")
@@ -773,6 +795,8 @@ def collect(request,include_qualification_audit=False,include_advanced_audit=Fal
         result["result_acceptance"]=result_acceptance(overview,review)
     if include_analyst_audit:
         result["analyst_acceptance"]=analyst_acceptance(overview,review)
+    if include_multi_strategy_audit:
+        result["multi_strategy_acceptance"]=multi_strategy_acceptance(overview)
     if include_recovery_audit:
         history=request("/api/v1/data-health/history-recovery")
         providers=request("/intelligence/api/v1/intelligence/data-hub/provider-adapters")
@@ -791,6 +815,7 @@ def main():
     parser.add_argument("--require-research-results",action="store_true",help="Require observed current Elite research, all three core fund categories and applicable portfolio history, not final qualification")
     parser.add_argument("--investment-analyst-audit",action="store_true",help="Verify current public and owner-local decision contracts; report actual populated output and model review counts separately")
     parser.add_argument("--require-analyst-results",action="store_true",help="Also require populated stock and all core fund decision lists and at least one current model review; absence may be legitimate")
+    parser.add_argument("--require-multi-strategy-results",action="store_true",help="Require actual distinct company research across two families, replay and frozen paper publications; not certification")
     args=parser.parse_args()
     session=LocalSession(args.base_url)
     result=None
@@ -806,7 +831,7 @@ def main():
         session.token=token
         del login,token
         session.request("/api/v1/auth/me")
-        result=collect(session.request,include_qualification_audit=args.qualification_audit,include_advanced_audit=args.advanced_audit,include_recovery_audit=args.recovery_audit,include_result_acceptance=args.require_research_results,include_analyst_audit=args.investment_analyst_audit or args.require_analyst_results)
+        result=collect(session.request,include_qualification_audit=args.qualification_audit,include_advanced_audit=args.advanced_audit,include_recovery_audit=args.recovery_audit,include_result_acceptance=args.require_research_results,include_analyst_audit=args.investment_analyst_audit or args.require_analyst_results,include_multi_strategy_audit=args.require_multi_strategy_results)
     except (RuntimeError,ValueError,TypeError,KeyError,AttributeError):
         print(json.dumps({"runtime":"BLOCKED","reason":"LOCAL_ACCEPTANCE_REQUEST_OR_CONTRACT_FAILED"}))
         return 1
@@ -817,7 +842,7 @@ def main():
                 if result is not None:result["runtime"]="BLOCKED";result["checks"]["session_logout"]="BLOCKED"
             finally:session.token=None
     print(json.dumps(result,indent=2,sort_keys=True))
-    return 0 if result["runtime"]==result["stored_provider_evidence"]=="PASS" and (not args.require_live or result["live_feed"]=="OBSERVED") and (not args.advanced_audit or result["advanced_audit"]["status"]=="PASS") and (not args.recovery_audit or result["recovery_audit"]["status"]=="PASS") and (not args.require_research_results or result["result_acceptance"]["status"]=="POPULATED_RESEARCH_OBSERVED") and (not args.investment_analyst_audit or result["analyst_acceptance"]["status"]=="CONTRACTS_OBSERVED") and (not args.require_analyst_results or (result["analyst_acceptance"]["status"]=="CONTRACTS_OBSERVED" and result["analyst_acceptance"]["populated_outputs_observed"] and (result["analyst_acceptance"]["model_reviews"] or 0)>0)) else 1
+    return 0 if result["runtime"]==result["stored_provider_evidence"]=="PASS" and (not args.require_live or result["live_feed"]=="OBSERVED") and (not args.advanced_audit or result["advanced_audit"]["status"]=="PASS") and (not args.recovery_audit or result["recovery_audit"]["status"]=="PASS") and (not args.require_research_results or result["result_acceptance"]["status"]=="POPULATED_RESEARCH_OBSERVED") and (not args.investment_analyst_audit or result["analyst_acceptance"]["status"]=="CONTRACTS_OBSERVED") and (not args.require_analyst_results or (result["analyst_acceptance"]["status"]=="CONTRACTS_OBSERVED" and result["analyst_acceptance"]["populated_outputs_observed"] and (result["analyst_acceptance"]["model_reviews"] or 0)>0)) and (not args.require_multi_strategy_results or (result["multi_strategy_acceptance"]["status"]=="CONTRACTS_OBSERVED" and result["multi_strategy_acceptance"]["populated_results_observed"])) else 1
 
 if __name__=="__main__":
     raise SystemExit(main())

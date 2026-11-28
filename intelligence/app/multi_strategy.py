@@ -190,7 +190,7 @@ def summarize(snapshot,connect,instant):
         lanes=price_lanes(f);facts={"return_60_percent":f["return_60_percent"],"median_daily_turnover_cr":f["turnover_cr"]}
         adjusted=f.get("adjustment_status")=="ADJUSTED" and f.get("calendar_matched") is True
         if adjusted:
-            if obj(r.get("fip_research")).get("status")=="FIP_PRICE_MATCH":lanes.append("FIP")
+            if obj(r.get("fip_research")).get("status")=="FIP_PRICE_MATCH" and number(f.get("return_252_percent"),0,99.9999):lanes.append("FIP")
             windows=obj(r.get("comparative_price_windows"));b=obj(regime.get("relative_strength_windows"))
             w=obj(windows.get("60"));ix=obj(b.get("60"))
             if (r["exchange"]=="NSE" and regime.get("as_of")==r["as_of"] and regime.get("calendar_checked_on")==today.isoformat()
@@ -199,7 +199,7 @@ def summarize(snapshot,connect,instant):
                 and number(w.get("return_percent"),5,50) and number(ix.get("return_percent"),-100,1e6) and w["return_percent"]>ix["return_percent"]):
                 lanes.append("RELATIVE_STRENGTH")
             cap=bounds.get(f.get("dates_digest"))
-            if cap:
+            if cap and number(f.get("volatility_126_percent"),.0001,1e5) and number(f.get("momentum_6_ex_recent")):
                 vol=f["volatility_126_percent"];mom=f["momentum_6_ex_recent"]
                 if vol<=cap[0]:lanes.append("LOW_VOLATILITY")
                 if mom>0 and mom/vol>=cap[1] and number(f.get("return_252_percent"),0,99.9999):lanes.append("RISK_ADJUSTED_MOMENTUM")
