@@ -99,7 +99,8 @@ def validate(response,evidence):
 def providers_for_analyst():
     # The plan is lead reviewer only after explicit account and external consent.
     allowed=ai.providers()
-    return sorted(allowed,key=lambda p:p!="CHATGPT_PLAN")
+    roles={"CHATGPT_PLAN":0,"GEMINI":1,"OLLAMA":2,"GROQ":3}
+    return sorted(allowed,key=lambda p:roles.get(p,4))
 
 def refresh(report,connect,instant,runner=ai_failover.grounded_research):
     providers=providers_for_analyst();evidence=pack(report)
