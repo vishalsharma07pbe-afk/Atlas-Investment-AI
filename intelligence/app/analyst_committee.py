@@ -12,7 +12,7 @@ from . import automatic_ai_review as ai, ai_failover
 from .investment_analyst import obj, rows, num
 
 VERSION="ANALYST-COMMITTEE-1"
-EVIDENCE_POLICY="CONDITIONAL_VALUE_AND_FUND_COST_V2"
+EVIDENCE_POLICY="CONDITIONAL_VALUE_FILING_ADVERSARIAL_V3"
 NOTICE="Model judgments are conditional research priorities, not independently verified facts, return probabilities or order instructions. Disagreement is caution, not a vote to trade."
 TIERS={"ADJUSTED_JOINT","REPORTED_JOINT","BUSINESS_SCREEN","TECHNICAL_LEAD","MULTI_STRATEGY_RESEARCH","DRIVER_SUPPORTED","HISTORICAL_ONLY","DRIVER_REVIEW"}
 REASONS={
@@ -32,6 +32,8 @@ REASONS={
  "CONFLICTING_TER":"Conflicting reported expense evidence prevents an informed new SIP comparison.",
  "CONDITIONAL_VALUE_DOWNSIDE":"The operator-reviewed base valuation scenario is below the recorded reference price; verify assumptions.",
  "BENCHMARK_LAG":"Matched historical TRI comparison shows lag; verify the benchmark mandate and future thesis.",
+ "FILING_CONFLICT":"Issuer/provider quarter reconciliation contains a discrepancy.",
+ "REGIME_CAUTION":"Recent matched regime-specific strategy outcome evidence warrants caution.",
 }
 def pack(report):
     if report.get("status")!="RESEARCH_AVAILABLE":return {}
@@ -59,6 +61,9 @@ def pack(report):
         if group=="EQUITY" and valuation.get("status")=="OPERATOR_SOURCE_BOUND_VALUATION_SCENARIO" and valuation.get("isin")==identity and valuation.get("qualified") is False and len(base)==1 and num(base[0].get("upside_downside_percent"),-1e6,1e6):
             facts["conditional_valuation_upside_percent"]=base[0]["upside_downside_percent"]
             if facts["conditional_valuation_upside_percent"]<0:allowed.append("CONDITIONAL_VALUE_DOWNSIDE")
+        if group=="EQUITY":
+            if obj(row.get("filing_context")).get("status")=="CONFLICT_REVIEW":allowed.append("FILING_CONFLICT")
+            if row.get("regime_priority")=="CAUTION":allowed.append("REGIME_CAUTION")
         if group!="EQUITY":
             if fund.get("ter_status")=="CONFLICTING_SAME_DATE_TER":allowed.append("CONFLICTING_TER")
             if num(fund.get("ter_percent"),0,100) and fund.get("ter_status")=="REPORTED_NOT_INDEPENDENTLY_AUTHENTICATED":facts["reported_ter_percent"]=fund["ter_percent"]
@@ -105,8 +110,8 @@ def validate(response,evidence):
             if candidate not in evidence or r.get("evidence_ids")!=[candidate] or reason not in evidence[candidate]["allowed_reasons"]:continue
             if decision not in ("PRIORITIZE_REVIEW","DEFER_REVIEW"):continue
             if decision=="PRIORITIZE_REVIEW" and (reason not in ("JOINT_SCREEN","BUSINESS_SCREEN","STRATEGY_MATCH","HISTORICAL_PEERS","GROWTH_DRIVERS","POSITIVE_SCENARIO","GROWTH_AND_VALUATION")
-                or evidence[candidate]["tier"]=="DRIVER_REVIEW" or "CONFLICTING_TER" in evidence[candidate]["allowed_reasons"]):continue
-            if decision=="DEFER_REVIEW" and reason not in ("LIMITED_EVIDENCE","HIGH_HISTORICAL_RISK","ADJUSTMENT_UNKNOWN","DRIVER_RISK","NEGATIVE_SCENARIO","VALUATION_CAUTION","CONFLICTING_TER","CONDITIONAL_VALUE_DOWNSIDE","BENCHMARK_LAG"):continue
+                or evidence[candidate]["tier"]=="DRIVER_REVIEW" or any(x in evidence[candidate]["allowed_reasons"] for x in ("CONFLICTING_TER","FILING_CONFLICT","REGIME_CAUTION"))):continue
+            if decision=="DEFER_REVIEW" and reason not in ("LIMITED_EVIDENCE","HIGH_HISTORICAL_RISK","ADJUSTMENT_UNKNOWN","DRIVER_RISK","NEGATIVE_SCENARIO","VALUATION_CAUTION","CONFLICTING_TER","CONDITIONAL_VALUE_DOWNSIDE","BENCHMARK_LAG","FILING_CONFLICT","REGIME_CAUTION"):continue
             if candidate in found:duplicate.add(candidate)
             found[candidate]={"decision":decision,"reason":reason}
         except (ValueError,TypeError,KeyError,AttributeError):continue
@@ -176,9 +181,10 @@ def attach(report,connect,instant):
     def annotate(row,k):
         votes=[(p,v[k]) for p,v in accepted.items() if k in v]
         if not votes:return
+        adversarial=next((v for p,v in votes if p=="OLLAMA"),None)
         decisions={v["decision"] for _,v in votes}
         state="DISAGREEMENT" if len(decisions)>1 else next(iter(decisions))
-        row["ai_review"]={"state":state,"agreement":"DISAGREEMENT" if len(decisions)>1 else "MULTI_PROVIDER_AGREEMENT" if len(votes)>=2 else "SINGLE_PROVIDER_ONLY","providers":[p for p,_ in votes],"reasons":[REASONS[c] for c in sorted({v["reason"] for _,v in votes})]}
+        row["ai_review"]={"adversarial_status":"DEFERRED_BY_LOCAL_RISK_REVIEWER" if adversarial and adversarial["decision"]=="DEFER_REVIEW" else "LOCAL_RISK_REVIEW_RECEIVED" if adversarial else "LOCAL_RISK_REVIEW_PENDING","state":state,"agreement":"DISAGREEMENT" if len(decisions)>1 else "MULTI_PROVIDER_AGREEMENT" if len(votes)>=2 else "SINGLE_PROVIDER_ONLY","providers":[p for p,_ in votes],"reasons":[REASONS[c] for c in sorted({v["reason"] for _,v in votes})]}
         if state in ("DISAGREEMENT","DEFER_REVIEW"):row["action"]="WATCH_FOR_CONFIRMATION" if row.get("action")!="REVIEW_BEFORE_NEW_SIP" else row["action"]
     for i,r in enumerate(report["stocks"]):annotate(r,"S"+str(i+1))
     for g in report["funds"]:
