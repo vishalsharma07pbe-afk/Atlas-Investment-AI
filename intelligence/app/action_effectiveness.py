@@ -63,3 +63,69 @@ def summarize(records,horizon,*,truncated=False):
         "matched_dates":{"eligible_dates":len(eligible_days),**stats(list(dates.values()))},
         "nonoverlapping_dates":{"eligible_dates":len(independent),**stats(matched)},
         "truncated":truncated,"qualified":False,"notice":NOTICE}
+
+
+# Record first scheduled public observation per day, including no-action days.
+# This denominator is scheduler observations, NOT exchange trading sessions.
+from contextlib import closing
+from datetime import date
+from zoneinfo import ZoneInfo
+import json
+
+SCOPES=("STOCK","LARGE_CAP","MID_CAP","SMALL_CAP")
+def _table(db):
+    db.execute("""CREATE TABLE IF NOT EXISTS final_action_day(
+        policy TEXT NOT NULL,observed_day TEXT NOT NULL,captured_at TEXT NOT NULL,
+        evidence TEXT NOT NULL,PRIMARY KEY(policy,observed_day))""")
+    db.execute("""CREATE TRIGGER IF NOT EXISTS final_action_day_immutable
+        BEFORE UPDATE ON final_action_day BEGIN SELECT RAISE(ABORT,'immutable daily action audit'); END""")
+
+def capture(snapshot,connect,instant):
+    if snapshot.get("enabled") is not True or snapshot.get("scope")!="PUBLIC_MARKET_RESEARCH_ONLY":return False
+    day=instant.astimezone(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    if snapshot.get("research_date")!=day:return False
+    report=snapshot.get("investment_analyst") or {}
+    from . import decision_quality as q
+    policy=q.obj(report.get("decision_quality"))
+    status=report.get("status")
+    if status not in ("RESEARCH_AVAILABLE","NO_SUPPORTED_CANDIDATES","AWAITING_CURRENT_RESEARCH","UNAVAILABLE"):return False
+    counts={k:{"candidates":0,"conditional":0} for k in SCOPES}
+    valid=report.get("research_date")==day and policy.get("methodology")==q.VERSION and policy.get("status")!="UNAVAILABLE"
+    def add(scope,rows,action):
+        for r in q.rows(rows):
+            if not isinstance(r,dict) or r.get("qualified") is not False:continue
+            counts[scope]["candidates"]+=1
+            d=q.obj(r.get("decision_quality"))
+            held=policy.get("forecast_allocation_hold") or (policy.get("stock_allocation_hold") if scope=="STOCK" else scope in q.rows(policy.get("fund_allocation_holds")))
+            if valid and not held and not r.get("allocation_evidence_hold") and r.get("action")==action and d.get("state")=="PRIORITY_RESEARCH" and d.get("methodology")==q.VERSION and d.get("qualified") is False:
+                counts[scope]["conditional"]+=1
+    add("STOCK",report.get("stocks"),"RESEARCH_FOR_ENTRY")
+    for g in q.rows(report.get("funds")):
+        if isinstance(g,dict) and g.get("category") in SCOPES[1:]:add(g["category"],g.get("items"),"COMPARE_FOR_SIP")
+    evidence={"status":status,"policy_available":bool(valid),"counts":counts}
+    with closing(connect()) as db,db:
+        _table(db)
+        return db.execute("INSERT OR IGNORE INTO final_action_day VALUES(?,?,?,?)",(VERSION,day,instant.isoformat(),json.dumps(evidence,allow_nan=False))).rowcount==1
+
+def daily_summary(connect,today):
+    with closing(connect()) as db:
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='final_action_day'").fetchone():rows=[]
+        else:rows=db.execute("SELECT * FROM final_action_day WHERE policy=? AND observed_day BETWEEN ? AND ? ORDER BY observed_day",(VERSION,(today-timedelta(days=364)).isoformat(),today.isoformat())).fetchall()
+    scopes={k:{"days_with_candidates":0,"days_with_conditional_action":0} for k in SCOPES}
+    unavailable=0;valid_days=[]
+    for row in rows:
+        try:
+            e=json.loads(row["evidence"]);counts=e["counts"]
+            if not all(type(counts[k]["candidates"]) is int and type(counts[k]["conditional"]) is int and 0<=counts[k]["conditional"]<=counts[k]["candidates"]<=100 for k in SCOPES):continue
+            day=date.fromisoformat(row["observed_day"])
+            valid_days.append(day)
+            if e.get("policy_available") is not True:unavailable+=1
+            for k in SCOPES:
+                scopes[k]["days_with_candidates"]+=counts[k]["candidates"]>0
+                scopes[k]["days_with_conditional_action"]+=counts[k]["conditional"]>0
+        except (ValueError,TypeError,KeyError,AttributeError):continue
+    n=len(valid_days)
+    return {"status":"OBSERVED_SCHEDULED_DAYS" if n else "AWAITING_SCHEDULED_OBSERVATIONS","observed_days":n,
+        "policy_unavailable_days":unavailable,"first_day":min(valid_days).isoformat() if n else None,
+        "last_day":max(valid_days).isoformat() if n else None,"calendar_days_without_observation":(max(valid_days)-min(valid_days)).days+1-n if n else None,
+        "scopes":scopes,"notice":"First scheduled public report per observed day; not all market sessions or intraday decisions. No-action and unavailable observations retained."}
