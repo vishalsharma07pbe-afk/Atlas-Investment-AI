@@ -36,3 +36,29 @@ class OfficialTRITest(unittest.TestCase):
                 self.assertTrue(t.refresh(NOW+timedelta(minutes=15),path=path,loader=lambda u:self.fail("Not due"),connect=connect))
                 path.write_text(json.dumps({"schema":t.VERSION,"authorization_attested":True,"sources":[]}))
                 self.assertEqual(t.read(NOW,path=path,connect=connect)["indices"],{})
+
+    def test_failed_refresh_retains_archive_and_respects_shared_publisher_cooldown(self):
+        import httpx
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/"sources.json";db=Path(d)/"cache.sqlite"
+            path.write_text(json.dumps({"schema":t.VERSION,"authorization_attested":True,"sources":[{"benchmark":NAME,"url":URL}]}))
+            def connect():
+                c=sqlite3.connect(db);c.row_factory=sqlite3.Row;return c
+            def limited(url):
+                request=httpx.Request("GET",url)
+                response=httpx.Response(429,request=request,headers={"Retry-After":"86400"})
+                response.raise_for_status()
+            with patch.object(t,"permitted",return_value=True):
+                self.assertTrue(t.refresh(NOW,path=path,loader=lambda u:csv_bytes(),connect=connect))
+                failed=NOW+timedelta(hours=7)
+                self.assertFalse(t.refresh(failed,path=path,loader=limited,connect=connect))
+                report=t.read(failed,path=path,connect=connect)
+                self.assertEqual(report["indices"],{})
+                self.assertEqual(report["last_good_count"],1)
+                self.assertEqual(report["failed_count"],1)
+                self.assertEqual(report["publisher_blocked_until"],(failed+timedelta(days=1)).isoformat())
+                with connect() as c:
+                    self.assertEqual(c.execute("SELECT retrieved_at FROM official_tri_last_good").fetchone()[0],NOW.isoformat())
+                path.write_text(json.dumps({"schema":t.VERSION,"authorization_attested":True,"sources":[
+                    {"benchmark":NAME,"url":URL},{"benchmark":"NIFTY 50 TRI","url":"https://www.niftyindices.com/second-example.csv"}]}))
+                self.assertFalse(t.refresh(failed+timedelta(hours=8),path=path,loader=lambda u:self.fail("publisher blocked across indices"),connect=connect))

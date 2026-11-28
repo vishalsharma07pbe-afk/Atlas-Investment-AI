@@ -4,7 +4,8 @@ No invented endpoint, session emulation, redirect following or price substitutio
 Each configured publisher URL must be verified and authorized by the operator.
 """
 from contextlib import closing
-from datetime import datetime,timedelta
+from datetime import datetime,timedelta,timezone
+from email.utils import parsedate_to_datetime
 from hashlib import sha256
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -96,6 +97,34 @@ def _table(db):
       benchmark TEXT PRIMARY KEY,url TEXT NOT NULL,attempted_at TEXT NOT NULL,
       status TEXT NOT NULL,source_hash TEXT,observations TEXT)""")
 
+    # Keep last-good evidence separately from the last attempt. Failed refreshes
+    # do not delete history, but archive rows are never admitted by read().
+    db.execute("""CREATE TABLE IF NOT EXISTS official_tri_last_good(
+      benchmark TEXT PRIMARY KEY,url TEXT NOT NULL,retrieved_at TEXT NOT NULL,
+      source_hash TEXT NOT NULL,observations TEXT NOT NULL)""")
+    db.execute("""CREATE TABLE IF NOT EXISTS official_tri_cooldown(
+      singleton INTEGER PRIMARY KEY CHECK(singleton=1),blocked_until TEXT NOT NULL)""")
+    db.execute("""INSERT OR IGNORE INTO official_tri_last_good
+      SELECT benchmark,url,attempted_at,source_hash,observations
+      FROM official_tri_downloads WHERE status='AVAILABLE' AND source_hash IS NOT NULL AND observations IS NOT NULL""")
+
+def _retry_until(error,instant):
+    # Shared publisher cooldown: rotating to another index must not evade 429.
+    # Honor a valid numeric or HTTP-date Retry-After; retain a six-hour floor.
+    deadline=instant+timedelta(seconds=INTERVAL)
+    if not isinstance(error,httpx.HTTPStatusError) or error.response.status_code not in (429,503):
+        return None
+    value=error.response.headers.get("Retry-After","").strip()
+    try:
+        if re.fullmatch(r"[0-9]{1,12}",value):
+            requested=instant+timedelta(seconds=int(value))
+        else:
+            requested=parsedate_to_datetime(value)
+            if requested.tzinfo is None:requested=requested.replace(tzinfo=timezone.utc)
+        deadline=max(deadline,requested)
+    except (ValueError,TypeError,OverflowError):pass
+    return deadline.astimezone(timezone.utc).isoformat()
+
 def refresh(instant,*,path=PATH,loader=fetch,connect=None):
     if not permitted():return False
     connect=connect or nav_catalog._connect
@@ -106,14 +135,18 @@ def refresh(instant,*,path=PATH,loader=fetch,connect=None):
     with nav_catalog._LOCK,closing(connect()) as db,db:
         _table(db)
         old={r["benchmark"]:r for r in db.execute("SELECT * FROM official_tri_downloads")}
+        cooldown=db.execute("SELECT blocked_until FROM official_tri_cooldown WHERE singleton=1").fetchone()
+        if cooldown and datetime.fromisoformat(cooldown["blocked_until"])>instant:
+            return False
     due=[name for name in links if name not in old or old[name]["url"]!=links[name] or old[name]["attempted_at"]<=(instant-timedelta(seconds=INTERVAL)).isoformat()]
     if not due:return bool(read(instant,path=path,connect=connect)["indices"])
     # One publisher request per scheduler pass, round-robin by last attempt.
     name=min(due,key=lambda k:(old[k]["attempted_at"] if k in old else "",k))
-    url=links[name];observations=None;digest=None
+    url=links[name];observations=None;digest=None;blocked_until=None
     try:
         raw=loader(url);observations=parse(raw,name,today);digest=sha256(raw).hexdigest()
-    except (OSError,ValueError,TypeError,KeyError,UnicodeError,httpx.HTTPError,csv.Error):pass
+    except (OSError,ValueError,TypeError,KeyError,UnicodeError,httpx.HTTPError,csv.Error) as error:
+        blocked_until=_retry_until(error,instant)
     with nav_catalog._LOCK,closing(connect()) as db,db:
         _table(db)
         db.execute("""INSERT INTO official_tri_downloads VALUES(?,?,?,?,?,?)
@@ -121,10 +154,19 @@ def refresh(instant,*,path=PATH,loader=fetch,connect=None):
           status=excluded.status,source_hash=excluded.source_hash,observations=excluded.observations
          WHERE excluded.attempted_at>=official_tri_downloads.attempted_at""",
          (name,url,instant.isoformat(),"AVAILABLE" if observations else "UNAVAILABLE",digest,json.dumps(observations,allow_nan=False) if observations else None))
+        if observations:
+            db.execute("""INSERT INTO official_tri_last_good VALUES(?,?,?,?,?)
+              ON CONFLICT(benchmark) DO UPDATE SET url=excluded.url,retrieved_at=excluded.retrieved_at,
+                source_hash=excluded.source_hash,observations=excluded.observations
+              WHERE excluded.retrieved_at>=official_tri_last_good.retrieved_at""",
+              (name,url,instant.isoformat(),digest,json.dumps(observations,allow_nan=False)))
+        if blocked_until:
+            db.execute("""INSERT INTO official_tri_cooldown VALUES(1,?)
+              ON CONFLICT(singleton) DO UPDATE SET blocked_until=max(blocked_until,excluded.blocked_until)""",(blocked_until,))
     return observations is not None
 
 def read(instant,*,path=PATH,connect=None):
-    out={"status":"DISABLED_OR_NOT_AUTHORIZED","indices":{},"provenance":{},"configured_count":0,"notice":NOTICE}
+    out={"status":"DISABLED_OR_NOT_AUTHORIZED","indices":{},"provenance":{},"configured_count":0,"last_good_count":0,"failed_count":0,"publisher_blocked_until":None,"notice":NOTICE}
     if not permitted():return out
     out["status"]="AWAITING_AUTHORIZED_SOURCE"
     connect=connect or nav_catalog._connect
@@ -134,6 +176,13 @@ def read(instant,*,path=PATH,connect=None):
         out["status"]="AWAITING_CURRENT_TRI"
         with nav_catalog._LOCK,closing(connect()) as db,db:
             _table(db);rows=db.execute("SELECT * FROM official_tri_downloads WHERE status='AVAILABLE'").fetchall()
+            archives=db.execute("SELECT benchmark,url FROM official_tri_last_good").fetchall()
+            failures=db.execute("SELECT benchmark,url FROM official_tri_downloads WHERE status='UNAVAILABLE'").fetchall()
+            cooldown=db.execute("SELECT blocked_until FROM official_tri_cooldown WHERE singleton=1").fetchone()
+        out["last_good_count"]=sum(links.get(r["benchmark"])==r["url"] for r in archives)
+        out["failed_count"]=sum(links.get(r["benchmark"])==r["url"] for r in failures)
+        if cooldown and datetime.fromisoformat(cooldown["blocked_until"])>instant:
+            out["publisher_blocked_until"]=cooldown["blocked_until"]
         today=instant.astimezone(IST).date()
         for row in rows:
             name=row["benchmark"]
