@@ -186,7 +186,7 @@ def reports(candidates,source_rows,loaded,today,ter=None):
         if c:
             if disclosure["ter_date"]==c["ter_date"] and disclosure["ter_percent"] is not None and abs(disclosure["ter_percent"]-c["ter_percent"])>.0002:
                 disclosure.update(ter_date=None,ter_percent=None)
-                ter_evidence={"status":"CONFLICTING_SAME_DATE_TER","source_sha256":ter["sha256"]}
+                ter_evidence={"status":"CONFLICTING_SAME_DATE_TER","ter_date":c["ter_date"],"source_sha256":ter["sha256"]}
             elif disclosure["ter_date"] is None or c["ter_date"]>=disclosure["ter_date"]:
                 disclosure.update(ter_date=c["ter_date"],ter_percent=c["ter_percent"])
                 ter_evidence={"status":"OPERATOR_NORMALIZED_TER_COMPONENTS",**c,"source_sha256":ter["sha256"]}

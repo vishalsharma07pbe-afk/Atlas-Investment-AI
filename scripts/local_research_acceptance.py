@@ -689,7 +689,10 @@ def result_acceptance(overview,review,instant=None):
             and count==min(matched,10) and report.get("status")== (status if matched else "NO_"+("REPORTED_" if basis!="ADJUSTED" else "")+"JOINT_SCREEN_MATCHES")
             and all(equity_current(row) and row.get("adjustment_status")==basis and row.get("status")=="SCREEN_MATCH_ONLY"
                 and _obj(row.get(evidence_key)).get("status")==expected and _obj(row.get(evidence_key)).get("calendar_status")=="STORED_SESSIONS_MATCHED"
-                and _obj(row.get(evidence_key)).get("as_of")==row.get("as_of") for row in rows))
+                and _obj(row.get(evidence_key)).get("as_of")==row.get("as_of")
+                and _obj(row.get(evidence_key)).get("adjustment_status")==basis
+                and _obj(row.get("governance_review")).get("findings",[])==[]
+                and _obj(row.get("company_venue_context")).get("review_findings",[])==[] for row in rows))
         elite[field]=count if valid else None
     funds={}
     for category in ("LARGE_CAP","MID_CAP","SMALL_CAP"):

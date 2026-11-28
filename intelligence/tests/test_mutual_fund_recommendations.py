@@ -313,3 +313,24 @@ class RecommendationEngineTests(unittest.TestCase):
 
 
 if __name__=="__main__":unittest.main()
+
+class WebsiteTerReconciliationTests(unittest.TestCase):
+    def test_same_date_components_conflict_even_when_total_matches(self):
+        website={"ter_date":"2026-11-27","ter_percent":.5,"base_expense_percent":.3,
+            "brokerage_percent":.05,"transaction_percent":.05,"statutory_levies_percent":.1}
+        local={"disclosure":{"ter_date":"2026-11-27","ter_percent":.5},
+            "ter_components_evidence":{"status":"OPERATOR_NORMALIZED_TER_COMPONENTS",**website,
+                "base_expense_percent":.25,"brokerage_percent":.1,"source_sha256":"a"*64}}
+        result=recommendations._reconcile_website_ter(local,website)
+        self.assertEqual(result["status"],"CONFLICTING_SAME_DATE_TER")
+        self.assertIsNone(local["disclosure"]["ter_percent"])
+        self.assertNotIn("base_expense_percent",local["ter_components_evidence"])
+        self.assertNotIn("ter_percent",result)
+
+    def test_existing_local_conflict_not_cleared_by_website_or_different_date(self):
+        website={"ter_date":"2026-11-27","ter_percent":.5,"base_expense_percent":.3,
+            "brokerage_percent":.05,"transaction_percent":.05,"statutory_levies_percent":.1}
+        local={"disclosure":{"ter_date":None,"ter_percent":None},
+            "ter_components_evidence":{"status":"CONFLICTING_SAME_DATE_TER","ter_date":"2026-11-27"}}
+        self.assertEqual(recommendations._reconcile_website_ter(local,website)["status"],"CONFLICTING_SAME_DATE_TER")
+        self.assertEqual(recommendations._reconcile_website_ter(local,{**website,"ter_date":"2026-11-28"})["status"],"OPERATOR_CROSSWALK_MATCH")

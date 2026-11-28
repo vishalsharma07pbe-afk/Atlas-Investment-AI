@@ -61,7 +61,7 @@ class RecoveryAcceptanceTests(unittest.TestCase):
     def test_result_acceptance_requires_current_populated_outputs_not_contracts(self):
         stock={"id":1,"isin":"INE002A01018","symbol":"PRIVATE_MARKER","exchange":"NSE",
                "as_of":"2026-11-27","status":"SCREEN_MATCH_ONLY","adjustment_status":"ADJUSTED",
-               "strict_fip_evidence":{"status":"FIP_PRICE_MATCH","calendar_status":"STORED_SESSIONS_MATCHED","as_of":"2026-11-27"}}
+               "strict_fip_evidence":{"status":"FIP_PRICE_MATCH","calendar_status":"STORED_SESSIONS_MATCHED","as_of":"2026-11-27","adjustment_status":"ADJUSTED"}}
         sections=[{"section":"NSE","status":"READY","result":{"discovery_coverage":{"calendar_checked_on":"2026-11-28",
             "calendar_status":"PUBLISHED_SESSION","expected_session":"2026-11-27"}}}]
         for cat in ("LARGE_CAP","MID_CAP","SMALL_CAP"):
@@ -75,6 +75,12 @@ class RecoveryAcceptanceTests(unittest.TestCase):
         self.assertEqual(result["status"],"POPULATED_RESEARCH_OBSERVED")
         self.assertEqual(result["final_investment_qualification"],"NOT_CERTIFIED")
         self.assertNotIn("PRIVATE_MARKER",json.dumps(result))
+        stock["strict_fip_evidence"]["adjustment_status"]="RAW_UNADJUSTED"
+        self.assertEqual(a.result_acceptance(overview,review,NOW)["status"],"AWAITING_POPULATED_RESEARCH")
+        stock["strict_fip_evidence"]["adjustment_status"]="ADJUSTED"
+        stock["governance_review"]={"findings":["REVIEW"]}
+        self.assertEqual(a.result_acceptance(overview,review,NOW)["status"],"AWAITING_POPULATED_RESEARCH")
+        del stock["governance_review"]
         stock["as_of"]="2026-11-25"
         self.assertEqual(a.result_acceptance(overview,review,NOW)["status"],"AWAITING_POPULATED_RESEARCH")
         stock["as_of"]="2026-11-27"

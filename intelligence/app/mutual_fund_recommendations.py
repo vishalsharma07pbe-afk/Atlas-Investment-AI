@@ -503,6 +503,30 @@ def _research_reports(candidates, ranked, source_rows, disclosed, portfolios, co
     return reports
 
 
+def _reconcile_website_ter(local_report,website):
+    """Do not publish contradictory same-date totals or components as evidence."""
+    if not local_report:
+        return {"status":"OPERATOR_CROSSWALK_MATCH",**website,"notice":official_amfi_ter.NOTICE}
+    disclosure=local_report.get("disclosure") or {}
+    components=local_report.get("ter_components_evidence") or {}
+    day=website["ter_date"]
+    same_disclosure=disclosure.get("ter_date")==day
+    same_components=components.get("ter_date")==day
+    def differs(row,field):
+        value=row.get(field)
+        return value is not None and abs(value-website[field])>.0002
+    conflict=(same_disclosure and differs(disclosure,"ter_percent")) or (
+        same_components and (components.get("status")=="CONFLICTING_SAME_DATE_TER"
+            or any(differs(components,k) for k in official_amfi_ter.FIELDS)))
+    if conflict:
+        if same_disclosure:disclosure.update(ter_percent=None,ter_date=None)
+        if same_components:
+            local_report["ter_components_evidence"]={"status":"CONFLICTING_SAME_DATE_TER","ter_date":day,
+                "source_sha256":components.get("source_sha256")}
+        return {"status":"CONFLICTING_SAME_DATE_TER","ter_date":day}
+    return {"status":"OPERATOR_CROSSWALK_MATCH",**website,"notice":official_amfi_ter.NOTICE}
+
+
 def _history_gate_counts(historical):
     counts=historical.get("history_gate_counts")
     keys=("OFFICIAL_ANCHOR_UNAVAILABLE","COMPARISON_DATE_MISMATCH","HISTORY_QUALITY_OR_LENGTH","ELIGIBLE")
@@ -606,7 +630,10 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
         source_ids[code]=row.get("isin_growth")
     matched_ter={c:v for c,v in website_ter["items"].items()
         if c in official_ids and c not in duplicates and source_ids.get(c)==v["isin_growth"]}
-    coverage["automatic_amfi_ter_matches"]=len(matched_ter)
+    reconciled_ter={c:_reconcile_website_ter(local_reports.get(c),v) for c,v in matched_ter.items()}
+    ter_matches=sum(v["status"]=="OPERATOR_CROSSWALK_MATCH" for v in reconciled_ter.values())
+    coverage["automatic_amfi_ter_matches"]=ter_matches
+    coverage["automatic_amfi_ter_conflicts"]=len(reconciled_ter)-ter_matches
     coverage["local_ter_component_matches"]=sum((r.get("ter_components_evidence") or {}).get("status")=="OPERATOR_NORMALIZED_TER_COMPONENTS" for r in local_reports.values())
     publisher_reports=official_amc_factsheet.matched(official,source_rows,datetime.now(timezone.utc))
     coverage["secondary_portfolio_composition_matches"]=len(compositions)
@@ -637,13 +664,8 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
         if report["identifier"] in risk_sources:
             report["official_riskometer_source"]=risk_sources[report["identifier"]]
         if report["identifier"] in local_reports:report["local_export_evidence"]=local_reports[report["identifier"]]
-        if report["identifier"] in matched_ter:
-            v=matched_ter[report["identifier"]]
-            manual=(local_reports.get(report["identifier"]) or {}).get("disclosure",{})
-            if manual.get("ter_date")==v["ter_date"] and manual.get("ter_percent") is not None and abs(manual["ter_percent"]-v["ter_percent"])>.0002:
-                report["automatic_amfi_ter_evidence"]={"status":"CONFLICTING_SAME_DATE_TER"}
-                report["local_export_evidence"]["disclosure"].update(ter_percent=None,ter_date=None)
-            else:report["automatic_amfi_ter_evidence"]={"status":"OPERATOR_CROSSWALK_MATCH",**v,"notice":official_amfi_ter.NOTICE}
+        if report["identifier"] in reconciled_ter:
+            report["automatic_amfi_ter_evidence"]=reconciled_ter[report["identifier"]]
         if report["identifier"] in publisher_reports:
             e=publisher_reports[report["identifier"]]
             # A publisher-reported current benchmark is a descriptive comparison
@@ -682,7 +704,7 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
       "suitability":ranked["suitability"],"blockers":blockers,
       "qualification_summary":{"evaluated_count":len(official),"top_eligible_count":ranked["top_eligible_count"],
           "growth_eligible_count":ranked["growth_eligible_count"],"excluded":ranked["excluded"]},
-      "automatic_amfi_ter_coverage":{"status":website_ter["status"],"matched_schemes":len(matched_ter),"notice":official_amfi_ter.NOTICE},
+      "automatic_amfi_ter_coverage":{"status":website_ter["status"],"matched_schemes":ter_matches,"conflicting_schemes":len(reconciled_ter)-ter_matches,"notice":official_amfi_ter.NOTICE},
       "official_amc_coverage":{"status":"PUBLISHER_MATCHES" if publisher_reports else "AWAITING_MATCHED_SOURCE" if official_amc_factsheet.permitted() else "DISABLED_OR_NOT_AUTHORIZED",
           "matched_schemes":len(publisher_reports),"notice":official_amc_factsheet.NOTICE},
       "official_tri_coverage":{"status":downloaded_tri["status"],"configured_count":downloaded_tri["configured_count"],
