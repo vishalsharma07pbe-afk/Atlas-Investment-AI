@@ -57,3 +57,27 @@ class ProfessionalStrategiesTest(unittest.TestCase):
         self.assertEqual(normalize([{**row,"operator_reviewed":False}]),{})
         self.assertEqual(normalize([row,{**row,"actual_eps":13}]),{})
         self.assertEqual(normalize([{**row,"consensus_eps":"10"}]),{})
+
+    def test_strategy_risk_geometry_requires_adjustment_and_calendar(self):
+        start=date(2025,1,1)
+        c=[Candle((start+timedelta(days=i)).isoformat(),100,101,99,100,1_000_000,"ADJUSTED") for i in range(252)]
+        c.append(Candle((start+timedelta(days=252)).isoformat(),101,112,101,110,2_000_000,"ADJUSTED"))
+        f={"professional_patterns":p.price_patterns(c),"close":110,"calendar_matched":True,"adjustment_status":"ADJUSTED"}
+        plan=p.strategy_risk_plan(f,["TURTLE_LONG_BREAKOUT"])
+        self.assertEqual(plan["entry_trigger"],101)
+        self.assertEqual(plan["channel_exit"],99)
+        self.assertEqual(plan["exit_rule"],"20_SESSION_LOW_OR_2N_STOP")
+        self.assertAlmostEqual(plan["n_or_atr"],2.5)
+        self.assertEqual(plan["stop_scenario"],105)
+        self.assertEqual(plan["target_scenario"],120)
+        self.assertFalse(plan["qualified"])
+        self.assertIsNone(p.strategy_risk_plan({**f,"calendar_matched":False},["TURTLE_LONG_BREAKOUT"]))
+        self.assertIsNone(p.strategy_risk_plan({**f,"adjustment_status":"RAW_UNADJUSTED"},["TURTLE_LONG_BREAKOUT"]))
+        self.assertIsNone(p.strategy_risk_plan({**f,"close":120},["TURTLE_LONG_BREAKOUT"]))
+
+    def test_turtle_unit_is_cash_and_risk_capped(self):
+        self.assertEqual(p.turtle_unit_size(100000,5,100,100000)["shares"],100)
+        self.assertEqual(p.turtle_unit_size(100000,5,100,2500)["shares"],25)
+        self.assertEqual(p.turtle_unit_size(100000,5,100,0)["shares"],0)
+        self.assertIsNone(p.turtle_unit_size(100000,0,100,2500))
+        self.assertIsNone(p.turtle_unit_size(100000,5,100,2500,2))
