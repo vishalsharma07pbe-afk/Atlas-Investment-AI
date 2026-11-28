@@ -228,6 +228,9 @@ def fund_projection(snapshot,today):
                 facts.update({k:d[k] for k in ("joint_coverage_weight_percent","joint_growth_weight_percent","review_weight_percent")})
             exact=[v for v in detailed if isinstance(v,dict) and v.get("identifier")==code and v.get("nav_date")==day and v.get("category")==category]
             context=research_synthesis.fund_context(r,exact[0] if len(exact)==1 else {},today)
+            if "fund_decision_evidence" in report:
+                from . import official_amfi_ter,fund_local_evidence,official_tri,fund_disclosures
+                context=research_synthesis.saved_fund_context(r,rows(report["fund_decision_evidence"]),category,today,website=official_amfi_ter.permitted(),local=fund_local_evidence.permitted(),tri=official_tri.permitted(),secondary=fund_disclosures.permitted())
             items.append({"fund_evidence":context,"identifier":code,"name":r["name"],"nav_date":day,"score":r["score"],
                 "tier":"DRIVER_SUPPORTED" if positive else "DRIVER_REVIEW" if adverse else "HISTORICAL_ONLY",
                 "action":"REVIEW_BEFORE_NEW_SIP" if adverse or context.get("ter_status")=="CONFLICTING_SAME_DATE_TER" else "COMPARE_FOR_SIP" if positive else "WATCH_FOR_CONFIRMATION",
