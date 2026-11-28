@@ -29,3 +29,31 @@ class ProfessionalStrategiesTest(unittest.TestCase):
         self.assertEqual(p.pead(e,now),20)
         e["consensus_as_of"]="2026-11-25T00:00:00+00:00"
         self.assertIsNone(p.pead(e,now))
+
+    def test_matched_beta_is_date_and_venue_specific(self):
+        today=date(2026,11,28)
+        y=[.01 if i%2 else -.01 for i in range(60)]
+        x=[v*.5 for v in y]
+        f={"professional_patterns":{"beta_dates_digest":"test","beta_returns":x}}
+        regime={"as_of":"2026-11-27","calendar_checked_on":"2026-11-28","beta_window":{"dates_digest":"test","returns":y}}
+        row={"exchange":"NSE","as_of":"2026-11-27"}
+        self.assertEqual(p.matched_beta(f,regime,row,today),.5)
+        self.assertIsNone(p.matched_beta(f,regime,{**row,"exchange":"BSE"},today))
+        self.assertIsNone(p.matched_beta(f,regime,row,today+timedelta(days=1)))
+
+    def test_authorized_event_normalization_excludes_conflicts(self):
+        from app import earnings_expectations as e
+        now=datetime(2026,11,28,tzinfo=timezone.utc)
+        row={"isin":"INE467B01029","quarter_end":"2026-09-30","consensus_eps":10,"actual_eps":12,
+             "consensus_as_of":"2026-11-20T00:00:00+00:00","released_at":"2026-11-24T00:00:00+00:00",
+             "consensus_verified":True,"release_verified":True,"same_share_basis":True,"analyst_count":3,
+             "operator_reviewed":True,"consensus_source":"https://consensus.example/report.pdf",
+             "release_source":"https://issuer.example/report.pdf","consensus_document_sha256":"a"*64,
+             "release_document_sha256":"b"*64}
+        def normalize(items):return e.normalize({"methodology":"AUTHORIZED-EARNINGS-EVENTS-1","events":items},now)
+        result=normalize([row])
+        self.assertIn(row["isin"],result)
+        self.assertNotIn("consensus_source",result[row["isin"]])
+        self.assertEqual(normalize([{**row,"operator_reviewed":False}]),{})
+        self.assertEqual(normalize([row,{**row,"actual_eps":13}]),{})
+        self.assertEqual(normalize([{**row,"consensus_eps":"10"}]),{})

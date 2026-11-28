@@ -202,6 +202,9 @@ def summarize(snapshot,connect,instant):
     qmj=pro.quality_ranks(prepared,classifications,today)
     from . import earnings_expectations
     surprises=earnings_expectations.read(instant)
+    if surprises:
+        result["unavailable_strategies"].pop("PEAD",None)
+    result["expectations_evidence_basis"]="AUTHORIZED_OPERATOR_REVIEWED_IMPORT" if surprises else "NO_AUTHORIZED_EVENT_INPUT"
     counts=Counter();items=[]
     for r in candidates:
         f=r["multi_strategy_price"];isin=r["isin"];report=prepared.get(isin,{})

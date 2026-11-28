@@ -158,7 +158,7 @@ def pead(event,instant):
     """Contract for genuine surprise evidence; no model-generated consensus,
     no latest-quarter growth substitution. Only real pre-release estimates."""
     try:
-        expected=float(event["consensus_eps"]);actual=float(event["actual_eps"])
+        expected=event["consensus_eps"];actual=event["actual_eps"]
         captured=datetime.fromisoformat(event["consensus_as_of"]);release=datetime.fromisoformat(event["released_at"])
         if not (event.get("consensus_verified") is True and event.get("release_verified") is True and event.get("same_share_basis") is True
             and type(event.get("analyst_count")) is int and event["analyst_count"]>=3

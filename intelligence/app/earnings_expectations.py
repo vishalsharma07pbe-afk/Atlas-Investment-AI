@@ -8,6 +8,8 @@ raw filings, URLs, or source text are forwarded into an AI prompt.
 import json,os,re,stat
 from pathlib import Path
 from datetime import date,datetime
+from calendar import monthrange
+from zoneinfo import ZoneInfo
 from urllib.parse import urlsplit
 from .replay_evidence import exact_isin
 from .professional_strategies import pead
@@ -38,7 +40,9 @@ def normalize(payload,instant):
         try:
             period=date.fromisoformat(e["quarter_end"])
             release=datetime.fromisoformat(e["released_at"])
-            if not period<release.date() or (release.date()-period).days>150 or pead(e,instant) is None:continue
+            if period.month not in (3,6,9,12) or period.day!=monthrange(period.year,period.month)[1] or release.tzinfo is None:continue
+            release_day=release.astimezone(ZoneInfo("Asia/Kolkata")).date()
+            if not period<release_day or (release_day-period).days>150 or pead(e,instant) is None:continue
         except (ValueError,TypeError,KeyError):continue
         isin=e["isin"]
         public={k:e[k] for k in ("isin","quarter_end","consensus_eps","actual_eps","consensus_as_of","released_at","consensus_verified","release_verified","same_share_basis","analyst_count")}
