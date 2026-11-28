@@ -255,7 +255,16 @@ def analyze(snapshot,today,instant=None):
         for row in stocks:
             v=valuations.get(row["isin"])
             if v and v["price_date"]==row["as_of"]:row["valuation_scenario"]=v
-    for row in stocks:row["research_thesis"]=research_synthesis.thesis(row,False)
+    # Join exact current listing observations only, not a different company or period.
+    evidence=list(company_reports.entries(snapshot))
+    for row in stocks:
+        contexts=[research_synthesis.filing_context(r,instant) for _,r in evidence if all(r.get(k)==row.get(k) for k in ("isin","id","exchange","as_of"))]
+        contexts=[c for c in contexts if c]
+        if contexts:
+            if any(c!=contexts[0] for c in contexts):
+                row["filing_context"]={"status":"CONFLICT_REVIEW","qualified":False,"notice":"Conflicting exact-listing filing comparisons."}
+            else:row["filing_context"]=contexts[0]
+        row["research_thesis"]=research_synthesis.thesis(row,False)
     for group in funds:
         for row in group["items"]:row["research_thesis"]=research_synthesis.thesis(row,True)
     out["multi_strategy"]=obj(snapshot.get("multi_strategy"))
