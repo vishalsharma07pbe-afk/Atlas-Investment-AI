@@ -8,6 +8,7 @@ from contextlib import closing
 from datetime import date,timedelta
 from collections import defaultdict
 from statistics import median
+from math import isfinite
 from zoneinfo import ZoneInfo
 import json
 from . import watch_outcomes as w,research_reliability as rel
@@ -15,7 +16,7 @@ from .replay_evidence import exact_isin
 
 VERSION="PROSPECTIVE-REGIME-PRIORITY-1"
 REGIMES=("RISING","FALLING","SIDEWAYS")
-NOTICE="Prospective price-only evidence, 30 bps illustrative friction per side. Two disjoint publication/outcome windows; current-registry selected watches, not independent alpha or optimized allocation weights."
+NOTICE="Prospective price-only evidence, 15/30/60 bps illustrative friction per side. Positive priority requires both windows positive at 60 bps; caution uses 30 bps. Two disjoint publication/outcome windows; current-registry selected watches, not independent alpha or optimized allocation weights."
 
 def summarize(rows,today,lanes,regime,truncated=False):
     result={"methodology":VERSION,"regime":regime,"status":"AWAITING_COMPARABLE_REGIME_EVIDENCE","lanes":{},"qualified":False,"notice":NOTICE}
@@ -32,9 +33,13 @@ def summarize(rows,today,lanes,regime,truncated=False):
             if maturity!=published+timedelta(days=60):continue
             block=next((i for i,(a,b) in enumerate(blocks) if a<=published<=b),None)
             if block is None:continue
-            ret=rel._outcome(row,published,maturity,today)
-            benchmark=rel._index_change(row,ret) if ret is not None else None
-            excess=100*((1+ret)*.997**2-1-benchmark) if benchmark is not None else None
+            # Invalid or absent outcome must remain in the mature denominator.
+            try:
+                ret=rel._outcome(row,published,maturity,today)
+                benchmark=rel._index_change(row,ret) if ret is not None else None
+                excess=tuple(100*((1+ret)*(1-bps/10000)**2-1-benchmark) for bps in (15,30,60)) if benchmark is not None and ret is not None and isfinite(ret) and isfinite(benchmark) else None
+                if excess is not None and not all(isfinite(x) for x in excess):excess=None
+            except (ValueError,TypeError,KeyError,OverflowError,AttributeError):excess=None
             for lane in set(e.get("strategies",[]))&set(lanes):
                 # first publication per exact company per lane per window;
                 # missing outcomes remain in denominators.
@@ -48,11 +53,13 @@ def summarize(rows,today,lanes,regime,truncated=False):
             paired=[(day,x) for day,x in cohort if x is not None]
             coverage=len(paired)/len(cohort) if cohort else 0
             ready=len(paired)>=20 and len({day for day,_ in paired})>=10 and coverage>=.8
-            observations.append({"publication_start":a.isoformat(),"publication_end":b.isoformat(),"mature_companies":len(cohort),"paired_companies":len(paired),"paired_coverage_percent":round(100*coverage,2),"median_net_excess_pp":round(median(x for _,x in paired),4) if paired else None,"comparable":ready})
+            observations.append({"publication_start":a.isoformat(),"publication_end":b.isoformat(),"mature_companies":len(cohort),"paired_companies":len(paired),"paired_coverage_percent":round(100*coverage,2),"median_net_excess_pp":round(median(x[1] for _,x in paired),4) if paired else None,
+                "cost_sensitivity":[{"cost_bps_per_side":bps,"median_net_excess_pp":round(median(x[j] for _,x in paired),4) if paired else None,"positive_count":sum(x[j]>0 for _,x in paired)} for j,bps in enumerate((15,30,60))],
+                "comparable":ready})
         old,recent=observations
         state="UNVALIDATED"
         if recent["comparable"] and recent["median_net_excess_pp"]<=0:state="CAUTION"
-        elif all(v["comparable"] and v["median_net_excess_pp"]>0 for v in observations):state="CONSISTENT_DESCRIPTIVE_SUPPORT"
+        elif all(v["comparable"] and v["cost_sensitivity"][-1]["median_net_excess_pp"]>0 for v in observations):state="CONSISTENT_DESCRIPTIVE_SUPPORT"
         result["lanes"][lane]={"state":state,"windows":observations}
     if any(v["state"]!="UNVALIDATED" for v in result["lanes"].values()):result["status"]="OBSERVED_REGIME_PRIORITY_CONTEXT"
     return result
