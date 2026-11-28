@@ -112,7 +112,25 @@ final class PortfolioInvestmentAnalyst {
       steps.add("Keep affected additions conditional on refreshed evidence; do not force deployment.");
     if(projected.isEmpty())steps.add("No holdings recorded; no personal allocation plan can be derived.");
     else steps.add("Compare new stock and fund research against existing exposure, cash needs and investment horizon before allocating.");
-    out.put("investment_analysis",Map.of("methodology",VERSION,"scope","OWNER_LOCAL","status",projected.isEmpty()?"NO_HOLDINGS":"CONDITIONAL_PLAN",
+    var stress=new LinkedHashMap<String,Object>();
+    if(coverage){
+      double equity=0,funds=0,largest=0,hhi=0;boolean typesKnown=true;
+      for(var h:holdings){
+        double w=h.path("weight_percent").asDouble();largest=Math.max(largest,w);hhi+=Math.pow(w/100,2);
+        if("EQUITY".equals(h.path("asset_type").asText()))equity+=w;
+        else if("MUTUAL_FUND".equals(h.path("asset_type").asText()))funds+=w;
+        else typesKnown=false;
+      }
+      if(typesKnown){
+        stress.put("status","ILLUSTRATIVE_SHOCKS");stress.put("largest_position_percent",largest);stress.put("position_hhi",hhi);
+        stress.put("scenarios",List.of(Map.of("case","BEAR","equity_shock_percent",-30,"fund_shock_percent",-20,"portfolio_change_percent",(-30*equity-20*funds)/100),
+          Map.of("case","BASE","equity_shock_percent",0,"fund_shock_percent",0,"portfolio_change_percent",0),
+          Map.of("case","BULL","equity_shock_percent",20,"fund_shock_percent",15,"portfolio_change_percent",(20*equity+15*funds)/100)));
+      }
+    }
+    stress.putIfAbsent("status","AWAITING_COMPLETE_RECORDED_WEIGHTS");
+    stress.put("notice","Hypothetical simultaneous shocks to recorded asset classes, not forecasts or probabilities. Fund look-through, correlations, taxes and liquidity are not modeled.");
+    out.put("investment_analysis",Map.of("stress_test",stress,"methodology",VERSION,"scope","OWNER_LOCAL","status",projected.isEmpty()?"NO_HOLDINGS":"CONDITIONAL_PLAN",
       "holding_count",projected.size(),"recent_weight_coverage",coverage,"action_counts",counts,"next_steps",steps,"notice",NOTICE));
     return out;
   }
