@@ -642,7 +642,16 @@ def read_overview():
         for group in report.get("funds",[]):
             for row in group.get("items",[]):row["action"]="WATCH_FOR_CONFIRMATION"
         report["decision_quality"]={"methodology":decision_quality.VERSION,"status":"UNAVAILABLE","qualified":False,"notice":decision_quality.NOTICE}
-    from . import decision_lifecycle
+    from . import decision_lifecycle,performance_protection
+    try:
+        if snapshot.get("enabled") is True:performance_protection.attach(snapshot["investment_analyst"],_connect)
+    except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,AttributeError):
+        report=snapshot["investment_analyst"]
+        report["performance_protection"]={"status":"UNAVAILABLE","held_scopes":[],"notice":performance_protection.NOTICE}
+        report.setdefault("decision_quality",{})["status"]="UNAVAILABLE"
+        for row in report.get("stocks",[]):row["action"]="WATCH_FOR_CONFIRMATION"
+        for group in report.get("funds",[]):
+            for row in group.get("items",[]):row["action"]="WATCH_FOR_CONFIRMATION"
     try:
         if snapshot.get("enabled") is True:
             report=snapshot["investment_analyst"]
@@ -783,6 +792,8 @@ def _execute_job(job):
         current=now()
         snapshot=read_overview()
         fund_prospective.refresh(snapshot,current,final_report=snapshot.get("investment_analyst"))
+        from . import performance_protection
+        performance_protection.update(snapshot.get("investment_analyst",{}),_connect,current)
         return "PASS_COMPLETED"
     if job=="FUND_COMPANY_EVIDENCE":
         if not fund_portfolios.permitted() or not automatic_company_evidence.permitted():
@@ -832,17 +843,14 @@ def _execute_job(job):
     if job=="MULTI_STRATEGY_PUBLICATION":
         from . import multi_strategy_prospective
         instant=now()
-        snapshot=read_snapshot()
+        snapshot=read_overview()
         if not snapshot.get("enabled"):return "DISABLED_OR_NOT_AUTHORIZED"
         multi_strategy_prospective.publish(snapshot,_connect,instant)
         from . import ranking_challenger
         ranking_challenger.publish(snapshot,_connect,instant)
-        from . import investment_analyst,analyst_committee,decision_quality,decision_outcomes
-        today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
-        report=investment_analyst.analyze(snapshot,today,instant)
-        analyst_committee.attach(report,_connect,instant)
-        report["decision_outcomes"]=decision_outcomes.summary(_connect,instant)
-        decision_quality.attach(report,today)
+        from . import decision_outcomes,performance_protection
+        report=snapshot.get("investment_analyst",{})
+        performance_protection.update(report,_connect,instant)
         decision_outcomes.publish(report,_connect,instant)
         return "PASS_COMPLETED"
     if job=="INVESTMENT_ANALYST_SOURCES":
