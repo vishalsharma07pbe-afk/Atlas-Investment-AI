@@ -462,6 +462,7 @@ def job_status():
     calendar_job=next(j for j in result["jobs"] if j["job"]=="CALENDAR_CONTEXT")
     result["calendar"]=research_calendar.read(_connect,current) if calendar_job["status"]=="PASS_COMPLETED" else {"status":"CALENDAR_UNAVAILABLE_OR_PENDING","sessions":[]}
     result["company_acquisition"]=automatic_company_evidence.acquisition_status(read_market_snapshot(),_connect,current)
+    result["fund_disclosure_acquisition"]=fund_disclosures.ingestion_coverage(current)
     return result
 
 
@@ -566,13 +567,11 @@ def _execute_job(job):
     if job=="FUND_PORTFOLIOS":
         if not fund_portfolios.permitted():
             return "DISABLED_OR_NOT_AUTHORIZED"
-        fund_portfolios.refresh()
-        return "PASS_COMPLETED"
+        return "PASS_COMPLETED" if fund_portfolios.refresh()>0 else "WAITING_EVIDENCE"
     if job=="FUND_DISCLOSURES":
         if not fund_disclosures.permitted():
             return "DISABLED_OR_NOT_AUTHORIZED"
-        fund_disclosures.refresh()
-        return "PASS_COMPLETED"
+        return "PASS_COMPLETED" if fund_disclosures.refresh()>0 else "WAITING_EVIDENCE"
     if job=="CALENDAR_CONTEXT":
         research_calendar.refresh(_connect)
         return "PASS_COMPLETED"

@@ -121,3 +121,41 @@ class FundDisclosuresTests(unittest.TestCase):
         with patch.object(disclosures,"refresh",return_value=1) as collect:
             self.assertEqual(autonomous_research._execute_job("FUND_DISCLOSURES"),"PASS_COMPLETED")
             collect.assert_called_once()
+
+    def test_disclosure_audit_is_atomic_and_corrupt_row_isolated(self):
+        from contextlib import closing
+        from datetime import datetime,timezone
+        disclosures.store(payload(row(),row(scheme_code="118956",isin="INF179K01BB3"),
+            row(scheme_code="118957",isin="INE002A01018")),TODAY,STAMP)
+        instant=datetime(2026,11,25,5,tzinfo=timezone.utc)
+        report=disclosures.ingestion_coverage(instant)
+        self.assertEqual(report["source_counts"],{"ACCEPTED":2,"INVALID_IDENTITY_OR_PLAN":1})
+        self.assertEqual(report["fresh_field_counts"]["ter_percent"],2)
+        with self.assertRaises(ValueError):
+            disclosures.store(payload(row(),row()),TODAY,STAMP)
+        self.assertEqual(disclosures.ingestion_coverage(instant),report)
+        with closing(nav_catalog._connect()) as db,db:
+            db.execute("UPDATE fund_disclosure_snapshot SET payload='invalid' WHERE scheme_code='118955'")
+        items=[{"scheme_code":code,"scheme_name":"Example","isin_growth":isin,"amfi_plan":"DIRECT",
+                "amfi_option":"GROWTH","category":"Open Ended Schemes(Equity Scheme - Large Cap Fund)"}
+               for code,isin in ((118955,"INF179K01BB2"),(118956,"INF179K01BB3"))]
+        self.assertEqual([r["scheme_code"] for r in disclosures.matched(items,TODAY)],["118956"])
+        self.assertEqual(disclosures.ingestion_coverage(instant)["stored_counts"]["INVALID_STORED_ROW"],1)
+
+    def test_shared_publisher_cooldown_blocks_both_bulk_jobs(self):
+        from datetime import datetime,timezone,timedelta
+        import httpx
+        from app import fund_portfolios
+        now=datetime.now(timezone.utc)
+        request=httpx.Request("GET",disclosures.URL)
+        response=httpx.Response(429,request=request,headers={"Retry-After":"86400"})
+        try:response.raise_for_status()
+        except httpx.HTTPStatusError as error:disclosures.record_bulk_failure(error,now)
+        self.assertEqual(disclosures.bulk_cooldown(now)["reason"],"RATE_LIMITED")
+        self.assertIsNone(disclosures.bulk_cooldown(now+timedelta(days=2)))
+        with patch.object(disclosures.httpx,"Client") as client:
+            self.assertEqual(disclosures.refresh(),0)
+            self.assertEqual(fund_portfolios.refresh(),0)
+            self.assertEqual(autonomous_research._execute_job("FUND_DISCLOSURES"),"WAITING_EVIDENCE")
+            self.assertEqual(autonomous_research._execute_job("FUND_PORTFOLIOS"),"WAITING_EVIDENCE")
+            client.assert_not_called()

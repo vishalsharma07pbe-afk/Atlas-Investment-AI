@@ -71,7 +71,7 @@ def finish(connect,job,token,instant,interval,status):
         if status=="WAITING_EVIDENCE":
             # Semiannual AMFI publication can lag the period boundary. Avoid
             # minute-by-minute download retries while retaining waiting status.
-            delay=min(interval,21600 if job=="AMFI_EQUITY_CAP" else 3600 if job in ("NSE_SURVEILLANCE","NSE_PLEDGE_FILINGS","NSE_FINANCIAL_FILINGS","OFFICIAL_TRI_DOWNLOAD","OFFICIAL_AMC_FACTSHEETS") else 60)
+            delay=min(interval,21600 if job=="AMFI_EQUITY_CAP" else 3600 if job in ("NSE_SURVEILLANCE","NSE_PLEDGE_FILINGS","NSE_FINANCIAL_FILINGS","OFFICIAL_TRI_DOWNLOAD","OFFICIAL_AMC_FACTSHEETS","FUND_DISCLOSURES","FUND_PORTFOLIOS") else 60)
         db.execute("""UPDATE research_job_state SET status=?,next_due=?,finished_at=?,
             last_completed_at=CASE WHEN ?='PASS_COMPLETED' THEN ? ELSE last_completed_at END,
             claim_id=NULL,lease_until=NULL,failures=?,error_code=?

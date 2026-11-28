@@ -198,3 +198,15 @@ class FundPortfoliosTests(unittest.TestCase):
                     {"fund_id":"fund:456","scheme_code":"123457","scheme_name":"B"}]
         self.assertEqual([r["scheme_code"] for r in portfolios.composition_matches(identities,INSTANT)],["123457"])
         self.assertEqual([r["scheme_code"] for r in portfolios.matched(identities,INSTANT)],["123457"])
+
+    def test_priority_includes_funds_beyond_old_alphabetical_limit(self):
+        from contextlib import closing
+        rows=[]
+        for n in range(101):
+            fields={"fund_code":str(n),"amfi_ssd_fund_id":f"fund:{n:03}"}
+            key="INE009A01021" if n==100 else "INE002A01018"
+            rows.extend([row(**fields,isin=key,isin_as_filed=key),{**CASH,**fields}])
+        portfolios.store(payload(*rows),TODAY,INSTANT.isoformat())
+        with closing(nav_catalog._connect()) as db,db:
+            db.execute("UPDATE fund_portfolio_snapshot SET payload='invalid' WHERE fund_id='fund:001'")
+        self.assertEqual(portfolios.research_identities(INSTANT),["INE002A01018","INE009A01021"])
