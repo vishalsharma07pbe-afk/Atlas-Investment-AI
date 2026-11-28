@@ -130,9 +130,19 @@ class LiveFeedsDatabaseIntegrationTest {
      {"status":"success","data":{"candles":[["2025-01-06T00:00:00+05:30",100,110,90,105,0,0]]}}
      """);
    assertThat(service.refresh(index,"test-operator",date,date)).isEqualTo(1);
+   assertThat((Boolean)org.springframework.test.util.ReflectionTestUtils.invokeMethod(service,"targetPresent",index,date)).isTrue();
    assertThat(db.queryForObject("SELECT close FROM market_candles WHERE instrument_id=? AND candle_time=?",BigDecimal.class,index,close)).isEqualByComparingTo("105");
+   Integer revision=db.queryForObject("SELECT revision FROM market_candles WHERE instrument_id=? AND candle_time=?",Integer.class,index,close);
+   assertThat(service.refresh(index,"test-operator",date,date)).isEqualTo(1);
+   assertThat(db.queryForObject("SELECT revision FROM market_candles WHERE instrument_id=? AND candle_time=?",Integer.class,index,close)).isEqualTo(revision);
+   when(http.text(contains("NSE_INDEX%7CNifty%2050/days/1"),eq("test-operator"),anyInt())).thenReturn("""
+     {"status":"success","data":{"candles":[["2025-01-06T00:00:00+05:30",100,110,90,106,0,0]]}}
+     """);
+   assertThat(service.refresh(index,"test-operator",date,date)).isEqualTo(1);
+   assertThat(db.queryForObject("SELECT revision FROM market_candles WHERE instrument_id=? AND candle_time=?",Integer.class,index,close)).isEqualTo(revision+1);
    db.update("UPDATE market_candles SET source_id=(SELECT id FROM data_sources WHERE source_code='MANUAL_CSV'),close=99 WHERE instrument_id=? AND candle_time=?",index,close);
    assertThat(service.refresh(index,"test-operator",date,date)).isZero();
+   assertThat((Boolean)org.springframework.test.util.ReflectionTestUtils.invokeMethod(service,"targetPresent",index,date)).isFalse();
    assertThat(db.queryForObject("SELECT close FROM market_candles WHERE instrument_id=? AND candle_time=?",BigDecimal.class,index,close)).isEqualByComparingTo("99");
   }finally{
    if(index!=0)db.update("DELETE FROM market_candles WHERE instrument_id=? AND (candle_time AT TIME ZONE 'Asia/Kolkata')::date=?",index,date);

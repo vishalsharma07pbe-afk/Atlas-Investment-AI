@@ -50,6 +50,9 @@ public class DiscoveryHistoryScheduler {
   // must not be silently skipped to an older regular session.
   // Keep the prior-day-only policy until same-day publication is validated.
   LocalDate verifiedPriorSession(String exchange,LocalDate today){
+    return verifiedPriorSession(calendar,exchange,today);
+  }
+  static LocalDate verifiedPriorSession(MarketCalendarService calendar,String exchange,LocalDate today){
     for(int i=1;i<=7;i++){
       LocalDate day=today.minusDays(i);
       String phase=(String)calendar.sessionContext(exchange,day.atTime(12,0).atZone(MarketCalendarService.IST).toInstant()).get("phase");
@@ -64,6 +67,9 @@ public class DiscoveryHistoryScheduler {
   // shorter bounded lease and a fencing token so a late worker cannot overwrite
   // a reclaimed attempt. Expiry permits retry, not exactly-once provider I/O.
   int claimAttempt(long id,LocalDate end,UUID claim){
+    return claimAttempt(jdbc,id,end,claim);
+  }
+  static int claimAttempt(JdbcTemplate jdbc,long id,LocalDate end,UUID claim){
     return jdbc.update("""
       INSERT INTO discovery_history_attempts(instrument_id,attempted_at,next_attempt_at,status,target_session,claim_token)
       VALUES (?,now(),now()+interval '30 minutes','RUNNING',?,?)
@@ -90,6 +96,9 @@ public class DiscoveryHistoryScheduler {
   }
 
   int finishAttempt(long id,UUID claim,boolean complete,int written,int retryMinutes){
+    return finishAttempt(jdbc,id,claim,complete,written,retryMinutes);
+  }
+  static int finishAttempt(JdbcTemplate jdbc,long id,UUID claim,boolean complete,int written,int retryMinutes){
     return jdbc.update("""
       UPDATE discovery_history_attempts SET status=?,rows_written=?,
         next_attempt_at=now()+(? * interval '1 minute')

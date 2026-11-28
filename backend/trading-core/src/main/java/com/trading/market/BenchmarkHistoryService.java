@@ -75,6 +75,29 @@ public class BenchmarkHistoryService {
     return result;
   }
 
+  // Validate the exact provider price-index row at the regular-session close.
+  // A manual, intraday, adjusted, or unexpected timestamp cannot satisfy it.
+  boolean targetPresent(long instrument,LocalDate date){
+    return Boolean.TRUE.equals(jdbc.queryForObject("""
+      SELECT EXISTS(
+        SELECT 1 FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
+        JOIN market_sessions s ON s.exchange_id=e.id
+        JOIN market_candles c ON c.instrument_id=i.id AND c.candle_time=s.close_time
+        JOIN data_sources ds ON ds.id=c.source_id
+        WHERE i.id=? AND i.instrument_type='INDEX' AND i.active AND e.code='NSE'
+          AND s.session_date=? AND s.session_type='REGULAR' AND s.is_trading_day
+          AND extract(isodow FROM s.session_date) BETWEEN 1 AND 5
+          AND s.open_time IS NOT NULL AND s.close_time IS NOT NULL AND s.open_time<s.close_time
+          AND (s.open_time AT TIME ZONE 'Asia/Kolkata')::date=s.session_date
+          AND (s.close_time AT TIME ZONE 'Asia/Kolkata')::date=s.session_date AND s.close_time<=now()
+          AND NOT EXISTS(SELECT 1 FROM exchange_holidays h WHERE h.exchange_code=e.code AND h.holiday_date=s.session_date)
+          AND NOT EXISTS(SELECT 1 FROM market_sessions x WHERE x.exchange_id=e.id AND x.session_date=s.session_date
+            AND x.is_trading_day AND x.session_type<>'REGULAR')
+          AND c.timeframe='1d' AND c.is_complete AND c.quality_status='PROVIDER_VALIDATED'
+          AND c.adjustment_status='RAW_UNADJUSTED' AND ds.enabled AND ds.source_code='UPSTOX')
+      """,Boolean.class,instrument,date));
+  }
+
   public int refresh(long instrument,String token,LocalDate from,LocalDate to)throws Exception{
     return refresh(instrument,KEY,token,from,to);
   }
@@ -112,8 +135,12 @@ public class BenchmarkHistoryService {
         var closes=jdbc.query("""
           SELECT s.close_time FROM market_sessions s JOIN instruments i ON i.exchange_id=s.exchange_id
           WHERE i.id=? AND s.session_date=? AND s.session_type='REGULAR' AND s.is_trading_day
+            AND extract(isodow FROM s.session_date) BETWEEN 1 AND 5
             AND s.open_time IS NOT NULL AND s.close_time IS NOT NULL AND s.open_time<s.close_time
+            AND (s.open_time AT TIME ZONE 'Asia/Kolkata')::date=s.session_date
             AND (s.close_time AT TIME ZONE 'Asia/Kolkata')::date=s.session_date AND s.close_time<=now()
+            AND NOT EXISTS(SELECT 1 FROM exchange_holidays h JOIN exchanges e ON e.code=h.exchange_code
+              WHERE e.id=s.exchange_id AND h.holiday_date=s.session_date)
             AND NOT EXISTS(SELECT 1 FROM market_sessions x WHERE x.exchange_id=s.exchange_id
               AND x.session_date=s.session_date AND x.is_trading_day AND x.session_type<>'REGULAR')
           """,(rs,n)->rs.getTimestamp(1),instrument,candle.date());
@@ -125,7 +152,10 @@ public class BenchmarkHistoryService {
           ON CONFLICT(instrument_id,timeframe,candle_time) DO UPDATE SET
             open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,
             volume=EXCLUDED.volume,ingestion_run_id=EXCLUDED.ingestion_run_id,
-            quality_status=EXCLUDED.quality_status,is_complete=true,received_at=now()
+            quality_status=EXCLUDED.quality_status,is_complete=true,received_at=now(),
+            revision=CASE WHEN (market_candles.open,market_candles.high,market_candles.low,market_candles.close,market_candles.volume)
+              IS DISTINCT FROM (EXCLUDED.open,EXCLUDED.high,EXCLUDED.low,EXCLUDED.close,EXCLUDED.volume)
+              THEN market_candles.revision+1 ELSE market_candles.revision END
           WHERE market_candles.source_id=EXCLUDED.source_id AND market_candles.adjustment_status='RAW_UNADJUSTED'
           """,instrument,closes.getFirst(),source,run,candle.open(),candle.high(),candle.low(),candle.close(),candle.volume());
         written+=changed;if(changed==0)skipped++;
