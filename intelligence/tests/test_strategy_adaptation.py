@@ -24,3 +24,13 @@ class StrategyAdaptationTest(unittest.TestCase):
             self.assertEqual(a.priority(["FIP"],a.summarize(rows,TODAY,["FIP"],"RISING",True)),"UNVALIDATED")
         with patch.object(a.rel,"_outcome",return_value=.01),patch.object(a.rel,"_index_change",return_value=.03):
             self.assertEqual(a.priority(["FIP"],a.summarize(rows,TODAY,["FIP"],"RISING")),"CAUTION")
+
+    def test_bad_outcome_stays_in_denominator_and_cost_stress_is_required(self):
+        rows=cohort()
+        with patch.object(a.rel,"_outcome",side_effect=[.1]*19+[ValueError("bad")]+[.1]*20),patch.object(a.rel,"_index_change",return_value=.02):
+            result=a.summarize(rows,TODAY,["FIP"],"RISING")
+            self.assertEqual(result["lanes"]["FIP"]["windows"][0]["mature_companies"],20)
+            self.assertEqual(result["lanes"]["FIP"]["windows"][0]["paired_companies"],19)
+            self.assertEqual(a.priority(["FIP"],result),"UNVALIDATED")
+        with patch.object(a.rel,"_outcome",return_value=.029),patch.object(a.rel,"_index_change",return_value=.02):
+            self.assertEqual(a.priority(["FIP"],a.summarize(rows,TODAY,["FIP"],"RISING")),"UNVALIDATED")
