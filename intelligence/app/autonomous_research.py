@@ -532,6 +532,11 @@ def read_overview():
     """UI-only projection, appended after all current qualification consumers."""
     snapshot=read_snapshot()
     snapshot["historical_display"]=research_display_archive.display(_connect,snapshot,now())
+    from . import investment_analyst
+    try:
+        snapshot["investment_analyst"]=investment_analyst.analyze(snapshot,now().astimezone(ZoneInfo("Asia/Kolkata")).date())
+    except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
+        snapshot["investment_analyst"]={"methodology":investment_analyst.VERSION,"status":"UNAVAILABLE","stocks":[],"funds":[],"next_steps":[],"notice":investment_analyst.NOTICE}
     return snapshot
 
 
