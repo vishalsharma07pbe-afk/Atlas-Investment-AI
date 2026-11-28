@@ -34,6 +34,31 @@ public class FundHistoryResearchService {
           AND s.scheme_name !~* '(idcw|dividend|regular|bonus)'))
     """;
 
+  // Assess depth, both return anchors and interior gaps against the latest
+  // actual AMFI date, not a rolling wall-clock count that can hide broken history.
+  // Same two bind parameters in both held and category queries.
+  static final String NEEDS_HISTORY="""
+    AND EXISTS(
+      SELECT 1 FROM (
+        SELECT max(n.nav_date) end_date FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code
+          AND n.source_code='AMFI' AND n.nav>0 AND n.nav_date BETWEEN ?::date-7 AND ?::date
+      ) anchor CROSS JOIN LATERAL (
+        SELECT count(*) FILTER(WHERE d>=anchor.end_date-interval '3 years') observations,
+          count(*) FILTER(WHERE d BETWEEN anchor.end_date-interval '3 years'-interval '14 days'
+            AND anchor.end_date-interval '3 years') base3,
+          count(*) FILTER(WHERE d BETWEEN anchor.end_date-interval '1 year'-interval '14 days'
+            AND anchor.end_date-interval '1 year') base1,
+          count(*) FILTER(WHERE d>=anchor.end_date-interval '3 years' AND d-prior>14) gaps
+        FROM (
+          SELECT n.nav_date d,lag(n.nav_date) OVER(ORDER BY n.nav_date) prior
+          FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code AND n.nav>0
+            AND n.source_code IN ('AMFI','MFAPI')
+            AND n.nav_date BETWEEN (anchor.end_date-interval '3 years'-interval '14 days')::date AND anchor.end_date
+        ) points
+      ) q WHERE anchor.end_date IS NOT NULL AND (q.observations<650 OR q.base3=0 OR q.base1=0 OR q.gaps>0)
+    )
+    """;
+
   private static String categoryPattern(String category){
     String label=CATEGORIES.get(category);
     if(label==null)throw new IllegalArgumentException("UNSUPPORTED_CATEGORY");
@@ -53,14 +78,11 @@ public class FundHistoryResearchService {
     categories.add(ADDITIONAL.get(Math.floorMod(Instant.now().getEpochSecond()/900,ADDITIONAL.size())));
     for(String category:categories){
       var rows=jdbc.queryForList("SELECT s.scheme_code "+UNIVERSE+"""
-        AND EXISTS(SELECT 1 FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code
-          AND n.source_code='AMFI' AND n.nav_date BETWEEN ?::date-7 AND ?::date)
         AND NOT EXISTS(SELECT 1 FROM fund_history_attempts a WHERE a.scheme_code=s.scheme_code AND a.next_attempt_at>now())
-        AND (SELECT count(*) FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code
-          AND n.nav_date BETWEEN ?::date-1100 AND ?::date)<650
+        """+NEEDS_HISTORY+"""
         ORDER BY (SELECT attempted_at FROM fund_history_attempts a WHERE a.scheme_code=s.scheme_code)
           ASC NULLS FIRST,s.scheme_code LIMIT 1
-        """,categoryPattern(category),today,today,today,today);
+        """,categoryPattern(category),today,today);
       for(var row:rows)collect(((Number)row.get("scheme_code")).longValue());
     }
   }
@@ -71,18 +93,11 @@ public class FundHistoryResearchService {
       WHERE EXISTS(SELECT 1 FROM personal_holdings h
         WHERE h.asset_type='MUTUAL_FUND' AND h.user_id IS NOT NULL
           AND h.symbol=s.scheme_code::text)
-        AND EXISTS(SELECT 1 FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code
-          AND n.source_code='AMFI' AND n.nav_date BETWEEN ?::date-7 AND ?::date)
         AND NOT EXISTS(SELECT 1 FROM fund_history_attempts a WHERE a.scheme_code=s.scheme_code AND a.next_attempt_at>now())
-        AND ((SELECT count(*) FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code
-          AND n.source_code IN ('AMFI','MFAPI') AND n.nav_date BETWEEN ?::date-1100 AND ?::date)<650
-          OR NOT EXISTS(SELECT 1 FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code
-            AND n.source_code IN ('AMFI','MFAPI')
-            AND n.nav_date BETWEEN (?::date-interval '3 years'-interval '21 days')::date
-              AND (?::date-interval '3 years')::date))
+      """+NEEDS_HISTORY+"""
       ORDER BY (SELECT attempted_at FROM fund_history_attempts a WHERE a.scheme_code=s.scheme_code)
         ASC NULLS FIRST,s.scheme_code LIMIT 2
-      """,today,today,today,today,today,today);
+      """,today,today);
     for(var row:rows)collect(((Number)row.get("scheme_code")).longValue());
   }
 
@@ -113,9 +128,14 @@ public class FundHistoryResearchService {
     var sample=jdbc.queryForList("SELECT s.scheme_code,s.scheme_name,s.category,s.amfi_plan,s.amfi_option,s.amfi_metadata_date,s.isin_growth,s.amc_name "+UNIVERSE+"""
       AND EXISTS(SELECT 1 FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code
         AND n.source_code='AMFI' AND n.nav_date BETWEEN ?::date-7 AND ?::date)
-      ORDER BY (SELECT count(*) FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code
-        AND n.nav_date BETWEEN ?::date-1100 AND ?::date) DESC,s.scheme_code LIMIT 40
-      """,pattern,today,today,today,today);
+      ORDER BY CASE WHEN s.amfi_plan='DIRECT' AND s.amfi_option='GROWTH'
+          AND s.amfi_metadata_date=?::date AND s.isin_growth ~ '^INF[A-Z0-9]{9}$'
+          AND EXISTS(SELECT 1 FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code
+            AND n.source_code='AMFI' AND n.nav_date=?::date AND n.nav>0) THEN 0 ELSE 1 END,
+        (SELECT count(*) FROM mutual_fund_nav n WHERE n.scheme_code=s.scheme_code
+          AND n.nav>0 AND n.source_code IN ('AMFI','MFAPI') AND n.nav_date BETWEEN ?::date-1100 AND ?::date) DESC,
+        s.scheme_code LIMIT 40
+      """,pattern,today,today,commonEnd,commonEnd,today,today);
     List<Map<String,Object>> observations=new ArrayList<>();
     Map<Long,List<Map<String,Object>>> histories=sampledHistories(sample,today);
     Map<String,Integer> gateCounts=new LinkedHashMap<>();

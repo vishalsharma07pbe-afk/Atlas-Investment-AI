@@ -941,4 +941,23 @@ class LiveFeedsDatabaseIntegrationTest {
   mvc.perform(get("/api/v1/portfolio/holdings")).andExpect(status().isOk()).andExpect(content().json("[]"));
  }
 
+ @Test
+ @org.springframework.transaction.annotation.Transactional
+ void historyRepairDetectsInteriorGapsDespiteEnoughRows()throws Exception{
+  long broken=987654322L,complete=987654323L;
+  LocalDate today=LocalDate.now(MarketCalendarService.IST),end=today.minusDays(1);
+  for(long code:List.of(broken,complete)){
+   db.update("INSERT INTO mutual_fund_schemes(scheme_code,scheme_name) VALUES (?,'Fund repair test')",code);
+   db.update("""
+     INSERT INTO mutual_fund_nav(scheme_code,nav_date,nav,source_code)
+     SELECT ?,?::date-g,100,CASE WHEN g=0 THEN 'AMFI' ELSE 'MFAPI' END
+     FROM generate_series(0,1110) g
+     """,code,end);
+  }
+  db.update("DELETE FROM mutual_fund_nav WHERE scheme_code=? AND nav_date BETWEEN ? AND ?",broken,end.minusDays(500),end.minusDays(480));
+  String needs=(String)org.springframework.test.util.ReflectionTestUtils.getField(FundHistoryResearchService.class,"NEEDS_HISTORY");
+  assertThat(db.queryForList("SELECT s.scheme_code FROM mutual_fund_schemes s WHERE s.scheme_code IN (?,?) "+needs,Long.class,broken,complete,today,today))
+    .containsExactly(broken);
+ }
+
 }
