@@ -171,3 +171,40 @@ def saved_fund_context(shortlist,records,category,today,*,website,local,tri,seco
                 if values:result["reported_metadata"]={**values,"basis":m["basis"],"document_date":m["document_date"]}
         except (ValueError,TypeError,KeyError):pass
     return result
+
+
+def forecast_challengers(baseline):
+    """Expose only reconciled original forecast experiments, not fitted estimates."""
+    if baseline.get("challenger_policy")!="FIXED_CHALLENGERS_V1":return []
+    result=[]
+    for model in ("HALF_PERSISTENCE","DAMPED_ACCELERATION"):
+        metrics={}
+        for metric in ("revenue","net_profit"):
+            original=obj(obj(baseline.get("metrics")).get(metric))
+            entry=obj(obj(obj(baseline.get("challengers")).get(metric)).get(model))
+            g=entry.get("growth_percent");a=entry.get("amount_cr");base=original.get("target_prior_year_amount_cr")
+            if not num(g,-50,100) or not num(a,0,1e12) or not num(base,.000001,1e12) or abs(a-round(base*(1+g/100),6))>max(.00001,base*1e-8):continue
+            metrics[metric]={"growth_percent":g,"amount_cr":a}
+        if len(metrics)==2:result.append({"model":model,"metrics":metrics,"qualified":False})
+    return result
+
+def filing_context(row,instant):
+    """Exact issuer/provider quarter reconciliation already acquired by the NSE worker."""
+    from . import nse_financial_filings
+    from zoneinfo import ZoneInfo
+    if instant is None or not nse_financial_filings.permitted():return None
+    f=obj(row.get("independent_financial_evidence"));c=obj(f.get("comparison"));p=obj(c.get("profit_comparison"))
+    if f.get("status")!="REPORTED_CONSOLIDATED_FILING" or f.get("isin")!=row.get("isin") or f.get("scope")!="CONSOLIDATED":return None
+    try:
+        stamp=datetime.fromisoformat(f["retrieved_at"]);period=date.fromisoformat(f["period"])
+        today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
+        if stamp.tzinfo is None or not instant-timedelta(hours=24)<=stamp<=instant or not nse_financial_filings.fresh_period(period,today):return None
+    except (ValueError,TypeError,KeyError):return None
+    import re
+    if not isinstance(f.get("source_sha256"),str) or not re.fullmatch(r"[a-f0-9]{64}",f["source_sha256"]):return None
+    revenue=c.get("status");profit=p.get("status")
+    if revenue not in ("WITHIN_ILLUSTRATIVE_TOLERANCE","REVENUE_DIFFERENCE_REVIEW","NOT_COMPARABLE") or profit not in ("BOTH_BASES_WITHIN_TOLERANCE","ONE_REPORTED_BASIS_WITHIN_TOLERANCE","PROFIT_DIFFERENCE_REVIEW","NOT_COMPARABLE",None):return None
+    status="CONFLICT_REVIEW" if revenue=="REVENUE_DIFFERENCE_REVIEW" or profit=="PROFIT_DIFFERENCE_REVIEW" else "CORROBORATED_REPORTED_QUARTER" if revenue=="WITHIN_ILLUSTRATIVE_TOLERANCE" and profit in ("BOTH_BASES_WITHIN_TOLERANCE","ONE_REPORTED_BASIS_WITHIN_TOLERANCE") else "PARTIAL_COMPARISON"
+    return {"status":status,"period":f["period"],"retrieved_at":stamp.isoformat(),"source_sha256":f["source_sha256"],
+        "revenue_comparison":revenue,"profit_comparison":profit,"automatic_index_source":f.get("acquisition_method")==nse_financial_filings.INDEX_METHOD,
+        "qualified":False,"notice":"Issuer/provider arithmetic corroboration under illustrative tolerances; net profit accounting basis may differ. Not audit certification."}
