@@ -48,3 +48,13 @@ class ProspectiveTests(unittest.TestCase):
             states=f.summary("LARGE_CAP",TODAY,connect)["decision_states"]
             self.assertEqual(states["EVIDENCE_INCOMPLETE"]["published"],1)
             self.assertEqual(states["PRIORITY_RESEARCH"]["published"],0)
+
+    def test_frozen_tri_exact_endpoints_only(self):
+        row={"category":"LARGE_CAP","evidence":json.dumps({"category_tri_proxy":"NIFTY 100 TRI"})}
+        outcome={"start_date":"2026-11-27","end_date":"2027-02-25"}
+        series={"NIFTY 100 TRI":{date(2026,11,27):100,date(2027,2,25):110}}
+        pair=f.paired_tri(row,outcome,series,"AUTHORIZED_LOCAL_EXPORT")
+        self.assertEqual(pair["tri_change_percent"],10)
+        self.assertIsNone(f.paired_tri(row,{**outcome,"end_date":"2027-02-26"},series,"AUTHORIZED_LOCAL_EXPORT"))
+        self.assertIsNone(f.paired_tri(row,outcome,series,"UNKNOWN"))
+        self.assertIsNone(f.paired_tri({**row,"category":"MID_CAP"},outcome,series,"AUTHORIZED_LOCAL_EXPORT"))
