@@ -156,7 +156,7 @@ def saved_fund_context(shortlist,records,category,today,*,website,local,tri,seco
         except (KeyError,ValueError,TypeError):return False
     basis=c.get("ter_basis")
     if c.get("ter_status")=="CONFLICTING_SAME_DATE_TER" and (website or local) and fresh("ter_conflict_date",7):
-        result["ter_status"]="CONFLICTING_SAME_DATE_TER"
+        result.update(ter_status="CONFLICTING_SAME_DATE_TER",ter_conflict_date=c["ter_conflict_date"])
     elif c.get("ter_status")=="REPORTED_NOT_INDEPENDENTLY_AUTHENTICATED" and num(c.get("ter_percent"),0,100):
         if (basis=="AMFI_WEBSITE_OPERATOR_CROSSWALK" and website and fresh("ter_date",7)) or (basis=="OPERATOR_OFFICIAL_EXPORT" and local and fresh("ter_date",90)):
             result.update({k:c[k] for k in ("ter_status","ter_basis","ter_date","ter_percent")})
