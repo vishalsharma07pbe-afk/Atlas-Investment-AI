@@ -790,6 +790,7 @@ def main():
     parser.add_argument("--recovery-audit",action="store_true",help="Audit recovery diagnostics and historical display isolation; require contracts to pass")
     parser.add_argument("--require-research-results",action="store_true",help="Require observed current Elite research, all three core fund categories and applicable portfolio history, not final qualification")
     parser.add_argument("--investment-analyst-audit",action="store_true",help="Verify current public and owner-local decision contracts; report actual populated output and model review counts separately")
+    parser.add_argument("--require-analyst-results",action="store_true",help="Also require populated stock and all core fund decision lists and at least one current model review; absence may be legitimate")
     args=parser.parse_args()
     session=LocalSession(args.base_url)
     result=None
@@ -805,7 +806,7 @@ def main():
         session.token=token
         del login,token
         session.request("/api/v1/auth/me")
-        result=collect(session.request,include_qualification_audit=args.qualification_audit,include_advanced_audit=args.advanced_audit,include_recovery_audit=args.recovery_audit,include_result_acceptance=args.require_research_results,include_analyst_audit=args.investment_analyst_audit)
+        result=collect(session.request,include_qualification_audit=args.qualification_audit,include_advanced_audit=args.advanced_audit,include_recovery_audit=args.recovery_audit,include_result_acceptance=args.require_research_results,include_analyst_audit=args.investment_analyst_audit or args.require_analyst_results)
     except (RuntimeError,ValueError,TypeError,KeyError,AttributeError):
         print(json.dumps({"runtime":"BLOCKED","reason":"LOCAL_ACCEPTANCE_REQUEST_OR_CONTRACT_FAILED"}))
         return 1
@@ -816,7 +817,7 @@ def main():
                 if result is not None:result["runtime"]="BLOCKED";result["checks"]["session_logout"]="BLOCKED"
             finally:session.token=None
     print(json.dumps(result,indent=2,sort_keys=True))
-    return 0 if result["runtime"]==result["stored_provider_evidence"]=="PASS" and (not args.require_live or result["live_feed"]=="OBSERVED") and (not args.advanced_audit or result["advanced_audit"]["status"]=="PASS") and (not args.recovery_audit or result["recovery_audit"]["status"]=="PASS") and (not args.require_research_results or result["result_acceptance"]["status"]=="POPULATED_RESEARCH_OBSERVED") and (not args.investment_analyst_audit or result["analyst_acceptance"]["status"]=="CONTRACTS_OBSERVED") else 1
+    return 0 if result["runtime"]==result["stored_provider_evidence"]=="PASS" and (not args.require_live or result["live_feed"]=="OBSERVED") and (not args.advanced_audit or result["advanced_audit"]["status"]=="PASS") and (not args.recovery_audit or result["recovery_audit"]["status"]=="PASS") and (not args.require_research_results or result["result_acceptance"]["status"]=="POPULATED_RESEARCH_OBSERVED") and (not args.investment_analyst_audit or result["analyst_acceptance"]["status"]=="CONTRACTS_OBSERVED") and (not args.require_analyst_results or (result["analyst_acceptance"]["status"]=="CONTRACTS_OBSERVED" and result["analyst_acceptance"]["populated_outputs_observed"] and (result["analyst_acceptance"]["model_reviews"] or 0)>0)) else 1
 
 if __name__=="__main__":
     raise SystemExit(main())

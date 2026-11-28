@@ -51,8 +51,9 @@ export function makeCapitalPlan(report:InvestmentAnalysis,review:OwnerReview|nul
  if(!Number.isInteger(months)||months<12||months>360||risk==="LOW"||months<60){out.status="RESERVE_FOR_HORIZON_OR_RISK";return out;}
  // Illustrative policy limits on new capital, not a suitability determination.
  // No sale proceeds, emergency reserve, leverage, or assumed future gains.
- const reservePct=risk==="MODERATE"?.4:.25;
- const maxStock=risk==="HIGH"?.1:0, fundBudget=risk==="HIGH"?.5:.6;
+ const existingReview=review.holdings.some(h=>["REVIEW_REDUCTION","REASSESS_THESIS","REBALANCE_REVIEW","PAUSE_ADDITIONS"].includes(h.investment_analysis?.action??""));
+ const reservePct=existingReview?.6:risk==="MODERATE"?.4:.25;
+ const maxStock=risk==="HIGH"&&!existingReview?.1:0, fundBudget=existingReview?.4:risk==="HIGH"?.5:.6;
  let left=Math.floor(amount*(1-reservePct));
  const used=new Set<string>();
  function add(identity:string,label:string,category:string,desired:number,positionCap:number,reason:string){
@@ -98,7 +99,7 @@ export default function CapitalPlanner({report}:{report:InvestmentAnalysis}){
    {!!plan.comparisons.length&&<><h4>Matched historical alternatives to current holdings</h4><ul>{plan.comparisons.slice(0,5).map(c=><li key={c.holding_identity+":"+c.alternative_identity}>{c.holding} → {c.alternative}: {c.holding_return_percent.toFixed(1)}% vs {c.alternative_return_percent.toFixed(1)}% · {c.first_date} to {c.last_date}. Historical comparison only.</li>)}</ul></>}
    {plan.allocations.length>0&&<ul>{plan.allocations.map(a=><li key={a.identity}><strong>{a.label} · {money(a.amount)}</strong><p>{a.reason}</p></li>)}</ul>}
    <p><strong>Conditional research budget {money(plan.planned)}</strong> · Keep unallocated {money(plan.reserved)}</p>
-   <small>Policy limits are illustrative: at least 25–40% unallocated for eligible risk profiles, no equity allocations under five years, no duplicate exact held identities, and capped new positions. Fund look-through and tax impact still require review. No automated execution.</small>
+   <small>Policy limits are illustrative: at least 25–40% unallocated (60% when current holdings need risk review), no equity allocations under five years, no duplicate exact held identities, and capped new positions. Fund look-through and tax impact still require review. No automated execution.</small>
   </>}
  </details>;
 }

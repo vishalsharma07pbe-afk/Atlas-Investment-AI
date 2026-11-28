@@ -83,6 +83,10 @@ def stock_projection(snapshot,instant=None):
             or not re.fullmatch(r"[A-Z0-9._&-]{1,50}",r["symbol"])
             or not num(r.get("close"),.0001,1e8)):return
         seen.add(r["isin"])
+        facts={k:r[k] for k,lo,hi in (("earnings_growth_percent",10,100),("eps_growth_percent",10,100),
+            ("sales_growth_percent",5,10000),("reported_pe",.0001,40),("reported_sector_pe",.0001,1e6),
+            ("median_daily_turnover_cr",5,1e10),("atr_percent",.01,5),("return_60_percent",-100,100))
+            if num(r.get(k),lo,hi)}
         growth=stock_growth(r,instant)
         risk=obj(obj(r.get("elite_assessment")).get("historical_risk")).get("historical_price_risk")
         if risk not in ("LOW","MEDIUM","HIGH"):
@@ -91,7 +95,7 @@ def stock_projection(snapshot,instant=None):
         out.append({k:r[k] for k in ("id","isin","symbol","exchange","as_of","close")}|
             {"tier":tier,"horizon":horizon,"score":score,"reasons":reasons,"limitations":gaps,
              "qualified":False,"price_plan":price_plan(r,horizon),
-             "risk":risk,"risk_basis":"HISTORICAL_PRICE_RISK_PROXY","growth_outlook":growth,
+             "risk":risk,"risk_basis":"HISTORICAL_PRICE_RISK_PROXY","growth_outlook":growth,"observed_facts":facts,
              "evidence_confidence":"MODERATE" if tier=="ADJUSTED_JOINT" and growth else "LIMITED" if tier in ("ADJUSTED_JOINT","REPORTED_JOINT","BUSINESS_SCREEN") else "LOW",
              "action":"RESEARCH_FOR_ENTRY" if tier=="ADJUSTED_JOINT" else "WATCH_FOR_CONFIRMATION"})
     for report,status,tier,key,basis in ((strict,"JOINT_SCREEN_MATCHES","ADJUSTED_JOINT","strict_fip_evidence","ADJUSTED"),
@@ -174,10 +178,13 @@ def fund_projection(snapshot,today):
             if positive:reasons.append(f"Reported holdings with positive joint growth represent {d['joint_growth_weight_percent']:.1f}% of original fund weight.")
             if adverse:reasons.append("Underlying reported business trends require review.")
             growth=fund_growth(d,today) if matched else None
+            facts={"historical_cagr_percent":r["weekly_cagr_percent"]}
+            if matched:
+                facts.update({k:d[k] for k in ("joint_coverage_weight_percent","joint_growth_weight_percent","review_weight_percent")})
             items.append({"identifier":code,"name":r["name"],"nav_date":day,"score":r["score"],
                 "tier":"DRIVER_SUPPORTED" if positive else "DRIVER_REVIEW" if adverse else "HISTORICAL_ONLY",
                 "action":"REVIEW_BEFORE_NEW_SIP" if adverse else "COMPARE_FOR_SIP" if positive else "WATCH_FOR_CONFIRMATION",
-                "relative_risk":r.get("relative_risk"),"reasons":reasons,"growth_outlook":growth,
+                "relative_risk":r.get("relative_risk"),"reasons":reasons,"growth_outlook":growth,"observed_facts":facts,
                 "evidence_confidence":"MODERATE" if positive and growth else "LIMITED" if positive else "LOW",
                 "limitations":["Past returns and reported underlying growth do not establish future NAV returns.",
                     "Verify current official costs, holdings, benchmark and personal horizon."],"qualified":False})

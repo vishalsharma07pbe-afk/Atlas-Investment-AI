@@ -19,5 +19,11 @@ describe("local conditional capital planner",()=>{
   expect(makeCapitalPlan(report,empty,100000,"HIGH",36,now).reserved).toBe(100000);
   expect(makeCapitalPlan({...report,stocks:[{...stock,ai_review:{state:"DEFER_REVIEW",providers:["OLLAMA"],reasons:[]}}]},empty,100000,"HIGH",60,now).allocations.every(a=>!a.identity.startsWith("S:"))).toBe(true);
  });
+ it("reserves more when existing holdings need attention",()=>{
+  const review:OwnerReview={...empty,holding_count:1,holdings:[{id:1,symbol:"OTHER",isin:"INE009A01021",asset_type:"EQUITY",recorded_market_value:100000,recorded_valuation_recent:true,investment_analysis:{action:"REVIEW_REDUCTION"}}],investment_analysis:{scope:"OWNER_LOCAL",recent_weight_coverage:true}};
+  const p=makeCapitalPlan(report,review,100000,"HIGH",60,now);
+  expect(p.reserved).toBeGreaterThanOrEqual(60000);
+  expect(p.allocations.every(a=>!a.identity.startsWith("S:"))).toBe(true);
+ });
  it("does not allocate on stale review",()=>expect(makeCapitalPlan(report,empty,100000,"HIGH",60,now+700000).planned).toBe(0));
 });
