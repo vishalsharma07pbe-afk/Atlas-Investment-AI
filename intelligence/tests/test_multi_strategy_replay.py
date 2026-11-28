@@ -24,3 +24,13 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(r.summarize([p],date(2026,11,28))["companies"],0)
         p["multi_strategy_replay"]["signal_policy"]=r.SIGNAL_POLICY
         self.assertEqual(r.summarize([p],date(2026,11,28))["companies"],1)
+
+    def test_turtle_channel_exit_is_next_open_and_cash_capped(self):
+        c=[Candle((date(2025,1,1)+timedelta(days=i)).isoformat(),100,101,99,100,1_000_000,"ADJUSTED") for i in range(260)]
+        c[253]=Candle(c[253].date,100,101,94,95,1_000_000,"ADJUSTED")
+        c[254]=Candle(c[254].date,90,91,89,90,1_000_000,"ADJUSTED")
+        result=r.turtle_channel_replay(c,{252:{"TURTLE_LONG_BREAKOUT"}},253,259)
+        self.assertEqual(result["completed_trades"],1)
+        self.assertFalse(result["open_position"])
+        self.assertLess(result["net_marked_return_percent"],-2.5)
+        self.assertFalse(result["qualified"])
