@@ -26,6 +26,15 @@ public class PortfolioRefreshService {
       """,user),includeHistory);
   }
 
+  /** Explicit fund-only refresh uses the dated local NAV store and never
+   * touches stock quotes, subscriptions or provider credentials. */
+  public Map<String,Object> refreshFunds(UUID user){
+    return refresh(jdbc.queryForList("""
+      SELECT id,user_id,symbol,asset_type FROM personal_holdings
+      WHERE user_id=? AND asset_type='MUTUAL_FUND' ORDER BY symbol LIMIT 200
+      """,user),false);
+  }
+
   /** At most ten holdings per pass, oldest attempts first. Mark attempts before
    * provider access so failures cannot starve other holdings or cause tight loops.
    * This is intended for the single local backend instance.

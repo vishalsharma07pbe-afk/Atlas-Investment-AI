@@ -25,7 +25,7 @@ export type FundHolding = {
 
 const fmt=(value:number)=>new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",maximumFractionDigits:2}).format(value);
 
-export default function MutualFundHoldings({holdings,busy=false,onSave,onRemove,onRefresh}:{holdings:FundHolding[];busy?:boolean;onSave?:(draft:HoldingDraft)=>Promise<void>;onRemove?:(id:number)=>Promise<void>;onRefresh?:()=>Promise<void>}){
+export default function MutualFundHoldings({holdings,busy=false,onSave,onRemove,onRefresh}:{holdings:FundHolding[];busy?:boolean;onSave?:(draft:HoldingDraft)=>Promise<void>;onRemove?:(id:number)=>Promise<void>;onRefresh?:()=>Promise<{updated:number;total:number}>}){
   const [view,setView]=useState<"research"|"overview"|"find"|"compare"|"plan"|"risk"|"more">("research");
   const [editorOpen,setEditorOpen]=useState(false);
   const [editing,setEditing]=useState<ExistingFund|null>(null);
@@ -34,7 +34,7 @@ export default function MutualFundHoldings({holdings,busy=false,onSave,onRemove,
   const [refreshing,setRefreshing]=useState(false);
   function openEditor(fund:ExistingFund|null=null){setView("overview");setEditing(fund);setEditorKey(k=>k+1);setEditorOpen(true);setMessage("");}
   async function saveFund(draft:HoldingDraft){if(!onSave)throw Error("Holding save unavailable");await onSave(draft);setEditorOpen(false);setEditing(null);setMessage("Fund holding saved. Your portfolio reflects the saved units and available dated NAV.");}
-  async function refresh(){if(!onRefresh)return;setRefreshing(true);setMessage("");try{await onRefresh();setMessage("NAV refresh requested. Check the observation dates below.");}catch{setMessage("NAV refresh unavailable. Existing saved values were retained.");}finally{setRefreshing(false);}}
+  async function refresh(){if(!onRefresh)return;setRefreshing(true);setMessage("");try{const result=await onRefresh();setMessage(result.total===0?"No fund holdings to refresh.":`Refreshed ${result.updated} of ${result.total} saved fund valuations from dated NAV records. Check the observation dates below.`);}catch{setMessage("NAV refresh unavailable. Existing saved values were retained.");}finally{setRefreshing(false);}}
   const [validatedHistory,setValidatedHistory]=useState<SharedNavHistory|null>(null);
   const [validatedHistories,setValidatedHistories]=useState<SharedNavHistory[]>([]);
   function acceptHistory(history:SharedNavHistory|null,schemeCode?:string){
@@ -80,7 +80,7 @@ export default function MutualFundHoldings({holdings,busy=false,onSave,onRemove,
         <article><span>Funds owned</span><strong>{funds.length}</strong><small>{unpriced?`${unpriced} needs attention`:aged?`${aged} needs date review`:"Valuation complete"}</small></article>
       </div>
       <PortfolioVisuals holdings={funds}/>
-      {unpriced>0&&<div role="status" className="mf-attention"><span>!</span><div><strong>Some values are missing</strong><p>Add the latest NAV (price per unit) for {unpriced} fund position{unpriced===1?"":"s"} to see a complete portfolio value and gain/loss.</p></div></div>}
+      {unpriced>0&&<div role="status" className="mf-attention"><span>!</span><div><strong>Some values are missing</strong><p>Published NAV is missing for {unpriced} fund position{unpriced===1?"":"s"}. Refresh saved NAVs after the daily AMFI collection, or check the exact scheme code.</p></div></div>}
       <section className="mf-card glass">
         <div className="mf-card-head"><div><small className="section-kicker">YOUR INVESTMENTS</small><h2>Your fund holdings</h2></div><span>Saved NAVs · not live</span></div>
         <div className="mf-holding-list">{funds.map(f=>{const performance=f.last_price===null||Number(f.average_cost)===0?null:100*(Number(f.last_price)/Number(f.average_cost)-1);return <article key={f.id}><div className="mf-fund-name"><i>{f.symbol.slice(0,2)}</i><div><strong>{fundName(f)}</strong><small>{f.quantity} units{f.notes?` · Scheme ${f.symbol}`:""}</small><small>{f.last_price===null?"NAV unavailable":`NAV ${navDate(f)}${f.valuation_status&&f.valuation_status!=="RECENT_RECORDED"?" · "+f.valuation_status.toLowerCase().replace(/_/g," "):""}`}</small></div></div><div><span>Invested</span><strong>{fmt(Number(f.invested))}</strong></div><div><span>Current value</span><strong>{f.market_value===null?"—":fmt(Number(f.market_value))}</strong></div><div><span>Gain / loss</span><strong className={(performance||0)>=0?"positive":"negative"}>{performance===null?"NAV needed":`${performance>=0?"+":""}${performance.toFixed(2)}%`}</strong>{onSave&&<button type="button" className="secondary" disabled={busy} onClick={()=>openEditor(f)}>Edit holding</button>}{onRemove&&<button type="button" className="danger" disabled={busy} onClick={()=>void onRemove(f.id)}>Delete</button>}</div></article>})}{!funds.length&&<div className="mf-empty"><strong>No mutual fund holdings saved</strong><p>Record your existing units using the add holding button above.</p>{onSave&&<button type="button" className="primary" disabled={busy} onClick={()=>openEditor()}>Add your first fund</button>}</div>}</div>

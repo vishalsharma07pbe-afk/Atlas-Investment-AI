@@ -69,4 +69,14 @@ class PortfolioRefreshServiceTest {
     verify(provider).hasConfiguredMarketToken();
     verifyNoMoreInteractions(provider);
   }
+  @Test void explicitFundRefreshNeverRequestsStockProviders(){
+    JdbcTemplate jdbc=mock(JdbcTemplate.class);
+    UpstoxFeedService provider=mock(UpstoxFeedService.class);
+    UUID owner=UUID.randomUUID();
+    when(jdbc.queryForList(contains("AND asset_type='MUTUAL_FUND'"),eq(owner))).thenReturn(List.of());
+    var result=new PortfolioRefreshService(jdbc,provider).refreshFunds(owner);
+    assertEquals(0,result.get("total"));
+    verifyNoInteractions(provider);
+  }
+
 }

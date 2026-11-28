@@ -190,7 +190,11 @@ public class PortfolioController {
    * This never creates, removes, buys or sells a holding. One failed symbol does
    * not prevent other holdings from updating. */
   @PostMapping("/refresh-prices")
-  public Map<String,Object> refreshPrices(@RequestParam(defaultValue="false") boolean includeHistory){
-    return refreshService.refreshUser(AuthSecurity.currentUser(),includeHistory);
+  public Map<String,Object> refreshPrices(@RequestParam(defaultValue="false") boolean includeHistory,
+      @RequestParam(required=false) String assetType){
+    UUID owner=AuthSecurity.currentUser();
+    if(assetType==null)return refreshService.refreshUser(owner,includeHistory);
+    if("MUTUAL_FUND".equals(assetType))return refreshService.refreshFunds(owner);
+    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid refresh asset type");
   }
 }

@@ -50,3 +50,11 @@ it("shows fund name and opens an existing position for total-unit editing",()=>{
   expect((screen.getByLabelText("Symbol") as HTMLInputElement).value).toBe("123456");
   expect((screen.getByLabelText("Quantity") as HTMLInputElement).value).toBe("2");
 });
+
+it("reports the actual fund refresh outcome",async()=>{
+ const refresh=vi.fn().mockResolvedValue({updated:0,total:1});
+ render(<MutualFundHoldings holdings={[fund]} onSave={vi.fn()} onRefresh={refresh}/>);
+ fireEvent.click(screen.getByRole("button",{name:"Refresh saved NAVs"}));
+ expect(await screen.findByText(/Refreshed 0 of 1 saved fund valuations/)).toBeTruthy();
+ expect(refresh).toHaveBeenCalledOnce();
+});
