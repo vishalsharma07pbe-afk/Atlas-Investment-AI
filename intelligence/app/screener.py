@@ -44,6 +44,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
     skipped = {"NO_HISTORY": 0, "STALE": 0, "INVALID": 0, "MIXED_ADJUSTMENT": 0}
     if batch_loaded:
         skipped["RAW_CORPORATE_ACTION"] = 0
+        skipped["ADJUSTED_ACTION_RECONCILIATION"] = 0
         skipped["SESSION_MISMATCH"] = 0
         skipped["REPORTED_SUSPENSION"] = 0
     for instrument in instruments[:limit]:
@@ -93,20 +94,27 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                 isin=instrument.get("isin")
                 crossings=reported_crossings((action_reports or {}).get(isin),isin,first_day,last_day,instant) if instant is not None else []
                 raw_history=candles[-1].adjustment_status=="RAW_UNADJUSTED"
-                if crossings and raw_history:
+                if crossings:
                     provider_crossing_count+=1
                     if len(provider_crossings)<5:
                         provider_crossings.append({"symbol":instrument["symbol"],"exchange":instrument["exchange"],
                             "events":crossings,"status":"REPORTED_ACTION_RECONCILIATION_REQUIRED"})
                 if raw_history and (crossings or (event is not None and first_day<date.fromisoformat(event)<=last_day)):
                     skipped["RAW_CORPORATE_ACTION"] += 1
-                    normalized=action_preview(candles,instrument)
+                    # A complete stored calendar suffix can confirm the dates, not event completeness.
+                    calendar_dates=fip_dates[-len(candles):] if len(fip_dates)>=len(candles) else ()
+                    normalized=action_preview(candles,instrument,expected_dates=calendar_dates)
                     if normalized["status"]=="KNOWN_ACTIONS_NORMALIZED_PRICE_ONLY":
                         action_preview_count+=1
                         if len(action_previews)<5:
                             action_previews.append({"symbol":instrument["symbol"],"exchange":instrument["exchange"],**normalized})
                     else:
                         action_preview_withheld+=1
+                    continue
+                # An ADJUSTED label is not proof that a recorded/reported event was reconciled.
+                # Keep strict FIP, bracket, comparative and replay inputs out of this case.
+                if not raw_history and (crossings or (event is not None and first_day<date.fromisoformat(event)<=last_day)):
+                    skipped["ADJUSTED_ACTION_RECONCILIATION"] += 1
                     continue
             ind = compute(candles)
             close = candles[-1].close
@@ -235,7 +243,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
         result["corporate_action_review"]={"normalized_preview_count":action_preview_count,
             "withheld_count":action_preview_withheld,"previews":action_previews,
             "provider_crossing_count":provider_crossing_count,"provider_crossings":provider_crossings,
-            "notice":"Recorded split/bonus normalization diagnostics only. These histories remain excluded from rankings and backtesting."}
+            "notice":"Known-action OHLCV reconstruction is diagnostic only. Unreconciled raw or adjusted crossing histories remain excluded from rankings and backtesting."}
     if include_horizons:
         result["horizons"] = summarize(horizon_evaluations)
         if batch_loaded:
