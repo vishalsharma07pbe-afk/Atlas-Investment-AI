@@ -4,7 +4,8 @@ import {visiblePolling} from "./visiblePolling";
 
 type Holding={id:number;symbol:string;isin?:string;exact_scheme_code?:string|number;asset_type:string;recorded_market_value?:number;recorded_valuation_recent?:boolean;investment_analysis?:{action:string}};
 type Comparison={asset_type:string;holding:string;alternative:string;holding_identity:string;alternative_identity:string;first_date:string;last_date:string;holding_return_percent:number;alternative_return_percent:number;basis:string};
-export type OwnerReview={generated_at:string;holding_count:number;holdings:Holding[];investment_analysis?:{recent_weight_coverage:boolean;scope:string};opportunity_context?:{matched_comparisons?:Comparison[]}};
+type FundingComparison={scope:string;kind:string;status:string;purchaseNotional:number;saleNotional:number;estimates:{basisPointsPerSide:number;additionalCashIncludingTransactionCost:number;conditionalCashIfThresholdUnused?:number|null;conditionalCashIfThresholdUsed?:number|null}[];evidenceGaps:string[]};
+export type OwnerReview={generated_at:string;holding_count:number;holdings:Holding[];investment_analysis?:{recent_weight_coverage:boolean;scope:string};opportunity_context?:{matched_comparisons?:Comparison[]};portfolio_level_risk?:{look_through_status:string;attention?:{kind:string;label:string;value:number;unit:string}[]};rebalancing_funding?:{status:string;comparisons:FundingComparison[];notice:string}};
 type Risk="LOW"|"MODERATE"|"HIGH";
 type Allocation={identity:string;label:string;category:string;amount:number;reason:string};
 const money=(n:number)=>"₹"+n.toLocaleString("en-IN",{maximumFractionDigits:0});
@@ -52,7 +53,7 @@ export function makeCapitalPlan(report:InvestmentAnalysis,review:OwnerReview|nul
  if(!Number.isInteger(months)||months<12||months>360||risk==="LOW"||months<60){out.status="RESERVE_FOR_HORIZON_OR_RISK";return out;}
  // Illustrative policy limits on new capital, not a suitability determination.
  // No sale proceeds, emergency reserve, leverage, or assumed future gains.
- const existingReview=review.holdings.some(h=>["REVIEW_REDUCTION","REASSESS_THESIS","REBALANCE_REVIEW","PAUSE_ADDITIONS"].includes(h.investment_analysis?.action??""));
+ const existingReview=!!review.portfolio_level_risk?.attention?.length||review.holdings.some(h=>["REVIEW_REDUCTION","REASSESS_THESIS","REBALANCE_REVIEW","PAUSE_ADDITIONS"].includes(h.investment_analysis?.action??""));
  const reservePct=existingReview?.6:risk==="MODERATE"?.4:.25;
  const maxStock=risk==="HIGH"&&!existingReview?.1:0, fundBudget=existingReview?.4:risk==="HIGH"?.5:.6;
  let left=Math.floor(amount*(1-reservePct));
@@ -105,7 +106,9 @@ export default function CapitalPlanner({report}:{report:InvestmentAnalysis}){
    <p>{plan.status==="AWAITING_OWNER_EVIDENCE"?"Fresh resolved portfolio values are needed.":plan.status==="RESERVE_FOR_HORIZON_OR_RISK"?"Keep this capital outside the equity research allocation under the selected horizon/risk limits.":plan.status==="NO_SUPPORTED_ALLOCATION"?"No supported allocation under the current evidence and policy.":"Conditional research allocations, not buy orders."}</p>
    {!!plan.comparisons.length&&<><h4>Matched historical alternatives to current holdings</h4><ul>{plan.comparisons.slice(0,5).map(c=><li key={c.holding_identity+":"+c.alternative_identity}>{c.holding} → {c.alternative}: {c.holding_return_percent.toFixed(1)}% vs {c.alternative_return_percent.toFixed(1)}% · {c.first_date} to {c.last_date}. Historical comparison only.</li>)}</ul></>}
    {plan.allocations.length>0&&<ul>{plan.allocations.map(a=><li key={a.identity}><strong>{a.label} · {money(a.amount)}</strong><p>{a.reason}</p></li>)}</ul>}
-   <p><strong>Conditional research budget {money(plan.planned)}</strong> · Keep unallocated {money(plan.reserved)}</p>
+   {!!review.portfolio_level_risk?.attention?.length&&<details><summary>Portfolio-level risk observations</summary><ul>{review.portfolio_level_risk.attention.map((v,i)=><li key={i}>{v.label}: {v.value.toFixed(1)} {v.unit}</li>)}</ul><small>Look-through status: {review.portfolio_level_risk.look_through_status}. Existing partial exposures are not complete live fund weights.</small></details>}
+    {!!review.rebalancing_funding?.comparisons?.length&&<details><summary>Existing rebalancing cost and funding comparisons</summary>{review.rebalancing_funding.comparisons.slice(0,5).map((v,i)=><div key={i}><strong>{v.kind}</strong>{v.estimates.filter(e=>e.basisPointsPerSide===30).map(e=><p key={e.basisPointsPerSide}>Additional cash with illustrative charges: {money(e.additionalCashIncludingTransactionCost)}. {e.conditionalCashIfThresholdUsed!=null?`Conditional with reference tax: ${money(e.conditionalCashIfThresholdUsed)}`:"Combined tax/exit costs not established."}</p>)}{!!v.evidenceGaps.length&&<small>{v.evidenceGaps.join(" ")}</small>}</div>)}<small>{review.rebalancing_funding.notice}</small></details>}
+    <p><strong>Conditional research budget {money(plan.planned)}</strong> · Keep unallocated {money(plan.reserved)}</p>
    <small>Policy limits are illustrative: at least 25–40% unallocated (60% when current holdings need risk review), no equity allocations under five years, no duplicate exact held identities, and capped new positions. New stocks require a supported stop scenario, with 0.5% fresh-capital risk per position before gaps and costs. Fund look-through and tax impact still require review. No automated execution.</small>
   </>}
  </details>;
