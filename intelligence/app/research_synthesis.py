@@ -95,3 +95,79 @@ def thesis(row,is_fund):
         "base_case":"Compare within the same fund category; confirm horizon, official costs and underlying exposure." if is_fund else "Verify current business, valuation and risk evidence before allocating; no price forecast.",
         "invalidation":["Reassess when new material evidence contradicts the thesis or the underlying evidence becomes stale."],
         "missing_evidence":gaps,"qualified":False}
+
+
+def compact_fund_context(shortlist,reports,category,today):
+    """Build bounded public evidence from the full scheduled fund report.
+
+    Do not persist full research reports, source URLs, raw holdings or
+    provider messages. Exact code/category/date and unique Direct Growth
+    report identity are required.
+    """
+    result=[]
+    for row in shortlist[:5]:
+        if not isinstance(row,dict) or row.get("qualified") is not False or row.get("status")!="HISTORICAL_RESEARCH_ONLY":continue
+        code,nav,isin=(row.get(k) for k in ("identifier","nav_date","isin_growth"))
+        import re
+        if not isinstance(code,str) or not re.fullmatch(r"[1-9][0-9]{5,8}",code) or not isinstance(isin,str) or not re.fullmatch(r"INF[A-Z0-9]{9}",isin):continue
+        try:
+            if not 0<=(today-date.fromisoformat(nav)).days<=7:continue
+        except (ValueError,TypeError):continue
+        matched=[r for r in reports if isinstance(r,dict) and r.get("identifier")==code]
+        if len(matched)!=1:continue
+        d=matched[0]
+        if d.get("category")!=category or d.get("nav_date")!=nav or d.get("plan")!="DIRECT" or d.get("option")!="GROWTH":continue
+        context=fund_context(row,d,today)
+        if context.get("ter_status")=="CONFLICTING_SAME_DATE_TER":
+            ter=obj(d.get("automatic_amfi_ter_evidence"))
+            local=obj(obj(d.get("local_export_evidence")).get("ter_components_evidence"))
+            dates=[]
+            for source in (ter,local):
+                if source.get("status")=="CONFLICTING_SAME_DATE_TER":
+                    try:
+                        day=date.fromisoformat(source["ter_date"])
+                        if 0<=(today-day).days<=7:dates.append(day)
+                    except (ValueError,TypeError,KeyError):continue
+            # A directly detected cross-source conflict also gets its actual
+            # observed date, never the snapshot generation date.
+            if not dates:
+                for source in (ter,obj(obj(d.get("local_export_evidence")).get("disclosure"))):
+                    try:
+                        day=date.fromisoformat(source["ter_date"])
+                        if 0<=(today-day).days<=7:dates.append(day)
+                    except (ValueError,TypeError,KeyError):continue
+            if dates:context["ter_conflict_date"]=max(dates).isoformat()
+        result.append({"identifier":code,"isin_growth":isin,"nav_date":nav,"category":category,"context":context})
+    return result
+
+def saved_fund_context(shortlist,records,category,today,*,website,local,tri,secondary):
+    """Revalidate stored projection at read time; revoked consent wins."""
+    result=fund_context(shortlist,{},today)
+    matches=[r for r in records if isinstance(r,dict) and r.get("identifier")==shortlist.get("identifier")]
+    if len(matches)!=1:return result
+    record=matches[0]
+    if record.get("category")!=category or record.get("isin_growth")!=shortlist.get("isin_growth") or record.get("nav_date")!=shortlist.get("nav_date"):return result
+    try:
+        if not 0<=(today-date.fromisoformat(record["nav_date"])).days<=7:return result
+    except (ValueError,TypeError,KeyError):return result
+    c=obj(record.get("context"))
+    def fresh(key,days):
+        try:return 0<=(today-date.fromisoformat(c[key])).days<=days
+        except (KeyError,ValueError,TypeError):return False
+    basis=c.get("ter_basis")
+    if c.get("ter_status")=="CONFLICTING_SAME_DATE_TER" and (website or local) and fresh("ter_conflict_date",7):
+        result["ter_status"]="CONFLICTING_SAME_DATE_TER"
+    elif c.get("ter_status")=="REPORTED_NOT_INDEPENDENTLY_AUTHENTICATED" and num(c.get("ter_percent"),0,100):
+        if (basis=="AMFI_WEBSITE_OPERATOR_CROSSWALK" and website and fresh("ter_date",7)) or (basis=="OPERATOR_OFFICIAL_EXPORT" and local and fresh("ter_date",90)):
+            result.update({k:c[k] for k in ("ter_status","ter_basis","ter_date","ter_percent")})
+    b=obj(c.get("benchmark_context"))
+    if (local or tri) and b.get("basis") in ("MATCHED_LOCAL_TRI_EXPORT","MATCHED_AUTHORIZED_DIRECT_TRI_CSV") and all(num(b.get(k),lo,hi) for k,lo,hi in (("three_year_difference_pp",-1e6,1e6),("rolling_outperformance_percent",0,100),("active_volatility_percent",0,1e6))):
+        result["benchmark_context"]={**{k:b[k] for k in ("basis","three_year_difference_pp","rolling_outperformance_percent","active_volatility_percent")},"benchmark":b.get("benchmark") if isinstance(b.get("benchmark"),str) and len(b["benchmark"])<=150 else None,"notice":"Matched historical TRI dates; historical mandate and future outperformance are not established."}
+    m=obj(c.get("reported_metadata"))
+    if secondary and m.get("basis")=="SECONDARY_REPORTED":
+        try:
+            if 0<=(today-date.fromisoformat(m["document_date"])).days<=90:
+                values={k:m[k] for k in ("fund_managers","exit_load") if isinstance(m.get(k),str) and 0<len(m[k])<=2000}
+                if values:result["reported_metadata"]={**values,"basis":m["basis"],"document_date":m["document_date"]}
+        except (ValueError,TypeError,KeyError):pass
+    return result
