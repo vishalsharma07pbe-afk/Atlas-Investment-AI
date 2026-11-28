@@ -30,6 +30,25 @@ def bounded_read(path,limit):
         if len(data)!=after.st_size or before.st_mtime_ns!=after.st_mtime_ns or len(data)>limit:raise ValueError("CHANGED_FILE")
         return data
 
+def discounted_equity(cash,g,d,t,debt):
+    """Five-year constant growth and Gordon terminal, amounts in crore."""
+    flow=sum(cash*(1+g/100)**i/(1+d/100)**i for i in range(1,6))
+    terminal=cash*(1+g/100)**5*(1+t/100)/((d-t)/100)/(1+d/100)**5
+    return flow+terminal-debt
+
+def implied_growth(cash,shares,price,d,t,debt):
+    """Solve only inside the declared scenario model's bounded growth range."""
+    target=price*shares
+    lo,hi=-40.,40.
+    a=discounted_equity(cash,lo,d,t,debt);b=discounted_equity(cash,hi,d,t,debt)
+    if not a<=target<=b:
+        return {"status":"OUTSIDE_DECLARED_GROWTH_RANGE","growth_percent":None}
+    for _ in range(64):
+        mid=(lo+hi)/2
+        if discounted_equity(cash,mid,d,t,debt)<target:lo=mid
+        else:hi=mid
+    return {"status":"SOLVED_CONDITIONAL_MARKET_IMPLIED_GROWTH","growth_percent":round((lo+hi)/2,4)}
+
 def scenario(e,today):
     if not exact_isin(e.get("isin")) or e.get("operator_reviewed") is not True or e.get("scope")!="CONSOLIDATED_INR_CRORE":return None
     model=e.get("model");sector=e.get("sector_type")
@@ -57,9 +76,7 @@ def scenario(e,today):
         for c in cases:
             g,d,t=(c.get(k) for k in ("growth_percent","discount_percent","terminal_growth_percent"))
             if not num(g,-40,40) or not num(d,5,40) or not num(t,0,8) or d-t<2:return None
-            flow=sum(cash*(1+g/100)**i/(1+d/100)**i for i in range(1,6))
-            terminal=cash*(1+g/100)**5*(1+t/100)/((d-t)/100)/(1+d/100)**5
-            value=flow+terminal-(net_debt if model=="FCFF" else 0)
+            value=discounted_equity(cash,g,d,t,net_debt if model=="FCFF" else 0)
             per_share=value/shares
             if not num(per_share,-1e8,1e8):return None
             row={"case":c["case"],"growth_percent":g,"discount_percent":d,"terminal_growth_percent":t,
@@ -70,7 +87,10 @@ def scenario(e,today):
             if num(profit,-1e12,1e12):row["conditional_eps"]=round(profit/shares,4)
             out.append(row)
         if not out[0]["conditional_value_per_share"]<=out[1]["conditional_value_per_share"]<=out[2]["conditional_value_per_share"]:return None
-        return {"methodology":VERSION,"status":"OPERATOR_SOURCE_BOUND_VALUATION_SCENARIO","isin":e["isin"],"model":model,
+        base=out[1]
+        reverse=implied_growth(cash,shares,price,base["discount_percent"],base["terminal_growth_percent"],net_debt if model=="FCFF" else 0)
+        reverse.update(discount_percent=base["discount_percent"],terminal_growth_percent=base["terminal_growth_percent"],declared_base_growth_percent=base["growth_percent"],qualified=False,notice="Conditional five-year cash growth implied by the reference quote using the same operator-reviewed base discount and terminal assumptions. Not consensus, expected growth or a price target.")
+        return {"reverse_valuation":reverse,"methodology":VERSION,"status":"OPERATOR_SOURCE_BOUND_VALUATION_SCENARIO","isin":e["isin"],"model":model,
             "fiscal_period_end":fiscal.isoformat(),"price_date":quote.isoformat(),"price_inr":price,"review_date":capture.isoformat(),
             "cash_base_cr":round(cash,4),"scenarios":out,"qualified":False,
             "notice":"Operator-reviewed source-bound cash/share inputs and explicit assumptions; not independently audited, calibrated, or an executable price target."}
