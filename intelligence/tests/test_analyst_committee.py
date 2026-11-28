@@ -48,7 +48,7 @@ class CommitteeTest(unittest.TestCase):
             with patch.object(c.ai,"providers",return_value=["OLLAMA","GEMINI"]):
                 self.assertTrue(c.refresh(report(),connect,now,run))
                 self.assertTrue(c.refresh(report(),connect,now+timedelta(minutes=15),run))
-                self.assertEqual(calls,["OLLAMA","GEMINI"])
+                self.assertEqual(calls,["GEMINI","OLLAMA"])
                 r=c.attach(report(),connect,now+timedelta(minutes=16))
                 self.assertEqual(r["stocks"][0]["action"],"WATCH_FOR_CONFIRMATION")
                 self.assertEqual(r["stocks"][0]["ai_review"]["state"],"DISAGREEMENT")
