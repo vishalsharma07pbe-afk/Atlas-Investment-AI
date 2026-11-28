@@ -19,7 +19,7 @@ function age(day:string,today:string){
 export function makeCapitalPlan(report:InvestmentAnalysis,review:OwnerReview|null,budget:number,risk:Risk,months:number,now=Date.now()){
  const allocations:Allocation[]=[];const comparisons:Comparison[]=[];
  const amount=Number.isSafeInteger(budget)&&budget>=0&&budget<=100000000?budget:0;
- const out={allocations,comparisons,reserved:amount,planned:0,status:"AWAITING_OWNER_EVIDENCE",estimatedStockStopRisk:0,illustrativeBuyCharges:0};
+ const out={allocations,comparisons,reserved:amount,planned:0,status:"AWAITING_OWNER_EVIDENCE",estimatedStockStopRisk:0,illustrativeBuyCharges:0,estimatedDoubleStopRisk:0};
  if(!review||!Array.isArray(review.holdings)||review.holding_count!==review.holdings.length||review.investment_analysis?.scope!=="OWNER_LOCAL")return out;
  const stamp=Date.parse(review.generated_at);
  const today=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(now));
@@ -37,11 +37,11 @@ export function makeCapitalPlan(report:InvestmentAnalysis,review:OwnerReview|nul
  const stockCounts=new Map<string,number>(),fundCounts=new Map<string,number>();
  for(const s of report.stocks)stockCounts.set(s.isin,(stockCounts.get(s.isin)??0)+1);
  for(const g of report.funds)for(const f of g.items)fundCounts.set(f.identifier,(fundCounts.get(f.identifier)??0)+1);
- const eligibleStocks=report.stocks.filter(s=>policyOk(s)&&s.qualified===false&&s.tier==="ADJUSTED_JOINT"&&s.action==="RESEARCH_FOR_ENTRY"&&
+ const eligibleStocks=report.stocks.filter(s=>policyOk(s)&&!s.allocation_evidence_hold&&!report.decision_quality?.stock_allocation_hold&&s.qualified===false&&s.tier==="ADJUSTED_JOINT"&&s.action==="RESEARCH_FOR_ENTRY"&&
   s.ai_review?.state!=="DEFER_REVIEW"&&s.ai_review?.state!=="DISAGREEMENT"&&s.risk!=="HIGH"&&
   /^INE[A-Z0-9]{9}$/.test(s.isin)&&stockCounts.get(s.isin)===1&&!stockIds.has(s.isin)&&age(s.as_of,today)>=1&&age(s.as_of,today)<=4&&
   !!s.price_plan&&finite(s.price_plan.reference)&&finite(s.price_plan.stop_scenario)&&s.price_plan.stop_scenario>0&&s.price_plan.reference>s.price_plan.stop_scenario&&Math.abs(s.price_plan.reference-s.close)<=.0051);
- const eligibleFunds=report.funds.flatMap(g=>g.items.filter(f=>policyOk(f)&&f.qualified===false&&f.tier==="DRIVER_SUPPORTED"&&f.action==="COMPARE_FOR_SIP"&&
+ const eligibleFunds=report.funds.flatMap(g=>g.items.filter(f=>policyOk(f)&&!report.decision_quality?.fund_allocation_holds?.includes(g.category)&&f.qualified===false&&f.tier==="DRIVER_SUPPORTED"&&f.action==="COMPARE_FOR_SIP"&&
   f.ai_review?.state!=="DEFER_REVIEW"&&f.ai_review?.state!=="DISAGREEMENT"&&scheme(f.identifier)&&fundCounts.get(f.identifier)===1&&!fundIds.has(f.identifier)&&
   age(f.nav_date,today)>=0&&age(f.nav_date,today)<=7&&f.fund_evidence?.ter_status!=="CONFLICTING_SAME_DATE_TER").map(f=>({...f,category:g.category})));
  // Exact identity, same-date upstream comparisons; historical advantages are
@@ -81,7 +81,7 @@ export function makeCapitalPlan(report:InvestmentAnalysis,review:OwnerReview|nul
   const charge=Math.ceil(n*chargeRate);
   if(n+charge>left)return;
   const stopRisk=shares!=null?shares*riskPerShare!:undefined;
-  if(stopRisk!=null){stockRiskLeft-=stopRisk;out.estimatedStockStopRisk+=stopRisk;}
+  if(stopRisk!=null){stockRiskLeft-=stopRisk;out.estimatedStockStopRisk+=stopRisk;out.estimatedDoubleStopRisk+=2*stopRisk;}
   used.add(identity);left-=n+charge;out.illustrativeBuyCharges+=charge;allocations.push({identity,label,category,amount:n,reason,wholeShares:shares,stopRisk});
  }
  const categories=risk==="HIGH"?["LARGE_CAP","MID_CAP","SMALL_CAP"]:["LARGE_CAP","MID_CAP"];
@@ -143,7 +143,7 @@ export default function CapitalPlanner({report}:{report:InvestmentAnalysis}){
    {plan.allocations.length>0&&<ul>{plan.allocations.map(a=><li key={a.identity}><strong>{a.label} · {money(a.amount)}</strong><p>{a.reason}</p>{a.wholeShares!=null&&<small>{a.wholeShares} illustrative whole shares · stop risk {money(a.stopRisk??0)}</small>}</li>)}</ul>}
    {!!review.portfolio_level_risk?.attention?.length&&<details><summary>Portfolio-level risk observations</summary><ul>{review.portfolio_level_risk.attention.map((v,i)=><li key={i}>{v.label}: {v.value.toFixed(1)} {v.unit}</li>)}</ul><small>Look-through status: {review.portfolio_level_risk.look_through_status}. Existing partial exposures are not complete live fund weights.</small></details>}
     {!!review.rebalancing_funding?.comparisons?.length&&<details><summary>Existing rebalancing cost and funding comparisons</summary>{review.rebalancing_funding.comparisons.slice(0,5).map((v,i)=><div key={i}><strong>{v.kind}</strong>{v.estimates.filter(e=>e.basisPointsPerSide===30).map(e=><p key={e.basisPointsPerSide}>Additional cash with illustrative charges: {money(e.additionalCashIncludingTransactionCost)}. {e.conditionalCashIfThresholdUsed!=null?`Conditional with reference tax: ${money(e.conditionalCashIfThresholdUsed)}`:"Combined tax/exit costs not established."}</p>)}{!!v.evidenceGaps.length&&<small>{v.evidenceGaps.join(" ")}</small>}</div>)}<small>{review.rebalancing_funding.notice}</small></details>}
-    <p><strong>Conditional research budget {money(plan.planned)}</strong> · Keep unallocated {money(plan.reserved)}</p>{plan.planned>0&&<small>Unallocated amount includes {money(plan.illustrativeBuyCharges)} illustrative purchase-charge reserve; total modeled stock stop risk {money(plan.estimatedStockStopRisk)}. No sale or realized tax is assumed.</small>}
+    <p><strong>Conditional research budget {money(plan.planned)}</strong> · Keep unallocated {money(plan.reserved)}</p>{plan.planned>0&&<small>Unallocated amount includes {money(plan.illustrativeBuyCharges)} illustrative purchase-charge reserve; total modeled stock stop risk {money(plan.estimatedStockStopRisk)}; double-stop loss sensitivity {money(plan.estimatedDoubleStopRisk)} before costs. Gaps can exceed both. No sale or realized tax is assumed.</small>}
    <small>Policy limits are illustrative: at least 25–40% unallocated (60% when current holdings need risk review), no equity allocations under five years, no duplicate exact held identities, and capped new positions. New stocks require a supported stop scenario, with 0.5% fresh-capital risk per position and 0.75% aggregate stock risk before gaps and costs. Fund look-through and tax impact still require review. No automated execution.</small>
   </>}
  </details>;
