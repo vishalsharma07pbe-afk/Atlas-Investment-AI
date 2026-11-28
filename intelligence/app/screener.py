@@ -196,6 +196,8 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                 key=candles[-2].date
                 counts=breadth_pairs.setdefault(key,{"advancing":0,"declining":0,"unchanged":0})
                 counts["advancing" if close>previous else "declining" if close<previous else "unchanged"]+=1
+            if batch_loaded and exact_isin(instrument.get("isin")):
+                row["isin"]=instrument["isin"]
             rows.append(row)
             # Observation depth only, not verified continuity or adjusted evidence.
             if batch_loaded and expected_session is not None and len(candles)>=253:

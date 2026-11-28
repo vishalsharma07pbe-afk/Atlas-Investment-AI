@@ -28,12 +28,12 @@ export default function InvestmentAnalystPanel({report,onOpenStock,onFunds,onPor
   <CapitalPlanner report={report}/>
   <h3>Stock research recommendations</h3>
   {!stocks.length?<p>No supported stock candidates in the current sample. Do not force a position.</p>:<div className="elite-stock-grid">{stocks.slice(0,showAll?10:3).map(s=><article key={s.isin} className="elite-stock">
-    <header><div><strong>{s.symbol}</strong><small>{s.exchange} · {s.as_of}</small></div><span>{s.action==="RESEARCH_FOR_ENTRY"?"Research for entry":"Watch for confirmation"}</span></header>
+    <header><div><strong>{s.symbol}</strong><small>{s.as_of}</small></div><span>{s.action==="RESEARCH_FOR_ENTRY"?"Research for entry":"Watch for confirmation"}</span></header>
     <p>{stockTiers[s.tier]??"Research only"}{s.score!=null?" · "+s.score.toFixed(1)+"/100 research score":""}</p>
     <div className="research-kpi"><small>Observed close</small><strong>{money(s.close)}</strong>{s.risk&&<small>Historical risk: {s.risk.toLowerCase()}</small>}</div>
     <ul>{s.reasons.map((v,i)=><li key={i}>{v}</li>)}</ul><AdvancedReview row={s}/>
     {s.price_plan&&<div className="research-action"><strong>Illustrative swing risk plan</strong><dl><div><dt>Reference</dt><dd>{money(s.price_plan.reference)}</dd></div><div><dt>Stop scenario</dt><dd>{money(s.price_plan.stop_scenario)}</dd></div><div><dt>Target scenario</dt><dd>{money(s.price_plan.target_scenario)}</dd></div><div><dt>Reward / risk</dt><dd>{s.price_plan.reward_risk.toFixed(2)}</dd></div></dl><small>{s.price_plan.notice}</small></div>}
-    <details><summary>Evidence limitations</summary><ul>{s.limitations.map((v,i)=><li key={i}>{v}</li>)}</ul></details>
+    <details><summary>Evidence &amp; source details</summary><small>Price source listing: {s.exchange}</small><ul>{s.limitations.map((v,i)=><li key={i}>{v}</li>)}</ul></details>
     {onOpenStock&&s.horizon==="ELITE"&&<button type="button" className="secondary" onClick={()=>onOpenStock({id:s.id,isin:s.isin,symbol:s.symbol,exchange:s.exchange})}>Open company research</button>}
   </article>)}</div>}
   {stocks.length>3&&<button type="button" className="secondary" aria-expanded={showAll} onClick={()=>setShowAll(!showAll)}>{showAll?"Show top 3":"View all "+stocks.length+" stock candidates"}</button>}

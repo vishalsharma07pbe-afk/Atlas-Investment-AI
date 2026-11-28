@@ -40,11 +40,11 @@ def directory():
     return p
 
 @contextmanager
-def locked():
+def locked(blocking=True):
     p=directory()
     fd=os.open(p/"session.lock",os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
     with os.fdopen(fd,"r+") as lock:
-        fcntl.flock(lock,fcntl.LOCK_EX)
+        fcntl.flock(lock,fcntl.LOCK_EX|(0 if blocking else fcntl.LOCK_NB))
         yield p
 
 def read(p,name):
@@ -120,13 +120,14 @@ def configuration_status():
     # User must disable additional-credit usage in ChatGPT settings first.
     if os.getenv("ATLAS_CHATGPT_PLAN_INCLUDED_ONLY_CONFIRMED","false").lower()!="true":return "PLAN_USAGE_CONFIRMATION_REQUIRED"
     try:
-        with locked() as p:
+        with locked(blocking=False) as p:
             s=read(p,"session.json")
             if not REQUIRED<=set(s.get("scopes",[])) or not CLIENT.fullmatch(str(s.get("client_id",""))) or not s.get("refresh_token"):return "CHATGPT_SIGN_IN_REQUIRED"
             if not MODEL.fullmatch(str(s.get("model",""))):return "CHATGPT_MODEL_REQUIRED"
             if s.get("reauth_required"):return "CHATGPT_SIGN_IN_REQUIRED"
             if float(s.get("cooldown_until",0))>time.time():return "PLAN_COOLDOWN"
             return "READY_TO_CALL"
+    except BlockingIOError:return "PLAN_SESSION_BUSY"
     except (OSError,ValueError,TypeError,PlanError):return "CHATGPT_SIGN_IN_REQUIRED"
 
 def session(p):
@@ -231,7 +232,7 @@ def connect():
             while not callback and time.monotonic()<deadline:server.handle_request()
         if callback.get("error") or not callback.get("code"):raise PlanError("SIGN_IN_CANCELLED_OR_EXPIRED")
         actual=callback.get("client_id") or issued
-        if not isinstance(actual,str) or not CLIENT.fullmatch(actual) or issued and actual!=issued:raise PlanError("INVALID_REGISTRATION")
+        if not isinstance(actual,str) or not CLIENT.fullmatch(actual) or (issued and actual!=issued):raise PlanError("INVALID_REGISTRATION")
         data=token_request({"grant_type":"authorization_code","client_id":actual,"code":callback["code"],"code_verifier":verifier,"redirect_uri":REDIRECT})
         subject=verify_identity(data.get("id_token",""),actual,nonce)
         if previous.get("subject") and previous["subject"]!=subject:raise PlanError("ACCOUNT_MISMATCH")
