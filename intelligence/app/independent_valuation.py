@@ -16,6 +16,7 @@ VERSION="SOURCE-BOUND-VALUATION-1"
 PATH=Path("/app/filing-reports/valuation-evidence.json")
 MAX_BYTES=2_000_000
 MAX_DOC=20_000_000
+MAX_TOTAL_DOCUMENT_BYTES=100_000_000
 def num(v,lo,hi):return type(v) in (int,float) and isfinite(v) and lo<=v<=hi
 def permitted():
     return os.getenv("ATLAS_VALUATION_EVIDENCE_ENABLED","false").lower()=="true" and os.getenv("MARKET_DATA_USAGE_RIGHTS_CONFIRMED","false").lower()=="true"
@@ -75,7 +76,7 @@ def scenario(e,today):
             "notice":"Operator-reviewed source-bound cash/share inputs and explicit assumptions; not independently audited, calibrated, or an executable price target."}
     except (TypeError,ValueError,KeyError,OverflowError,AttributeError,ZeroDivisionError):return None
 
-def read(instant,path=PATH):
+def read(instant,path=PATH,*,identities=None):
     if not permitted():return {}
     try:
         today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
@@ -83,9 +84,9 @@ def read(instant,path=PATH):
         if root.get("methodology")!=VERSION or root.get("authorization_attested") is not True:return {}
         rows=root["companies"]
         if not isinstance(rows,list) or len(rows)>200:return {}
-        output={};conflict=set();hashes={}
+        output={};conflict=set();hashes={};total_bytes=0
         for e in rows:
-            if not isinstance(e,dict):continue
+            if not isinstance(e,dict) or identities is not None and e.get("isin") not in identities:continue
             result=scenario(e,today)
             if not result:continue
             sources=e.get("sources")
@@ -96,7 +97,11 @@ def read(instant,path=PATH):
                 name=src.get("file");digest=src.get("sha256")
                 if not isinstance(name,str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,120}",name) or ".." in name or not isinstance(digest,str) or not re.fullmatch(r"[a-f0-9]{64}",digest):break
                 if name not in hashes:
-                    try:hashes[name]=sha256(bounded_read(path.parent/name,MAX_DOC)).hexdigest()
+                    try:
+                        remaining=MAX_TOTAL_DOCUMENT_BYTES-total_bytes
+                        if remaining<=0:return {}
+                        raw=bounded_read(path.parent/name,min(MAX_DOC,remaining))
+                        total_bytes+=len(raw);hashes[name]=sha256(raw).hexdigest()
                     except (OSError,ValueError):hashes[name]=None
                 if hashes[name]!=digest:break
                 verified.append(digest)
