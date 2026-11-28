@@ -331,6 +331,28 @@ class LiveFeedsDatabaseIntegrationTest {
   assertThat(((BigDecimal)metrics.get("maxDrawdown")).doubleValue()).isLessThan(-0.20);
  }
 
+ @Test
+ @org.springframework.transaction.annotation.Transactional
+ void discoverySessionRolloverAndExpiredClaimAreFenced(){
+  long id=seedStock();
+  db.update("DELETE FROM discovery_history_attempts WHERE instrument_id=?",id);
+  LocalDate old=LocalDate.of(2026,11,25),next=old.plusDays(1);
+  UUID first=UUID.randomUUID(),second=UUID.randomUUID(),third=UUID.randomUUID();
+  assertThat((Integer)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"claimAttempt",id,old,first)).isEqualTo(1);
+  assertThat((Integer)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"claimAttempt",id,next,second)).isZero();
+  assertThat((Integer)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"finishAttempt",id,first,true,1,720)).isEqualTo(1);
+  assertThat((Integer)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"claimAttempt",id,old,second)).isZero();
+  assertThat((Integer)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"claimAttempt",id,next,second)).isEqualTo(1);
+  db.update("UPDATE discovery_history_attempts SET next_attempt_at=now()-interval '1 second' WHERE instrument_id=?",id);
+  assertThat((Integer)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"claimAttempt",id,next,third)).isEqualTo(1);
+  assertThat((Integer)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"finishAttempt",id,second,true,1,720)).isZero();
+  assertThat((Integer)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"finishAttempt",id,third,false,1,360)).isEqualTo(1);
+  assertThat((Integer)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"claimAttempt",id,next.plusDays(1),first)).isZero();
+  assertThat(db.queryForMap("SELECT status,rows_written,target_session FROM discovery_history_attempts WHERE instrument_id=?",id))
+    .containsEntry("status","FAILED").containsEntry("rows_written",1);
+  assertThat((Boolean)org.springframework.test.util.ReflectionTestUtils.invokeMethod(discovery,"targetPresent",id,LocalDate.of(1999,1,1))).isFalse();
+ }
+
  @Test void discoveryBackfillsMappedEquityWithoutBorrowingOwnerToken()throws Exception{
   db.update("INSERT INTO instruments(exchange_id,symbol,series,source,isin,instrument_type) VALUES ((SELECT id FROM exchanges WHERE code='BSE'),'DISCOVERYTEST','EQ','UPSTOX','INE000A01002','EQ')");
   db.update("INSERT INTO upstox_instrument_map(instrument_key,exchange_code,trading_symbol,instrument_type,isin) VALUES ('BSE_EQ|INE000A01002','BSE','DISCOVERYTEST','EQ','INE000A01002')");
