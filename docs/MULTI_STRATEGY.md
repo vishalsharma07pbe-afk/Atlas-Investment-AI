@@ -48,3 +48,9 @@ The research sample now exposes tie-aware volatility-adjusted six- and twelve-mo
 Replay aggregates ignore prior cached outputs without the new `RECENT_JUMP_FILTER_V1` signal policy marker. The existing schema version and endpoints are preserved; older replay results must be recomputed by the worker. The Investment Analyst displays the strategy name, observed trigger, channel exit where available and the conditional exit rule. It does not upgrade these results to qualified recommendations.
 
 Market-regime ordering now requires a current calendar check; the Investment Analyst joins alternative candidates to the expected completed session of the corresponding exchange before presenting them. These are freshness gates, not predictions.
+
+### Additional strategy diagnostics and channel-exit research
+
+Full Piotroski component checks and annual period are retained when available. Trend-template diagnostics and the observed contraction/pivot/volume facts are exposed separately from canonical SEPA/VCP claims. Alternate stock research may reuse existing quarterly and cash-stream scenarios when available.
+
+The existing rotating worker now includes a separate single-instrument cash-only Turtle channel experiment. Signals are evaluated on completed bars; stop/channel confirmation uses closes, and subsequent exits use the next open with cost and gap effects. It uses a conservative initial 2N risk cap and marks open positions at the last observed close. It does not simulate pyramiding, a multi-instrument portfolio or actual intraday execution. Old replay cache versions are refreshed by the existing bounded worker.
