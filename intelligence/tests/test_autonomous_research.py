@@ -444,3 +444,13 @@ class AutonomousResearchTests(unittest.TestCase):
         self.assertEqual(s.saved_fund_context(row,saved,"LARGE_CAP",date(2026,11,28),website=True,local=False,tri=False,secondary=False)["ter_percent"],.7)
         self.assertNotIn("ter_percent",s.saved_fund_context(row,saved,"LARGE_CAP",date(2026,11,28),website=False,local=False,tri=False,secondary=False))
         self.assertNotIn("ter_percent",s.saved_fund_context(row,saved,"MID_CAP",date(2026,11,28),website=True,local=False,tri=False,secondary=False))
+
+    def test_fund_evidence_does_not_replace_section_index(self):
+        # Regression for portfolio-opportunities HTTP 500: first fund
+        # evidence list must not shadow the map of persisted section rows.
+        research.refresh_once(lambda exchange: {"exchange":exchange},
+            lambda category: {"category":category,"fund_decision_evidence":[]})
+        result=research.read_snapshot(include_ai=False)
+        self.assertEqual(len(result["sections"]),len(research.SECTIONS))
+        self.assertEqual([r["section"] for r in result["sections"]],list(research.SECTIONS))
+        self.assertTrue(all(r["status"]=="READY" for r in result["sections"]))
