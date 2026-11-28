@@ -59,3 +59,11 @@ it("caps aggregate stock risk, reserves costs and sizes whole shares",()=>{
  expect(p.allocations.every(x=>Number.isInteger(x.wholeShares)&&x.amount===x.wholeShares!*100)).toBe(true);
  expect(p.planned+p.reserved).toBe(100000);
 });
+
+
+it("does not add direct stock risk over a known indirect concentration or without dated fund look-through",()=>{
+ const review:OwnerReview={...empty,holding_count:1,holdings:[{id:1,symbol:"123456",exact_scheme_code:"123456",asset_type:"MUTUAL_FUND",recorded_market_value:100000,recorded_valuation_recent:true}],investment_analysis:{scope:"OWNER_LOCAL",recent_weight_coverage:true}};
+ expect(makeCapitalPlan(report,review,100000,"HIGH",60,now).allocations.every(x=>x.category!=="EQUITY")).toBe(true);
+ const look={...review,diversification:{look_through:{status:"DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE",portfolio_date:"2026-10-31",exposures:[{isin:stock.isin,estimatedValue:12000,indirectValue:12000}]}}};
+ expect(makeCapitalPlan(report,look,100000,"HIGH",60,now).allocations.every(x=>x.category!=="EQUITY")).toBe(true);
+});
