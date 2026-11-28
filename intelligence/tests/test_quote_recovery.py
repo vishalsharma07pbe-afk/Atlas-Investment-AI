@@ -75,3 +75,10 @@ class QuoteRecoveryTests(unittest.TestCase):
         self.assertIsNone(recovery.claim("DHAN",101.5))
         self.assertTrue(recovery.claim("UPSTOX",101.5))
         self.assertTrue(recovery.claim("DHAN",102))
+
+    def test_long_retry_after_not_truncated_by_local_backoff_cap(self):
+        token=recovery.claim("UPSTOX",100)
+        self.assertTrue(recovery.finish("UPSTOX",token,"PROVIDER_RATE_LIMITED",retry_after=86400,now=101))
+        self.assertIsNone(recovery.claim("UPSTOX",3702))
+        self.assertIsNone(recovery.claim("UPSTOX",86500))
+        self.assertTrue(recovery.claim("UPSTOX",86501))
