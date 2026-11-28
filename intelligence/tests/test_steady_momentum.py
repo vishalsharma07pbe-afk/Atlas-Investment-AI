@@ -118,7 +118,7 @@ class SteadyMomentumTests(unittest.TestCase):
             rows.append({"id":i+1,"isin":f"INE000A{i:05d}","exchange":"NSE","symbol":f"T{i}",
               "adjustment_status":"ADJUSTED","as_of":"2026-11-27","median_daily_turnover_cr":10,
               "strict_fip_evidence":{"methodology":fip_research.VERSION,"status":"FIP_PRICE_MATCH","score":100-i,
-                 "calendar_status":"STORED_SESSIONS_MATCHED","adjustment_status":"ADJUSTED","as_of":"2026-11-27"}})
+                 "calendar_status":"STORED_SESSIONS_MATCHED","adjustment_status":"ADJUSTED","as_of":"2026-11-27","windows":{"252":{"return_percent":60}}}})
         rows[0]["governance_review"]={"findings":["REVIEW"]}
         rows[1]["adjustment_status"]="RAW_UNADJUSTED"
         rows[2]["strict_fip_evidence"]={**rows[2]["strict_fip_evidence"],"as_of":"2026-11-26"}
@@ -183,3 +183,18 @@ class SteadyMomentumTests(unittest.TestCase):
                 with closing(connect()) as db,db:
                     db.execute("DELETE FROM automatic_company_evidence")
                 self.assertEqual(steady_momentum.summarize(snapshot,connect,now)["strict_suggestions"]["items"],[])
+
+    def test_reported_joint_suggestions_never_enter_strict_selection(self):
+        from datetime import datetime,timezone
+        from app import fip_research
+        from app.steady_momentum import reported_suggestions,strict_suggestions
+        now=datetime(2026,11,28,5,tzinfo=timezone.utc)
+        row={"id":1,"isin":"INE002A01018","exchange":"NSE","symbol":"TEST",
+             "as_of":"2026-11-27","adjustment_status":"RAW_UNADJUSTED","median_daily_turnover_cr":10,
+             "reported_fip_evidence":{"methodology":fip_research.REPORTED_VERSION,"status":"REPORTED_PRICE_MATCH",
+                 "calendar_status":"STORED_SESSIONS_MATCHED","as_of":"2026-11-27","adjustment_status":"RAW_UNADJUSTED",
+                 "qualification_eligible":False,"adjustment_verified":False,"score":70,"windows":{"252":{"return_percent":60}}}}
+        self.assertEqual(reported_suggestions([row],{},now)[1],1)
+        self.assertEqual(strict_suggestions([row],{},now),([],0))
+        row["reported_fip_evidence"]["windows"]["252"]["return_percent"]=100
+        self.assertEqual(reported_suggestions([row],{},now),([],0))

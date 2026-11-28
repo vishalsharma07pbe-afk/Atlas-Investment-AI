@@ -71,3 +71,16 @@ class FipTests(unittest.TestCase):
         self.assertEqual(len({i for _,i in priority}),10)
         technical["as_of"]="2026-11-25"
         self.assertEqual(list(company.identify_fip_priority(snap,NOW))[0][1],rows[0]["isin"])
+
+    def test_reported_history_observations_preserve_unverified_adjustment_boundary(self):
+        raw,c=fixture()
+        dates=f.calendar_suffix(c,"NSE",TODAY)
+        raw=[{**r,"adjustment_status":"RAW_UNADJUSTED"} for r in raw]
+        result=f.observe_reported(raw,dates,TODAY)
+        self.assertEqual(result["status"],"REPORTED_PRICE_MATCH")
+        self.assertFalse(result["qualification_eligible"])
+        self.assertFalse(result["adjustment_verified"])
+        self.assertNotIn("replay_evidence_hash",result)
+        self.assertIsNone(f.observe(raw,dates,TODAY))
+        raw[-1]["source_code"]="DIFFERENT"
+        self.assertIsNone(f.observe_reported(raw,dates,TODAY))

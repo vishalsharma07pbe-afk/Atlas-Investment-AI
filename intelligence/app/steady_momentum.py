@@ -134,8 +134,38 @@ def strict_fip_match(row):
             and e.get("status")=="FIP_PRICE_MATCH" and e.get("calendar_status")=="STORED_SESSIONS_MATCHED"
             and e.get("adjustment_status")=="ADJUSTED" and e.get("as_of")==row.get("as_of")
             and numeric(e.get("score")) and 0<=e["score"]<=100
+            and numeric((e.get("windows") or {}).get("252",{}).get("return_percent"))
+            and 0<e["windows"]["252"]["return_percent"]<100
             and not (row.get("governance_review") or {}).get("findings")
             and not (row.get("company_venue_context") or {}).get("review_findings"))
+
+
+def reported_suggestions(candidates,observations,instant):
+    """Preliminary joint FIP research only, separate from strict suggestions."""
+    from . import fip_research
+    today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
+    def eligible(row):
+        e=row.get("reported_fip_evidence") or {}
+        try:
+            current=1<=(today-date.fromisoformat(row["as_of"])).days<=4
+        except (ValueError,TypeError,KeyError):return False
+        return (current and exact_isin(row.get("isin")) and row.get("exchange") in ("NSE","BSE")
+            and type(row.get("id")) is int and row["id"]>0
+            and row.get("security_state") not in company_venues.SPECIAL
+            and row.get("adjustment_status")=="RAW_UNADJUSTED"
+            and e.get("methodology")==fip_research.REPORTED_VERSION and e.get("status")=="REPORTED_PRICE_MATCH"
+            and e.get("calendar_status")=="STORED_SESSIONS_MATCHED" and e.get("as_of")==row.get("as_of")
+            and e.get("adjustment_status")=="RAW_UNADJUSTED" and e.get("qualification_eligible") is False
+            and e.get("adjustment_verified") is False and numeric(e.get("score")) and 0<=e["score"]<=100
+            and numeric((e.get("windows") or {}).get("252",{}).get("return_percent"))
+            and 0<e["windows"]["252"]["return_percent"]<100
+            and not (row.get("governance_review") or {}).get("findings")
+            and not (row.get("company_venue_context") or {}).get("review_findings"))
+    def rank(row):
+        return (-row["reported_fip_evidence"]["score"],-row["median_daily_turnover_cr"],row["isin"],row["exchange"])
+    matches=company_venues.consolidate([row for row in candidates if eligible(row)],observations,instant,rank)
+    matches=sorted([row for row in matches if eligible(row)],key=rank)
+    return matches[:10],len(matches)
 
 
 def strict_suggestions(candidates,observations,instant):
@@ -182,7 +212,8 @@ def summarize(snapshot,connect,instant):
     out={"methodology":VERSION,"status":"AWAITING_EVIDENCE","items":[],"reviewed_count":0,
          "technical_count":0,"sampled_count":0,"eligible_history_count":0,"matched_count":0,
          "qualified_count":0,"category_items":{k:[] for k in CAP_GROUPS},"exclusions":[],"notice":NOTICE,
-         "strict_suggestions":{"status":"AWAITING_EVIDENCE","matched_count":0,"items":[],"qualification_eligible":False}}
+         "strict_suggestions":{"status":"AWAITING_EVIDENCE","matched_count":0,"items":[],"qualification_eligible":False},
+         "reported_suggestions":{"status":"AWAITING_EVIDENCE","matched_count":0,"items":[],"qualification_eligible":False}}
     if not snapshot.get("enabled"):
         out["status"]="DISABLED"
         return out
@@ -303,6 +334,10 @@ def summarize(snapshot,connect,instant):
     out["strict_suggestions"]={"status":"JOINT_SCREEN_MATCHES" if strict_items else "NO_JOINT_SCREEN_MATCHES",
         "matched_count":strict_count,"items":strict_items,"qualification_eligible":False,
         "notice":"Four-window FIP, bullish technical, reported earnings/EPS, relative P/E, cap and turnover screens all passed. No recorded governance or venue review findings in the screened evidence. Not TradingView Strong Buy, independent valuation, or final investment qualification."}
+    reported_items,reported_count=reported_suggestions(candidates,observations,instant)
+    out["reported_suggestions"]={"status":"REPORTED_JOINT_MATCHES" if reported_items else "NO_REPORTED_JOINT_MATCHES",
+        "matched_count":reported_count,"items":reported_items,"qualification_eligible":False,
+        "notice":fip_research.REPORTED_NOTICE+" Reported business, cap and historical liquidity screens also passed; annual return must be below 100%."}
     out["exclusions"]=[{"reason":k,"count":v} for k,v in excluded.most_common()]
     out["status"]="SCREEN_MATCHES_AVAILABLE" if out["items"] else "NO_SCREEN_MATCHES" if out["technical_count"] else "AWAITING_EVIDENCE"
     return out

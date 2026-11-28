@@ -143,7 +143,8 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                 if steady:
                     swing_structure=price_structure(candles,ind,"SWING",calendar_verified=True)
                     strict_bracket=bracket_research.observe(raw,swing_structure,"SWING",fip_dates,today) if fip_dates else None
-                    steady_candidates.append({**steady,"bracket_research":strict_bracket,"historical_swing_structure":swing_structure,"adjusted_window_dates":relative_strength.stock_windows(raw,today),"security_state":row["security_state"],"report_close_history":report_close_history(candles),"id":row["id"],"symbol":row["symbol"],"exchange":row["exchange"],"isin":instrument["isin"],"as_of":row["as_of"]})
+                    reported_fip=fip_research.observe_reported(raw,fip_dates,today) if fip_dates and row["adjustment_status"]=="RAW_UNADJUSTED" else None
+                    steady_candidates.append({**steady,"reported_fip_evidence":reported_fip,"bracket_research":strict_bracket,"historical_swing_structure":swing_structure,"adjusted_window_dates":relative_strength.stock_windows(raw,today),"security_state":row["security_state"],"report_close_history":report_close_history(candles),"id":row["id"],"symbol":row["symbol"],"exchange":row["exchange"],"isin":instrument["isin"],"as_of":row["as_of"]})
             if include_horizons and batch_loaded:
                 pressure=price_volume_pressure.analyze(candles, calendar_verified=expected_session is not None)
                 row["price_volume_pressure"]=pressure
