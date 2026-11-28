@@ -147,6 +147,7 @@ def stock_projection(snapshot,instant=None):
                 if (r.get("adjustment_verified_for_screen") is not True or plan.get("qualified") is not False
                     or plan.get("method")!="STRATEGY_RISK_GEOMETRY_V1" or plan.get("strategy") not in r["strategies"]
                     or not all(num(plan.get(k),.01,1e9) for k in ("reference","stop_scenario","target_scenario"))
+                    or not num(plan.get("reward_risk"),0,1e9) or not named(plan.get("notice"))
                     or not plan["stop_scenario"]<plan["reference"]<plan["target_scenario"]
                     or abs(plan["reference"]-r["close"])>.0051):plan=None
                 out.append({**{k:r[k] for k in ("id","isin","symbol","exchange","as_of","close")},
