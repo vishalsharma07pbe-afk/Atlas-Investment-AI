@@ -45,3 +45,22 @@ class AnalystTest(unittest.TestCase):
         self.assertEqual(a.analyze(s,TODAY)["funds"],[])
         s["enabled"]=False
         self.assertEqual(a.analyze(s,TODAY)["status"],"DISABLED")
+
+    def test_alternate_strategy_plan_requires_validated_geometry(self):
+        s=snapshot()
+        row={"id":1,"isin":"INE002A01018","symbol":"RELIANCE","exchange":"NSE","as_of":"2026-11-27",
+             "close":100,"qualified":False,"adjustment_verified_for_screen":True,
+             "strategies":["TURTLE_LONG_BREAKOUT"],"families":["MOMENTUM"],"observed_facts":{},
+             "price_plan":{"reference":100,"stop_scenario":96,"target_scenario":108,"reward_risk":2,
+                           "method":"STRATEGY_RISK_GEOMETRY_V1","strategy":"TURTLE_LONG_BREAKOUT",
+                           "qualified":False,"notice":"Illustrative scenario"}}
+        s["multi_strategy"]={"methodology":"MULTI-STRATEGY-1","items":[row]}
+        pick=a.analyze(s,TODAY)["stocks"][0]
+        self.assertEqual(pick["tier"],"MULTI_STRATEGY_RESEARCH")
+        self.assertEqual(pick["price_plan"]["stop_scenario"],96)
+        self.assertFalse(pick["qualified"])
+        row["adjustment_verified_for_screen"]=False
+        self.assertIsNone(a.analyze(s,TODAY)["stocks"][0]["price_plan"])
+        row["adjustment_verified_for_screen"]=True
+        row["price_plan"]["reward_risk"]=None
+        self.assertIsNone(a.analyze(s,TODAY)["stocks"][0]["price_plan"])
