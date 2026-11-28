@@ -69,3 +69,20 @@ python3 scripts/local_research_acceptance.py --investment-analyst-audit --requir
 ```
 
 The existing 500-observation history API and incomplete historical constituent coverage, absence of an automatic authorized PEAD consensus source and insufficient mature prospective evidence remain qualification blockers. Local account authorization and market-data verification cannot be substituted by CI. Update this checklist only against observed evidence.
+
+## Integrated implementation in PR #307 (code-level only)
+
+The six workstreams are advanced together, not marked complete independently.
+
+| Module | Implemented in consolidated branch | Still required for full acceptance |
+|---|---|---|
+| 1 | Strategy-specific price risk geometry; exact-date momentum cohort; pump guard; visible Piotroski component and trend/contraction diagnostics | Complete canonical financial/ownership/expectation coverage, actual independent opportunity output, full portfolio risk/pyramiding |
+| 2 | Ordered role-specific reviewer routing, actual provider IDs, bounded anonymous official-document retrieval, content digests and HTML exact identity mentions; conditional evidence thesis | Authorized live responses, independently verified dated financial extraction, contradiction resolution across documents, source completeness |
+| 3 | Reuse frozen quarterly persistence on alternate stocks, explicit ±10 percentage point bear/base/bull revenue and profit amounts and margins, existing cash sensitivity projection | Actual forecasts, verified capex/FCF, share basis, EPS, sector-appropriate fair value, calibration |
+| 4 | Exact-scheme, dated TER evidence and conflict withholding in analyst cards; historical drawdown and volatility | Live authorized TER mapping across all categories, manager/mandate/exit-load/portfolio/tax evidence and verified fund growth qualification |
+| 5 | Owner-local asset-class stress scenarios, concentration diagnostics and 0.5% fresh-capital stop-risk cap in existing planner | Full owner evidence, underlying fund exposure, portfolio rebalancing and actual tax/cost calculations |
+| 6 | Causal next-open single-instrument channel/stop experiment, retained gap losses, cache refresh and aggregate observations | Full portfolio walk-forward, point-in-time universe, long adjusted history, total-return benchmark, mature paper outcomes |
+
+Use the existing acceptance command with the additional option `--require-advanced-engine-results`. This reports actual stock thesis/price/quarterly scenario counts, matching TER in all three categories, four actual provider review IDs, official-document retrieval receipt, channel experiments and owner-local stress observation. It returns nonzero if any expected integrated output is missing. It deliberately cannot certify the canonical strategies or real investment performance. An empty portfolio is explicitly not applicable for stress testing.
+
+Current fixed shocks, quarterly shifts and risk caps are illustrative engineering assumptions. All external document retrieval is permission-gated and bounded; retrieval does not prove a document's claims. Do not enable extra subscriptions or send private holdings to external providers.
