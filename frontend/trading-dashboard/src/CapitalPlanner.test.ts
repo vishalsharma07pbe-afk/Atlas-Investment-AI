@@ -2,7 +2,7 @@ import {describe,it,expect} from "vitest";
 import {makeCapitalPlan,type OwnerReview} from "./CapitalPlanner";
 import type {InvestmentAnalysis} from "./InvestmentAnalystPanel";
 const now=Date.parse("2026-11-28T05:00:00Z");
-const stock={id:1,isin:"INE002A01018",symbol:"RELIANCE",exchange:"NSE",as_of:"2026-11-27",close:100,tier:"ADJUSTED_JOINT",horizon:"ELITE",score:80,reasons:[],limitations:[],qualified:false as const,action:"RESEARCH_FOR_ENTRY",risk:"MEDIUM"};
+const stock={id:1,isin:"INE002A01018",symbol:"RELIANCE",exchange:"NSE",as_of:"2026-11-27",close:100,tier:"ADJUSTED_JOINT",horizon:"ELITE",score:80,reasons:[],limitations:[],qualified:false as const,action:"RESEARCH_FOR_ENTRY",risk:"MEDIUM",price_plan:{reference:100,stop_scenario:96,target_scenario:108,reward_risk:2,notice:"Scenario only"}};
 const fund={identifier:"123456",name:"Fund",nav_date:"2026-11-27",score:80,tier:"DRIVER_SUPPORTED",action:"COMPARE_FOR_SIP",relative_risk:"AT_OR_BELOW_PEER_MEDIAN_DOWNSIDE",reasons:[],limitations:[],qualified:false as const};
 const report:InvestmentAnalysis={methodology:"INVESTMENT-ANALYST-1",status:"RESEARCH_AVAILABLE",research_date:"2026-11-28",stocks:[stock],funds:[{category:"LARGE_CAP",items:[fund]}],next_steps:[],notice:"Research"};
 const empty:OwnerReview={generated_at:"2026-11-28T04:59:00Z",holding_count:0,holdings:[],investment_analysis:{scope:"OWNER_LOCAL",recent_weight_coverage:false}};
@@ -26,4 +26,12 @@ describe("local conditional capital planner",()=>{
   expect(p.allocations.every(a=>!a.identity.startsWith("S:"))).toBe(true);
  });
  it("does not allocate on stale review",()=>expect(makeCapitalPlan(report,empty,100000,"HIGH",60,now+700000).planned).toBe(0));
+});
+
+it("requires a stock risk scenario and caps a high-stop-risk position",()=>{
+ const risky={...stock,price_plan:{...stock.price_plan,stop_scenario:90}};
+ const p=makeCapitalPlan({...report,stocks:[risky]},empty,100000,"HIGH",60,now);
+ expect(p.allocations.find(a=>a.identity==="S:"+stock.isin)?.amount).toBe(5000);
+ const missing={...stock,price_plan:undefined};
+ expect(makeCapitalPlan({...report,stocks:[missing]},empty,100000,"HIGH",60,now).allocations.every(a=>!a.identity.startsWith("S:"))).toBe(true);
 });
