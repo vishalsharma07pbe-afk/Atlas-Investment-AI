@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from urllib.request import Request,urlopen
 from urllib.error import HTTPError,URLError
 from fastapi import HTTPException
@@ -7,6 +8,8 @@ from .config import settings
 from .fund_categories import CATEGORIES
 
 def _internal_path(path:str)->str:
+    if path.startswith("/api/v1/market-data/discovery-universe-page?"):
+        return "/api/v1/internal/feed/discovery-universe-page?"+path.split("?",1)[1]
     if path.startswith("/api/v1/market-data/discovery-universe?"):
         return "/api/v1/internal/feed/discovery-universe?"+path.split("?",1)[1]
     if path.startswith("/api/v1/market-data/discovery-candles?"):
@@ -15,12 +18,16 @@ def _internal_path(path:str)->str:
         return "/api/v1/internal/feed/instruments/"+path.removeprefix("/api/v1/market-data/instruments/")
     if path.startswith("/api/v1/instruments"):
         return "/api/v1/internal/feed/instruments"+path.removeprefix("/api/v1/instruments")
+    if re.fullmatch(r"/api/v1/mutual-funds/outcome-window\?schemeCode=[1-9][0-9]{0,8}&from=\d{4}-\d{2}-\d{2}&through=\d{4}-\d{2}-\d{2}",path):
+        return "/api/v1/internal/feed/fund-outcome-window?"+path.split("?",1)[1]
     if path.startswith("/api/v1/mutual-funds/historical-watch?category="):
         category = path.removeprefix("/api/v1/mutual-funds/historical-watch?category=")
         if category in CATEGORIES:
             return "/api/v1/internal/feed/fund-history?category="+category
     if path == "/api/v1/portfolio-research-identities":
         return "/api/v1/internal/feed/portfolio-research-identities"
+    if path == "/api/v1/market-data/sector-benchmarks":
+        return "/api/v1/internal/feed/sector-benchmarks"
     if path == "/api/v1/market-data/strategy-benchmark":
         return "/api/v1/internal/feed/strategy-benchmark"
     if path in ("/api/v1/market-data/strategy-calendar?exchange=NSE","/api/v1/market-data/strategy-calendar?exchange=BSE"):

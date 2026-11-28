@@ -9,7 +9,7 @@ import json
 from .market_client import backend_json
 from .replay_evidence import session_audit
 from .strategy_validation import REGIME_LOOKBACK,REGIME_THRESHOLD
-from . import regime_features
+from . import regime_features, relative_strength
 
 IST=ZoneInfo("Asia/Kolkata")
 HIGH_VOL=regime_features.HIGH_VOL
@@ -50,6 +50,7 @@ def analyze(benchmark,calendar,today):
             return result
         return {"status":"OBSERVED_BENCHMARK_REGIME",**features,
                 "as_of":dates[-1].isoformat(),"previous_session":dates[-2].isoformat(),"first_session":dates[0].isoformat(),
+                "relative_strength_windows":relative_strength.benchmark_windows(indexed,calendar,today),
                 "calendar_checked_on":today.isoformat(),"last_five_sessions":[d.isoformat() for d in reversed(dates[-5:])],"notice":NOTICE}
     except (ValueError,TypeError,KeyError,AttributeError,OverflowError,ZeroDivisionError):
         return result
@@ -98,7 +99,7 @@ def _breadth(snapshot,report,today):
     fields=("advancing","declining","unchanged")
     values=[pairs[0].get(k) for k in fields]
     selected=coverage.get("selected_count")
-    if any(type(v) is not int or v<0 for v in values) or type(selected) is not int or not 1<=selected<=200:
+    if any(type(v) is not int or v<0 for v in values) or type(selected) is not int or not 1<=selected<=20000:
         return result
     total=sum(values)
     if not 0<total<=selected:

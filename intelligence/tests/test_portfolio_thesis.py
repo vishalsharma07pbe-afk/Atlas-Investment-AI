@@ -143,3 +143,49 @@ class PortfolioThesisTests(unittest.TestCase):
             self.assertEqual([tuple(r) for r in rows],[(identity,"AVAILABLE")])
         with public._connect() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM automatic_company_evidence").fetchone()[0],3)
+
+    def test_public_filings_reused_by_exact_isin_without_public_mutation(self):
+        from app import autonomous_research as public, nse_pledge_filings as pledge, nse_financial_filings as financial
+        import json
+        from datetime import date
+        now=datetime(2026,11,27,4,tzinfo=timezone.utc)
+        isin=self.rows[0]["isin"]
+        period="2026-09-30"
+        purl="https://nsearchives.nseindia.com/corporate/ixbrl/SHP_SDD_123_17102026230154_iXBRL_WEB.html"
+        furl="https://nsearchives.nseindia.com/corporate/ixbrl/INTEGRATED_FILING_INDAS_209923_04112026211009_iXBRL_WEB.html"
+        with public._connect() as db:
+            pledge._table(db);financial._table(db)
+            for identity,stamp in ((isin,now),("INE009A01021",now-timedelta(days=8)),("INE000A01019",now)):
+                evidence={"isin":identity,"period":period,"source_url":purl,"pledged_shares":20,"total_encumbered_shares":30}
+                db.execute("INSERT INTO nse_pledge_filings VALUES(?,?,?,?,?)",(identity,stamp.isoformat(),stamp.isoformat(),"AVAILABLE",json.dumps(evidence)))
+            evidence={"isin":isin,"period":period,"source_url":furl,"quarter":{"revenue":100},"audit_opinion":"QUALIFIED_OPINION",
+                      "cash_flow_ytd":{"net_profit_cr":20,"operating_cash_flow_cr":-10}}
+            db.execute("INSERT INTO nse_financial_filings VALUES(?,?,?,?,?,?,?)",(isin,period,furl,now.isoformat(),now.isoformat(),"AVAILABLE",json.dumps(evidence)))
+            before=db.execute("SELECT * FROM nse_pledge_filings ORDER BY isin").fetchall()
+        rows=[{"isin":isin,"exchange":"NSE"},{"isin":isin,"exchange":"BSE"},{"isin":"INE009A01021","exchange":"NSE"}]
+        with patch.object(pledge,"permitted",return_value=True),patch.object(financial,"permitted",return_value=True), \
+             patch.object(financial,"read_manifest",return_value={isin:(date.fromisoformat(period),furl)}), \
+             patch.object(company,"attach"),patch.object(thesis.news,"attach"),patch.object(thesis,"_local_enabled",return_value=False):
+            result=thesis.read(rows,instant=now)["items"]
+            for venue in ("NSE","BSE"):
+                g=result[venue+":"+isin]["governance_review"]
+                self.assertIn("ISSUER_REPORTED_PROMOTER_PLEDGE_REVIEW",g["findings"])
+                self.assertIn("ISSUER_REPORTED_AUDIT_QUALIFICATION_REVIEW",g["findings"])
+                self.assertFalse(g["clearance_verified"])
+            g=result["NSE:INE009A01021"]["governance_review"]
+            self.assertFalse(g["findings"])
+            self.assertFalse(g["clearance_verified"])
+            self.assertNotIn("NSE:INE000A01019",result)
+        with public._connect() as db:
+            self.assertEqual([tuple(r) for r in db.execute("SELECT * FROM nse_pledge_filings ORDER BY isin")],[tuple(r) for r in before])
+            self.assertEqual(db.execute("SELECT count(*) FROM nse_financial_filings").fetchone()[0],1)
+
+    def test_public_filing_missing_tables_do_not_create_public_records(self):
+        from app import autonomous_research as public, nse_pledge_filings as pledge, nse_financial_filings as financial
+        with public._connect() as db:
+            pass
+        snapshot=thesis.selection(self.rows)
+        with patch.object(pledge,"permitted",return_value=True),patch.object(financial,"permitted",return_value=True):
+            thesis._attach_public_filings(snapshot,datetime.now(timezone.utc))
+        with public._connect() as db:
+            self.assertFalse(db.execute("SELECT 1 FROM sqlite_master WHERE name IN ('nse_pledge_filings','nse_financial_filings')").fetchone())

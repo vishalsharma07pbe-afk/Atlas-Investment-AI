@@ -1,4 +1,8 @@
-fastapi==0.115.12
+fastapi==0.165.0
+starlette==1.10.0
+anyio==4.16.0
+certifi==2026.11.20
+idna==3.20
 uvicorn[standard]==0.34.2
 pydantic==2.11.4
 websockets==15.0.1

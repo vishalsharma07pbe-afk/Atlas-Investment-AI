@@ -20,3 +20,6 @@ data/entitlements/sources.json
 
 # Private local research notes, including per-account journals and legacy files.
 data/research-journal/
+
+# Local public filing link manifest; no local source input committed.
+data/filing-reports/

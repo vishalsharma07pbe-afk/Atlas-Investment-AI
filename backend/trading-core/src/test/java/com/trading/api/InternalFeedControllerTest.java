@@ -54,6 +54,19 @@ class InternalFeedControllerTest {
     verifyNoInteractions(jdbc);
   }
 
+  @Test void pagedDiscoveryReadsAnnualDepthWithoutChangingLegacyBatchLimit() {
+    JdbcTemplate jdbc=mock(JdbcTemplate.class);
+    HttpServletRequest request=mock(HttpServletRequest.class);
+    var api=controller(jdbc,"service-secret");
+    when(request.getHeader("X-Atlas-Service-Token")).thenReturn("service-secret");
+    String cutoff=java.time.Instant.now().minusSeconds(1).toString();
+    var stamp=java.sql.Timestamp.from(java.time.Instant.parse(cutoff));
+    api.discoveryCandles(request,"NSE",List.of(7L));
+    verify(jdbc).queryForList(contains("ORDER BY b.candle_time DESC LIMIT 250"),eq("NSE"),eq(7L));
+    api.discoveryCandles(request,"NSE",List.of(7L),cutoff);
+    verify(jdbc).queryForList(argThat(sql->sql.contains("ORDER BY b.candle_time DESC LIMIT 253")&&sql.contains("b.received_at<=?")),eq(stamp),eq("NSE"),eq(7L));
+  }
+
   @Test void strategyBenchmarkRequiresCredentialAndUsesFixedPublicIndex() {
     JdbcTemplate jdbc=mock(JdbcTemplate.class);
     HttpServletRequest request=mock(HttpServletRequest.class);
@@ -107,5 +120,57 @@ class InternalFeedControllerTest {
     assertThat(controller.candles(request,7,250)).containsEntry("count",21);
     verify(instruments).list(20,null,"NSE");
     verify(marketData).candles(7,250);
+  }
+
+  @Test void capPublicationRequiresServiceCredentialAndRightsAndCompleteDatedRows(){
+    JdbcTemplate jdbc=mock(JdbcTemplate.class);
+    HttpServletRequest request=mock(HttpServletRequest.class);
+    var api=controller(jdbc,"service-secret");
+    var body=new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode();
+    assertThatThrownBy(()->api.amfiEquityCaps(request,body)).isInstanceOf(ResponseStatusException.class);
+    when(request.getHeader("X-Atlas-Service-Token")).thenReturn("service-secret");
+    assertThatThrownBy(()->api.amfiEquityCaps(request,body)).isInstanceOf(ResponseStatusException.class);
+    api.capUsageRights=true;
+    assertThatThrownBy(()->api.amfiEquityCaps(request,body)).isInstanceOf(ResponseStatusException.class);
+    verifyNoInteractions(jdbc);
+  }
+
+  @Test void capPublicationValidatesAllRowsBeforeReplacingAndRejectsOlderEvidence(){
+    JdbcTemplate jdbc=mock(JdbcTemplate.class);
+    HttpServletRequest request=mock(HttpServletRequest.class);
+    when(request.getHeader("X-Atlas-Service-Token")).thenReturn("service-secret");
+    var api=controller(jdbc,"service-secret");api.capUsageRights=true;
+    var today=java.time.LocalDate.now(com.trading.market.MarketCalendarService.IST);
+    var period=java.time.LocalDate.of(today.getYear(),6,30);
+    if(!period.isBefore(today))period=java.time.LocalDate.of(today.getYear()-1,12,31);
+    if(today.getMonthValue()==12&&today.getDayOfMonth()==31)period=java.time.LocalDate.of(today.getYear(),6,30);
+    var body=new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode().put("as_of",period.toString());
+    var items=body.putArray("items");
+    for(int i=0;i<251;i++)items.addObject().put("isin",String.format(java.util.Locale.ROOT,"INE000A%05d",i+1))
+      .put("category",i<100?"LARGE_CAP":i<250?"MID_CAP":"SMALL_CAP").put("average_cap_cr",2000-i);
+    when(jdbc.queryForObject(contains("as_of>?"),eq(Boolean.class),eq(period))).thenReturn(false,true);
+    assertThat(api.amfiEquityCaps(request,body)).containsEntry("count",251).containsEntry("as_of",period.toString());
+    verify(jdbc).update("DELETE FROM discovery_amfi_cap");
+    verify(jdbc).batchUpdate(eq("INSERT INTO discovery_amfi_cap(isin,category,average_cap_cr,as_of) VALUES (?,?,?,?)"),org.mockito.ArgumentMatchers.<List<Object[]>>any());
+    assertThatThrownBy(()->api.amfiEquityCaps(request,body)).isInstanceOf(ResponseStatusException.class);
+    verify(jdbc,times(1)).update("DELETE FROM discovery_amfi_cap");
+    items.add(items.get(0));
+    assertThatThrownBy(()->api.amfiEquityCaps(request,body)).isInstanceOf(ResponseStatusException.class);
+    verify(jdbc,times(1)).update("DELETE FROM discovery_amfi_cap");
+  }
+
+  @Test void discoveryPagesRequireCredentialKnownVenueAndNonnegativeCursor(){
+    JdbcTemplate jdbc=mock(JdbcTemplate.class);
+    HttpServletRequest request=mock(HttpServletRequest.class);
+    var api=controller(jdbc,"service-secret");
+    String cutoff=java.time.Instant.now().minusSeconds(1).toString();
+    assertThatThrownBy(()->api.discoveryUniversePage(request,"NSE",0,cutoff)).isInstanceOf(ResponseStatusException.class);
+    when(request.getHeader("X-Atlas-Service-Token")).thenReturn("service-secret");
+    assertThatThrownBy(()->api.discoveryUniversePage(request,"OTHER",0,cutoff)).isInstanceOf(ResponseStatusException.class);
+    assertThatThrownBy(()->api.discoveryUniversePage(request,"NSE",-1,cutoff)).isInstanceOf(ResponseStatusException.class);
+    assertThatThrownBy(()->api.discoveryUniversePage(request,"NSE",0,"invalid")).isInstanceOf(ResponseStatusException.class);
+    verifyNoInteractions(jdbc);
+    when(jdbc.queryForList(contains("WHERE id>? ORDER BY id LIMIT 200"),eq("NSE"),eq(java.sql.Timestamp.from(java.time.Instant.parse(cutoff))),eq("NSE"),eq(200L))).thenReturn(List.of(Map.of("id",201L)));
+    assertThat(api.discoveryUniversePage(request,"NSE",200,cutoff)).hasSize(1);
   }
 }

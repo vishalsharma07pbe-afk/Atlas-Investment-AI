@@ -16,12 +16,12 @@ from .financial_trends import summarize as financial_trends, earnings_evidence
 from .fundamental_quality import summarize as fundamental_quality
 from .financial_strength import summarize as financial_strength, DETAIL_NAMES
 from .earnings_quality import summarize as earnings_quality, INCOME_NAMES
-from . import peer_research, shareholding_research
+from . import peer_research, shareholding_research, quarterly_financials
 from .corporate_action_normalization import normalize_reported_actions
 
 ISIN = re.compile(r"^IN[A-Z0-9]{10}$")
 HORIZONS = ("LONG_TERM", "SHORT_TERM", "SWING")
-SECTIONS = ("profile","ratios","income_statement","balance_sheet","cash_flow","shareholding","corporate_actions","competitors")
+SECTIONS = ("profile","ratios","income_statement","balance_sheet","cash_flow","shareholding","corporate_actions","competitors","quarterly_income")
 NORMALIZATION_VERSION=2
 ANNUAL_HISTORY_CACHE_DAYS=7
 ANNUAL_SECTIONS=("income_statement","balance_sheet","cash_flow")
@@ -47,6 +47,22 @@ def identify(snapshot):
                     yield item,isin
 
 
+def identify_priority(snapshot):
+    yield from identify(snapshot)
+    # Deepen the actual Elite candidates without expanding report attachment.
+    for section in snapshot.get("sections",[]):
+        if section.get("status")!="READY" or section.get("section") not in ("NSE","BSE"):
+            continue
+        result=section.get("result") or {}
+        coverage=result.get("discovery_coverage") or {}
+        expected=coverage.get("expected_session")
+        if coverage.get("calendar_status")=="PUBLISHED_SESSION" and expected:
+            for item in result.get("steady_momentum_candidates",[]):
+                isin=item.get("isin")
+                if isinstance(isin,str) and ISIN.fullmatch(isin) and item.get("exchange")==section["section"] and item.get("as_of")==expected and item.get("security_state") not in ("PCA","SME","RELIST","IPO","SUSPENDED_REPORTED"):
+                    yield item,isin
+
+
 def identify_sample(snapshot,instant):
     """Only validated completed public histories from the bounded discovery sample."""
     today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
@@ -56,10 +72,10 @@ def identify_sample(snapshot,instant):
             continue
         result=section.get("result") or {}
         rows=result.get("company_research_universe")
-        if not isinstance(rows,list) or len(rows)>200:
+        if not isinstance(rows,list) or len(rows)>20000:
             continue
         count=result.get("eligible_count")
-        if type(count) is not int or not len(rows)<=count<=200:
+        if type(count) is not int or not len(rows)<=count<=20000:
             continue
         ids=[r.get("id") for r in rows if isinstance(r,dict)]
         if any(type(i) is not int or i<=0 for i in ids) or len(ids)!=len(rows) or len(set(ids))!=len(ids):
@@ -172,6 +188,8 @@ def normalize(report, isin, instant):
                     data.append({"name":text(r["name"]),"company_value":company,"sector_value":sector,
                                  "unit":r.get("unit") if r.get("unit") in ("PERCENT","RATIO") else "UNKNOWN",
                                  "sector_unit":r.get("sector_unit") if r.get("sector_unit") in ("PERCENT","RATIO") else "UNKNOWN"})
+        elif key=="quarterly_income":
+            data=quarterly_financials.normalize(raw,instant.astimezone(ZoneInfo("Asia/Kolkata")).date())
         elif key in ("income_statement","cash_flow") and isinstance(raw,dict):
             rows=history(raw.get(key))
             if rows:
@@ -275,7 +293,7 @@ def refresh(snapshot, connect, loader=company_research, instant=None, *, explici
 def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None):
     stamp=instant.isoformat()
     candidates={}
-    for item,isin in identify(snapshot):
+    for item,isin in identify_priority(snapshot):
         # Exact public discovery venue/ISIN; no name matching.
         if isin not in candidates or item["exchange"]=="NSE":
             candidates[isin]=item["exchange"]+"_EQ|"+isin
@@ -369,7 +387,7 @@ def acquisition_status(snapshot,connect,instant):
     import sqlite3
     from collections import Counter
     sample={isin for _,isin in identify_sample(snapshot,instant)}
-    primary={isin for _,isin in identify(snapshot)}
+    primary={isin for _,isin in identify_priority(snapshot)}
     stamp=instant.isoformat()
     try:
         with closing(connect()) as db:
@@ -509,12 +527,17 @@ def cached_action_reports(connect,identities,instant):
         return {}
 
 
-def _enrich(report,today):
+def _enrich(report,today,instant=None):
     report["financial_trends"]=financial_trends(report,today.year,as_of=today)
+    report["quarterly_financials"]=quarterly_financials.summarize(report,today)
     report["reported_earnings"]=earnings_evidence(report,today)
     report["fundamental_quality"]=fundamental_quality(report,today.year)
     report["financial_strength"]=financial_strength(report,today)
     report["earnings_quality"]=earnings_quality(report,today)
+    from . import valuation_scenarios
+    report.pop("valuation_sensitivity",None)
+    if instant is not None:
+        report["valuation_sensitivity"]=valuation_scenarios.summarize(report,instant)
     report["ownership_research"]=shareholding_research.summarize(report,today)
     return report
 
@@ -576,7 +599,7 @@ def attach(snapshot,connect,instant=None):
         try:
             report=json.loads(row["payload"])
             if report.get("isin")==isin and peer_research.fresh_sector(report,instant):
-                cohort[isin]=(key,_enrich(report,today))
+                cohort[isin]=(key,_enrich(report,today,instant))
         except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
             continue
     # Enrich only primary identities and their explicitly selected one-hop peers.
@@ -589,15 +612,17 @@ def attach(snapshot,connect,instant=None):
         if row and row["payload"]:
             try:
                 report=json.loads(row["payload"])
-                if report.get("isin")==isin:
-                    reports[isin]=_enrich(report,today)
+                stamp=datetime.fromisoformat(report["retrieved_at"])
+                if report.get("isin")==isin and stamp.tzinfo and instant-timedelta(hours=24)<=stamp<=instant:
+                    reports[isin]=_enrich(report,today,instant)
             except (ValueError,TypeError,AttributeError,KeyError,OverflowError):
                 continue
-    for item,isin in primary:
+    for isin in {isin for _,isin in primary}:
         report=reports.get(isin)
         if report:
             report["peer_research"]=peer_research.summarize(report,reports)
             report["industry_sample"]=peer_research.industry_sample(report,cohort,instant)
             report["sector_sample"]=peer_research.sector_sample(report,cohort,instant)
-            item["company_evidence"]=report
+    for item,isin in primary:
+        if isin in reports:item["company_evidence"]=reports[isin]
     return snapshot

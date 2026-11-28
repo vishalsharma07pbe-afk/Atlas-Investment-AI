@@ -1,7 +1,7 @@
 import os
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from unittest.mock import patch
 
 from app import autonomous_research as research
@@ -11,7 +11,7 @@ class AutonomousResearchTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.env = patch.dict(os.environ, {"ATLAS_RESEARCH_SNAPSHOT_DB": self.temp.name + "/research.sqlite3",
-            "ATLAS_AUTONOMOUS_RESEARCH_ENABLED": "true"})
+            "ATLAS_AUTONOMOUS_RESEARCH_ENABLED": "true","ATLAS_BROAD_DISCOVERY_ENABLED":"false"})
         self.env.start()
         self.addCleanup(self.temp.cleanup)
         self.addCleanup(self.env.stop)
@@ -49,6 +49,39 @@ class AutonomousResearchTests(unittest.TestCase):
         self.assertIsNone(research._fund_qualification_counts(None))
         self.assertEqual(research._fund_qualification_counts({"evaluated_count":0,"top_eligible_count":0,
             "growth_eligible_count":0,"excluded":[]})["top_missing_gate_counts"],{})
+
+    def test_growth_driver_projection_does_not_retain_raw_holdings_or_private_fields(self):
+        payload={key:None for key in ("category","coverage","top_performers","growth_outlook",
+            "recommendation_status","blockers","notice","filters","historical_coverage")}
+        payload.update(category="LARGE_CAP",top_performers=[],growth_outlook=[],
+            growth_driver_review={"methodology":"MF-QUARTERLY-DRIVERS-1","status":"MATCHED_HISTORICAL_DRIVERS",
+                "items":[{"identifier":"123456","name":"Example","portfolio_date":"2026-10-31","quarter":"2026-09-30",
+                    "nav_date":"2026-11-26","joint_coverage_weight_percent":80,"joint_growth_weight_percent":70,
+                    "review_weight_percent":10,"state":"POSITIVE_HISTORICAL_DRIVERS_ONLY","qualified":False,
+                    "forecast_return_percent":None,"raw_holdings":"DO_NOT_PERSIST"}]})
+        with patch.object(research,"dashboard",return_value=payload):
+            snapshot=research.fund_snapshot("LARGE_CAP")
+        self.assertNotIn("DO_NOT_PERSIST",str(snapshot))
+        self.assertEqual(snapshot["growth_driver_review"]["items"][0]["nav_date"],"2026-11-26")
+        self.assertTrue(research._published_evidence_current("LARGE_CAP",snapshot,date(2026,11,27)))
+        self.assertFalse(research._published_evidence_current("LARGE_CAP",snapshot,date(2026,12,5)))
+
+    def test_fund_shortlist_snapshot_is_bounded_and_dates_rechecked(self):
+        payload={key:None for key in ("category","coverage","top_performers","growth_outlook",
+            "recommendation_status","blockers","notice","filters","historical_coverage")}
+        payload.update(category="LARGE_CAP",top_performers=[],growth_outlook=[],
+            historical_coverage={"comparison_date":"2026-11-26","items":[]},
+            historical_research_shortlist={"methodology":"MF-MATCHED-PEER-1","category":"LARGE_CAP","last_date":"2026-11-26",
+                "items":[{"identifier":"123456","name":"Fund","nav_date":"2026-11-26","score":75,"qualified":False,
+                          "status":"HISTORICAL_RESEARCH_ONLY","private_marker":"DO_NOT_PERSIST"}]})
+        with patch.object(research,"dashboard",return_value=payload):
+            snapshot=research.fund_snapshot("LARGE_CAP")
+        self.assertNotIn("DO_NOT_PERSIST",str(snapshot))
+        self.assertEqual(len(snapshot["historical_research_shortlist"]["items"]),1)
+        self.assertTrue(research._published_evidence_current("LARGE_CAP",snapshot,date(2026,11,27)))
+        self.assertFalse(research._published_evidence_current("LARGE_CAP",snapshot,date(2026,12,4)))
+        snapshot["historical_research_shortlist"]["items"][0]["qualified"]=True
+        self.assertFalse(research._published_evidence_current("LARGE_CAP",snapshot,date(2026,11,27)))
 
     def test_failure_retains_last_good_but_marks_failed(self):
         research.refresh_once(lambda exchange: {"exchange": exchange}, lambda category: {"category": category})
@@ -197,3 +230,70 @@ class AutonomousResearchTests(unittest.TestCase):
         self.assertFalse(research._published_evidence_current("NSE",result,date(2026,11,25)))
         result["top_gainers"][0]["as_of"]="2026-11-22"
         self.assertFalse(research._published_evidence_current("NSE",result,date(2026,11,24)))
+
+    def test_broad_discovery_crosses_400_and_merges_exact_winners(self):
+        from urllib.parse import parse_qs,urlsplit
+        from datetime import date,timedelta
+        total=421
+        rows=[{"id":i,"exchange":"NSE","symbol":f"S{i:04d}","active":True,
+               "listing_status":"ACTIVE","series":"EQ","instrument_type":"EQ",
+               "recent_registry_count":total,"expected_session":"2026-11-23",
+               "expected_session_count":total} for i in range(1,total+1)]
+        calls=[]
+        def load(path):
+            args=parse_qs(urlsplit(path).query)
+            self.assertEqual(args.get("cutoff"),["2026-11-24T12:00:00+00:00"])
+            if "discovery-universe-page?" in path:
+                after=int(args["afterId"][0]);calls.append(after)
+                return [r for r in rows if r["id"]>after][:200]
+            ids=list(map(int,args["ids"]))
+            self.assertLessEqual(len(ids),20)
+            return [{"instrument_id":i,"trade_date":(date(2026,10,31)+timedelta(days=d)).isoformat(),
+              "open":100,"high":200,"low":90,"close":100 if d<23 else 100+i/10,
+              "volume":100000,"adjustment_status":"ADJUSTED","revision":1} for i in ids for d in range(24)]
+        with patch.dict(os.environ,{"ATLAS_BROAD_DISCOVERY_ENABLED":"true"}),patch.object(research,"now",return_value=datetime(2026,11,24,12,tzinfo=timezone.utc)),patch.object(research,"backend_json",side_effect=load):
+            result=research.market_snapshot("NSE")
+        self.assertEqual(calls,[0,200,400,421])
+        self.assertEqual(result["universe_size"],total)
+        self.assertEqual(result["eligible_count"],total)
+        self.assertTrue(result["discovery_coverage"]["scan_complete"])
+        self.assertEqual([r["id"] for r in result["top_gainers"]],[421,420,419,418,417])
+        self.assertEqual([r["id"] for r in result["top_losers"]],[1,2,3,4,5])
+        self.assertEqual([r["id"] for r in result["momentum_leaders"]],[421,420,419,418,417])
+        self.assertEqual(result["sample_breadth"]["pairs"][0]["advancing"],total)
+
+    def test_broad_annual_depth_and_legacy_bounds(self):
+        from datetime import date,timedelta
+        instant=datetime(2026,11,24,12,tzinfo=timezone.utc)
+        instruments=[{"id":i,"exchange":"NSE","symbol":f"T{i}","active":True,
+                      "listing_status":"ACTIVE","series":"EQ","instrument_type":"EQ",
+                      "recent_registry_count":2,"expected_session":"2026-11-23",
+                      "expected_session_count":2} for i in (1,2)]
+        last=date(2026,11,23)
+        def rows(depth):
+            return [{"instrument_id":i,"trade_date":(last-timedelta(days=n-1-d)).isoformat(),
+                     "open":100,"high":102,"low":99,"close":101,"volume":100000,
+                     "adjustment_status":"RAW_UNADJUSTED"}
+                    for i,n in ((1,depth),(2,250)) for d in range(n)]
+        with patch.object(research,"now",return_value=instant):
+            with patch.object(research,"backend_json",return_value=rows(253)):
+                result=research._market_page("NSE",instruments,instant.isoformat())
+                self.assertEqual(result["eligible_count"],2)
+                self.assertEqual(result["discovery_coverage"]["annual_depth_count"],1)
+                self.assertEqual(result["discovery_coverage"]["history_limit"],253)
+                with self.assertRaisesRegex(ValueError,"LIMIT_EXCEEDED|INVALID_DISCOVERY_HISTORY"):
+                    research._market_page("NSE",instruments)
+            with patch.object(research,"backend_json",return_value=rows(254)):
+                with self.assertRaisesRegex(ValueError,"LIMIT_EXCEEDED|INVALID_DISCOVERY_HISTORY"):
+                    research._market_page("NSE",instruments,instant.isoformat())
+
+    def test_broad_discovery_rejects_missing_duplicate_or_changed_pages(self):
+        from app import discovery_scan
+        instant=datetime(2026,11,24,12,tzinfo=timezone.utc)
+        row={"id":1,"recent_registry_count":2,"expected_session":"2026-11-23","expected_session_count":2}
+        part={"universe_size":1,"discovery_coverage":{"calendar_checked_on":"2026-11-24"}}
+        for pages,code in (([[row],[]],"INCOMPLETE"),([[row],[row]],"CURSOR"),
+              ([[row],[{**row,"id":2,"recent_registry_count":3}]],"CHANGED")):
+            with self.subTest(code=code),patch.object(research,"backend_json",side_effect=pages):
+                with self.assertRaisesRegex(ValueError,code):
+                    discovery_scan.scan("NSE",research.backend_json,lambda e,p,cutoff:part,lambda:instant)

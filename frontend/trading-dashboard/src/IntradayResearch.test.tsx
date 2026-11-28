@@ -24,3 +24,12 @@ it("keeps intraday qualification separate from current technical patterns",async
  expect(await screen.findByText(/0 qualified in reviewed sample/)).toBeTruthy();
  expect(screen.getByText(/1 conflicting companies/)).toBeTruthy();
 });
+
+it("shows the chosen research venue without claiming execution clearance",async()=>{
+ const row={id:1,symbol:"TEST",exchange:"BSE",bar_end:"2026-11-25T05:15:00Z",close:100,vwap_proxy:99,relative_volume:2,session_change_percent:1,mean_bar_range_percent:2,bar_count:6,
+ company_venue_context:{status:"PAIRED_QUOTE_LIQUIDITY_PREFERENCE",preferred_exchange:"BSE",representative_exchange:"BSE",observed_venues:["BSE","NSE"],venue_observations:[],notice:"No verified execution."}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({status:"RESEARCH_ONLY",eligible:2,examined:2,candidates:[row],warnings:[],notice:"Research only."})})));
+ render(<IntradayResearch/>);
+ expect(await screen.findByText("Exchange comparison · BSE + NSE")).toBeTruthy();
+ expect(screen.getByText(/Research venue: BSE/)).toBeTruthy();
+});

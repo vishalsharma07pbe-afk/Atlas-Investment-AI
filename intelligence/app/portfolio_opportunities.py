@@ -34,6 +34,17 @@ def project(snapshot, today):
         output["ready_sections"].append(name)
         result = section.get("result") or {}
         if name in ("NSE","BSE"):
+            from .sector_price_context import _point
+            coverage=result.get("discovery_coverage") or {}
+            universe=result.get("company_research_universe") or []
+            indexed={}
+            if (isinstance(universe,list) and len(universe)<=20000 and coverage.get("calendar_status")=="PUBLISHED_SESSION"
+                and coverage.get("calendar_checked_on")==today.isoformat()):
+                for row in universe:
+                    if not isinstance(row,dict):continue
+                    identity=row.get("isin")
+                    if not isinstance(identity,str):continue
+                    indexed[identity]=row if identity not in indexed else None
             for horizon in EQUITY_HORIZONS:
                 group = result.get("horizons", {}).get(horizon, {})
                 if group.get("status") != "TECHNICAL_WATCH_ONLY":
@@ -48,11 +59,21 @@ def project(snapshot, today):
                     company = item.get("company_evidence") or {}
                     profile = company.get("sections",{}).get("profile",{}).get("data") or {}
                     sector = profile.get("sector") if company.get("isin")==isin else None
+                    matched=None
+                    raw=indexed.get(isin)
+                    if (raw and name=="NSE" and raw.get("exchange")==name and type(raw.get("id")) is int
+                        and raw.get("id")==item.get("id") and raw.get("as_of")==item["as_of"]==coverage.get("expected_session")
+                        and raw.get("security_state") not in ("PCA","SME","RELIST","IPO","SUSPENDED_REPORTED")
+                        and item.get("adjustment_status")=="ADJUSTED"):
+                        point=_point((raw.get("comparative_price_windows") or {}).get("60"),item["as_of"])
+                        if point and point[0][3]=="UPSTOX":
+                            scope,value=point
+                            matched={"first_date":scope[0],"last_date":scope[1],"dates_digest":scope[2],"return_percent":value}
                     seen_equity.add(isin)
                     output["equities"].append({"isin":isin,"symbol":symbol,"exchange":name,"horizon":horizon,
                         "as_of":item["as_of"],"sector":sector[:180] if isinstance(sector,str) else None,
                         "adjustment_status":item.get("adjustment_status"),
-                        "blockers":group.get("blockers",[])[:10],"evidence_type":"TECHNICAL_WATCH_ONLY"})
+                        "blockers":group.get("blockers",[])[:10],"matched_60":matched,"evidence_type":"TECHNICAL_WATCH_ONLY"})
         else:
             history = result.get("historical_coverage") or {}
             if history.get("status") != "HISTORICAL_WATCH_ONLY":
@@ -65,10 +86,20 @@ def project(snapshot, today):
                     or not _number(item.get("cagr_3y_percent")) or not _number(item.get("drawdown_3y_percent"))
                     or not -100<=item["drawdown_3y_percent"]<=0):
                     continue
+                weekly=item.get("matched_weekly_comparison") or {}
+                matched=None
+                if (item.get("amfi_plan")=="DIRECT" and item.get("amfi_option")=="GROWTH"
+                    and isinstance(item.get("isin_growth"),str) and re.fullmatch(r"INF[A-Z0-9]{9}",item["isin_growth"])
+                    and weekly.get("methodology")=="MF-WEEKLY-MATCH-1" and weekly.get("anchor_count")==157
+                    and weekly.get("last_date")==item["nav_date"] and isinstance(weekly.get("date_digest"),str)
+                    and re.fullmatch(r"[a-f0-9]{64}",weekly["date_digest"])
+                    and all(_number(weekly.get(k)) for k in ("cagr_percent","drawdown_percent"))
+                    and -100<=weekly["drawdown_percent"]<=0):
+                    matched={k:weekly.get(k) for k in ("first_date","last_date","date_digest","cagr_percent","drawdown_percent")}
                 seen_fund.add(code)
                 output["funds"].append({"scheme_code":str(code),"name":title[:300],"category":name,
                     "as_of":item["nav_date"],"cagr_3y_percent":item["cagr_3y_percent"],
-                    "drawdown_3y_percent":item["drawdown_3y_percent"],
+                    "drawdown_3y_percent":item["drawdown_3y_percent"],"matched_weekly":matched,"isin_growth":item.get("isin_growth") if matched else None,
                     "evidence_type":"HISTORICAL_WATCH_ONLY"})
     if output["equities"] or output["funds"]:
         output["status"]="WATCH_EVIDENCE_AVAILABLE"

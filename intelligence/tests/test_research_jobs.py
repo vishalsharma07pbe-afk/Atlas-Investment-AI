@@ -64,6 +64,14 @@ class DurableResearchJobsTests(unittest.TestCase):
         jobs.finish(self.connect,job,token,self.clock+180,300,"PASS_COMPLETED")
         self.assertEqual(self.states(definitions)["A"]["consecutive_failures"],0)
 
+    def test_amfi_cap_missing_publication_has_bounded_slow_retry(self):
+        definitions={"AMFI_EQUITY_CAP":0}
+        job,token=jobs.claim(self.connect,definitions,self.clock)
+        self.assertTrue(jobs.finish(self.connect,job,token,self.clock,86400,"WAITING_EVIDENCE"))
+        self.assertEqual(self.states(definitions)[job]["status"],"WAITING_EVIDENCE")
+        self.assertIsNone(jobs.claim(self.connect,definitions,self.clock+21599))
+        self.assertEqual(jobs.claim(self.connect,definitions,self.clock+21600)[0],job)
+
     def test_scheduler_dispatch_failure_preserves_other_sections(self):
         def market(exchange):
             if exchange=="NSE":

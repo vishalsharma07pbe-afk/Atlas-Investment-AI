@@ -65,5 +65,33 @@ class IntegrationContracts(unittest.TestCase):
         simulation=main.daily_backtest(7,fast=10,slow=30,fee_bps=10,slippage_bps=5)
         self.assertEqual(simulation["status"],"INSUFFICIENT_HISTORY")
 
+class LifespanContracts(unittest.IsolatedAsyncioTestCase):
+    async def test_all_existing_services_are_started_and_stopped(self):
+        from unittest.mock import AsyncMock
+        from contextlib import ExitStack
+        events=[]
+        def callback(name):
+            async def invoke(): events.append(name)
+            return AsyncMock(side_effect=invoke)
+        with ExitStack() as patches:
+            patches.enter_context(patch.object(main,"start_opt_in_upstox_feed",callback("start_feed")))
+            patches.enter_context(patch.object(main,"stop_opt_in_upstox_feed",callback("stop_feed")))
+            for label,service in (("monitor",main.readiness_monitor),("nav",main.nav_refresh_scheduler),("research",main.research_scheduler)):
+                patches.enter_context(patch.object(service,"start",callback("start_"+label)))
+                patches.enter_context(patch.object(service,"stop",callback("stop_"+label)))
+            async with main.lifespan(main.app):
+                self.assertEqual(events,["start_feed","start_monitor","start_nav","start_research"])
+            self.assertEqual(events,["start_feed","start_monitor","start_nav","start_research","stop_research","stop_nav","stop_monitor","stop_feed"])
+
+    async def test_partial_startup_is_cleaned_up(self):
+        from unittest.mock import AsyncMock
+        with patch.object(main,"start_opt_in_upstox_feed",AsyncMock()),patch.object(main,"stop_opt_in_upstox_feed",AsyncMock()) as feed_stop,patch.object(main.readiness_monitor,"start",AsyncMock(side_effect=RuntimeError("fixture"))),patch.object(main.readiness_monitor,"stop",AsyncMock()) as monitor_stop:
+            with self.assertRaises(RuntimeError):
+                async with main.lifespan(main.app):
+                    self.fail("Failed startup must not yield")
+            monitor_stop.assert_awaited_once()
+            feed_stop.assert_awaited_once()
+
+
 if __name__=="__main__":
     unittest.main()

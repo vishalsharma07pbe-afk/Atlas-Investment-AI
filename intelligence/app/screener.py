@@ -7,7 +7,7 @@ from .horizon_research import evaluate, summarize, MIN_HISTORY as HORIZON_MIN_HI
 from .price_structure import analyze as price_structure
 from .corporate_action_normalization import preview as action_preview, reported_crossings
 from .replay_evidence import fingerprint, exact_isin
-from . import price_volume_pressure, steady_momentum
+from . import price_volume_pressure, steady_momentum, relative_strength, company_venues, sector_price_context, score_calibration, fip_research, bracket_research
 
 MIN_HISTORY = 21
 MAX_INSTRUMENTS = 20
@@ -20,11 +20,12 @@ def report_close_history(candles):
             "points": [{"date": c.date, "close": round(c.close, 4)} for c in candles[-30:]]}
 
 
-def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit=MAX_INSTRUMENTS, include_horizons=False, *, batch_loaded=False, expected_session=None, action_reports=None, instant=None):
+def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit=MAX_INSTRUMENTS, include_horizons=False, *, batch_loaded=False, expected_session=None, action_reports=None, instant=None, fip_dates=()):
     limit = max(1, min(200 if batch_loaded else 60, universe_limit))
     today = as_of or date.today()
     rows = []
     steady_candidates=[]
+    annual_depth_count=0
     horizon_evaluations = []
     breadth_pairs={}
     pressure_rows=[]
@@ -32,6 +33,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
     trap_eligible=0
     trap_rows=[]
     company_research_universe=[]
+    venue_observations={}
     replay_research_universe=[]
     action_previews=[]
     action_preview_count=0
@@ -43,7 +45,13 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
     if batch_loaded:
         skipped["RAW_CORPORATE_ACTION"] = 0
         skipped["SESSION_MISMATCH"] = 0
+        skipped["REPORTED_SUSPENSION"] = 0
     for instrument in instruments[:limit]:
+        if batch_loaded and exact_isin(instrument.get("isin")) and instrument.get("exchange") in ("NSE","BSE") and isinstance(instrument.get("symbol"),str):
+            venue_observations[instrument["id"]]=company_venues.observation(instrument)
+        if batch_loaded and instrument.get("security_state")=="SUSPENDED_REPORTED":
+            skipped["REPORTED_SUSPENSION"]+=1
+            continue
         try:
             payload = load_candles(instrument["id"])
             raw = payload["candles"]
@@ -116,11 +124,14 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                 "rsi_14": round(rsi, 2) if rsi is not None else None,
                 "adjustment_status": candles[-1].adjustment_status,
                 "data_age_calendar_days": age,
+                "security_state":instrument.get("security_state","UNKNOWN"),
             }
             if include_horizons and batch_loaded and expected_session is not None and exact_isin(instrument.get("isin")):
                 steady=steady_momentum.technical(candles,ind)
                 if steady:
-                    steady_candidates.append({**steady,"report_close_history":report_close_history(candles),"id":row["id"],"symbol":row["symbol"],"exchange":row["exchange"],"isin":instrument["isin"],"as_of":row["as_of"]})
+                    swing_structure=price_structure(candles,ind,"SWING",calendar_verified=True)
+                    strict_bracket=bracket_research.observe(raw,swing_structure,"SWING",fip_dates,today) if fip_dates else None
+                    steady_candidates.append({**steady,"bracket_research":strict_bracket,"historical_swing_structure":swing_structure,"adjusted_window_dates":relative_strength.stock_windows(raw,today),"security_state":row["security_state"],"report_close_history":report_close_history(candles),"id":row["id"],"symbol":row["symbol"],"exchange":row["exchange"],"isin":instrument["isin"],"as_of":row["as_of"]})
             if include_horizons and batch_loaded:
                 pressure=price_volume_pressure.analyze(candles, calendar_verified=expected_session is not None)
                 row["price_volume_pressure"]=pressure
@@ -137,18 +148,30 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                         pressure_rows.append({"id":row["id"],"symbol":row["symbol"],"exchange":row["exchange"],
                             "isin":instrument.get("isin") if exact_isin(instrument.get("isin")) else None,
                             "as_of":row["as_of"],"price_volume_pressure":pressure})
+            comparative={}
+            if batch_loaded and expected_session is not None and exact_isin(instrument.get("isin")) and row["adjustment_status"]=="ADJUSTED" and row["security_state"] not in sector_price_context.SPECIAL:
+                comparative=sector_price_context.windows(raw,today)
             if include_horizons:
                 evidence_hash=fingerprint(raw,today) if batch_loaded else None
                 evaluation=evaluate(candles, ind, row)
                 for state,candidate in evaluation.values():
                     if candidate is not None and evidence_hash is not None:
                         candidate["replay_evidence_hash"]=evidence_hash
+                paths=steady_momentum.window_observations(candles) if comparative and any(c is not None for _,c in evaluation.values()) else {}
                 for horizon, (state,candidate) in evaluation.items():
                     if candidate is not None:
                         candidate["price_structure"]=price_structure(candles,ind,horizon,
                             calendar_verified=batch_loaded and expected_session is not None)
                         if batch_loaded:
+                            if fip_dates:
+                                bracket=bracket_research.observe(raw,candidate["price_structure"],horizon,fip_dates,today)
+                                if bracket is not None:candidate["bracket_research"]=bracket
+                            candidate["security_state"]=row["security_state"]
                             candidate["report_close_history"]=report_close_history(candles)
+                            n=score_calibration.WINDOW.get(horizon)
+                            if n and str(n) in comparative:
+                                candidate["score_window"]=comparative[str(n)]
+                                candidate["score_risk_path"]=paths.get(str(n))
                 horizon_evaluations.append(evaluation)
                 for horizon,minimum in HORIZON_MIN_HISTORY.items():
                     if len(candles)>=minimum:
@@ -158,16 +181,34 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                 counts=breadth_pairs.setdefault(key,{"advancing":0,"declining":0,"unchanged":0})
                 counts["advancing" if close>previous else "declining" if close<previous else "unchanged"]+=1
             rows.append(row)
+            # Observation depth only, not verified continuity or adjusted evidence.
+            if batch_loaded and expected_session is not None and len(candles)>=253:
+                annual_depth_count+=1
             if batch_loaded and exact_isin(instrument.get("isin")):
                 identity={"id":row["id"],"exchange":row["exchange"],"isin":instrument["isin"],"as_of":row["as_of"]}
+                # Collect comparable returns for the broad valid sample, not
+                # only bullish candidates. Reuse the already loaded histories.
+                if expected_session is not None:
+                    identity["security_state"]=row["security_state"]
+                    if row["adjustment_status"]=="ADJUSTED" and row["security_state"] not in sector_price_context.SPECIAL:
+                        identity["comparative_price_windows"]=comparative
+                        if fip_dates and fip_dates[-1]==row["as_of"]:
+                            fip=fip_research.observe(raw,fip_dates,today)
+                            if fip is not None:
+                                # Only matching rows need the full metrics in
+                                # the broad snapshot; keep status/reasons for
+                                # coverage and strict Elite review of others.
+                                identity["fip_research"]=fip if fip["status"]=="FIP_PRICE_MATCH" else {k:v for k,v in fip.items() if k!="windows"}
                 company_research_universe.append(identity)
+                if instrument["id"] in venue_observations:
+                    venue_observations[instrument["id"]]=company_venues.observation(instrument,candles)
                 # A recent validated adjusted window is a scheduling hint only.
                 # The replay worker still validates its complete 500-row input.
                 if len(candles)>=250 and 1<=age<=4 and fingerprint(raw,today) is not None:
                     replay_research_universe.append(identity)
         except (KeyError, TypeError, ValueError, OverflowError, ZeroDivisionError):
             skipped["INVALID"] += 1
-    rows.sort(key=lambda x: (-x["change_1d_percent"], x["exchange"], x["symbol"]))
+    rows.sort(key=lambda x: (-x["change_1d_percent"], x["exchange"], x["symbol"],x["id"]))
     result = {
         "status": "RESEARCH_ONLY",
         "timeframe": "1d",
@@ -175,16 +216,18 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
         "eligible_count": len(rows),
         "skipped": skipped,
         "top_gainers": rows[:5],
-        "top_losers": sorted(rows, key=lambda x: (x["change_1d_percent"], x["exchange"], x["symbol"]))[:5],
+        "top_losers": sorted(rows, key=lambda x: (x["change_1d_percent"], x["exchange"], x["symbol"],x["id"]))[:5],
         "momentum_leaders": sorted(
             [x for x in rows if x["momentum_20d_percent"] is not None],
-            key=lambda x: (-x["momentum_20d_percent"], x["symbol"])
+            key=lambda x: (-x["momentum_20d_percent"], x["symbol"],x["id"])
         )[:5],
         "notice": f"Bounded daily sample of up to {limit} registry instruments; not a full-market top-five ranking, live feed, intraday signal or recommendation.",
     }
     if batch_loaded:
+        result["annual_depth_count"]=annual_depth_count
         result["steady_momentum_candidates"]=steady_candidates
         result["company_research_universe"]=company_research_universe
+        result["venue_observations"]=list(venue_observations.values())
         result["replay_research_universe"]=replay_research_universe
         result["sample_breadth"]={"as_of":expected_session.isoformat() if expected_session is not None else None,
             "adjustment_status":"ADJUSTED","pairs":[{"previous_session":k,**v} for k,v in sorted(breadth_pairs.items())],

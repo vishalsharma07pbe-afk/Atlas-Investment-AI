@@ -40,3 +40,15 @@ class OpportunityProjectionTests(unittest.TestCase):
         self.assertEqual(len(result["funds"]),1)
         self.assertEqual(result["funds"][0]["evidence_type"],"HISTORICAL_WATCH_ONLY")
         self.assertEqual(result["funds"][0]["scheme_code"],"123456")
+
+    def test_exact_public_price_window_projection(self):
+        item={**equity(),"id":1,"adjustment_status":"ADJUSTED"}
+        section=market([item])
+        section["result"]["discovery_coverage"]={"calendar_status":"PUBLISHED_SESSION","calendar_checked_on":TODAY.isoformat(),"expected_session":item["as_of"]}
+        raw={"isin":item["isin"],"id":1,"exchange":"NSE","as_of":item["as_of"],"security_state":"NORMAL",
+             "comparative_price_windows":{"60":{"first_date":"2026-08-25","last_date":item["as_of"],"dates_digest":"a"*64,"source_code":"UPSTOX","return_percent":8}}}
+        section["result"]["company_research_universe"]=[raw]
+        snapshot={"enabled":True,"sections":[section]}
+        self.assertEqual(project(snapshot,TODAY)["equities"][0]["matched_60"]["return_percent"],8)
+        section["result"]["company_research_universe"]=[raw,raw]
+        self.assertIsNone(project(snapshot,TODAY)["equities"][0]["matched_60"])

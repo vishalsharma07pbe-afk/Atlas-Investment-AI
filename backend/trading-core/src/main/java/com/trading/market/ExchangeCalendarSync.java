@@ -124,10 +124,11 @@ public class ExchangeCalendarSync {
  public void scheduled(){
   if(!enabled||!rights||!entitlement||token.isBlank()||OperatorFeedCooldown.blocked(jdbc))return;
   LocalDate today=LocalDate.now(MarketCalendarService.IST);
-  // Most recent dates first, then repair the preceding twelve months. A
+  // Most recent dates first, then repair enough calendar days for the
+  // 15-month discovery window plus the maximum seven-day prior-session lag. A
   // successful or unresolved date has a persisted cooldown; no hot retries.
   var due=jdbc.query("""
-    SELECT CAST(? AS date)-n AS day FROM generate_series(0,370) g(n)
+    SELECT CAST(? AS date)-n AS day FROM generate_series(0,470) g(n)
     LEFT JOIN exchange_calendar_attempts a ON a.session_date=CAST(? AS date)-n
     WHERE (a.next_attempt_at IS NULL OR a.next_attempt_at<=now())
       AND (SELECT count(DISTINCT e.code) FROM market_sessions s JOIN exchanges e ON e.id=s.exchange_id

@@ -3,6 +3,7 @@
 This module deliberately does not issue investment recommendations. Factor scores are
 user-/upstream-supplied observations, not independently verified market research.
 """
+from contextlib import asynccontextmanager, AsyncExitStack
 from datetime import date, datetime, timezone
 import sqlite3
 from enum import Enum
@@ -19,7 +20,21 @@ from .institutional_flows import FlowRequest
 from .news_events import NewsRequest
 from .research_alerts import AlertRequest
 
+@asynccontextmanager
+async def lifespan(application):
+    # Explicitly preserve the existing service lifecycle on modern Starlette.
+    # Register cleanup before each start, including partial startup failures.
+    async with AsyncExitStack() as cleanup:
+        cleanup.push_async_callback(stop_opt_in_upstox_feed)
+        await start_opt_in_upstox_feed()
+        for service in (readiness_monitor, nav_refresh_scheduler, research_scheduler):
+            cleanup.push_async_callback(service.stop)
+            await service.start()
+        yield
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="ATLAS Trading Intelligence Engine",
     version="0.2.0",
     description="Research-only evidence and risk assessment. No order execution.",
@@ -827,15 +842,15 @@ async def internal_live_instrument(instrument_id:int,request:FastAPIRequest):
 from .upstox_supervisor import feed_supervisor,startup_feed
 from .dynamic_feed_selection import dynamic_feed_selection
 
-@app.on_event("startup")
 async def start_opt_in_upstox_feed():
     await startup_feed()
     await dynamic_feed_selection.start()
 
-@app.on_event("shutdown")
 async def stop_opt_in_upstox_feed():
-    await dynamic_feed_selection.stop()
-    await feed_supervisor.stop()
+    try:
+        await dynamic_feed_selection.stop()
+    finally:
+        await feed_supervisor.stop()
 
 @app.post("/api/v1/intelligence/providers/upstox/subscriptions/reconcile")
 async def reconcile_upstox_portfolio_subscriptions():
@@ -1080,12 +1095,8 @@ def reliability_observe():
 
 # Optional, local-only scheduled observations. No external market data collection.
 from .reliability_monitor import monitor as readiness_monitor, observe_once as monitor_observe_once
-app.add_event_handler("startup", readiness_monitor.start)
-app.add_event_handler("shutdown", readiness_monitor.stop)
 
 from .nav_auto_refresh import scheduler as nav_refresh_scheduler
-app.add_event_handler("startup", nav_refresh_scheduler.start)
-app.add_event_handler("shutdown", nav_refresh_scheduler.stop)
 
 @app.get("/api/v1/intelligence/reliability/monitor")
 def reliability_monitor_status():
@@ -1227,8 +1238,6 @@ async def ai_analyze(symbol: str, observations: AllowlistedAnalysisPayload, requ
 
 # Autonomous research uses the existing validated screen and fund ranking engines.
 from .autonomous_research import scheduler as research_scheduler, read_snapshot as research_snapshot
-app.add_event_handler("startup", research_scheduler.start)
-app.add_event_handler("shutdown", research_scheduler.stop)
 
 @app.get("/api/v1/intelligence/research/overview")
 def autonomous_research_overview():

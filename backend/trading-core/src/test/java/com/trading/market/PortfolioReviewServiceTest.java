@@ -36,4 +36,22 @@ class PortfolioReviewServiceTest {
     assertNull(item.get("change_20_observations_percent"));
     assertNull(item.get("recent_peak_change_percent"));
   }
+  @Test void positiveCrossVenueRestrictionIsReviewEvidenceEvenWithMissingPrices(){
+    LocalDate date=LocalDate.of(2026,11,27);
+    var row=new HashMap<String,Object>();
+    row.put("id",1L);row.put("symbol","TEST");row.put("asset_type","EQUITY");row.put("exchange","NSE");
+    row.put("isin","INE002A01018");row.put("instrument_id",5L);
+    row.put("positive_security_observations","BSE SUSPENDED_REPORTED (observed 2026-11-20)");
+    var result=PortfolioReviewService.assess(List.of(row),date,Instant.EPOCH);
+    var item=(Map<?,?>)((List<?>)result.get("holdings")).getFirst();
+    assertEquals("REVIEW_REQUIRED",item.get("status"));
+    assertEquals(1,result.get("attention_count"));
+    assertTrue(item.get("findings").toString().contains("BSE SUSPENDED_REPORTED (observed 2026-11-20)"));
+    assertTrue(item.get("findings").toString().contains("another venue is not automatically restricted"));
+    row.remove("positive_security_observations");
+    var unknown=PortfolioReviewService.assess(List.of(row),date,Instant.EPOCH);
+    var missing=(Map<?,?>)((List<?>)unknown.get("holdings")).getFirst();
+    assertEquals("EVIDENCE_GAP",missing.get("status"));
+    assertTrue(missing.get("missing_evidence").toString().contains("restriction clearance is not established"));
+  }
 }

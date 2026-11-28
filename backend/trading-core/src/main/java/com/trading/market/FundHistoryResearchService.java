@@ -217,6 +217,25 @@ public class FundHistoryResearchService {
     return rows.size()==1?rows.getFirst():null;
   }
 
+  /** Bounded public AMFI observations for a frozen research watch, independent
+   * of current category rank. Exact current metadata, no account/holding read.
+   * Current identity does not certify historical scheme-event continuity.
+   */
+  public Map<String,Object> outcomeWindow(long code,LocalDate from,LocalDate through){
+    LocalDate today=LocalDate.now(MarketCalendarService.IST);
+    if(code<1||code>999999999||from==null||through==null||through.isBefore(from)||
+       through.isAfter(today)||from.isBefore(today.minusDays(400))||ChronoUnit.DAYS.between(from,through)>120)
+      throw new IllegalArgumentException("INVALID_OUTCOME_WINDOW");
+    var identity=holdingIdentity(code);
+    if(identity==null)return Map.of("status","IDENTITY_UNAVAILABLE");
+    var rows=jdbc.queryForList("""
+      SELECT nav_date::text AS nav_date,nav,source_code FROM mutual_fund_nav
+      WHERE scheme_code=? AND nav_date BETWEEN ? AND ? AND source_code='AMFI'
+      ORDER BY nav_date LIMIT 122
+      """,code,from,through);
+    return Map.of("status","LOCAL_AMFI_OBSERVATIONS","identity",identity,"rows",rows);
+  }
+
   /** Exact saved scheme only; not a category ranking or forward recommendation. */
   public Map<String,Object> holdingEvidence(long schemeCode){
     LocalDate today=LocalDate.now(MarketCalendarService.IST);
@@ -426,6 +445,23 @@ public class FundHistoryResearchService {
     result.put("negative_week_percent",round(100.0*negativeWeeks/n));
     result.put("rolling_windows",rolling);
     result.put("weekly_intervals",n);
+    // Compare the same actual weekly NAV observation dates, not merely the
+    // same end date or nominal number of weeks. No interpolation.
+    try{
+      var sha=java.security.MessageDigest.getInstance("SHA-256");
+      for(var p:points)sha.update((p.date().toString()+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      double peak=anchors.getFirst(),dd=0;
+      for(double value:anchors){peak=Math.max(peak,value);dd=Math.min(dd,value/peak-1);}
+      double cagr=100*(Math.pow(anchors.getLast()/anchors.getFirst(),365.2425/ChronoUnit.DAYS.between(points.getFirst().date(),points.getLast().date()))-1);
+      if(Double.isFinite(cagr)&&Double.isFinite(dd))
+        result.put("matched_weekly_comparison",Map.of("methodology","MF-WEEKLY-MATCH-1",
+          "date_digest",java.util.HexFormat.of().formatHex(sha.digest()),"anchor_count",157,
+          "first_date",points.getFirst().date().toString(),"last_date",points.getLast().date().toString(),
+          "cagr_percent",round(cagr),"drawdown_percent",round(100*dd)));
+    }catch(java.security.NoSuchAlgorithmException ex){throw new IllegalStateException(ex);}
+    // Exact observed dates and NAVs for the local TRI comparison. Do not
+    // interpolate or treat a nominal week target as an actual NAV date.
+    result.put("weekly_anchor_series",points.stream().map(p->Map.of("date",p.date().toString(),"nav",p.nav())).toList());
     var sensitivity=weeklyHurdleSensitivity(weeklyReturns);
     if(!sensitivity.isEmpty())result.put("weekly_hurdle_sensitivity",sensitivity);
     return result;

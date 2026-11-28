@@ -84,4 +84,34 @@ class PortfolioThesisSummaryTest {
   assertTrue(((List<?>)result.get("observations")).isEmpty());
   assertFalse(((List<?>)result.get("gaps")).isEmpty());
  }
+ @Test void quarterlyEvidenceRequiresExactIdentityAndRecentPeriodAndFlagsDeterioration(){
+  var period=java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")).withDayOfMonth(1).minusDays(1).toString();
+  var metric=Map.<String,Object>of("metric","net_profit","latest_value",90,
+    "year_over_year_growth_percent",-10,"previous_quarter_growth_percent",5,"growth_acceleration_pp",-15);
+  var quarter=Map.of("status","PARTIAL_LATEST_QUARTER","latest_period",period,"items",List.of(metric));
+  var company=Map.of("isin","INE002A01018","quarterly_financials",quarter);
+  var holding=Map.<String,Object>of("asset_type","EQUITY","isin","INE002A01018","thesis_evidence",Map.of("company_evidence",company));
+  var report=PortfolioThesisSummary.summarize(holding,json);
+  assertTrue(report.get("review_prompts").toString().contains("YoY -10.00%"));
+  assertTrue(report.get("review_prompts").toString().contains("not an exit signal"));
+  assertTrue(report.get("gaps").toString().contains("quarterly"));
+  var mismatched=new LinkedHashMap<>(holding);mismatched.put("isin","INE009A01021");
+  assertFalse(PortfolioThesisSummary.summarize(mismatched,json).get("review_prompts").toString().contains("YoY -10.00%"));
+  var stale=new LinkedHashMap<String,Object>(quarter);stale.put("latest_period","2020-03-31");
+  var staleHolding=new LinkedHashMap<>(holding);staleHolding.put("thesis_evidence",Map.of("company_evidence",Map.of("isin","INE002A01018","quarterly_financials",stale)));
+  assertFalse(PortfolioThesisSummary.summarize(staleHolding,json).get("review_prompts").toString().contains("YoY -10.00%"));
+ }
+ @Test void independentGovernanceIsExactCompanyEvidenceNotClearance(){
+  var pledge=Map.of("isin","INE002A01018","status","REPORTED_QUARTERLY_AGGREGATE","period","2026-09-30","source_url","https://nsearchives.nseindia.com/filing");
+  var filing=Map.of("isin","INE002A01018","status","REPORTED_CONSOLIDATED_FILING","period","2026-09-30");
+  var governance=Map.of("isin","INE002A01018","findings",List.of("ISSUER_REPORTED_PROMOTER_PLEDGE_REVIEW","ISSUER_REPORTED_AUDIT_QUALIFICATION_REVIEW","UNRECOGNIZED"),"independent_pledge_evidence",pledge,"independent_financial_evidence",filing);
+  var holding=Map.<String,Object>of("asset_type","EQUITY","isin","INE002A01018","thesis_evidence",Map.of("governance_review",governance));
+  var report=PortfolioThesisSummary.summarize(holding,json);
+  assertTrue(report.get("review_prompts").toString().contains("pledged promoter shares"));
+  assertTrue(report.get("review_prompts").toString().contains("audit qualification"));
+  assertFalse(report.get("review_prompts").toString().contains("UNRECOGNIZED"));
+  assertEquals("REVIEW_EVIDENCE",report.get("status"));
+  var wrong=new LinkedHashMap<>(holding);wrong.put("isin","INE009A01021");
+  assertEquals("INSUFFICIENT_FOR_VERDICT",PortfolioThesisSummary.summarize(wrong,json).get("status"));
+ }
 }

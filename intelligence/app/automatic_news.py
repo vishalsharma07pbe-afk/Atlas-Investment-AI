@@ -8,7 +8,8 @@ import os
 import re
 from urllib.parse import urlsplit, urlunsplit
 
-from .automatic_company_evidence import identify
+from .automatic_company_evidence import identify, identify_priority
+from . import company_reports
 from .p1_research import company_news
 
 NOTICE = ("Provider headlines only; underlying claims, completeness and market impact are not independently verified. "
@@ -103,7 +104,7 @@ def refresh(snapshot,connect,loader=company_news,instant=None):
     instant=instant or datetime.now(timezone.utc)
     stamp=instant.isoformat()
     # Reuse active registry ISIN; BSE key cannot be inferred from ticker/ISIN.
-    candidates=sorted({"NSE_EQ|"+isin for item,isin in identify(snapshot) if item["exchange"]=="NSE"})
+    candidates=sorted({"NSE_EQ|"+isin for item,isin in identify_priority(snapshot) if item["exchange"]=="NSE"})
     if not candidates:
         return
     with closing(connect()) as db,db:
@@ -161,12 +162,19 @@ def attach(snapshot,connect,instant=None):
     snapshot["automatic_news_status"]="ENABLED"
     by_key=read(connect,instant)
     latest={}
-    for item,isin in identify(snapshot):
-        if item["exchange"]!="NSE":
-            continue
+    primary=list(identify(snapshot))
+    # Only request NSE keys from actual NSE candidates, never synthesize a BSE
+    # key. For public report attachment the already fetched exact ISIN news
+    # can be shared across venue/horizon views, with origin explicitly retained.
+    if snapshot.get("scope")=="PUBLIC_MARKET_RESEARCH_ONLY":
+        primary=[(item,item["isin"]) for _,item in company_reports.entries(snapshot)]
+    for item,isin in primary:
+        item.pop("news_evidence",None)
+        if snapshot.get("scope")!="PUBLIC_MARKET_RESEARCH_ONLY" and item["exchange"]!="NSE":continue
         section=by_key.get("NSE_EQ|"+isin)
         if section:
-            item["news_evidence"]=section
+            item["news_evidence"]={**section,"isin":isin,"source_instrument_key":"NSE_EQ|"+isin,
+                "source_exchange":"NSE","scope":"PUBLIC_COMPANY_HEADLINE_OBSERVATIONS"}
             for article in section["articles"]:
                 latest.setdefault(article["id"],article)
     snapshot["recent_company_news"]=sorted(latest.values(),key=lambda a:(a["published_at"],a["id"]),reverse=True)[:10]

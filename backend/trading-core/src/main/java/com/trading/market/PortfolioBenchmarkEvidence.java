@@ -38,12 +38,16 @@ public final class PortfolioBenchmarkEvidence {
   }
 
   public static List<PortfolioRollingPerformance.BenchmarkPoint> points(JdbcTemplate jdbc,LocalDate terminal,LocalDate today){
+    return points(jdbc,terminal,today,BenchmarkHistoryService.KEY,365);
+  }
+  static List<PortfolioRollingPerformance.BenchmarkPoint> points(JdbcTemplate jdbc,LocalDate terminal,LocalDate today,String key,int days){
+    if(!BenchmarkHistoryService.allowed(key)||days<1||days>470)return List.of();
     // Historical reference only; never use the live index strip or a fund as an index substitute.
     var rows=jdbc.queryForList("""
       WITH candidate AS (
         SELECT i.id,i.exchange_id FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
         WHERE e.code='NSE' AND i.active AND i.listing_status='ACTIVE'
-          AND i.instrument_type='INDEX' AND i.exchange_token='NSE_INDEX|Nifty 50'
+          AND i.instrument_type='INDEX' AND i.exchange_token=?
       )
       SELECT (c.candle_time AT TIME ZONE 'Asia/Kolkata')::date AS trade_date,c.close,
         ds.source_code,
@@ -59,7 +63,7 @@ public final class PortfolioBenchmarkEvidence {
         AND (c.candle_time AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ? AND ?
         AND (c.candle_time AT TIME ZONE 'Asia/Kolkata')::date<=?
       ORDER BY c.candle_time
-      """,terminal.minusDays(365),terminal,today);
+      """,key,terminal.minusDays(days),terminal,today);
     return rows.stream().map(row->new PortfolioRollingPerformance.BenchmarkPoint(
       day(row.get("trade_date")),(BigDecimal)row.get("close"),(String)row.get("source_code"),
       Boolean.TRUE.equals(row.get("eligible")))).toList();

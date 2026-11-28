@@ -24,7 +24,7 @@ jobs:
 
   dependency-scan:
     name: OSV full dependency scan
-    if: github.event_name != 'pull_request'
+    # Audit the full dependency graph before merge, not just changed dependencies.
     uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2.7.1
     permissions:
       actions: read

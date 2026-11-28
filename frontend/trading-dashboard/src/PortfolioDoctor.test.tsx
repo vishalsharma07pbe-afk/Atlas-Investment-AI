@@ -307,3 +307,11 @@ it("prioritizes non-price business evidence in the compact summary",async()=>{
  expect(screen.getByText("Next research step")).toBeTruthy();
  expect(screen.queryByText("Recorded loss")).toBeNull();
 });
+
+it("renders the evidence-gated score and synthesis without a recommendation",async()=>{
+ const holding={id:1,symbol:"TEST",asset_type:"EQUITY",exchange:"NSE",status:"EVIDENCE_GAP",weight_percent:null,recorded_return_percent:null,evidence_date:null,history_count:0,change_20_observations_percent:null,recent_peak_change_percent:null,findings:[],missing_evidence:[],reassessment:{status:"SCORE_WITHHELD",score:null,review_state:"COLLECT_EVIDENCE",methodology:"HELD_EQUITY_DIRECTIONAL_1",components:[{factor:"QUARTERLY_REVENUE_YOY",weight:25,points:null}],missing_factors:["QUARTERLY_REVENUE_YOY"],notice:"Not a rating."}};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({generated_at:"2026-11-24T10:00:00Z",holding_count:1,attention_count:0,data_gap_count:1,notice:"Research only",holdings:[holding],portfolio_reassessment:{status:"EVIDENCE_INCOMPLETE",holding_count:1,scored_count:0,reassess_count:0,evidence_needed_count:1,monitor_count:0,notice:"Research only."}})})));
+ render(<PortfolioDoctor revision={0} onSettings={()=>{}}/>);
+ expect(await screen.findByText("Portfolio research synthesis")).toBeTruthy();
+ expect(screen.getByText("Preliminary holding research score: Withheld")).toBeTruthy();
+});

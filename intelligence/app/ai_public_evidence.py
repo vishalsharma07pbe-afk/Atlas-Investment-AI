@@ -88,7 +88,13 @@ def _valuation(company,today):
 
 def _news(candidate,today):
     block=candidate.get("news_evidence") or {}
-    if candidate.get("exchange")!="NSE" or block.get("status")!="REVIEW_AVAILABLE":
+    if block.get("status")!="REVIEW_AVAILABLE":
+        return None
+    # A cross-venue company headline is valid only with exact source identity.
+    if candidate.get("exchange")!="NSE" and not (
+        block.get("scope")=="PUBLIC_COMPANY_HEADLINE_OBSERVATIONS" and exact_isin(candidate.get("isin"))
+        and block.get("isin")==candidate["isin"] and block.get("source_exchange")=="NSE"
+        and block.get("source_instrument_key")=="NSE_EQ|"+candidate["isin"]):
         return None
     if not 0<=(today-_stamp_day(block["retrieved_at"])).days<=1:
         return None
@@ -100,7 +106,7 @@ def _news(candidate,today):
         if 0<=(today-d).days<=3:
             output.update((d.isoformat(),t) for t in TOPICS if t in r.get("topics",[]))
     return {"basis":"UNVERIFIED_PROVIDER_HEADLINE_TOPIC_NOT_CONFIRMED_EVENT",
-            "observations":[{"publication_date":d,"topic":t} for d,t in sorted(output)]} if output else None
+            "source_exchange":"NSE","observations":[{"publication_date":d,"topic":t} for d,t in sorted(output)]} if output else None
 
 def _global(context,today):
     block=context.get("global_context") or {}

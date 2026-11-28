@@ -23,6 +23,23 @@ final class PortfolioThesisSummary {
     add(risks,f.asText(),"Local portfolio review");
   if("EQUITY".equals(row.path("asset_type").asText())){
    JsonNode thesis=row.path("thesis_evidence"),company=thesis.path("company_evidence");
+   JsonNode relative=row.path("holding_relative_strength");
+   int relativeCount=0;
+   if("MATCHED_PRICE_INDEX_OBSERVATIONS".equals(relative.path("status").asText())&&
+      "NSE_INDEX|Nifty 50".equals(relative.path("benchmark_key").asText())&&"NSE".equals(row.path("exchange").asText())){
+     for(int horizon:new int[]{20,60,120,252}){
+       JsonNode window=relative.path("windows").path(String.valueOf(horizon));
+       Double stock=number(window,"stock_return_percent"),index=number(window,"index_return_percent"),delta=number(window,"difference_pp");
+       if(stock==null||index==null||delta==null||Math.abs(stock-index-delta)>0.001)continue;
+       relativeCount++;
+       String statement=horizon+" matched sessions: equity "+fmt(stock)+"%, Nifty 50 price index "+fmt(index)+"%, difference "+fmt(delta)+" pp ("+
+         window.path("first_date").asText()+" to "+window.path("last_date").asText()+").";
+       add(observations,statement,"Adjusted local equity and price-index history; not total return or forecast");
+     }
+   }
+   if(relativeCount==0)gaps.add("Exact-session holding benchmark comparison unavailable; no relative-strength verdict.");
+   else if(relativeCount<4)gaps.add("Some benchmark windows lack complete matched evidence.");
+
    JsonNode sections=company.path("sections");
    Map<String,List<JsonNode>> recognized=new TreeMap<>();
    for(JsonNode ratio:sections.path("ratios").path("data")){
@@ -85,6 +102,50 @@ final class PortfolioThesisSummary {
     boolean reviewMetric=!"REPORTED_LIABILITIES_TO_ASSETS".equals(key)&&(latest<previous||latest<0);
     add(reviewMetric?review:observations,statement,"Upstox matched annual statements; filings unverified");
    }
+   // The shared company adapter has already matched reported consolidated
+   // quarter periods. Preserve its limitations and never infer growth from gaps.
+   JsonNode quarterly=company.path("quarterly_financials");
+   String quarterStatus=quarterly.path("status").asText();
+   int quarterCount=0;
+   String isin=row.path("isin").asText();
+   boolean recentQuarter=false;
+   try{
+     var period=java.time.LocalDate.parse(quarterly.path("latest_period").asText());
+     long age=java.time.temporal.ChronoUnit.DAYS.between(period,java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")));
+     recentQuarter=age>=0&&age<=150&&period.getDayOfMonth()==period.lengthOfMonth();
+   }catch(java.time.DateTimeException ignored){/* No dated quarter. */}
+   if(isin.matches("IN[A-Z0-9]{10}")&&isin.equals(company.path("isin").asText())&&recentQuarter
+       &&Set.of("REPORTED_QUARTERLY_COMPARISONS","PARTIAL_LATEST_QUARTER").contains(quarterStatus)){
+     Map<String,List<JsonNode>> quarterMetrics=new TreeMap<>();
+     for(JsonNode metric:quarterly.path("items")){
+       String key=metric.path("metric").asText();
+       if(Set.of("revenue","operating_profit","net_profit").contains(key))
+         quarterMetrics.computeIfAbsent(key,k->new ArrayList<>()).add(metric);
+     }
+     for(var entry:quarterMetrics.entrySet()){
+       if(entry.getValue().size()!=1)continue;
+       JsonNode metric=entry.getValue().getFirst();
+       Double latest=number(metric,"latest_value"),yoy=number(metric,"year_over_year_growth_percent"),
+         qoq=number(metric,"previous_quarter_growth_percent"),acceleration=number(metric,"growth_acceleration_pp");
+       if(latest==null||Math.abs(latest)>1e12)continue;
+       if(yoy!=null&&(yoy< -100||yoy>1e12))yoy=null;
+       if(qoq!=null&&(qoq< -100||qoq>1e12))qoq=null;
+       if(acceleration!=null&&(Math.abs(acceleration)>2e12||yoy==null))acceleration=null;
+       if(yoy==null&&qoq==null&&latest>=0)continue;
+       quarterCount++;
+       String label=switch(entry.getKey()){case "revenue"->"Revenue";case "operating_profit"->"Operating profit";default->"Net profit";};
+       String statement=label+" quarter ended "+quarterly.path("latest_period").asText()+":";
+       if(yoy!=null)statement+=" YoY "+fmt(yoy)+"%.";
+       if(qoq!=null)statement+=" QoQ "+fmt(qoq)+"%.";
+       if(acceleration!=null)statement+=" YoY growth acceleration "+fmt(acceleration)+" pp.";
+       if(latest<0)statement+=" Negative reported value.";
+       boolean concern=latest<0||(yoy!=null&&yoy<0)||(acceleration!=null&&acceleration<0);
+       add(concern?review:observations,statement+(concern?" Reassess reported earnings direction; not an exit signal.":" Historical observation, not a forecast."),
+           "Upstox consolidated quarterly statements; independent filings unverified");
+     }
+   }
+   if(quarterCount<3||!"REPORTED_QUARTERLY_COMPARISONS".equals(quarterStatus))
+     gaps.add("Recent matched quarterly revenue and profit comparisons are incomplete or unavailable.");
    JsonNode news=thesis.path("news_evidence");
    SortedSet<String> topics=new TreeSet<>();
    for(JsonNode article:news.path("articles"))for(JsonNode topic:article.path("topics"))
@@ -103,6 +164,32 @@ final class PortfolioThesisSummary {
       }
     }
    }else gaps.add("Comparable complete quarterly ownership reports unavailable.");
+   // Positive source-linked governance observations are supplementary; an
+   // absent or zero reported value never means the company is cleared.
+   JsonNode governance=thesis.path("governance_review");
+   if(isin.matches("IN[A-Z0-9]{10}")&&isin.equals(governance.path("isin").asText())){
+     JsonNode pledge=governance.path("independent_pledge_evidence"),filing=governance.path("independent_financial_evidence");
+     boolean pledgeMatch=isin.equals(pledge.path("isin").asText())&&"REPORTED_QUARTERLY_AGGREGATE".equals(pledge.path("status").asText());
+     boolean filingMatch=isin.equals(filing.path("isin").asText())&&"REPORTED_CONSOLIDATED_FILING".equals(filing.path("status").asText());
+     Set<String> seen=new HashSet<>();
+     for(JsonNode finding:governance.path("findings")){
+       String code=finding.asText();
+       if(!seen.add(code))continue;
+       String statement=switch(code){
+         case "ISSUER_REPORTED_PROMOTER_PLEDGE_REVIEW" -> pledgeMatch?"Issuer reports pledged promoter shares.":null;
+         case "ISSUER_REPORTED_PROMOTER_ENCUMBRANCE_REVIEW" -> pledgeMatch?"Issuer reports encumbered promoter shares.":null;
+         case "ISSUER_REPORTED_AUDIT_QUALIFICATION_REVIEW" -> filingMatch?"Issuer filing reports an audit qualification or modified opinion.":null;
+         case "INDEPENDENT_REVENUE_DIFFERENCE_REVIEW" -> filingMatch?"Matched issuer and provider revenue differ beyond the illustrative tolerance.":null;
+         case "POSITIVE_PROFIT_NEGATIVE_OPERATING_CASH_FLOW_REVIEW" -> filingMatch?"Reported year-to-date profit is positive but operating cash flow is negative.":null;
+         default -> null;
+       };
+       if(statement==null)continue;
+       JsonNode source=code.contains("PROMOTER")?pledge:filing;
+       add(review,statement+" Verify the original filing; not proof of misconduct or an exit instruction.",
+         "NSE issuer-reported filing; period "+source.path("period").asText()+"; "+source.path("source_url").asText());
+     }
+   }
+   gaps.add("Comprehensive exchange restrictions, signed auditor conclusions and independent filing coverage remain incomplete.");
    gaps.add("Official filings, comparable financial periods, intrinsic valuation and company-specific institutional flows remain unverified.");
    gaps.add("Promoter pledges and bulk/block transactions remain unverified; ownership changes do not establish stock-specific trades.");
   }else if("MUTUAL_FUND".equals(row.path("asset_type").asText())){

@@ -30,7 +30,7 @@ def _ready_ids(snapshot,exchange,registry,today):
         result=section.get("result") or {}
         rows=result.get("replay_research_universe")
         count=result.get("eligible_count")
-        if not isinstance(rows,list) or type(count) is not int or not 0<=len(rows)<=count<=200:
+        if not isinstance(rows,list) or type(count) is not int or not 0<=len(rows)<=count<=20000:
             return set()
         ids=set()
         seen=set()
@@ -156,6 +156,15 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
                             except Exception:
                                 benchmark=None
                             attach_market_benchmark(result,payload,benchmark,today,positions=positions)
+                            if audit["status"] in ("OVERLAP_UNCHANGED","NO_COMPARABLE_PRIOR_CAPTURE") and listing["status"]=="RECORDED_LISTING_DATES_CONSISTENT":
+                                from . import bracket_research
+                                bracket=bracket_research.replay(payload,today,positions)
+                                for h,report in bracket.items():
+                                    if h in result["horizons"]:result["horizons"][h]["bracket_replay"]=report
+                            if audit["status"] in ("OVERLAP_UNCHANGED","NO_COMPARABLE_PRIOR_CAPTURE") and listing["status"]=="RECORDED_LISTING_DATES_CONSISTENT":
+                                from . import fip_research
+                                fip=fip_research.replay(payload["candles"],today)
+                                if fip is not None:result["fip_replay"]=fip
                             for horizon in result["horizons"].values():
                                 horizon["history_provenance"]={**audit,"calendar_continuity":continuity}
             result["isin"]=identity["isin"]
@@ -207,6 +216,17 @@ def read(connect,instant=None,*,snapshot=None):
                             and 1<=(today-date.fromisoformat(payload["as_of"])).days<=5):
                         item["matched_strategy_replay"]={"as_of":payload["as_of"],"attempted_at":row["attempted_at"],
                             **replay_result,"notice":"Exact ISIN and shared recent adjusted history match the cached replay. Full history was audited at replay time, not revalidated by this snapshot; later revisions and missing corporate actions remain possible. Not a forward performance estimate."}
+    fip_items=[]
+    for row in rows:
+        payload=_payload(row);fip=payload.get("fip_replay")
+        if isinstance(fip,dict) and fip.get("status")=="DESCRIPTIVE_FIXED_RULE_REPLAY":
+            try:
+                if 1<=(today-date.fromisoformat(fip["as_of"])).days<=5:
+                    fip_items.append({"exchange":row["exchange"],"id":row["instrument_id"],"symbol":row["symbol"],"isin":payload.get("isin"),
+                        "replay_evidence_hash":payload.get("replay_evidence_hash"),**fip})
+            except (ValueError,TypeError,KeyError):pass
+    if snapshot is not None:
+        snapshot["fip_replay_sample"]={"sample_count":len(fip_items),"items":fip_items}
     selection_counts={}
     for row in rows:
         basis=_payload(row).get("selection_basis","UNKNOWN")

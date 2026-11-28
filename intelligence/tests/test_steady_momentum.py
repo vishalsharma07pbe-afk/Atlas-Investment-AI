@@ -5,10 +5,10 @@ from app.steady_momentum import technical,fundamentals
 from app.technical import Candle,compute
 from app.amfi_equity_caps import parse
 
-def bars(pump=False):
+def bars(pump=False,count=220):
     close=100.
     result=[]
-    for i in range(220):
+    for i in range(count):
         close*=1.0035 if i%5<3 else .998
         if pump and i==218:close*=1.2
         result.append(Candle((date(2025,1,1)+timedelta(days=i)).isoformat(),close,close*1.008,close*.992,close,1000000,"ADJUSTED"))
@@ -43,6 +43,28 @@ class SteadyMomentumTests(unittest.TestCase):
         row=technical(c,indicators(c))
         self.assertIsNotNone(row)
         self.assertEqual(row["technical_rating"],"ATLAS_STRONG_BULLISH")
+
+    def test_multiscale_observations_require_exact_window_depth(self):
+        from app.steady_momentum import window_observations
+        c=bars(count=253)
+        observed=window_observations(c)
+        self.assertEqual(set(observed),{"20","60","120","252"})
+        self.assertAlmostEqual(observed["252"]["return_percent"],100*(c[-1].close/c[0].close-1),places=3)
+        self.assertGreater(observed["252"]["maximum_close_drawdown_percent"],0)
+        self.assertNotIn("252",window_observations(c[1:]))
+        self.assertNotIn("252",window_observations([c[0],*c[10:]]))
+
+    def test_cap_tabs_rank_beyond_overall_top_ten(self):
+        from app.steady_momentum import ranked_shortlists
+        rows=[{"isin":f"INE000A{i:05d}","exchange":"NSE","cap_category":"LARGE_CAP" if i<12 else "SMALL_CAP",
+               "positive_day_percent":80-i,"largest_gain_share_percent":5,
+               "median_daily_turnover_cr":10,"earnings_growth_percent":20} for i in range(13)]
+        overall,categories,total=ranked_shortlists(rows+[{**rows[0],"exchange":"BSE"}])
+        self.assertEqual(total,13)
+        self.assertEqual(len(overall),10)
+        self.assertEqual(categories["SMALL_CAP"],[rows[-1]])
+        self.assertEqual(len(categories["LARGE_CAP"]),10)
+        self.assertEqual(categories["MID_CAP"],[])
 
     def test_meaningful_earnings_and_valuation(self):
         item,reason=fundamentals(report(),date(2026,11,27))
@@ -79,3 +101,9 @@ class SteadyMomentumTests(unittest.TestCase):
         self.assertEqual(result["eligible_history_count"],120)
         self.assertEqual(result["technical_count"],0)
         self.assertEqual(result["matched_count"],0)
+
+    def test_amfi_period_rollover_does_not_relabel_old_classification(self):
+        from app.amfi_equity_caps import periods,url_for
+        self.assertEqual(periods(date(2026,11,27)),[date(2026,6,30)])
+        self.assertEqual(periods(date(2027,1,3)),[date(2026,12,31),date(2026,6,30)])
+        self.assertTrue(url_for(date(2026,12,31)).endswith("31Dec2026.xlsx"))

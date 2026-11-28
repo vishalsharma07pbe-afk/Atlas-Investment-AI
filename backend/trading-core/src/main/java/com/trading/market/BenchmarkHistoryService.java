@@ -13,6 +13,15 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class BenchmarkHistoryService {
   public static final String KEY="NSE_INDEX|Nifty 50";
+  // Only exact public price-index keys; no caller-supplied provider path.
+  // Bank is documented by Upstox; other named indices require live key acceptance.
+  public static final List<String> SECTOR_KEYS=List.of("NSE_INDEX|Nifty Bank","NSE_INDEX|Nifty IT",
+      "NSE_INDEX|Nifty Auto","NSE_INDEX|Nifty Pharma","NSE_INDEX|Nifty FMCG","NSE_INDEX|Nifty Metal");
+  public static boolean allowed(String key){return KEY.equals(key)||SECTOR_KEYS.contains(key);}
+  static String historyUrl(String key,LocalDate from,LocalDate to){
+    if(!allowed(key))throw new IllegalArgumentException("Unsupported benchmark");
+    return "https://api.upstox.com/v3/historical-candle/"+java.net.URLEncoder.encode(key,java.nio.charset.StandardCharsets.UTF_8).replace("+","%20")+"/days/1/"+to+"/"+from;
+  }
   private final JdbcTemplate jdbc;
   private final FeedHttp http;
   private final TransactionTemplate transactions;
@@ -22,21 +31,25 @@ public class BenchmarkHistoryService {
   }
   record Candle(LocalDate date,BigDecimal open,BigDecimal high,BigDecimal low,BigDecimal close,long volume){}
 
-  Long ensureIndex(){
+  Long ensureIndex(){return ensureIndex(KEY);}
+  Long ensureIndex(String key){
+    if(!allowed(key))throw new IllegalArgumentException("Unsupported benchmark");
+    String name=key.substring("NSE_INDEX|".length());
+    String symbol=name.toUpperCase(Locale.ROOT).replace(" ","");
     // Never convert an existing equity or unrelated instrument into an index.
     jdbc.update("""
       INSERT INTO instruments(exchange_id,symbol,series,security_name,instrument_type,exchange_token,
         listing_status,active,source,source_revision,updated_at)
-      SELECT e.id,'NIFTY50','INDEX','NIFTY 50','INDEX',?,'ACTIVE',true,'UPSTOX','UPSTOX_INDEX_KEY',now()
+      SELECT e.id,?,'INDEX',?,'INDEX',?,'ACTIVE',true,'UPSTOX','UPSTOX_INDEX_KEY',now()
       FROM exchanges e WHERE e.code='NSE'
         AND NOT EXISTS(SELECT 1 FROM instruments i WHERE i.exchange_id=e.id AND i.exchange_token=?)
       ON CONFLICT DO NOTHING
-      """,KEY,KEY);
+      """,symbol,name.toUpperCase(Locale.ROOT),key,key);
     var ids=jdbc.query("""
       SELECT i.id FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
       WHERE e.code='NSE' AND i.active AND i.listing_status='ACTIVE'
         AND i.instrument_type='INDEX' AND i.exchange_token=?
-      """,(rs,n)->rs.getLong(1),KEY);
+      """,(rs,n)->rs.getLong(1),key);
     return ids.size()==1?ids.getFirst():null;
   }
 
@@ -63,26 +76,30 @@ public class BenchmarkHistoryService {
   }
 
   public int refresh(long instrument,String token,LocalDate from,LocalDate to)throws Exception{
+    return refresh(instrument,KEY,token,from,to);
+  }
+  int refresh(long instrument,String key,String token,LocalDate from,LocalDate to)throws Exception{
+    if(!allowed(key))throw new IllegalArgumentException("Unsupported benchmark");
     LocalDate today=LocalDate.now(MarketCalendarService.IST);
-    if(token==null||token.isBlank()||from.isAfter(to)||from.isBefore(to.minusDays(370))||!to.isBefore(today))
+    if(token==null||token.isBlank()||from.isAfter(to)||from.isBefore(to.minusDays(470))||!to.isBefore(today))
       throw new IllegalArgumentException("Invalid completed index history request");
     var sources=jdbc.query("SELECT id FROM data_sources WHERE source_code='UPSTOX' AND enabled",(rs,n)->rs.getLong(1));
     if(sources.size()!=1)throw new IllegalStateException("Index source not enabled");
     long source=sources.getFirst();
-    String url="https://api.upstox.com/v3/historical-candle/NSE_INDEX%7CNifty%2050/days/1/"+to+"/"+from;
+    String url=historyUrl(key,from,to);
     List<Candle> candles=parse(json.readTree(http.text(url,token,2_000_000)),from,to);
     Integer count=transactions.execute(status->{
       var exact=jdbc.queryForObject("""
         SELECT count(*) FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
         WHERE e.code='NSE' AND i.active AND i.listing_status='ACTIVE'
           AND i.instrument_type='INDEX' AND i.exchange_token=?
-        """,Integer.class,KEY);
+        """,Integer.class,key);
       if(!Integer.valueOf(1).equals(exact))throw new IllegalStateException("Ambiguous index identity");
       var identity=jdbc.queryForObject("""
         SELECT count(*) FROM instruments i JOIN exchanges e ON e.id=i.exchange_id
         WHERE i.id=? AND e.code='NSE' AND i.active AND i.listing_status='ACTIVE'
           AND i.instrument_type='INDEX' AND i.exchange_token=?
-        """,Integer.class,instrument,KEY);
+        """,Integer.class,instrument,key);
       if(!Integer.valueOf(1).equals(identity))throw new IllegalStateException("Index identity changed");
       UUID run=jdbc.queryForObject("""
         INSERT INTO ingestion_runs(source_id,job_name,status,started_at,source_revision)

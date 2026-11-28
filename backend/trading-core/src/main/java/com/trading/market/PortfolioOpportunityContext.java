@@ -65,10 +65,75 @@ final class PortfolioOpportunityContext {
   result.put("status",!equities.isEmpty()||!funds.isEmpty()?"WATCH_CONTEXT_AVAILABLE":
     "WATCH_EVIDENCE_AVAILABLE".equals(upstream)?"NO_NEW_EXACT_IDENTITY_WATCHES":upstream);
   result.put("equities",equities);result.put("funds",funds);result.put("held_excluded_count",heldExcluded);
+  result.put("matched_comparisons",matched(holdings,snapshot,json,equityIds,fundIds,unknownEquity,unknownFund));
   result.put("ready_sections",snapshot.path("ready_sections").isArray()?snapshot.path("ready_sections"):List.of());
   result.put("blocked_sections",snapshot.path("blocked_sections").isArray()?snapshot.path("blocked_sections"):List.of());
   result.put("notice","Public research watches compared locally with recorded holdings. No match does not establish diversification, suitability or a buy opportunity. Sector values cover priced direct equities only; fund look-through, overlap, valuation and future returns are not verified. Original research gates remain unchanged.");
   return result;
+ }
+ private static Double number(JsonNode node,String key){var v=node.path(key);return v.isNumber()&&Double.isFinite(v.asDouble())?v.asDouble():null;}
+ private static boolean sameDates(JsonNode a,JsonNode b,String digestKey){
+  String hash=a.path(digestKey).asText();
+  String otherKey="dates_digest".equals(digestKey)?"dates_digest":"date_digest";
+  return hash.matches("[a-f0-9]{64}")&&hash.equals(b.path(otherKey).asText())&&
+    a.path("first_date").isTextual()&&a.path("last_date").isTextual()&&
+    a.path("first_date").equals(b.path("first_date"))&&a.path("last_date").equals(b.path("last_date"));
+ }
+ static List<Map<String,Object>> matched(List<Map<String,Object>> holdings,JsonNode snapshot,ObjectMapper json,
+    Set<String> equityIds,Set<String> fundIds,boolean unknownEquity,boolean unknownFund){
+  List<Map<String,Object>> rows=new ArrayList<>();
+  Set<String> heldFundIsins=new HashSet<>();
+  boolean unresolvedFundIsin=false;
+  for(var holding:holdings){
+   JsonNode h=json.valueToTree(holding);
+   if(!"MUTUAL_FUND".equals(h.path("asset_type").asText()))continue;
+   String isin=h.path("fund_history_evidence").path("isin_growth").asText();
+   if(isin.matches("INF[A-Z0-9]{9}"))heldFundIsins.add(isin);else unresolvedFundIsin=true;
+  }
+  Set<String> seen=new HashSet<>();
+  for(var holding:holdings){
+   var h=json.valueToTree(holding);
+   if("EQUITY".equals(h.path("asset_type").asText())&&!unknownEquity&&"NSE".equals(h.path("exchange").asText())){
+    var held=h.path("holding_relative_strength").path("windows").path("60");
+    var old=number(held,"stock_return_percent");
+    if(old==null)continue;
+    for(var item:snapshot.path("equities")){
+     String isin=item.path("isin").asText();
+     if(!"TECHNICAL_WATCH_ONLY".equals(item.path("evidence_type").asText())||!"NSE".equals(item.path("exchange").asText())||
+       !"ADJUSTED".equals(item.path("adjustment_status").asText())||!isin.matches("INE[A-Z0-9]{9}")||equityIds.contains(isin))continue;
+     var other=item.path("matched_60");Double value=number(other,"return_percent");
+     if(value==null||!sameDates(held,other,"dates_digest")||value<=old||
+        !seen.add(h.path("isin").asText()+":"+isin))continue;
+     rows.add(Map.of("asset_type","EQUITY","holding",h.path("symbol").asText(),"alternative",item.path("symbol").asText(),
+       "first_date",held.path("first_date").asText(),"last_date",held.path("last_date").asText(),
+       "holding_return_percent",old,"alternative_return_percent",value,"basis","60_MATCHED_SESSIONS_PRICE_ONLY"));
+     if(rows.size()>=30)return rows;
+    }
+   }else if("MUTUAL_FUND".equals(h.path("asset_type").asText())&&!unknownFund&&!unresolvedFundIsin){
+    var history=h.path("fund_history_evidence");var held=history.path("matched_weekly_comparison");
+    String category=label(history.path("category"));
+    if(!"DIRECT".equals(history.path("amfi_plan").asText())||!"GROWTH".equals(history.path("amfi_option").asText())||
+      !history.path("scheme_code").asText().equals(h.path("exact_scheme_code").asText())||
+      !history.path("isin_growth").asText().matches("INF[A-Z0-9]{9}")||!"MF-WEEKLY-MATCH-1".equals(held.path("methodology").asText())||held.path("anchor_count").asInt()!=157)continue;
+    Double old=number(held,"cagr_percent"),risk=number(held,"drawdown_percent");
+    if(old==null||risk==null||risk>0||risk< -100)continue;
+    for(var item:snapshot.path("funds")){
+     String code=item.path("scheme_code").asText(),cat=CATEGORIES.get(item.path("category").asText());
+     String isin=item.path("isin_growth").asText();
+     if(!"HISTORICAL_WATCH_ONLY".equals(item.path("evidence_type").asText())||cat==null||
+       !category.contains(" - "+cat+")")||!code.matches("[1-9][0-9]{5,8}")||fundIds.contains(code)||
+       !isin.matches("INF[A-Z0-9]{9}")||heldFundIsins.contains(isin))continue;
+     var other=item.path("matched_weekly");Double value=number(other,"cagr_percent"),dd=number(other,"drawdown_percent");
+     if(value==null||dd==null||dd>0||dd< -100||!sameDates(held,other,"date_digest")||value<=old||dd<risk||
+        !seen.add(history.path("scheme_code").asText()+":"+code))continue;
+     rows.add(Map.of("asset_type","MUTUAL_FUND","holding",h.path("symbol").asText(),"alternative",item.path("name").asText(),
+       "first_date",held.path("first_date").asText(),"last_date",held.path("last_date").asText(),
+       "holding_return_percent",old,"alternative_return_percent",value,"basis","157_MATCHED_WEEKLY_NAV_CAGR_AND_DRAWDOWN"));
+     if(rows.size()>=30)return rows;
+    }
+   }
+  }
+  return rows;
  }
  private static String label(JsonNode n){
   if(!n.isTextual())return "";

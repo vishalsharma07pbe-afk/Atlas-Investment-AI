@@ -10,7 +10,7 @@ from datetime import date
 from math import isfinite
 from .horizon_research import HORIZONS, MIN_HISTORY, BLOCKERS, VERSION as TECH_VERSION
 from .replay_evidence import exact_isin
-from . import stock_selection
+from . import stock_selection, governance_review, company_venues
 
 VERSION="STOCK-QUALIFICATION-1"
 NOTICE=("Strict evidence assessment of the already shortlisted daily watches only. Descriptive, reported and simulated evidence "
@@ -66,6 +66,11 @@ def assess(item,group,coverage,context,horizon,today):
         base_cost=[r for r in sensitivity.get("scenarios",[]) if r.get("cost_bps_per_side")==30]
         if len(base_cost)==1 and base_cost[0].get("reference_meets_stressed_ratio") is False:
             warnings.add("ILLUSTRATIVE_GAP_STRESS_RATIO_BELOW_ASSUMPTION")
+    strict=item.get("bracket_research") or {}
+    if horizon=="SWING" and strict.get("status")!="STRICT_HISTORICAL_BRACKET":requirements.append("STRICT_MATCHED_BRACKET_HISTORY_REQUIRED")
+    if strict.get("status")=="STRICT_HISTORICAL_BRACKET":
+        cases=[r for r in strict.get("entry_cases",[]) if r.get("cost_bps_per_side")==30]
+        if len(cases)==1 and cases[0].get("reference_meets_stress") is False:warnings.add("STRICT_BRACKET_REFERENCE_BELOW_STRESSED_RATIO")
     gate("EXECUTION_AND_RISK",geometric,requirements)
 
     company=item.get("company_evidence") or {}
@@ -76,7 +81,9 @@ def assess(item,group,coverage,context,horizon,today):
     requirements=["INDEPENDENT_DATED_FILING_VERIFICATION_REQUIRED"]
     if not fundamental:requirements.append("MATCHED_MULTI_YEAR_FINANCIAL_HISTORY_REQUIRED")
     if horizon=="LONG_TERM":requirements.append("VERIFIED_BUSINESS_QUALITY_REQUIRED")
-    gate("FUNDAMENTALS",fundamental,requirements)
+    filing=item.get("independent_financial_evidence") or {}
+    filing_observed=exact and filing.get("isin")==item.get("isin") and filing.get("status")=="REPORTED_CONSOLIDATED_FILING"
+    gate("FUNDAMENTALS",fundamental or filing_observed,requirements)
     peer=(company.get("peer_research") or {}).get("valuation_research") or {} if matched else {}
     valuation=matched and peer.get("status")=="UNDATED_PEER_MULTIPLES" and bool(peer.get("metrics"))
     gate("VALUATION",valuation,["DATED_INTRINSIC_VALUATION_REQUIRED"] if horizon!="SWING" else ["VALUATION_AND_DOWNSIDE_CONTEXT_REQUIRED"])
@@ -84,6 +91,10 @@ def assess(item,group,coverage,context,horizon,today):
     ownership=company.get("ownership_research") or {} if matched else {}
     gate("OWNERSHIP_AND_INSTITUTIONAL",matched and ownership.get("status")=="COMPARABLE_QUARTERS",
          ["STOCK_LEVEL_TRANSACTION_AND_PLEDGE_EVIDENCE_REQUIRED"])
+    governance=governance_review.assess(item,company if matched else {},today)
+    item["governance_review"]=governance
+    warnings.update(governance["findings"])
+    gate("GOVERNANCE_AND_SURVEILLANCE",governance["provider_security_state"]!="UNKNOWN" or governance["ownership_status"]=="COMPARABLE_QUARTERS",governance["blockers"])
     news=item.get("news_evidence") or {}
     gate("EVENT_RISK",news.get("status")=="REVIEW_AVAILABLE" and bool(news.get("articles")),
          ["VERIFIED_MATERIAL_EVENT_AND_RISK_ASSESSMENT_REQUIRED"])
@@ -140,10 +151,11 @@ def assess(item,group,coverage,context,horizon,today):
             "horizon":horizon,"gates":gates,"blockers":sorted(all_blockers),
             "review_findings":sorted(warnings),"notice":NOTICE}
 
-def attach(snapshot,today):
+def attach(snapshot,today,instant=None):
     report={"methodology":VERSION,"horizons":{},"notice":NOTICE}
     snapshot["stock_qualification"]=report
     enabled=snapshot.get("enabled") is True
+    venues=company_venues.collect(snapshot,instant) if enabled and instant is not None else None
     for horizon in HORIZONS:
         if horizon=="INTRADAY":
             report["horizons"][horizon]={"status":"SEPARATE_INTRADAY_WORKFLOW","reviewed_count":0,
@@ -174,7 +186,7 @@ def attach(snapshot,today):
                     # Duplicate observations must never inflate coverage.
                     continue
                 reviewed[key]=decision
-        selection=stock_selection.summarize(observations,ready_markets)
+        selection=stock_selection.summarize(observations,ready_markets,venues,instant)
         counts=Counter(code for decision in reviewed.values() for code in decision["blockers"])
         report["horizons"][horizon]={"status":"DISABLED" if not enabled else
             "NO_QUALIFIED_IN_REVIEWED_SAMPLE" if reviewed else "NO_TECHNICAL_WATCHES" if groups else "AWAITING_RESEARCH",

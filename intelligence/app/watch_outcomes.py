@@ -61,6 +61,14 @@ def publish(snapshot, connect, instant):
                         # Keep the original publication, not a later edited candidate.
                         evidence = {k:item[k] for k in ("symbol","exchange","close","adjustment_status","as_of")}
                         evidence["methodology"] = result.get("methodology","UNKNOWN")
+                        # Freeze score inputs at original publication, never backfill
+                        # past rows using a subsequent research snapshot.
+                        from . import score_calibration
+                        frozen=score_calibration.capture(item,horizon,result,(section.get("result") or {}).get("discovery_coverage") or {},today)
+                        if frozen is not None:evidence["score_calibration"]=frozen
+                        from . import bracket_research
+                        bracket=bracket_research.freeze(item,horizon,result,(section.get("result") or {}).get("discovery_coverage") or {},today)
+                        if bracket is not None:evidence["bracket_research"]=bracket
                         if isinstance(item.get("isin"),str) and re.fullmatch(r"IN[A-Z0-9]{10}",item["isin"]):
                             evidence["isin"]=item["isin"]
                         db.execute("""INSERT OR IGNORE INTO watch_outcomes
@@ -156,7 +164,9 @@ def evaluate(row, payload, today, calendar=None, *, action_report=None, instant=
         return "EVIDENCE_GAP",None
     start=publication.astimezone(IST).date()
     maturity=date.fromisoformat(row["maturity_date"])
-    if maturity!=start+timedelta(days=HORIZONS[row["horizon"]]):
+    if row["horizon"] not in (*HORIZONS,"FIP"):
+        return "EVIDENCE_GAP",None
+    if maturity!=start+timedelta(days=60 if row["horizon"]=="FIP" else HORIZONS[row["horizon"]]):
         return "EVIDENCE_GAP",None
     if today<=maturity:
         return "PENDING", None
@@ -189,7 +199,11 @@ def evaluate(row, payload, today, calendar=None, *, action_report=None, instant=
     change=100*(values[-1]/values[0]-1)
     if not isfinite(change):
         return "EVIDENCE_GAP",None
-    return "OBSERVED", {"entry_date":expected[0].isoformat(),"exit_date":expected[-1].isoformat(),
+    bracket=None
+    if isinstance(evidence.get("bracket_research"),dict):
+        from . import bracket_research
+        bracket=bracket_research.evaluate_frozen(evidence["bracket_research"],instrument,payload["candles"],expected,calendar,today,action_report,instant)
+    return "OBSERVED", {"bracket_research":bracket,"entry_date":expected[0].isoformat(),"exit_date":expected[-1].isoformat(),
         "entry_close":values[0],"exit_close":values[-1],"observed_price_return_pct":round(change,4),
         "source_code":interval[0]["source_code"],"evidence_version":OUTCOME_EVIDENCE_VERSION,
         "observations":len(interval),"history_fingerprint":manifest["digest"],"risk_path":_risk_path(values),

@@ -62,6 +62,7 @@ public class PortfolioReviewService {
           AND (now() AT TIME ZONE 'Asia/Kolkata')::date-(p.price_as_of AT TIME ZONE 'Asia/Kolkata')::date
             <= CASE WHEN p.asset_type='MUTUAL_FUND' THEN 7 ELSE 5 END) AS recorded_valuation_recent,
         i.exchange,i.id AS instrument_id,i.isin,s.scheme_code AS exact_scheme_code,s.category AS scheme_category,
+        security.positive_security_observations,
         CASE WHEN p.asset_type='EQUITY' THEN eq.n ELSE mf.n END AS history_count,
         CASE WHEN p.asset_type='EQUITY' THEN eq.latest_date ELSE mf.latest_date END AS evidence_date,
         CASE WHEN p.asset_type='EQUITY' THEN eq.latest ELSE mf.latest END AS latest,
@@ -84,6 +85,19 @@ public class PortfolioReviewService {
         WHERE matches=1 OR (matches=known_isins AND min_isin=max_isin)
         ORDER BY CASE WHEN candidate.exchange='NSE' THEN 0 ELSE 1 END,candidate.id LIMIT 1
       ) i ON true
+      LEFT JOIN LATERAL (
+        SELECT string_agg(DISTINCT evidence,'; ' ORDER BY evidence) AS positive_security_observations
+        FROM (
+          SELECT d.exchange||' '||d.security_state||' (observed '||
+            ((d.security_evidence_at AT TIME ZONE 'Asia/Kolkata')::date)::text||')' AS evidence
+          FROM discovery_security_context d
+          WHERE p.asset_type='EQUITY' AND d.isin=i.isin
+            AND i.isin ~ '^INE[A-Z0-9]{8}[0-9]$'
+            AND d.exchange IN ('NSE','BSE')
+            AND d.security_state IN ('SUSPENDED_REPORTED','PCA','SME','RELIST','IPO')
+            AND d.security_evidence_at<=now()
+        ) observed
+      ) security ON true
       LEFT JOIN LATERAL (
         SELECT count(*) n,count(DISTINCT trade_date) distinct_dates,
           count(DISTINCT adjustment_status) adjustments,
@@ -114,7 +128,19 @@ public class PortfolioReviewService {
       ) mf ON true
       WHERE p.user_id=? ORDER BY p.id
       """,today,today,owner);
-    Map<String,Object> report=assess(rows,today,now);
+    Map<String,Object> relative=Map.of();
+    try{relative=PortfolioHoldingRelativeStrength.collect(jdbc,rows,today);}
+    catch(org.springframework.dao.DataAccessException|IllegalArgumentException ex){/* Optional local evidence. */}
+    List<Map<String,Object>> enrichedRows=new ArrayList<>();
+    for(var row:rows){
+      var copy=new LinkedHashMap<>(row);
+      if("EQUITY".equals(row.get("asset_type"))){
+        String key=row.get("exchange")+":"+row.get("isin")+":"+row.get("instrument_id");
+        copy.put("holding_relative_strength",relative.get(key));
+      }
+      enrichedRows.add(copy);
+    }
+    Map<String,Object> report=assess(enrichedRows,today,now);
     report.put("journal_revision",journalRevision);
     try{report.put("journal_lot_reconciliation",PortfolioJournalLots.collect(jdbc,owner,rows,today));}
     catch(org.springframework.dao.DataAccessException ex){
@@ -139,6 +165,7 @@ public class PortfolioReviewService {
     report=PortfolioThesisChanges.attach(thesis.enrich(report),previous,json,now);
     report=PortfolioFundThesisChanges.attach(report,previous,json,now);
     report=PortfolioOwnershipChanges.attach(report,previous,json,now);
+    report=PortfolioReassessment.finalizeReview(report,json,today);
     report.put("portfolio_level_risk",PortfolioLevelRisk.assess(report,json,today));
     report.put("sale_research",PortfolioSaleResearch.assess(rows,report,json,today));
     report.put("fund_exit_load_research",PortfolioFundExitLoad.assess(report,json,now));
@@ -195,6 +222,11 @@ public class PortfolioReviewService {
         if(r.get("instrument_id")==null){missing.add("Stock mapping missing or ambiguous.");valid=false;}
         if(number(r,"distinct_dates")!=count||number(r,"adjustments")!=1){missing.add("Daily history has duplicate dates or mixed adjustment status.");valid=false;}
         if(number(r,"raw_count")>0)missing.add("Raw prices may be distorted by corporate actions.");
+        if(r.get("positive_security_observations") instanceof String positive&&!positive.isBlank()){
+          findings.add("Reported listing cautions for this company: "+positive+
+            ". Verify the relevant exchange; retained suspension evidence may be old and another venue is not automatically restricted.");
+        }
+        missing.add("Complete current NSE/BSE restriction clearance is not established by available listing classifications.");
         missing.add("Current fundamentals, valuation, institutional activity and news have not been verified in this review.");
       }else{
         if(number(r,"distinct_sources")!=1){missing.add("NAV history lacks a consistent source.");valid=false;}
@@ -218,6 +250,7 @@ public class PortfolioReviewService {
       item.put("exchange",r.get("exchange"));item.put("isin",r.get("isin"));item.put("status",status);item.put("weight_percent",weight);
       item.put("recorded_valuation_recent",Boolean.TRUE.equals(r.get("recorded_valuation_recent")));
       item.put("recorded_market_value",value);item.put("exact_scheme_code",r.get("exact_scheme_code"));item.put("scheme_category",r.get("scheme_category"));item.put("recorded_return_percent",returnPct);item.put("evidence_date",observed==null?null:observed.toString());
+      if(equity&&r.get("holding_relative_strength")!=null)item.put("holding_relative_strength",r.get("holding_relative_strength"));
       item.put("history_count",count);item.put("change_20_observations_percent",momentum);
       item.put("recent_peak_change_percent",drawdown);item.put("findings",findings);item.put("missing_evidence",missing);
       assessments.add(item);

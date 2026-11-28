@@ -185,6 +185,14 @@ class FundHistoryResearchServiceTest {
   for(int i=156;i>=0;i--)rows.add(Map.of("nav_date",end.minusWeeks(i),"nav",BigDecimal.valueOf(100+(156-i)*.2)));
   var risk=FundHistoryResearchService.weeklyRisk(rows,end);
   assertEquals(156,risk.get("weekly_intervals"));
+  var matched=(Map<?,?>)risk.get("matched_weekly_comparison");
+  assertNotNull(matched);assertEquals(157,matched.get("anchor_count"));
+  assertEquals(end.toString(),matched.get("last_date"));
+  assertEquals(0.0,matched.get("drawdown_percent"));
+  var shifted=new ArrayList<>(rows);
+  var changed=new HashMap<>(shifted.get(50));changed.put("nav_date",((LocalDate)changed.get("nav_date")).minusDays(1));shifted.set(50,changed);
+  var alternate=(Map<?,?>)FundHistoryResearchService.weeklyRisk(shifted,end).get("matched_weekly_comparison");
+  assertNotNull(alternate);assertNotEquals(matched.get("date_digest"),alternate.get("date_digest"));
   assertNotNull(risk.get("weekly_hurdle_sensitivity"));
   assertEquals(105,risk.get("rolling_windows"));
   assertEquals(100.0,risk.get("positive_rolling_52w_percent"));

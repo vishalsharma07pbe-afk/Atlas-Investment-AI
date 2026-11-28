@@ -4,6 +4,8 @@ from zoneinfo import ZoneInfo
 from unittest.mock import patch
 import json
 import sqlite3
+import tempfile
+from pathlib import Path
 from app import mutual_fund_recommendations as recommendations
 from app.mutual_fund_recommendations import FundEvidence,rank_candidates,suitability,_official_history_candidates,_research_reports
 
@@ -190,15 +192,15 @@ class RecommendationEngineTests(unittest.TestCase):
                  "research_candidates":[row],"universe_count":1,"eligible_count":1,
                  "sample_count":1,"history_gate_counts":{"OFFICIAL_ANCHOR_UNAVAILABLE":0,
                     "COMPARISON_DATE_MISMATCH":0,"HISTORY_QUALITY_OR_LENGTH":0,"ELIGIBLE":1}}
-        db=sqlite3.connect(":memory:")
-        try:
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/"catalog.sqlite3"
             with patch.object(recommendations,"_catalog_candidates",return_value=([],{"official_category_verified":0,"dated_nav_history_eligible":0})), \
                  patch.object(recommendations,"backend_json",return_value=history), \
                  patch.object(recommendations.fund_disclosures,"matched",return_value=[{"scheme_code":"123456","ter_percent":0.1}]), \
                  patch.object(recommendations.fund_portfolios,"composition_matches",return_value=[{"scheme_code":"123456","status":"SECONDARY_COMPOSITION_ONLY","portfolio_date":"2026-10-31"}]), \
                  patch.object(recommendations.fund_portfolios,"matched",return_value=[]), \
                  patch.object(recommendations.fund_portfolios,"overlap",return_value={"pairs":[]}), \
-                 patch.object(recommendations.nav_catalog,"_connect",return_value=db):
+                 patch.object(recommendations.nav_catalog,"DB_PATH",path):
                 first=recommendations.dashboard("LARGE_CAP",84,"HIGH")
                 second=recommendations.dashboard("LARGE_CAP",84,"HIGH")
             self.assertEqual(first["snapshot_hash"],second["snapshot_hash"])
@@ -215,11 +217,11 @@ class RecommendationEngineTests(unittest.TestCase):
             self.assertFalse(report["secondary_portfolio_available"])
             self.assertIn("RECENT_PORTFOLIO_DISCLOSURE",report["growth_outlook"]["missing"])
             self.assertIn("EXPENSE_RATIO",report["top_performer"]["missing"])
-            stored=db.execute("SELECT result_json FROM mf_recommendation_snapshots").fetchall()
+            self.assertEqual(first["prospective_validation"]["status"],"AWAITING_MATURE_EVIDENCE")
+            with sqlite3.connect(path) as db:
+                stored=db.execute("SELECT result_json FROM mf_recommendation_snapshots").fetchall()
             self.assertEqual(len(stored),1)
             self.assertEqual(json.loads(stored[0][0])["research_reports"],first["research_reports"])
-        finally:
-            db.close()
 
     def test_reports_include_secondary_context_beyond_display_five(self):
         funds=[strong(identifier=str(123450+i),expense_ratio=None,riskometer=None,riskometer_date=None)
