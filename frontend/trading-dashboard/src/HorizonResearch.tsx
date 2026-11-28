@@ -44,7 +44,7 @@ type GlobalExposure={status:string;sector?:string;industry?:string;questions:{fa
 type QualificationGate={domain:string;status:string;requirements:string[]};
 type StockQualification={status:string;gates:QualificationGate[];blockers:string[];review_findings:string[];notice:string};
 type WatchReference={exchange:string;id:number;isin:string};
-type CompanySelection={unique_company_count:number;unidentified_listing_count:number;conflicting_listing_count:number;cross_venue_company_count:number;review_company_count:number;ready_markets:string[];watch_refs:WatchReference[];notice:string};
+type CompanySelection={unique_company_count:number;unidentified_listing_count:number;conflicting_listing_count:number;cross_venue_company_count:number;review_company_count:number;ready_markets:string[];watch_refs:WatchReference[];preliminary_watch_refs?:WatchReference[];notice:string};
 type CompanyContext={listing_count:number;venues:string[];blockers:string[];review_findings:string[];status:string};
 type QualificationSummary={selection?:CompanySelection;status:string;reviewed_count:number;review_required_count:number;qualified_count:number|null;recommendations:unknown[];leading_blockers:{code:string;count:number}[];notice:string};
 type ReportCloseHistory={adjustment_status:string;as_of:string;points:{date:string;close:number}[]};
@@ -185,6 +185,9 @@ export default function HorizonResearch({horizon,children,onSettings,reportTarge
  const available=ready.flatMap(s=>s.result!.horizons![horizon]!.candidates);
  const selection=data?.stock_qualification?.horizons[horizon]?.selection;
  const ranked=selection?selection.watch_refs.flatMap(ref=>{const matches=available.filter(c=>c.exchange===ref.exchange&&c.id===ref.id&&c.isin===ref.isin);return matches.length===1?matches:[];}).slice(0,5):available.sort((a,b)=>b.rank_score-a.rank_score||a.exchange.localeCompare(b.exchange)||a.symbol.localeCompare(b.symbol)).slice(0,5);
+ const preliminary=selection?(selection.preliminary_watch_refs??[]).flatMap(ref=>{const matches=available.filter(c=>c.exchange===ref.exchange&&c.id===ref.id&&c.isin===ref.isin);return matches.length===1?matches:[];}).slice(0,5):[];
+ const preliminaryOnly=ranked.length===0&&preliminary.length>0;
+ const displayed=preliminaryOnly?preliminary:ranked;
  const blockers=[...new Set(ready.flatMap(s=>s.result!.horizons![horizon]!.blockers))];
  // A briefing reference is never resolved by ticker or by a different venue.
  // Require exactly one current server-selected candidate; older snapshots
@@ -215,9 +218,9 @@ export default function HorizonResearch({horizon,children,onSettings,reportTarge
   </section>
   {horizon==="INTRADAY"?<IntradayResearch/>:<section className="panel glass horizon-results">
    {data?.enabled&&!error&&data.stock_qualification?.horizons[horizon]&&<QualificationSummaryView report={data.stock_qualification.horizons[horizon]!}/>}
-   {ranked.length>0&&<EvidenceBars title="Observed ATR as percentage of price (not a risk rating)" rows={ranked.map(c=>({label:c.symbol+" · "+c.exchange,value:c.atr_percent}))} neutral format={v=>"ATR "+v.toFixed(2)+"%"}/>}<div className="sectionhead"><div><h3>Technical watch candidates</h3><p className="muted tiny">{selection?"Up to five distinct ISINs from the available NSE/BSE shortlists; research watches, not recommendations.":"Up to five observations across the available NSE/BSE samples."}</p></div></div>
+   {displayed.length>0&&<EvidenceBars title="Observed ATR as percentage of price (not a risk rating)" rows={displayed.map(c=>({label:c.symbol+" · "+c.exchange,value:c.atr_percent}))} neutral format={v=>"ATR "+v.toFixed(2)+"%"}/>}<div className="sectionhead"><div><h3>{preliminaryOnly?"Raw-price research observations":"Technical watch candidates"}</h3><p className="muted tiny">{preliminaryOnly?"No strict adjusted-history watches are available. These current technical observations use unadjusted prices and do not qualify for the strategy or recommendations.":selection?"Up to five distinct ISINs from the available NSE/BSE shortlists; research watches, not recommendations.":"Up to five observations across the available NSE/BSE samples."}</p></div></div>
    {reportTarget&&<div className="notice" role="status">{!data&&!error?"Resolving the selected report…":requested?(requested.as_of===reportTarget.as_of?"Opened the selected stock report from the briefing.":"The selected stock has a refreshed observation: "+requested.as_of+" (briefing: "+reportTarget.as_of+"). The report below uses current evidence."):"The requested stock report is not available in the current canonical shortlist. No substitute report was opened. You can review the current watches below."}</div>}
-   {ranked.length?<div className="horizon-cards">{ranked.map((candidate,index)=><article className="horizon-card" key={candidate.exchange+":"+candidate.id}>
+   {displayed.length?<div className="horizon-cards">{displayed.map((candidate,index)=><article className="horizon-card" key={candidate.exchange+":"+candidate.id}>
     <header><div><small>#{index+1} · {candidate.exchange}</small><h3>{candidate.symbol}</h3></div><strong>{money(candidate.close)}</strong></header>
     <p className="muted tiny">Daily close · {candidate.as_of}</p><p>{candidate.review_horizon}</p>
     <dl><div><dt>ATR / price</dt><dd>{candidate.atr_percent.toFixed(2)}%</dd></div><div><dt>History</dt><dd>{candidate.history_count} sessions</dd></div></dl>

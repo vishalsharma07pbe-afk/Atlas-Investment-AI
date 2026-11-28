@@ -548,7 +548,7 @@ def _publisher_riskometer(candidates,source_rows,publisher_reports,today):
     return output,used
 
 
-def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str="MODERATE"):
+def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str="MODERATE",*,category_only=False):
     if category not in CATEGORIES:raise ValueError("UNSUPPORTED_CATEGORY")
     if horizon_months<12 or horizon_months>360:raise ValueError("INVALID_HORIZON")
     if risk_tolerance not in RISK_LEVELS:raise ValueError("INVALID_RISK_TOLERANCE")
@@ -581,7 +581,7 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
         for field in ("ter_percent","riskometer","benchmark","aum_cr_all_plans","fund_managers","exit_load")}
     fit=suitability(category,horizon_months,risk_tolerance)
     today=datetime.now(ZoneInfo("Asia/Kolkata")).date()
-    shortlist=fund_peer_shortlist.build(official,source_rows,category,fit,today,_rolling_peer_context)
+    shortlist=fund_peer_shortlist.build(official,source_rows,category,fit,today,_rolling_peer_context,category_only=category_only)
     # Prioritize matched shortlist portfolio drilldowns within the existing
     # five-report budget, without claiming the rest of the cohort was assessed.
     priority={r["identifier"]:i for i,r in enumerate(shortlist["items"])}

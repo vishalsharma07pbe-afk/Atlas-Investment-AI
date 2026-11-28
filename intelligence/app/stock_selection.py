@@ -39,6 +39,15 @@ def _technical(item,decision):
             and any(g.get("domain")=="TECHNICAL" and g.get("status")=="OBSERVATION_CHECKS_MET"
                     for g in decision.get("gates",[])))
 
+def _raw_observation(item,decision):
+    # An exact, current, otherwise passing technical observation. This is not
+    # an adjusted-history watch, a strategy signal or qualification input.
+    return (item.get("adjustment_status")=="RAW_UNADJUSTED"
+            and _numeric(item.get("rank_score")) and _numeric(item.get("close")) and item["close"]>0
+            and any(g.get("domain")=="TECHNICAL" and g.get("requirements")==["ADJUSTED_PRICE_HISTORY_REQUIRED"]
+                    for g in decision.get("gates",[])))
+
+
 def summarize(observations,ready_markets,venue_observations=None,instant=None):
     listings=defaultdict(list)
     for item,decision in observations:
@@ -61,6 +70,7 @@ def summarize(observations,ready_markets,venue_observations=None,instant=None):
             continue
         groups[item["isin"]].append((item,decision))
     representatives=[]
+    raw_representatives=[]
     review_companies=0
     both=0
     for isin,entries in sorted(groups.items()):
@@ -105,9 +115,20 @@ def summarize(observations,ready_markets,venue_observations=None,instant=None):
                 item["company_venue_context"]=venue_context
         if chosen is not None:
             representatives.append(chosen)
+        elif not findings and isin not in conflicting_isins:
+            raw=[i for i,d in entries if _raw_observation(i,d) and i.get("security_state") not in company_venues.SPECIAL]
+            if raw and len({i["exchange"] for i in raw})==len(raw):
+                if venue_observations is not None and instant is not None:
+                    consolidated=company_venues.consolidate(raw,venue_observations,instant,rank)
+                    if consolidated and not consolidated[0]["company_venue_context"]["review_findings"]:
+                        raw_representatives.append(consolidated[0])
+                else:
+                    raw_representatives.append(min(raw,key=rank))
+    raw_representatives.sort(key=lambda i:(-_score(i.get("rank_score")),-_score(i.get("median_daily_traded_value")),i["isin"],i["exchange"],i["id"]))
     representatives.sort(key=lambda i:(-_score(i.get("rank_score")),-_score(i.get("median_daily_traded_value")),i["isin"],i["exchange"],i["id"]))
     return {"unique_company_count":len(groups),"unidentified_listing_count":unidentified,
             "conflicting_listing_count":conflicts,"cross_venue_company_count":both,
             "review_company_count":review_companies,"ready_markets":sorted(ready_markets),
             "watch_refs":[{"exchange":i["exchange"],"id":i["id"],"isin":i["isin"]} for i in representatives[:5]],
+            "preliminary_watch_refs":[{"exchange":i["exchange"],"id":i["id"],"isin":i["isin"]} for i in raw_representatives[:5]],
             "notice":NOTICE}

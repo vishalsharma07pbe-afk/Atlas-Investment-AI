@@ -125,5 +125,6 @@ class SteadyMomentumTests(unittest.TestCase):
         obs={rows[3]["isin"]:[{"exchange":"BSE","id":50,"security_state":"PCA"}]}
         matches,count=strict_suggestions(rows+[{**rows[4],"exchange":"BSE","id":51}],obs,now)
         self.assertEqual(count,9)
-        self.assertEqual([r["id"] for r in matches],[5,6,7,8,9,10,11,12,13])
+        self.assertEqual([r["isin"] for r in matches],[r["isin"] for r in rows[4:]])
+        self.assertEqual(matches[0]["exchange"],"BSE")
         self.assertEqual(len({r["isin"] for r in matches}),len(matches))

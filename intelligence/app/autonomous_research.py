@@ -213,7 +213,9 @@ def _fund_qualification_counts(summary):
 
 
 def fund_snapshot(category):
-    result = dashboard(category, 60, "MODERATE")
+    # Public category discovery is not a personalized recommendation. Keep
+    # the existing suitability filters authoritative for the qualified lists.
+    result = dashboard(category, 60, "MODERATE",category_only=True)
     # Keep strict rankings and compact counts, not the individual exclusions.
     snapshot={key: result[key] for key in (
         "category", "coverage", "top_performers", "growth_outlook",
@@ -238,7 +240,7 @@ def fund_snapshot(category):
     shortlist=result.get("historical_research_shortlist") or {}
     if shortlist.get("methodology")=="MF-MATCHED-PEER-1" and shortlist.get("category")==category:
         snapshot["historical_research_shortlist"]={k:shortlist.get(k) for k in
-            ("methodology","category","status","eligible_count","matched_count","cohort_count","first_date","last_date","date_digest","notice")}
+            ("methodology","category","status","eligible_count","matched_count","cohort_count","first_date","last_date","date_digest","notice","scope","selected_suitability")}
         snapshot["historical_research_shortlist"]["items"]=[
             {k:r.get(k) for k in ("identifier","name","isin_growth","nav","nav_date","score","weekly_cagr_percent","relative_risk","status","qualified")}
             for r in shortlist.get("items",[])[:5] if isinstance(r,dict) and r.get("qualified") is False and r.get("status")=="HISTORICAL_RESEARCH_ONLY"]
