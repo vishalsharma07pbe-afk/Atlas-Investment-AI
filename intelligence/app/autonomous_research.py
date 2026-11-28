@@ -595,7 +595,11 @@ def read_overview():
         analyst_source_discovery.attach(snapshot["investment_analyst"],_connect,instant)
     except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,AttributeError):
         snapshot["investment_analyst"]["source_discovery"]={"status":"UNAVAILABLE","links":[],"notice":analyst_source_discovery.NOTICE}
-    from . import decision_quality
+    from . import decision_quality,decision_outcomes
+    try:
+        snapshot["investment_analyst"]["decision_outcomes"]=decision_outcomes.summary(_connect,instant)
+    except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,AttributeError):
+        snapshot["investment_analyst"]["decision_outcomes"]={"status":"UNAVAILABLE","states":{},"notice":decision_outcomes.NOTICE}
     try:
         decision_quality.attach(snapshot["investment_analyst"],instant.astimezone(ZoneInfo("Asia/Kolkata")).date())
     except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
@@ -790,6 +794,13 @@ def _execute_job(job):
         snapshot=read_snapshot()
         if not snapshot.get("enabled"):return "DISABLED_OR_NOT_AUTHORIZED"
         multi_strategy_prospective.publish(snapshot,_connect,instant)
+        from . import investment_analyst,analyst_committee,decision_quality,decision_outcomes
+        today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
+        report=investment_analyst.analyze(snapshot,today,instant)
+        analyst_committee.attach(report,_connect,instant)
+        report["decision_outcomes"]=decision_outcomes.summary(_connect,instant)
+        decision_quality.attach(report,today)
+        decision_outcomes.publish(report,_connect,instant)
         return "PASS_COMPLETED"
     if job=="INVESTMENT_ANALYST_SOURCES":
         from . import investment_analyst,analyst_source_discovery
