@@ -92,8 +92,13 @@ def validate(response,evidence):
         except (ValueError,TypeError,KeyError,AttributeError):continue
     return {k:v for k,v in found.items() if k not in duplicate}
 
+def providers_for_analyst():
+    # The plan is lead reviewer only after explicit account and external consent.
+    allowed=ai.providers()
+    return sorted(allowed,key=lambda p:p!="CHATGPT_PLAN")
+
 def refresh(report,connect,instant,runner=ai_failover.grounded_research):
-    providers=ai.providers();evidence=pack(report)
+    providers=providers_for_analyst();evidence=pack(report)
     if not providers or not evidence:return False
     digest=key(evidence,providers,report["research_date"])
     previous=ai._claim(connect,digest,instant)
@@ -124,7 +129,7 @@ def refresh(report,connect,instant,runner=ai_failover.grounded_research):
     return bool(reviews)
 
 def attach(report,connect,instant):
-    providers=ai.providers();evidence=pack(report)
+    providers=providers_for_analyst();evidence=pack(report)
     result={"methodology":VERSION,"status":"AWAITING_REVIEW" if providers and evidence else "DISABLED_OR_NO_EVIDENCE",
         "reviewed_providers":0,"notice":NOTICE}
     report["committee"]=result

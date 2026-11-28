@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from .ai_verdict import VERDICT_PROMPT, parse_verdict
 from . import ai_budgets
 
-ALLOWED = ("OLLAMA", "GEMINI", "GROQ", "OPENAI", "XAI")
+ALLOWED = ("OLLAMA", "GEMINI", "GROQ", "OPENAI", "XAI", "CHATGPT_PLAN")
 FIELDS = {"symbol", "market", "price_change_pct", "volume_change_pct", "sector", "technical_summary", "news_summary"}
 SYMBOL = re.compile(r"^[A-Z0-9._&-]{1,40}$")
 CHAT_ENDPOINTS = {
@@ -23,7 +23,7 @@ RESPONSES_ENDPOINTS = {
 }
 DEFAULT_MODELS = {"OLLAMA":"llama3.2", "GEMINI":"gemini-3.5-flash-lite",
                   "GROQ":"llama-3.3-70b-versatile", "OPENAI":"gpt-4.1-mini",
-                  "XAI":"grok-4.7"}
+                  "XAI":"grok-4.7", "CHATGPT_PLAN":"account-selected"}
 BLOCKED = re.compile(r"(?:bearer\s+\S+|(?:api[_ -]?key|access[_ -]?token|password|account[_ -]?id)\s*[:=]|sk-[a-zA-Z0-9_-]{12,})", re.I)
 _LAST_SUCCESS = {}
 _SUCCESS_LOCK = Lock()
@@ -92,7 +92,7 @@ def _safe_payload(data):
 def _order():
     raw=os.getenv("ATLAS_AI_PROVIDER_ORDER","OLLAMA,GEMINI,GROQ")
     order=[s.strip().upper() for s in raw.split(",")]
-    if not order or len(order)>5 or len(set(order))!=len(order) or any(s not in ALLOWED for s in order):
+    if not order or len(order)>len(ALLOWED) or len(set(order))!=len(order) or any(s not in ALLOWED for s in order):
         raise ValueError("INVALID_AI_PROVIDER_ORDER")
     return order
 
@@ -116,6 +116,9 @@ def _configuration_status(provider):
         return "READY_TO_CALL"
     if os.getenv("ATLAS_EXTERNAL_AI_ALLOWED","false").lower()!="true":
         return "EXTERNAL_OPT_IN_REQUIRED"
+    if provider=="CHATGPT_PLAN":
+        from . import chatgpt_plan
+        return chatgpt_plan.configuration_status()
     key_var="GEMINI_API_KEY" if provider=="GEMINI" else (CHAT_ENDPOINTS.get(provider) or RESPONSES_ENDPOINTS[provider])[1]
     if not os.getenv(key_var):
         return "API_KEY_REQUIRED"
@@ -142,6 +145,12 @@ def _responses_answer(body):
     return "".join(fragments) or None
 
 def _generate(provider, prompt, schema=VERDICT_SCHEMA, schema_name="atlas_verdict"):
+    if provider=="CHATGPT_PLAN":
+        from . import chatgpt_plan
+        try:
+            return chatgpt_plan.generate(prompt,schema,schema_name)
+        except chatgpt_plan.PlanError as exc:
+            raise AIProviderError(str(exc)) from None
     model=os.getenv("ATLAS_"+provider+"_MODEL",DEFAULT_MODELS[provider])
     if not re.fullmatch(r"[a-zA-Z0-9._:/-]{2,100}",model):
         raise AIProviderError("INVALID_MODEL")

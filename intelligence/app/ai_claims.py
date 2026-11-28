@@ -91,7 +91,7 @@ def compare(supplied,reviews):
     seen=set()
     for review in reviews:
         provider=review.get("provider")
-        if provider not in ("OLLAMA","GEMINI","GROQ","OPENAI","XAI") or provider in seen:
+        if provider not in ("OLLAMA","GEMINI","GROQ","OPENAI","XAI","CHATGPT_PLAN") or provider in seen:
             continue
         seen.add(provider)
         block=review.get("claim_audit") or {}

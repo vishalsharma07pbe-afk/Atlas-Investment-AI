@@ -15,6 +15,7 @@ DEFAULT_LIMITS = {
     "GROQ": (5, 100),
     "OPENAI": (0, 0),
     "XAI": (0, 0),
+    "CHATGPT_PLAN": (1, 8),
 }
 
 def limits(provider):
