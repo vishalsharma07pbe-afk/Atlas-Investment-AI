@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 import json,re
 from . import decision_quality as q,watch_outcomes as w,research_reliability as rel
 from .replay_evidence import exact_isin
+from . import action_effectiveness as effectiveness
 
 VERSION="ANALYST-DECISION-OUTCOMES-1"
 HORIZON="ANALYST_DECISION"
@@ -33,7 +34,10 @@ def publish(report,connect,instant):
                 existing.add(e["isin"])
                 if rel._stamp(r["published_at"])==today:daily.add(e["decision_state"])
             except (ValueError,TypeError,KeyError):continue
-        for r in q.rows(report.get("stocks"))[:10]:
+        # Within the existing daily budget, prefer the actual conditional
+        # action over another row of the same research category.
+        candidates=q.rows(report.get("stocks"))[:10]
+        for r in sorted(candidates,key=lambda x:x.get("action")!="RESEARCH_FOR_ENTRY"):
             d=q.obj(r.get("decision_quality"));state=d.get("state")
             if state not in STATES or state in daily or d.get("methodology")!=q.VERSION or d.get("qualified") is not False or r.get("qualified") is not False or r.get("tier")!="ADJUSTED_JOINT":continue
             isin=r.get("isin")
@@ -41,13 +45,17 @@ def publish(report,connect,instant):
             if type(r.get("id")) is not int or r["id"]<=0 or r.get("exchange") not in ("NSE","BSE") or not isinstance(r.get("symbol"),str) or not re.fullmatch(r"[A-Z0-9._&-]{1,40}",r["symbol"]) or not q.num(r.get("close"),.0001,1e9):continue
             e={k:r[k] for k in ("isin","symbol","exchange","close","as_of")}
             e.update(methodology=VERSION,decision_policy=q.VERSION,adjustment_status="ADJUSTED",decision_state=state)
+            if r.get("action") in ("RESEARCH_FOR_ENTRY","WATCH_FOR_CONFIRMATION"):
+                policy=q.obj(report.get("decision_quality"))
+                positive=r["action"]=="RESEARCH_FOR_ENTRY" and state=="PRIORITY_RESEARCH" and not r.get("allocation_evidence_hold") and not policy.get("stock_allocation_hold") and not policy.get("forecast_allocation_hold") and policy.get("status")!="UNAVAILABLE"
+                e.update(action_policy=effectiveness.VERSION,final_action="CONDITIONAL" if positive else "WITHHELD")
             n=db.execute("""INSERT OR IGNORE INTO watch_outcomes(instrument_id,horizon,observed_date,published_at,maturity_date,evidence)
                 VALUES(?,?,?,?,?,?)""",(r["id"],HORIZON,r["as_of"],instant.isoformat(),(today+timedelta(days=60)).isoformat(),json.dumps(e,allow_nan=False))).rowcount
             if n:daily.add(state);existing.add(isin);count+=n
     return count
 
 def summarize_rows(rows,today,truncated=False):
-    groups=defaultdict(list);published=defaultdict(int)
+    groups=defaultdict(list);published=defaultdict(int);actions=[]
     for r in rows:
         try:
             e=json.loads(r["evidence"]);state=e.get("decision_state")
@@ -63,6 +71,14 @@ def summarize_rows(rows,today,truncated=False):
                 excess=net-100*benchmark if net is not None and benchmark is not None and isfinite(benchmark) else None
             except (ValueError,TypeError,KeyError,OverflowError,AttributeError):net=excess=None
             groups[state].append((e["isin"],start,net,excess))
+            if e.get("action_policy")==effectiveness.VERSION and e.get("final_action") in ("CONDITIONAL","WITHHELD") and e.get("exchange") in ("NSE","BSE"):
+                endpoints=None;stress=None
+                if net is not None:
+                    try:
+                        o=json.loads(r["outcome"]);endpoints=(o["entry_date"],o["exit_date"],o["observations"])
+                        stress=100*((1+ret)*.994**2-1)
+                    except (ValueError,TypeError,KeyError,OverflowError):net=excess=None
+                actions.append({"day":start,"identity":e["isin"],"group":e["exchange"],"arm":e["final_action"],"endpoints":endpoints,"net":net,"stress":stress,"benchmark":100*benchmark if excess is not None else None})
         except (ValueError,TypeError,KeyError,OverflowError,AttributeError):continue
     result={}
     for state in STATES:
@@ -76,7 +92,8 @@ def summarize_rows(rows,today,truncated=False):
             "median_net_minus_price_index_pp":round(median(values),4) if values else None,
             "status":"INSUFFICIENT_MATURE_COMPARABLE_EVIDENCE" if not ready else "ADVERSE_OBSERVED_SAMPLE" if median(values)<=0 else "POSITIVE_DESCRIPTIVE_SAMPLE"}
     return {"methodology":VERSION,"status":"OBSERVED_DECISION_OUTCOMES" if any(v["observed"] for v in result.values()) else "AWAITING_MATURITY",
-        "states":result,"truncated":truncated,"qualified":False,"notice":NOTICE}
+        "states":result,"truncated":truncated,"qualified":False,"notice":NOTICE,
+        "final_action_comparison":effectiveness.summarize(actions,60,truncated=truncated)}
 
 def summary(connect,instant):
     with closing(connect()) as db:
