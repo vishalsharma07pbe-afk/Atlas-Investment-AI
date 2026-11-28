@@ -269,6 +269,11 @@ def analyze(snapshot,today,instant=None):
         for row in group["items"]:row["research_thesis"]=research_synthesis.thesis(row,True)
     out["multi_strategy"]=obj(snapshot.get("multi_strategy"))
     out["forecast_model_review"]=obj(obj(snapshot.get("forward_earnings_validation")).get("model_review"))
+    out["long_history_validation"]=obj(snapshot.get("long_history_validation"))
+    regime=obj(snapshot.get("market_regime"))
+    if regime.get("status")=="OBSERVED_BENCHMARK_REGIME" and regime.get("calendar_checked_on")==today.isoformat() and fresh(regime.get("as_of"),today,4):
+        out["market_context"]={k:regime.get(k) for k in ("trend","as_of","volatility_regime","status")}
+    else:out["market_context"]={"status":"AWAITING_CURRENT_MARKET_CONTEXT"}
     out.update(stocks=stocks,funds=funds,status="RESEARCH_AVAILABLE" if stocks or any(f["items"] for f in funds) else "NO_SUPPORTED_CANDIDATES")
     if stocks:out["next_steps"].append("Review the highest evidence-tier stock first; confirm current price and independent business evidence before allocating cash.")
     else:out["next_steps"].append("Do not force a new equity position from the current sample.")
