@@ -242,6 +242,8 @@ def summarize(snapshot,connect,instant):
     if surprises:
         result["unavailable_strategies"].pop("PEAD",None)
     result["expectations_evidence_basis"]="AUTHORIZED_OPERATOR_REVIEWED_IMPORT" if surprises else "NO_AUTHORIZED_EVENT_INPUT"
+    from . import emerging_opportunities
+    emerging=[]
     counts=Counter();items=[];excluded_price_risk=0
     for r in candidates:
         f=r["multi_strategy_price"];isin=r["isin"];report=prepared.get(isin,{})
@@ -249,6 +251,8 @@ def summarize(snapshot,connect,instant):
         # Known company-level warnings in the established report remain authoritative.
         existing=obj(obj(obj(snapshot.get("company_reports")).get("items")).get(isin))
         if existing.get("review_findings"):continue
+        setup=emerging_opportunities.assess(r,f,report,today)
+        if setup:emerging.append(setup)
         lanes=price_lanes(f);facts={"return_60_percent":f["return_60_percent"],"median_daily_turnover_cr":f["turnover_cr"]}
         adjusted=f.get("adjustment_status")=="ADJUSTED" and f.get("calendar_matched") is True
         if adjusted:
@@ -342,6 +346,8 @@ def summarize(snapshot,connect,instant):
         row=next((r for r in items if family in r["families"] and r["isin"] not in seen and r["regime_priority"]!="CAUTION"),None)
         if row:selected.append(row);seen.add(row["isin"])
     selected.extend(r for r in items if r["isin"] not in seen)
+    emerging.sort(key=lambda x:({"EARLY_CONVERGENCE_RESEARCH":0,"PRICE_SETUP_BUSINESS_CONFIRMATION_PENDING":1,"PRICE_SETUP_AWAITING_BUSINESS_EVIDENCE":2,"BUSINESS_TREND_CAUTION":3}[x["state"]],x["isin"]))
+    result["emerging_opportunities"]={"methodology":emerging_opportunities.VERSION,"items":emerging[:10],"matched_count":len(emerging),"notice":emerging_opportunities.NOTICE,"qualified":False}
     result.update(status="RESEARCH_AVAILABLE" if selected else "NO_SUPPORTED_MATCHES",items=selected[:10],
         coverage={"eligible_companies":len(candidates),"cached_company_reports":len(reports),"comparable_cohorts":len(bounds),"matched_companies":len(items),"excluded_known_price_risk":excluded_price_risk},
         lane_counts=dict(counts),regime=trend,regime_basis="PROSPECTIVE_CONTEXT_WITH_STATIC_FALLBACK",adaptive_priority=adaptive,
