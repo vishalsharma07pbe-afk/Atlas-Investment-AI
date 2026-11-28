@@ -24,3 +24,12 @@ it("shows a conditional owner-local plan",()=>{
  expect(screen.getByText("Review potential reduction")).toBeTruthy();
  expect(screen.getByText("Verify official evidence")).toBeTruthy();
 });
+
+it("shows a strategy-specific channel exit without calling it a certified target",()=>{
+ const report:InvestmentAnalysis={methodology:"INVESTMENT-ANALYST-1",status:"RESEARCH_AVAILABLE",research_date:"2026-11-28",
+ stocks:[{id:1,isin:"INE002A01018",symbol:"RELIANCE",exchange:"NSE",as_of:"2026-11-27",close:100,tier:"MULTI_STRATEGY_RESEARCH",horizon:"RESEARCH",score:null,reasons:["Research match"],limitations:["Not qualified"],qualified:false,action:"WATCH_FOR_CONFIRMATION",price_plan:{reference:100,entry_trigger:99,stop_scenario:96,target_scenario:108,reward_risk:2,channel_exit:94,risk_per_share:4,strategy:"TURTLE_LONG_BREAKOUT",exit_rule:"20_SESSION_LOW_OR_2N_STOP",notice:"No fixed profit target"}}],funds:[],next_steps:[],notice:"Research only"};
+ render(<InvestmentAnalystPanel report={report} onFunds={()=>{}} onPortfolio={()=>{}}/>);
+ expect(screen.getByText("Illustrative strategy risk plan")).toBeTruthy();
+ expect(screen.getByText("Observed channel exit")).toBeTruthy();
+ expect(screen.getByText("No fixed profit target")).toBeTruthy();
+});
