@@ -194,7 +194,7 @@ def summarize(snapshot,connect,instant):
         "CAN_SLIM_FULL":"Quarterly share-adjusted EPS, institutional sponsorship and verified catalyst evidence required",
         "SEPA_FULL":"Complete audited earnings, growth and valuation evidence required beyond the trend template",
         "VCP_FULL":"Discretionary pattern definition; objective contraction proxy is implemented",
-        "TURTLE_FULL":"Pyramiding, portfolio risk sizing and channel/ATR exits require a distinct portfolio simulator"},
+        "TURTLE_FULL":"Shared-cash close-confirmed replay is implemented; canonical intraday fills, historical universe and portfolio validation remain unverified"},
         "notice":NOTICE}
     if snapshot.get("enabled") is not True:return result
     observations=company_venues.collect(snapshot,instant)
