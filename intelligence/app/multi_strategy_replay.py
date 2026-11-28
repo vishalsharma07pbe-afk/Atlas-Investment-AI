@@ -71,6 +71,43 @@ def positions_for(signal_map,lane,start,end):
             result.append(i);next_signal=i+HOLD
     return result
 
+def turtle_channel_replay(candles,signal_map,start,end,bps=30):
+    """Single-instrument cash-only next-open experiment; no portfolio claims.
+
+    Close-confirmed stop/channel exit executes at next open. Gaps are retained.
+    No same-bar look-ahead or simulated intraday fills. No pyramiding.
+    """
+    from .professional_strategies import channel_risk_inputs,turtle_unit_size
+    equity=100000.;cash=equity;shares=0;stop=None;pending=None;trades=0;path=[equity]
+    cost=bps/10000
+    if "TURTLE_LONG_BREAKOUT" in signal_map.get(start-1,set()):
+        evidence=channel_risk_inputs(candles[max(0,start-253):start])
+        if evidence:pending=("ENTRY",evidence["n"])
+    for i in range(start,end+1):
+        bar=candles[i]
+        if pending=="EXIT" and shares:
+            cash+=shares*bar.open*(1-cost);shares=0;stop=None;trades+=1
+        elif isinstance(pending,tuple) and not shares:
+            atr=pending[1]
+            size=turtle_unit_size(cash,atr,bar.open*(1+cost),cash)
+            if size and size["shares"]>0:
+                shares=size["shares"];cash-=shares*bar.open*(1+cost);stop=bar.open-2*atr
+        pending=None
+        if shares:
+            channel=min(v.low for v in candles[i-20:i])
+            if bar.close<=max(stop,channel):pending="EXIT"
+        elif "TURTLE_LONG_BREAKOUT" in signal_map.get(i,set()):
+            evidence=channel_risk_inputs(candles[max(0,i-252):i+1])
+            if evidence:pending=("ENTRY",evidence["n"])
+        path.append(cash+shares*bar.close)
+    peak=path[0];drawdown=0.
+    for v in path:
+        peak=max(peak,v);drawdown=min(drawdown,v/peak-1)
+    return {"status":"DESCRIPTIVE_SINGLE_INSTRUMENT_CHANNEL_REPLAY","completed_trades":trades,
+        "open_position":shares>0,"net_marked_return_percent":round(100*(path[-1]/path[0]-1),6),
+        "max_drawdown_percent":round(100*drawdown,6),"cost_bps_per_side":bps,"qualified":False,
+        "notice":"Close-confirmed next-open channel/stop research with 1% initial 2N risk cap; final open holdings marked at close. No pyramiding, portfolio capacity or realized performance."}
+
 def pearson(a,b):
     if len(a)!=len(b) or len(a)<4:return None
     x,y=pstdev(a),pstdev(b)
@@ -118,6 +155,7 @@ def replay(payload,benchmark,today):
             if x is not None:correlation.append({"a":a,"b":b,"fold_return_correlation":x,"folds":len(folds)})
     return {"methodology":VERSION,"signal_policy":SIGNAL_POLICY,"status":"DESCRIPTIVE_REPLAY_ONLY","as_of":c[-1].date,
         "history_count":len(c),"history_start":c[0].date,"test_start":c[start].date,"test_end":c[end].date,
+        "turtle_channel_experiment":turtle_channel_replay(c,{**signal_map,**{i:signals(c,i) for i in range(end-HOLD+1,end)}},start,end),
         "full_folds":len(folds),"lanes":lanes,"fold_correlation":correlation,"qualified":False,
         "historical_universe_verified":False,"total_return_benchmark_verified":False,"notice":NOTICE}
 
