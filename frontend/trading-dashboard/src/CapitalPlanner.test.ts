@@ -35,3 +35,10 @@ it("requires a stock risk scenario and caps a high-stop-risk position",()=>{
  const missing={...stock,price_plan:undefined};
  expect(makeCapitalPlan({...report,stocks:[missing]},empty,100000,"HIGH",60,now).allocations.every(a=>!a.identity.startsWith("S:"))).toBe(true);
 });
+
+it("reserves capital when existing portfolio look-through is flagged",()=>{
+ const review:OwnerReview={...empty,portfolio_level_risk:{look_through_status:"DATED_PARTIAL_EQUITY_EXPOSURE_ESTIMATE",attention:[{kind:"HIDDEN_EQUITY_CONCENTRATION",label:"Observed exposure",value:30,unit:"PERCENT"}]}};
+ const p=makeCapitalPlan(report,review,100000,"HIGH",60,now);
+ expect(p.reserved).toBeGreaterThanOrEqual(60000);
+ expect(p.allocations.every(a=>!a.identity.startsWith("S:"))).toBe(true);
+});
