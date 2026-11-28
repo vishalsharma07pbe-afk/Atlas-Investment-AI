@@ -126,21 +126,30 @@ def _table(db):
 
 
 def annual_capture(report,isin,instant):
-    """One coherent exact-source annual capture, never refreshed by a cache read."""
+    """Retain coherent exact-source annual evidence at its own original vintage.
+
+    The overall report can now contain reused nonannual sections, so the oldest
+    report timestamp is not necessarily the annual statement capture timestamp.
+    Never combine different annual vintages or advance their dates.
+    """
     try:
         if not re.fullmatch(r"INE[A-Z0-9]{9}",isin) or report.get("isin")!=isin:
             return None
-        stamp=datetime.fromisoformat(report["retrieved_at"])
-        if stamp.tzinfo is None or not instant-timedelta(days=ANNUAL_HISTORY_CACHE_DAYS)<=stamp<=instant:
-            return None
         from .financial_strength import _block
-        sections={}
+        sections={};stamps=set()
         for key in ANNUAL_SECTIONS:
             data,source=_block(report,key)
-            if data and source and data.get("rows") and datetime.fromisoformat(source["retrieved_at"])==stamp:
-                sections[key]=report["sections"][key]
-        if not sections:
+            if not data or not source or not data.get("rows"):continue
+            stamp=datetime.fromisoformat(source["retrieved_at"])
+            if stamp.tzinfo is None or not instant-timedelta(days=ANNUAL_HISTORY_CACHE_DAYS)<=stamp<=instant:return None
+            stamps.add(stamp)
+            sections[key]=report["sections"][key]
+        if not sections or len(stamps)!=1:
             return None
+        stamp=next(iter(stamps))
+        # Reject a capture that could not have existed at the latest report attempt.
+        latest=datetime.fromisoformat(report.get("last_refresh_at") or report["retrieved_at"])
+        if latest.tzinfo is None or not stamp<=latest<=instant:return None
         return {"isin":isin,"retrieved_at":stamp.isoformat(),"sections":sections,
                 "available_sections":len(sections),"historical_cache_only":True,
                 "notice":"Retained exact-source annual capture only. Not fresh company evidence or a forward estimate."}

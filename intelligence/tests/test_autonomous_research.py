@@ -125,7 +125,7 @@ class AutonomousResearchTests(unittest.TestCase):
              patch.object(research,"read_snapshot",side_effect=AssertionError("full snapshot not needed")), \
              patch.object(research.automatic_company_evidence,"permitted",return_value=True), \
              patch.object(research.automatic_news,"permitted",return_value=True), \
-             patch.object(research.automatic_company_evidence,"refresh") as company, \
+             patch.object(research.automatic_company_evidence,"refresh",return_value="AVAILABLE") as company, \
              patch.object(research.automatic_news,"refresh") as news, \
              patch.object(research.automatic_strategy_validation,"refresh") as replay, \
              patch.object(research.watch_outcomes,"refresh") as outcomes:

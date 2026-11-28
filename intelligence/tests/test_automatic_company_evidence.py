@@ -386,3 +386,17 @@ class CompanyEvidenceTests(unittest.TestCase):
             self.assertEqual(audit["due_fip_priority"],0)
         with patch.object(fip_research,"rank",return_value={"status":"PRICE_MATCHES_AVAILABLE","items":[{**item,"review_findings":["REPORTED_PCA_AT_BSE"]}]}):
             self.assertEqual(list(company.identify_fip_priority(self.snapshot,self.now)),[])
+
+    def test_annual_archive_uses_coherent_annual_vintage_not_reused_profile_date(self):
+        def statement(name):
+            return {"status":"AVAILABLE","data":{"statement_type":"consolidated","time_period":"yearly",
+                "units":"crore","rows":[{"name":"revenue","history":[{"period":"Mar 2026","value":100}]}]},
+                "source":{"provider":"UPSTOX","endpoint":"/v2/fundamentals/"+self.isin+"/"+name.replace("_","-"),
+                          "retrieved_at":self.now.isoformat()}}
+        report={"isin":self.isin,"retrieved_at":(self.now-timedelta(hours=6)).isoformat(),
+                "last_refresh_at":self.now.isoformat(),"sections":{k:statement(k) for k in company.ANNUAL_SECTIONS}}
+        captured=company.annual_capture(report,self.isin,self.now)
+        self.assertEqual(captured["retrieved_at"],self.now.isoformat())
+        self.assertEqual(captured["available_sections"],3)
+        report["sections"]["cash_flow"]["source"]["retrieved_at"]=(self.now-timedelta(hours=1)).isoformat()
+        self.assertIsNone(company.annual_capture(report,self.isin,self.now))

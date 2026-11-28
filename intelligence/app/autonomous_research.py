@@ -590,8 +590,8 @@ def _execute_job(job):
         ids=fund_portfolios.research_identities()
         if not ids:
             return "WAITING_EVIDENCE"
-        automatic_company_evidence.refresh({"enabled":True,"sections":[]},_connect,explicit_isins=ids)
-        return "PASS_COMPLETED"
+        outcome=automatic_company_evidence.refresh({"enabled":True,"sections":[]},_connect,explicit_isins=ids)
+        return "PASS_COMPLETED" if outcome in ("AVAILABLE","PARTIAL") else "WAITING_EVIDENCE"
     if job=="FUND_PORTFOLIOS":
         if not fund_portfolios.permitted():
             return "DISABLED_OR_NOT_AUTHORIZED"
@@ -651,7 +651,8 @@ def _execute_job(job):
     if not any(s["section"] in ("NSE","BSE") and s["status"]=="READY" for s in snapshot["sections"]):
         return "WAITING_EVIDENCE"
     if job=="COMPANY_EVIDENCE":
-        automatic_company_evidence.refresh(snapshot,_connect)
+        outcome=automatic_company_evidence.refresh(snapshot,_connect)
+        return "PASS_COMPLETED" if outcome in ("AVAILABLE","PARTIAL") else "WAITING_EVIDENCE"
     elif job=="COMPANY_NEWS":
         automatic_news.refresh(snapshot,_connect)
     elif job=="STRATEGY_REPLAY":
