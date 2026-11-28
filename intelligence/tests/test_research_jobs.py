@@ -125,3 +125,15 @@ class DurableResearchJobsTests(unittest.TestCase):
         self.assertTrue(jobs.finish(self.connect,job,token,self.clock,900,"WAITING_EVIDENCE"))
         self.assertIsNone(jobs.claim(self.connect,definitions,self.clock+899))
         self.assertEqual(jobs.claim(self.connect,definitions,self.clock+900)[0],job)
+
+    def test_successful_company_acquisition_has_bounded_separate_cadence(self):
+        with patch.dict(os.environ,{"ATLAS_COMPANY_RESEARCH_INTERVAL_SECONDS":"300"}):
+            self.assertEqual(research.company_success_interval(900),300)
+        for invalid in ("0","299","86401","bad"):
+            with patch.dict(os.environ,{"ATLAS_COMPANY_RESEARCH_INTERVAL_SECONDS":invalid}):
+                self.assertEqual(research.company_success_interval(900),900)
+        definitions={"COMPANY_EVIDENCE":0}
+        with patch.object(jobs,"definitions",return_value=definitions),patch.object(research,"now",return_value=datetime.fromtimestamp(self.clock,timezone.utc)),patch.dict(os.environ,{"ATLAS_COMPANY_RESEARCH_INTERVAL_SECONDS":"300"}),patch.object(research,"_execute_job",return_value="PASS_COMPLETED"):
+            self.assertTrue(research.run_one_job(900))
+        self.assertIsNone(jobs.claim(self.connect,definitions,self.clock+299))
+        self.assertEqual(jobs.claim(self.connect,definitions,self.clock+300)[0],"COMPANY_EVIDENCE")

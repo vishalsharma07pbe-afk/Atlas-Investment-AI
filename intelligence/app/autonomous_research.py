@@ -667,6 +667,19 @@ def _execute_job(job):
     return "PASS_COMPLETED"
 
 
+def company_success_interval(interval):
+    """Bounded stock acquisition cadence; only successful evidence passes.
+
+    One company per pass, single local worker, existing transport cooldowns.
+    Invalid operator configuration falls back to the normal job cadence.
+    """
+    try:
+        configured=int(os.getenv("ATLAS_COMPANY_RESEARCH_INTERVAL_SECONDS","300"))
+        if not 300<=configured<=86400:return interval
+        return configured
+    except (ValueError,TypeError):return interval
+
+
 def run_one_job(interval):
     """Claim one due job, run it outside the transaction, persist its result."""
     claimed=research_jobs.claim(_connect,research_jobs.definitions(SECTIONS),now().timestamp())
@@ -679,7 +692,7 @@ def run_one_job(interval):
         outcome="WAITING_EVIDENCE"
     except Exception:
         outcome="FAILED"
-    research_jobs.finish(_connect,job,token,now().timestamp(),(research_calendar.POLL_SECONDS if job=="CALENDAR_CONTEXT" else economic_calendar.INTERVAL if job=="ECONOMIC_CALENDAR" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_releases.INTERVAL if job in global_releases.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_markets.INTERVAL if job in global_markets.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_macro.INTERVAL if job in global_macro.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_fx.INTERVAL if job=="GLOBAL_FX" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else 3600 if job=="FORWARD_EARNINGS_BASELINE" else 900 if job=="OFFICIAL_TRI_DOWNLOAD" else sector_benchmarks.INTERVAL if job=="SECTOR_BENCHMARKS" else nse_financial_filings.INTERVAL if job=="NSE_FINANCIAL_FILINGS" else nse_pledge_filings.INTERVAL if job=="NSE_PLEDGE_FILINGS" else nse_surveillance.INTERVAL if job=="NSE_SURVEILLANCE" else amfi_equity_caps.INTERVAL if job=="AMFI_EQUITY_CAP" else fund_disclosures.INTERVAL if job in ("FUND_DISCLOSURES","FUND_PORTFOLIOS") and outcome!="DISABLED_OR_NOT_AUTHORIZED" else interval),outcome)
+    research_jobs.finish(_connect,job,token,now().timestamp(),(company_success_interval(interval) if job=="COMPANY_EVIDENCE" and outcome=="PASS_COMPLETED" else research_calendar.POLL_SECONDS if job=="CALENDAR_CONTEXT" else economic_calendar.INTERVAL if job=="ECONOMIC_CALENDAR" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_releases.INTERVAL if job in global_releases.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_markets.INTERVAL if job in global_markets.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_macro.INTERVAL if job in global_macro.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_fx.INTERVAL if job=="GLOBAL_FX" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else 3600 if job=="FORWARD_EARNINGS_BASELINE" else 900 if job=="OFFICIAL_TRI_DOWNLOAD" else sector_benchmarks.INTERVAL if job=="SECTOR_BENCHMARKS" else nse_financial_filings.INTERVAL if job=="NSE_FINANCIAL_FILINGS" else nse_pledge_filings.INTERVAL if job=="NSE_PLEDGE_FILINGS" else nse_surveillance.INTERVAL if job=="NSE_SURVEILLANCE" else amfi_equity_caps.INTERVAL if job=="AMFI_EQUITY_CAP" else fund_disclosures.INTERVAL if job in ("FUND_DISCLOSURES","FUND_PORTFOLIOS") and outcome!="DISABLED_OR_NOT_AUTHORIZED" else interval),outcome)
     return True
 
 

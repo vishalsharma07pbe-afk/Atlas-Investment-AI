@@ -285,7 +285,7 @@ def summarize(snapshot,connect,instant):
     strict_items,strict_count=strict_suggestions(candidates,observations,instant)
     out["strict_suggestions"]={"status":"JOINT_SCREEN_MATCHES" if strict_items else "NO_JOINT_SCREEN_MATCHES",
         "matched_count":strict_count,"items":strict_items,"qualification_eligible":False,
-        "notice":"Four-window FIP, bullish technical, reported earnings/EPS, relative P/E, cap and turnover screens all passed. No known review findings in observed venues. Not TradingView Strong Buy, independent valuation, or final investment qualification."}
+        "notice":"Four-window FIP, bullish technical, reported earnings/EPS, relative P/E, cap and turnover screens all passed. No recorded governance or venue review findings in the screened evidence. Not TradingView Strong Buy, independent valuation, or final investment qualification."}
     out["exclusions"]=[{"reason":k,"count":v} for k,v in excluded.most_common()]
     out["status"]="SCREEN_MATCHES_AVAILABLE" if out["items"] else "NO_SCREEN_MATCHES" if out["technical_count"] else "AWAITING_EVIDENCE"
     return out
