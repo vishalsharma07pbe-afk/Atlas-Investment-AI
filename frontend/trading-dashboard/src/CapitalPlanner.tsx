@@ -33,7 +33,7 @@ export function makeCapitalPlan(report:InvestmentAnalysis,review:OwnerReview|nul
   total+=h.recorded_market_value;
  }
  if(!Number.isFinite(total)||review.holdings.length>0&&review.investment_analysis.recent_weight_coverage!==true)return out;
- const policyOk=(r:{decision_quality?:{state:string;qualified:false}})=>!report.decision_quality||report.decision_quality.status!=="UNAVAILABLE"&&r.decision_quality?.state==="PRIORITY_RESEARCH"&&r.decision_quality.qualified===false;
+ const policyOk=(r:{decision_quality?:{state:string;qualified:false}})=>!report.decision_quality||report.decision_quality.status!=="UNAVAILABLE"&&!report.decision_quality.forecast_allocation_hold&&r.decision_quality?.state==="PRIORITY_RESEARCH"&&r.decision_quality.qualified===false;
  const stockCounts=new Map<string,number>(),fundCounts=new Map<string,number>();
  for(const s of report.stocks)stockCounts.set(s.isin,(stockCounts.get(s.isin)??0)+1);
  for(const g of report.funds)for(const f of g.items)fundCounts.set(f.identifier,(fundCounts.get(f.identifier)??0)+1);
@@ -90,7 +90,7 @@ export function makeCapitalPlan(report:InvestmentAnalysis,review:OwnerReview|nul
     if(y===x||y.nav_date!==x.nav_date)return false;
     const a=x.fund_evidence,b=y.fund_evidence;
     const ax=a?.benchmark_context,bx=b?.benchmark_context;
-    if(!ax?.benchmark||ax.benchmark!==bx?.benchmark||ax.basis!==bx?.basis||a?.ter_status!=="REPORTED_NOT_INDEPENDENTLY_AUTHENTICATED"||b?.ter_status!==a.ter_status||a.ter_date!==b.ter_date)return false;
+    if(!a||!b||!ax||!bx||!ax.benchmark||ax.benchmark!==bx.benchmark||ax.basis!==bx.basis||a.ter_status!=="REPORTED_NOT_INDEPENDENTLY_AUTHENTICATED"||b.ter_status!==a.ter_status||a.ter_date!==b.ter_date)return false;
     const av=[a.ter_percent,ax.three_year_difference_pp,a.weekly_drawdown_percent,a.annualized_volatility_percent];
     const bv=[b.ter_percent,bx.three_year_difference_pp,b.weekly_drawdown_percent,b.annualized_volatility_percent];
     if(!av.every(finite)||!bv.every(finite))return false;
