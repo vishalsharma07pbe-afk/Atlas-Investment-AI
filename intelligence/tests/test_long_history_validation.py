@@ -25,3 +25,12 @@ class LongHistoryTest(unittest.TestCase):
         root=fixture();row=root["sessions"][600];key=row["members"][-1]
         row["members"].remove(key);del row["observations"][key]
         with self.assertRaises(ValueError):l.replay(root,date(2027,1,1))
+
+    def test_cost_sensitivity_and_cache_version(self):
+        out=l.replay(fixture(),date(2027,1,1))
+        costs=out["cost_sensitivity"]
+        self.assertEqual([x["cost_bps_per_side"] for x in costs],[15,30,60])
+        self.assertGreater(costs[0]["momentum_cagr_percent"],costs[1]["momentum_cagr_percent"])
+        self.assertGreater(costs[1]["momentum_cagr_percent"],costs[2]["momentum_cagr_percent"])
+        self.assertEqual(len({x["benchmark_cagr_percent"] for x in costs}),1)
+        self.assertEqual(out["replay_version"],l.REPLAY_VERSION)
