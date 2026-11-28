@@ -100,9 +100,11 @@ def market_snapshot(exchange):
         dates=fip_research.calendar_suffix(calendar,exchange,now().astimezone(ZoneInfo("Asia/Kolkata")).date())
         return discovery_scan.scan(exchange,backend_json,lambda e,rows,cutoff:_market_page(e,rows,cutoff,fip_dates=dates),now)
     instruments = backend_json("/api/v1/market-data/discovery-universe?" + urlencode({"exchange": exchange}))
-    try:calendar=backend_json(f"/api/v1/market-data/strategy-calendar?exchange={exchange}")
-    except Exception:calendar=None
-    dates=fip_research.calendar_suffix(calendar,exchange,now().astimezone(ZoneInfo("Asia/Kolkata")).date())
+    dates=()
+    if isinstance(instruments,list) and any(isinstance(r,dict) and r.get("expected_session") and exact_isin(r.get("isin")) for r in instruments):
+        try:calendar=backend_json(f"/api/v1/market-data/strategy-calendar?exchange={exchange}")
+        except Exception:calendar=None
+        dates=fip_research.calendar_suffix(calendar,exchange,now().astimezone(ZoneInfo("Asia/Kolkata")).date())
     return _market_page(exchange,instruments,fip_dates=dates)
 
 
