@@ -71,6 +71,7 @@ def fund_growth(driver,today):
             "target_quarter":e["target_quarter"],"coverage_percent":e["covered_weight_percent"],
             "revenue_yoy_percent":e["covered_subset_revenue_persistence_percent"],
             "profit_yoy_percent":e["covered_subset_profit_persistence_percent"],
+            "driver_scenarios":[{"case":case,"revenue_yoy_percent":round(e["covered_subset_revenue_persistence_percent"]+shift,4),"profit_yoy_percent":round(e["covered_subset_profit_persistence_percent"]+shift,4)} for case,shift in (("BEAR",-10),("BASE",0),("BULL",10))],
             "notice":"Persistence scenario for covered original fund weight only; not a fund NAV forecast."}
     except (ValueError,TypeError,KeyError):return None
 
@@ -229,7 +230,7 @@ def fund_projection(snapshot,today):
             context=research_synthesis.fund_context(r,exact[0] if len(exact)==1 else {},today)
             items.append({"fund_evidence":context,"identifier":code,"name":r["name"],"nav_date":day,"score":r["score"],
                 "tier":"DRIVER_SUPPORTED" if positive else "DRIVER_REVIEW" if adverse else "HISTORICAL_ONLY",
-                "action":"REVIEW_BEFORE_NEW_SIP" if adverse else "COMPARE_FOR_SIP" if positive else "WATCH_FOR_CONFIRMATION",
+                "action":"REVIEW_BEFORE_NEW_SIP" if adverse or context.get("ter_status")=="CONFLICTING_SAME_DATE_TER" else "COMPARE_FOR_SIP" if positive else "WATCH_FOR_CONFIRMATION",
                 "relative_risk":r.get("relative_risk"),"reasons":reasons,"growth_outlook":growth,"observed_facts":facts,
                 "evidence_confidence":"MODERATE" if positive and growth else "LIMITED" if positive else "LOW",
                 "limitations":["Past returns and reported underlying growth do not establish future NAV returns.",
