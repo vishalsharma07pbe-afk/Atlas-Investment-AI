@@ -10,6 +10,7 @@ from statistics import mean,pstdev
 from . import multi_strategy as m, strategy_validation as sv, fip_research, regime_features
 
 VERSION="MULTI-STRATEGY-REPLAY-1"
+SIGNAL_POLICY="RECENT_JUMP_FILTER_V1"
 LANES=("FIP","TREND_FOLLOWING","HIGH_52_WEEK","CONTRACTION_PROXY","DONCHIAN_BREAKOUT","TURTLE_LONG_BREAKOUT","STAGE2_PROXY","SEPA_TREND_TEMPLATE","VCP_PROXY","MEAN_REVERSION","WYCKOFF_ACCUMULATION_PROXY","ANCHORED_VWAP_RECLAIM")
 HOLD=20
 FOLD=63
@@ -115,7 +116,7 @@ def replay(payload,benchmark,today):
         for b in LANES[i+1:]:
             x=pearson(fold_values[a],fold_values[b])
             if x is not None:correlation.append({"a":a,"b":b,"fold_return_correlation":x,"folds":len(folds)})
-    return {"methodology":VERSION,"status":"DESCRIPTIVE_REPLAY_ONLY","as_of":c[-1].date,
+    return {"methodology":VERSION,"signal_policy":SIGNAL_POLICY,"status":"DESCRIPTIVE_REPLAY_ONLY","as_of":c[-1].date,
         "history_count":len(c),"history_start":c[0].date,"test_start":c[start].date,"test_end":c[end].date,
         "full_folds":len(folds),"lanes":lanes,"fold_correlation":correlation,"qualified":False,
         "historical_universe_verified":False,"total_return_benchmark_verified":False,"notice":NOTICE}
@@ -128,7 +129,7 @@ def summarize(payloads,today):
         report=p.get("multi_strategy_replay") or {}
         identity=p.get("isin")
         try:
-            if not m.exact_isin(identity) or identity in seen or report.get("methodology")!=VERSION or report.get("status")!="DESCRIPTIVE_REPLAY_ONLY" or not 1<=(today-date.fromisoformat(report["as_of"])).days<=5:continue
+            if not m.exact_isin(identity) or identity in seen or report.get("methodology")!=VERSION or report.get("signal_policy")!=SIGNAL_POLICY or report.get("status")!="DESCRIPTIVE_REPLAY_ONLY" or not 1<=(today-date.fromisoformat(report["as_of"])).days<=5:continue
         except (ValueError,TypeError,KeyError):continue
         seen.add(identity)
         for lane in LANES:
