@@ -86,3 +86,14 @@ The six workstreams are advanced together, not marked complete independently.
 Use the existing acceptance command with the additional option `--require-advanced-engine-results`. This reports actual stock thesis/price/quarterly scenario counts, matching TER in all three categories, four actual provider review IDs, official-document retrieval receipt, channel experiments and owner-local stress observation. It returns nonzero if any expected integrated output is missing. It deliberately cannot certify the canonical strategies or real investment performance. An empty portfolio is explicitly not applicable for stress testing.
 
 Current fixed shocks, quarterly shifts and risk caps are illustrative engineering assumptions. All external document retrieval is permission-gated and bounded; retrieval does not prove a document's claims. Do not enable extra subscriptions or send private holdings to external providers.
+
+## Additional code implemented after the integrated first pass
+
+- Shared-capital, exact-session audited cohort channel replay: cash constraints, up to four units per company, close-confirmed next-open pyramiding and exits, capital/risk caps, measured drawdown and risk ratios. No historical constituent membership, no canonical intraday stop execution, no total-return comparison, no certification.
+- Conditional source-bound FCFF/FCFE/dividend discount valuation, including per-share scenario values, price-relative upside/downside, margin-of-safety arithmetic and conditional EPS when supplied. It is opt-in and requires operator-reviewed exact cash/share/price inputs and source files matching SHA-256 digests; it is not autonomous acquisition or authentication.
+- AI committee receives a bounded allowlist of conditional value, TER and matched TRI evidence; adverse fund fee conflicts cannot be overridden by model prioritization. Source document text and owner data are not sent.
+- Fund recommendation cards show existing matched benchmark evidence, dated reported managers/exit terms and underlying business growth sensitivities. A conflicting TER defers allocation.
+- Local capital planner uses existing portfolio-level attention and the existing funding, FIFO/exit-load/conditional tax comparison pipeline. Fund acquisition-specific tax treatment remains withheld when unsupported.
+- Regression tests were added. No new paid provider or broker action is introduced.
+
+The checklist above remains authoritative; these changes do not make all six modules fully complete. Source-bound valuation needs authorized evidence files, while automatic PEAD consensus, complete canonical factor and institutional ownership inputs, independent extraction of actual filing figures, verified fund manager tenure, long point-in-time market histories and prospective maturity remain unresolved. Exact-head CI and protected local live acceptance are required.
