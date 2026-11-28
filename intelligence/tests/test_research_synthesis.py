@@ -36,3 +36,18 @@ class ResearchSynthesisTest(unittest.TestCase):
         self.assertFalse(thesis["qualified"])
         self.assertIn("Underlying business evidence requires review before a new SIP.",thesis["bear_case"])
         self.assertEqual(thesis["missing_evidence"],["No verified TER"])
+
+    def test_matched_tri_and_reported_disclosures_keep_their_basis(self):
+        today=date(2026,11,28)
+        r={"identifier":"123456","nav_date":"2026-11-27"}
+        d={"identifier":"123456","plan":"DIRECT","option":"GROWTH",
+           "secondary_disclosure":{"status":"SECONDARY_REPORTED_NOT_INDEPENDENTLY_VERIFIED","document_date":"2026-11-01","fund_managers":"Reported manager"},
+           "local_export_evidence":{"disclosure":{"benchmark":"NIFTY 100 TRI"},
+           "benchmark_comparison":{"status":"MATCHED_LOCAL_TRI_EXPORT","matched_anchors":157,"rolling_windows":105,
+           "above_tri_percent":60,"annualized_weekly_active_volatility_percent":5,
+           "windows":[{"weeks":156,"last_date":"2026-11-27","fund_cagr_percent":12,"tri_cagr_percent":10,"difference_pp":2}]}}}
+        out=s.fund_context(r,d,today)
+        self.assertEqual(out["benchmark_context"]["three_year_difference_pp"],2)
+        self.assertEqual(out["reported_metadata"]["basis"],"SECONDARY_REPORTED")
+        self.assertNotIn("reported_metadata",s.fund_context(r,d,today+timedelta(days=100)))
+        self.assertNotIn("benchmark_context",s.fund_context({**r,"nav_date":"2026-11-26"},d,today))
