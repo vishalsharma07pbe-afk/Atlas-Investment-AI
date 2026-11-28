@@ -246,7 +246,7 @@ def analyze(snapshot,today,instant=None):
     stocks=stock_projection(snapshot,instant);funds=fund_projection(snapshot,today)
     if instant is not None and stocks:
         from . import independent_valuation
-        valuations=independent_valuation.read(instant)
+        valuations=independent_valuation.read(instant,identities={r["isin"] for r in stocks})
         for row in stocks:
             v=valuations.get(row["isin"])
             if v and v["price_date"]==row["as_of"]:row["valuation_scenario"]=v
