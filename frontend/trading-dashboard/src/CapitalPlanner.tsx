@@ -34,10 +34,11 @@ export function makeCapitalPlan(report:InvestmentAnalysis,review:OwnerReview|nul
  if(!Number.isFinite(total)||review.holdings.length>0&&review.investment_analysis.recent_weight_coverage!==true)return out;
  const eligibleStocks=report.stocks.filter(s=>s.qualified===false&&s.tier==="ADJUSTED_JOINT"&&s.action==="RESEARCH_FOR_ENTRY"&&
   s.ai_review?.state!=="DEFER_REVIEW"&&s.ai_review?.state!=="DISAGREEMENT"&&s.risk!=="HIGH"&&
-  /^INE[A-Z0-9]{9}$/.test(s.isin)&&!stockIds.has(s.isin)&&age(s.as_of,today)>=1&&age(s.as_of,today)<=4);
+  /^INE[A-Z0-9]{9}$/.test(s.isin)&&!stockIds.has(s.isin)&&age(s.as_of,today)>=1&&age(s.as_of,today)<=4&&
+  !!s.price_plan&&finite(s.price_plan.reference)&&finite(s.price_plan.stop_scenario)&&s.price_plan.stop_scenario>0&&s.price_plan.reference>s.price_plan.stop_scenario&&Math.abs(s.price_plan.reference-s.close)<=.0051);
  const eligibleFunds=report.funds.flatMap(g=>g.items.filter(f=>f.qualified===false&&f.tier==="DRIVER_SUPPORTED"&&f.action==="COMPARE_FOR_SIP"&&
   f.ai_review?.state!=="DEFER_REVIEW"&&f.ai_review?.state!=="DISAGREEMENT"&&scheme(f.identifier)&&!fundIds.has(f.identifier)&&
-  age(f.nav_date,today)>=0&&age(f.nav_date,today)<=7).map(f=>({...f,category:g.category})));
+  age(f.nav_date,today)>=0&&age(f.nav_date,today)<=7&&f.fund_evidence?.ter_status!=="CONFLICTING_SAME_DATE_TER").map(f=>({...f,category:g.category})));
  // Exact identity, same-date upstream comparisons; historical advantages are
  // context, not predictions or evidence that a switch is suitable.
  for(const c of review.opportunity_context?.matched_comparisons??[]){
@@ -70,7 +71,13 @@ export function makeCapitalPlan(report:InvestmentAnalysis,review:OwnerReview|nul
   const f=eligibleFunds.find(x=>x.category===category&&(risk==="HIGH"||x.relative_risk==="AT_OR_BELOW_PEER_MEDIAN_DOWNSIDE"));
   if(f)add("F:"+f.identifier,f.name,category,amount*fundBudget/categories.length,.25,"Reported growth drivers and current historical peer evidence; confirm suitability, costs and portfolio overlap.");
  }
- if(maxStock>0)for(const s of eligibleStocks.slice(0,2))add("S:"+s.isin,s.symbol,"EQUITY",amount*maxStock,.1,"Adjusted joint screen; confirm current execution, independent valuation and business evidence.");
+ if(maxStock>0)for(const s of eligibleStocks.slice(0,2)){
+  const plan=s.price_plan!;
+  const riskPerShare=plan.reference-plan.stop_scenario;
+  // At most 0.5% of fresh investable capital per stock before gaps and costs.
+  const shares=Math.floor(Math.min(amount*maxStock/plan.reference,amount*.005/riskPerShare));
+  add("S:"+s.isin,s.symbol,"EQUITY",shares*plan.reference,.1,"Adjusted joint screen; allocation capped by a 0.5% fresh-capital stop-risk scenario. Recheck live quote, gap risk, costs and independent valuation.");
+ }
  out.planned=allocations.reduce((n,r)=>n+r.amount,0);out.reserved=amount-out.planned;
  out.status=allocations.length?"CONDITIONAL_RESEARCH_BUDGET":"NO_SUPPORTED_ALLOCATION";
  return out;
@@ -99,7 +106,7 @@ export default function CapitalPlanner({report}:{report:InvestmentAnalysis}){
    {!!plan.comparisons.length&&<><h4>Matched historical alternatives to current holdings</h4><ul>{plan.comparisons.slice(0,5).map(c=><li key={c.holding_identity+":"+c.alternative_identity}>{c.holding} → {c.alternative}: {c.holding_return_percent.toFixed(1)}% vs {c.alternative_return_percent.toFixed(1)}% · {c.first_date} to {c.last_date}. Historical comparison only.</li>)}</ul></>}
    {plan.allocations.length>0&&<ul>{plan.allocations.map(a=><li key={a.identity}><strong>{a.label} · {money(a.amount)}</strong><p>{a.reason}</p></li>)}</ul>}
    <p><strong>Conditional research budget {money(plan.planned)}</strong> · Keep unallocated {money(plan.reserved)}</p>
-   <small>Policy limits are illustrative: at least 25–40% unallocated (60% when current holdings need risk review), no equity allocations under five years, no duplicate exact held identities, and capped new positions. Fund look-through and tax impact still require review. No automated execution.</small>
+   <small>Policy limits are illustrative: at least 25–40% unallocated (60% when current holdings need risk review), no equity allocations under five years, no duplicate exact held identities, and capped new positions. New stocks require a supported stop scenario, with 0.5% fresh-capital risk per position before gaps and costs. Fund look-through and tax impact still require review. No automated execution.</small>
   </>}
  </details>;
 }
