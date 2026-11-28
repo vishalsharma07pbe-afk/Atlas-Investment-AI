@@ -18,7 +18,7 @@ from .provider_router import Quote, ProviderFailure, ReadOnlyRouter, CircuitBrea
 SYMBOL_RE = re.compile(r"^[A-Z0-9._&-]{1,40}$")
 KEY_RE = re.compile(r"^[A-Z0-9_|.-]{3,120}$")
 DEFAULT_TIMEOUT = 5
-EQ_KEY_RE=re.compile(r"(?:NSE_EQ|BSE_EQ)\\|INE[A-Z0-9]{9}")
+EQ_KEY_RE=re.compile(r"(?:NSE_EQ|BSE_EQ)\|INE[A-Z0-9]{9}")
 # Circuit state survives separate HTTP requests within this process.
 quote_breaker = CircuitBreaker()
 

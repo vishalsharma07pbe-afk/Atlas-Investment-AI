@@ -237,3 +237,11 @@ it("shows distinct company decision coverage and links private review without ne
  expect(portfolio).toHaveBeenCalledTimes(1);
  expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+it("displays historical bars separately from current opportunity rankings",async()=>{
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({enabled:true,sections:[{section:"NSE",status:"READY",generated_at:"2026-11-27T04:00:00Z",result:{momentum_leaders:[]}}],historical_display:[{section:"NSE",status:"HISTORICAL_DISPLAY_ONLY",generated_at:"2026-11-26T04:00:00Z",current_status:"READY",metric:"20_SESSION_PRICE_CHANGE",qualification_eligible:false,observations:[{label:"PAST",observed_date:"2026-11-25",value_percent:5}],notice:"Historical only"}]})})));
+ render(<AutonomousOverview onPortfolio={()=>{}} onFunds={()=>{}} onSettings={()=>{}}>{null}</AutonomousOverview>);
+ expect(await screen.findByRole("region",{name:"Last valid historical observations"})).toBeTruthy();
+ expect(screen.getByText("Observed 2026-11-25")).toBeTruthy();
+ expect(screen.queryByRole("region",{name:"Momentum leaders"})).toBeNull();
+});

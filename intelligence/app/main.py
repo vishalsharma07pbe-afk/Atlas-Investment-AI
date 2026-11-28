@@ -1237,13 +1237,13 @@ async def ai_analyze(symbol: str, observations: AllowlistedAnalysisPayload, requ
     return await committee(symbol,observations.model_dump(exclude={"symbol"},exclude_none=True))
 
 # Autonomous research uses the existing validated screen and fund ranking engines.
-from .autonomous_research import scheduler as research_scheduler, read_snapshot as research_snapshot
+from .autonomous_research import scheduler as research_scheduler, read_snapshot as research_snapshot, read_overview as research_overview
 
 @app.get("/api/v1/intelligence/research/overview")
 def autonomous_research_overview():
     """Read cached public-market research; no provider calls or user data."""
     try:
-        return research_snapshot()
+        return research_overview()
     except (OSError, ValueError, sqlite3.Error) as exc:
         raise HTTPException(status_code=503, detail="Research snapshot storage unavailable") from exc
 

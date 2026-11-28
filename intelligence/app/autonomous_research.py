@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from .market_client import backend_json
 from . import steady_momentum, amfi_equity_caps, company_reports, nse_surveillance, nse_pledge_filings, nse_financial_filings, sector_price_context, sector_benchmarks, score_calibration, fip_research, bracket_research
 from .screener import screen
-from . import discovery_scan
+from . import discovery_scan, research_display_archive
 from .mutual_fund_recommendations import CATEGORIES, dashboard
 from . import forward_earnings, official_amc_factsheet, official_tri, fund_ai_review, unified_decision, stock_qualification, market_regime, release_reconciliation, economic_calendar, global_releases, global_context, global_markets, global_macro, global_fx, automatic_deals, fund_portfolios, fund_disclosures, fund_prospective, research_jobs, research_calendar, daily_briefing, automatic_ai_review, watch_outcomes, automatic_company_evidence, automatic_institutional, automatic_news, portfolio_thesis, automatic_strategy_validation, research_reliability
 
@@ -61,6 +61,25 @@ def _save(section, result=None):
                 ON CONFLICT(section) DO UPDATE SET attempted_at=excluded.attempted_at,
                 status=excluded.status,error_code=excluded.error_code""", (section, stamp))
         else:
+            # Capture the previous successful payload before a successful but
+            # empty refresh overwrites it. Legacy snapshots retain their dates.
+            if research_display_archive.permitted():
+                old=db.execute("SELECT generated_at,payload FROM research_sections WHERE section=?",(section,)).fetchone()
+                if old and old["generated_at"] and old["payload"]:
+                    try:
+                        original=datetime.fromisoformat(old["generated_at"])
+                        previous=json.loads(old["payload"])
+                        if original.tzinfo is not None and original<=now():
+                            research_display_archive.capture(db,section,previous,original,
+                                _published_evidence_current(section,previous,original.astimezone(ZoneInfo("Asia/Kolkata")).date()))
+                    except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
+                        pass
+                try:
+                    original=datetime.fromisoformat(stamp)
+                    research_display_archive.capture(db,section,result,original,
+                        _published_evidence_current(section,result,original.astimezone(ZoneInfo("Asia/Kolkata")).date()))
+                except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
+                    pass
             db.execute("""INSERT INTO research_sections VALUES(?,?,?,'READY',?,NULL)
                 ON CONFLICT(section) DO UPDATE SET generated_at=excluded.generated_at,
                 attempted_at=excluded.attempted_at,status=excluded.status,
@@ -450,6 +469,13 @@ def read_snapshot(include_ai=True):
         except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
             # An invalid optional decision projection must not break the existing research endpoint.
             snapshot["unified_decision"]={"methodology":unified_decision.VERSION,"status":"UNAVAILABLE","notice":unified_decision.NOTICE}
+    return snapshot
+
+
+def read_overview():
+    """UI-only projection, appended after all current qualification consumers."""
+    snapshot=read_snapshot()
+    snapshot["historical_display"]=research_display_archive.display(_connect,snapshot,now())
     return snapshot
 
 
