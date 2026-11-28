@@ -258,17 +258,27 @@ def analyze(snapshot,today,instant=None):
     # Join exact current listing observations only, not a different company or period.
     evidence=list(company_reports.entries(snapshot))
     for row in stocks:
-        contexts=[research_synthesis.filing_context(r,instant) for _,r in evidence if all(r.get(k)==row.get(k) for k in ("isin","id","exchange","as_of"))]
+        # Financial statements are company-level, not venue price evidence.
+        # Include same-session exact ISIN observations across both venues; no
+        # transfer of price, stop, replay or execution evidence.
+        contexts=[research_synthesis.filing_context(r,instant) for _,r in evidence if r.get("isin")==row.get("isin") and r.get("as_of")==row.get("as_of")]
         contexts=[c for c in contexts if c]
         if contexts:
-            if any(c!=contexts[0] for c in contexts):
+            if any(c.get("status")=="CONFLICT_REVIEW" for c in contexts) or len({(c.get("period"),c.get("source_sha256"),c.get("revenue_comparison"),c.get("profit_comparison")) for c in contexts})>1:
                 row["filing_context"]={"status":"CONFLICT_REVIEW","qualified":False,"notice":"Conflicting exact-listing filing comparisons."}
             else:row["filing_context"]=contexts[0]
+        # A strict FIP row must also inherit a current FIP performance caution,
+        # even if the independent multi-strategy list omitted this company.
+        regime=obj(snapshot.get("market_regime"));adaptive=obj(obj(snapshot.get("multi_strategy")).get("adaptive_priority"))
+        if row["tier"]=="ADJUSTED_JOINT" and regime.get("as_of")==row["as_of"] and regime.get("calendar_checked_on")==today.isoformat() and adaptive.get("regime")==regime.get("trend"):
+            from . import strategy_adaptation
+            row["regime_priority"]=strategy_adaptation.priority(["FIP"],adaptive)
         row["research_thesis"]=research_synthesis.thesis(row,False)
     for group in funds:
         for row in group["items"]:row["research_thesis"]=research_synthesis.thesis(row,True)
     out["multi_strategy"]=obj(snapshot.get("multi_strategy"))
     out["forecast_model_review"]=obj(obj(snapshot.get("forward_earnings_validation")).get("model_review"))
+    out["common_forecast_review"]=obj(obj(snapshot.get("forward_earnings_validation")).get("common_model_review"))
     out["long_history_validation"]=obj(snapshot.get("long_history_validation"))
     regime=obj(snapshot.get("market_regime"))
     if regime.get("status")=="OBSERVED_BENCHMARK_REGIME" and regime.get("calendar_checked_on")==today.isoformat() and fresh(regime.get("as_of"),today,4):
