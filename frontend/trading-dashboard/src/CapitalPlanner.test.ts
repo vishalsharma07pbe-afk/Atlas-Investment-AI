@@ -42,3 +42,10 @@ it("reserves capital when existing portfolio look-through is flagged",()=>{
  expect(p.reserved).toBeGreaterThanOrEqual(60000);
  expect(p.allocations.every(a=>!a.identity.startsWith("S:"))).toBe(true);
 });
+
+it("does not allocate when final decision policy is incomplete or unavailable",()=>{
+ const decision_quality={methodology:"FINAL-DECISION-QUALITY-1",qualified:false as const,notice:"research",counts:{EVIDENCE_INCOMPLETE:2}};
+ const p=makeCapitalPlan({...report,decision_quality},empty,100000,"HIGH",60,now);
+ expect(p.planned).toBe(0);
+ expect(makeCapitalPlan({...report,decision_quality:{...decision_quality,status:"UNAVAILABLE"}},empty,100000,"HIGH",60,now).planned).toBe(0);
+});
