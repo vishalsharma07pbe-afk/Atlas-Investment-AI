@@ -243,7 +243,7 @@ def fund_snapshot(category):
         except (ValueError,TypeError,KeyError):continue
     if targets:snapshot["portfolio_research_targets"]=targets
     # Only aggregate public source coverage. Never persist source URLs or holdings.
-    for key,fields in (("official_tri_coverage",("configured_count","available_count")),("official_amc_coverage",("matched_schemes",))):
+    for key,fields in (("official_tri_coverage",("configured_count","available_count","local_csv_count")),("official_amc_coverage",("matched_schemes",)),("automatic_amfi_ter_coverage",("matched_schemes",))):
         block=result.get(key)
         if isinstance(block,dict):
             snapshot[key]={k:block[k] for k in fields if type(block.get(k)) is int and 0<=block[k]<=40}

@@ -57,3 +57,27 @@ class RecoveryAcceptanceTests(unittest.TestCase):
         self.assertIsNone(result["stocks"]["SWING"]["strict_watch_count"])
         overview["steady_momentum"]["strict_suggestions"]["items"]=[row,row]
         self.assertIsNone(a.qualification_audit(overview)["elite"]["displayed_strict_suggestion_count"])
+
+    def test_result_acceptance_requires_current_populated_outputs_not_contracts(self):
+        stock={"id":1,"isin":"INE002A01018","symbol":"PRIVATE_MARKER","exchange":"NSE",
+               "as_of":"2026-11-27","status":"SCREEN_MATCH_ONLY","adjustment_status":"ADJUSTED",
+               "strict_fip_evidence":{"status":"FIP_PRICE_MATCH","calendar_status":"STORED_SESSIONS_MATCHED","as_of":"2026-11-27"}}
+        sections=[{"section":"NSE","status":"READY","result":{"discovery_coverage":{"calendar_checked_on":"2026-11-28",
+            "calendar_status":"PUBLISHED_SESSION","expected_session":"2026-11-27"}}}]
+        for cat in ("LARGE_CAP","MID_CAP","SMALL_CAP"):
+            sections.append({"section":cat,"status":"READY","result":{"historical_coverage":{"comparison_date":"2026-11-27"},
+                "historical_research_shortlist":{"methodology":"MF-MATCHED-PEER-1","category":cat,"status":"HISTORICAL_SHORTLIST_AVAILABLE",
+                "last_date":"2026-11-27","items":[{"identifier":"123456","qualified":False,"status":"HISTORICAL_RESEARCH_ONLY","nav_date":"2026-11-27"}]}}})
+        overview={"enabled":True,"sections":sections,"steady_momentum":{"strict_suggestions":{"status":"JOINT_SCREEN_MATCHES",
+            "qualification_eligible":False,"matched_count":1,"items":[stock]}}}
+        review={"holding_count":0,"holdings":[]}
+        result=a.result_acceptance(overview,review,NOW)
+        self.assertEqual(result["status"],"POPULATED_RESEARCH_OBSERVED")
+        self.assertEqual(result["final_investment_qualification"],"NOT_CERTIFIED")
+        self.assertNotIn("PRIVATE_MARKER",json.dumps(result))
+        stock["as_of"]="2026-11-25"
+        self.assertEqual(a.result_acceptance(overview,review,NOW)["status"],"AWAITING_POPULATED_RESEARCH")
+        stock["as_of"]="2026-11-27"
+        sections[3]["status"]="STALE"
+        self.assertEqual(a.result_acceptance(overview,review,NOW)["status"],"AWAITING_POPULATED_RESEARCH")
+        self.assertEqual(a.result_acceptance({}, {},NOW)["status"],"AWAITING_POPULATED_RESEARCH")

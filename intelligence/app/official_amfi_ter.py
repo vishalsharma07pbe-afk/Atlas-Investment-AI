@@ -56,7 +56,7 @@ def parse(raw,amc,month,today,mapping):
     if (not isinstance(rows,list) or not isinstance(meta,dict) or type(meta.get("total")) is not int
         or meta["total"]!=len(rows) or not 1<=len(rows)<=PAGE_SIZE or meta.get("page")!=1 or meta.get("pageCount")!=1):
         raise ValueError("RESPONSE_INCOMPLETE")
-    out={};seen=set()
+    out={};seen=set();digest=sha256(raw).hexdigest()
     for row in rows:
         if not isinstance(row,dict) or row.get("MF_ID") not in (amc,str(amc)) or row.get("Month")!=month:raise ValueError("RESPONSE_SCOPE")
         nsdl=row.get("NSDLSchemeCode")
@@ -81,7 +81,7 @@ def parse(raw,amc,month,today,mapping):
         code=str(mapping[key]["scheme_code"])
         if (today-day).days<=7 and (code not in out or out[code]["ter_date"]<day.isoformat()):
             out[code]={**mapping[key],"ter_date":day.isoformat(),**{k:float(v) for k,v in vals.items()},
-                "source":"AMFI_WEBSITE_OPERATOR_CROSSWALK","source_sha256":sha256(raw).hexdigest()}
+                "source":"AMFI_WEBSITE_OPERATOR_CROSSWALK","source_sha256":digest}
     return out
 
 def _table(db):

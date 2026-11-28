@@ -653,7 +653,69 @@ def recovery_audit(history,readiness,overview,providers,instant=None):
             "observed_evidence":evidence,"product_acceptance":"NOT_CERTIFIED",
             "notice":"Recovery contracts only. Unknown calendars, empty archives, disabled optional sources and zero observations are not evidence of working live acquisition."}
 
-def collect(request,include_qualification_audit=False,include_advanced_audit=False,include_recovery_audit=False):
+def result_acceptance(overview,review,instant=None):
+    """Observe real current outputs, separately from read contracts and certification.
+
+    Positive output is an acceptance observation, never a requirement to generate
+    an investment pick in unsuitable market conditions. Counts only; no identities.
+    """
+    instant=instant or datetime.now(timezone.utc)
+    today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
+    sections={}
+    duplicates=set()
+    for row in _list(overview.get("sections")):
+        if not isinstance(row,dict) or not isinstance(row.get("section"),str):continue
+        key=row["section"]
+        if key in sections:duplicates.add(key)
+        sections[key]=row
+    def current(key):
+        row=_obj(sections.get(key))
+        if key in duplicates or row.get("status")!="READY":return {}
+        return _obj(row.get("result"))
+    def equity_current(row):
+        ref=_ref(row)
+        if ref is None:return False
+        coverage=_obj(current(ref[0]).get("discovery_coverage"))
+        day=_date(row.get("as_of"))
+        return (day is not None and 1<=(today-day).days<=4 and coverage.get("calendar_checked_on")==today.isoformat()
+            and coverage.get("calendar_status")=="PUBLISHED_SESSION" and coverage.get("expected_session")==row.get("as_of"))
+    screen=_obj(overview.get("steady_momentum"))
+    elite={}
+    for field,status,basis in (("strict_suggestions","JOINT_SCREEN_MATCHES","ADJUSTED"),("reported_suggestions","REPORTED_JOINT_MATCHES","RAW_UNADJUSTED")):
+        report=_obj(screen.get(field));rows=report.get("items");count=_distinct_stock_count(rows,10);matched=_bounded_count(report.get("matched_count"))
+        evidence_key="strict_fip_evidence" if basis=="ADJUSTED" else "reported_fip_evidence"
+        expected="FIP_PRICE_MATCH" if basis=="ADJUSTED" else "REPORTED_PRICE_MATCH"
+        valid=(overview.get("enabled") is True and report.get("qualification_eligible") is False and count is not None and matched is not None
+            and count==min(matched,10) and report.get("status")== (status if matched else "NO_"+("REPORTED_" if basis!="ADJUSTED" else "")+"JOINT_SCREEN_MATCHES")
+            and all(equity_current(row) and row.get("adjustment_status")==basis and row.get("status")=="SCREEN_MATCH_ONLY"
+                and _obj(row.get(evidence_key)).get("status")==expected and _obj(row.get(evidence_key)).get("calendar_status")=="STORED_SESSIONS_MATCHED"
+                and _obj(row.get(evidence_key)).get("as_of")==row.get("as_of") for row in rows))
+        elite[field]=count if valid else None
+    funds={}
+    for category in ("LARGE_CAP","MID_CAP","SMALL_CAP"):
+        r=current(category);history=_obj(r.get("historical_coverage"));s=_obj(r.get("historical_research_shortlist"));rows=s.get("items")
+        day=_date(s.get("last_date"))
+        valid=(overview.get("enabled") is True and s.get("methodology")=="MF-MATCHED-PEER-1" and s.get("category")==category
+            and s.get("status")=="HISTORICAL_SHORTLIST_AVAILABLE" and day is not None and 0<=(today-day).days<=7
+            and history.get("comparison_date")==s.get("last_date") and isinstance(rows,list) and 1<=len(rows)<=5
+            and all(isinstance(v,dict) and isinstance(v.get("identifier"),str) and re.fullmatch(r"[1-9][0-9]{5,8}",v["identifier"])
+                and v.get("qualified") is False and v.get("status")=="HISTORICAL_RESEARCH_ONLY" and v.get("nav_date")==s.get("last_date") for v in rows)
+            and len({v["identifier"] for v in rows})==len(rows))
+        funds[category]=len(rows) if valid else None
+    observed_stock=any(type(n) is int and n>0 for n in elite.values())
+    observed_fund=all(type(n) is int and n>0 for n in funds.values())
+    holdings=review.get("holdings")
+    n=review.get("holding_count")
+    portfolio_ok=type(n) is int and n>=0 and isinstance(holdings,list) and len(holdings)==n
+    # Do not require private holdings to exist; distinguish empty account.
+    portfolio_state="NOT_APPLICABLE_EMPTY_PORTFOLIO" if portfolio_ok and not n else "OBSERVED" if portfolio_ok and n and any(isinstance(v,dict) and type(v.get("change_20_observations_percent")) in (int,float) and isfinite(v["change_20_observations_percent"]) for v in holdings) else "AWAITING_HISTORY"
+    return {"status":"POPULATED_RESEARCH_OBSERVED" if observed_stock and observed_fund and portfolio_state!="AWAITING_HISTORY" else "AWAITING_POPULATED_RESEARCH",
+        "strict_elite_count":elite["strict_suggestions"],"reported_elite_count":elite["reported_suggestions"],
+        "core_fund_historical_watch_counts":funds,"portfolio_history_status":portfolio_state,
+        "final_investment_qualification":"NOT_CERTIFIED",
+        "notice":"Current descriptive output check only. A zero or absent match may be legitimate; never manufacture picks to satisfy this optional acceptance criterion."}
+
+def collect(request,include_qualification_audit=False,include_advanced_audit=False,include_recovery_audit=False,include_result_acceptance=False):
     readiness=request("/intelligence/api/v1/intelligence/data-readiness")
     overview=request("/intelligence/api/v1/intelligence/research/overview")
     review=request("/api/v1/portfolio/review")
@@ -673,6 +735,8 @@ def collect(request,include_qualification_audit=False,include_advanced_audit=Fal
         result["advanced_audit"]=advanced_audit(readiness,overview,review,intraday)
     if include_qualification_audit:
         result["qualification_audit"]=qualification_audit(overview,readiness,intraday)
+    if include_result_acceptance:
+        result["result_acceptance"]=result_acceptance(overview,review)
     if include_recovery_audit:
         history=request("/api/v1/data-health/history-recovery")
         providers=request("/intelligence/api/v1/intelligence/data-hub/provider-adapters")
@@ -688,6 +752,7 @@ def main():
     parser.add_argument("--qualification-audit",action="store_true",help="Include redacted stock and fund evidence gap counts")
     parser.add_argument("--advanced-audit",action="store_true",help="Audit advanced decision and validation contracts; require them to pass")
     parser.add_argument("--recovery-audit",action="store_true",help="Audit recovery diagnostics and historical display isolation; require contracts to pass")
+    parser.add_argument("--require-research-results",action="store_true",help="Require observed current Elite research, all three core fund categories and applicable portfolio history, not final qualification")
     args=parser.parse_args()
     session=LocalSession(args.base_url)
     result=None
@@ -703,7 +768,7 @@ def main():
         session.token=token
         del login,token
         session.request("/api/v1/auth/me")
-        result=collect(session.request,include_qualification_audit=args.qualification_audit,include_advanced_audit=args.advanced_audit,include_recovery_audit=args.recovery_audit)
+        result=collect(session.request,include_qualification_audit=args.qualification_audit,include_advanced_audit=args.advanced_audit,include_recovery_audit=args.recovery_audit,include_result_acceptance=args.require_research_results)
     except (RuntimeError,ValueError,TypeError,KeyError,AttributeError):
         print(json.dumps({"runtime":"BLOCKED","reason":"LOCAL_ACCEPTANCE_REQUEST_OR_CONTRACT_FAILED"}))
         return 1
@@ -714,7 +779,7 @@ def main():
                 if result is not None:result["runtime"]="BLOCKED";result["checks"]["session_logout"]="BLOCKED"
             finally:session.token=None
     print(json.dumps(result,indent=2,sort_keys=True))
-    return 0 if result["runtime"]==result["stored_provider_evidence"]=="PASS" and (not args.require_live or result["live_feed"]=="OBSERVED") and (not args.advanced_audit or result["advanced_audit"]["status"]=="PASS") and (not args.recovery_audit or result["recovery_audit"]["status"]=="PASS") else 1
+    return 0 if result["runtime"]==result["stored_provider_evidence"]=="PASS" and (not args.require_live or result["live_feed"]=="OBSERVED") and (not args.advanced_audit or result["advanced_audit"]["status"]=="PASS") and (not args.recovery_audit or result["recovery_audit"]["status"]=="PASS") and (not args.require_research_results or result["result_acceptance"]["status"]=="POPULATED_RESEARCH_OBSERVED") else 1
 
 if __name__=="__main__":
     raise SystemExit(main())
