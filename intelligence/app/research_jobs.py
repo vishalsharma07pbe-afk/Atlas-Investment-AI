@@ -68,7 +68,9 @@ def finish(connect,job,token,instant,interval,status):
         failures=row["failures"]+1 if status=="FAILED" else 0
         # Failure never triggers a busy loop; cap backoff at the normal cadence.
         delay=min(interval,60*2**min(failures-1,8)) if failures else interval
-        if status=="WAITING_EVIDENCE":
+        if status=="WAITING_EVIDENCE" and (job.startswith("GLOBAL_") or job.startswith("RELEASE_") or job=="ECONOMIC_CALENDAR"):
+            delay=min(interval,900)
+        elif status=="WAITING_EVIDENCE":
             # Semiannual AMFI publication can lag the period boundary. Avoid
             # minute-by-minute download retries while retaining waiting status.
             delay=min(interval,21600 if job=="AMFI_EQUITY_CAP" else 3600 if job in ("NSE_SURVEILLANCE","NSE_PLEDGE_FILINGS","NSE_FINANCIAL_FILINGS","OFFICIAL_TRI_DOWNLOAD","OFFICIAL_AMC_FACTSHEETS","FUND_DISCLOSURES","FUND_PORTFOLIOS") else 60)

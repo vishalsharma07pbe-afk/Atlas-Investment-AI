@@ -463,6 +463,7 @@ def job_status():
     result["calendar"]=research_calendar.read(_connect,current) if calendar_job["status"]=="PASS_COMPLETED" else {"status":"CALENDAR_UNAVAILABLE_OR_PENDING","sessions":[]}
     result["company_acquisition"]=automatic_company_evidence.acquisition_status(read_market_snapshot(),_connect,current)
     result["fund_disclosure_acquisition"]=fund_disclosures.ingestion_coverage(current)
+    result["global_source_recovery"]=global_macro.quote_recovery.status(current.timestamp(),global_sources=True)
     return result
 
 
@@ -644,6 +645,8 @@ def run_one_job(interval):
     job,token=claimed
     try:
         outcome=_execute_job(job)
+    except global_macro.GlobalCooldown:
+        outcome="WAITING_EVIDENCE"
     except Exception:
         outcome="FAILED"
     research_jobs.finish(_connect,job,token,now().timestamp(),(research_calendar.POLL_SECONDS if job=="CALENDAR_CONTEXT" else economic_calendar.INTERVAL if job=="ECONOMIC_CALENDAR" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_releases.INTERVAL if job in global_releases.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_markets.INTERVAL if job in global_markets.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_macro.INTERVAL if job in global_macro.JOBS and outcome!="DISABLED_OR_NOT_AUTHORIZED" else global_fx.INTERVAL if job=="GLOBAL_FX" and outcome!="DISABLED_OR_NOT_AUTHORIZED" else 3600 if job=="FORWARD_EARNINGS_BASELINE" else 900 if job=="OFFICIAL_TRI_DOWNLOAD" else sector_benchmarks.INTERVAL if job=="SECTOR_BENCHMARKS" else nse_financial_filings.INTERVAL if job=="NSE_FINANCIAL_FILINGS" else nse_pledge_filings.INTERVAL if job=="NSE_PLEDGE_FILINGS" else nse_surveillance.INTERVAL if job=="NSE_SURVEILLANCE" else amfi_equity_caps.INTERVAL if job=="AMFI_EQUITY_CAP" else fund_disclosures.INTERVAL if job in ("FUND_DISCLOSURES","FUND_PORTFOLIOS") and outcome!="DISABLED_OR_NOT_AUTHORIZED" else interval),outcome)

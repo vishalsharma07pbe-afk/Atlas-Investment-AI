@@ -149,11 +149,14 @@ def read(connect,instant=None):
             row=db.execute("SELECT captured_at,payload FROM global_market_snapshot WHERE series=?",(key,)).fetchone()
             if not row:
                 continue
-            stamp=datetime.fromisoformat(row["captured_at"])
-            if stamp.tzinfo is None or not timedelta(0)<=instant-stamp<=timedelta(hours=24):
-                item["status"]="STALE_CAPTURE"
-                continue
-            item.update(summarize(key,json.loads(row["payload"]),instant.astimezone(ZoneInfo(tz)).date()),retrieved_at=stamp.isoformat())
+            try:
+                stamp=datetime.fromisoformat(row["captured_at"])
+                if stamp.tzinfo is None or not timedelta(0)<=instant-stamp<=timedelta(hours=24):
+                    item["status"]="STALE_CAPTURE"
+                    continue
+                item.update(summarize(key,json.loads(row["payload"]),instant.astimezone(ZoneInfo(tz)).date()),retrieved_at=stamp.isoformat())
+            except (ValueError,TypeError,KeyError,AttributeError,InvalidOperation,ArithmeticError):
+                item["status"]="INVALID_CACHED_EVIDENCE"
     count=sum(i["status"]=="AVAILABLE" for i in items)
     return {"status":"AVAILABLE" if count==len(items) else "PARTIAL" if count else "UNAVAILABLE",
             "items":items,"notice":NOTICE}

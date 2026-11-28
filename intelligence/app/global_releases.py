@@ -154,11 +154,17 @@ def read(connect,instant=None):
             row=db.execute("SELECT captured_at,payload FROM global_release_snapshot WHERE source=?",(key,)).fetchone()
             if not row:
                 continue
-            stamp=_stamp(row["captured_at"])
-            if not timedelta(0)<=instant-stamp<=timedelta(hours=2):
-                status["status"]="STALE_CAPTURE"
+            try:
+                stamp=_stamp(row["captured_at"])
+                if not timedelta(0)<=instant-stamp<=timedelta(hours=2):
+                    status["status"]="STALE_CAPTURE"
+                    continue
+                rows=[e for e in json.loads(row["payload"]) if timedelta(0)<=instant-_stamp(e["published_at"])<=timedelta(days=7)]
+                if any(not isinstance(e,dict) or not all(k in e for k in ("id","headline","source_name","source_url","published_at","geography","topics")) or not isinstance(e["id"],str) or not isinstance(e["topics"],list) or not all(isinstance(topic,str) for topic in e["topics"]) for e in rows):
+                    raise ValueError("INVALID_CACHED_RELEASE")
+            except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
+                status["status"]="INVALID_CACHED_EVIDENCE"
                 continue
-            rows=[e for e in json.loads(row["payload"]) if timedelta(0)<=instant-_stamp(e["published_at"])<=timedelta(days=7)]
             status.update(status="CURRENT_FEED" if rows else "NO_RECENT_RETURNED_HEADLINES",
                           retrieved_at=stamp.isoformat(),event_count=len(rows))
             for e in rows:

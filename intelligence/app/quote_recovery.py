@@ -10,6 +10,7 @@ import time
 from uuid import uuid4
 
 PROVIDERS=("UPSTOX","POLYGON","DHAN")
+GLOBAL_PROVIDERS=("FRED","EIA","US_TREASURY","TWELVE_DATA","ECB","FED","BLS")
 LEASE=30
 CODES={"PROVIDER_ACCESS_REJECTED":900,"PROVIDER_RATE_LIMITED":60,
        "PROVIDER_REQUEST_FAILED":60,"PROVIDER_HTTP_FAILURE":60}
@@ -33,7 +34,7 @@ def _connect():
 
 
 def claim(provider,now=None):
-    if provider not in PROVIDERS:
+    if provider not in PROVIDERS+GLOBAL_PROVIDERS:
         raise ValueError("INVALID_PROVIDER")
     now=time.time() if now is None else now
     with closing(_connect()) as db,db:
@@ -43,7 +44,7 @@ def claim(provider,now=None):
         if row["blocked_until"]>now or (row["claim_id"] and row["lease_until"]>now):
             return None
         token=uuid4().hex
-        db.execute("UPDATE quote_recovery SET claim_id=?,lease_until=? WHERE provider=?",(token,now+LEASE,provider))
+        db.execute("UPDATE quote_recovery SET claim_id=?,lease_until=? WHERE provider=?",(token,now+(90 if provider in GLOBAL_PROVIDERS else LEASE),provider))
         return token
 
 
@@ -58,7 +59,12 @@ def finish(provider,token,reason=None,retry_after=None,now=None):
         delay=1 if provider=="DHAN" else 0
         if reason in CODES:
             delay=min(3600,CODES[reason]*2**min(failures-1,5))
-            if reason=="PROVIDER_RATE_LIMITED" and type(retry_after) is int:
+            if provider in GLOBAL_PROVIDERS:
+                # Global publishers share a conservative minimum cooldown.
+                delay=max(delay,900 if reason=="PROVIDER_ACCESS_REJECTED" else 300)
+                if type(retry_after) is int:
+                    delay=max(delay,retry_after)
+            elif reason=="PROVIDER_RATE_LIMITED" and type(retry_after) is int:
                 delay=min(3600,max(delay,retry_after))
         db.execute("""UPDATE quote_recovery SET failures=?,blocked_until=?,claim_id=NULL,lease_until=NULL,
             last_error=?,last_success=CASE WHEN ? IS NULL THEN ? ELSE last_success END
@@ -67,7 +73,7 @@ def finish(provider,token,reason=None,retry_after=None,now=None):
         return True
 
 
-def status(now=None):
+def status(now=None,*,global_sources=False):
     now=time.time() if now is None else now
     try:
         path=_path()
@@ -77,7 +83,7 @@ def status(now=None):
                 db.row_factory=sqlite3.Row
                 rows={r["provider"]:r for r in db.execute("SELECT * FROM quote_recovery")}
         results=[]
-        for provider in PROVIDERS:
+        for provider in GLOBAL_PROVIDERS if global_sources else PROVIDERS:
             r=rows.get(provider)
             state="CLOSED" if r else "NOT_OBSERVED"
             wait=0
@@ -89,6 +95,6 @@ def status(now=None):
                 state="RECOVERY_PROBE_DUE"
             results.append({"provider":provider,"state":state,"retry_after_seconds":wait,
                             "failures":r["failures"] if r else 0,"last_error":r["last_error"] if r else None})
-        return {"status":"PERSISTED_QUOTE_RECOVERY","providers":results}
+        return {"status":"PERSISTED_GLOBAL_RECOVERY" if global_sources else "PERSISTED_QUOTE_RECOVERY","providers":results}
     except (OSError,sqlite3.Error):
         return {"status":"RECOVERY_STORAGE_UNAVAILABLE","providers":[]}
