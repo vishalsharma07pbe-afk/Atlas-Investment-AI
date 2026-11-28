@@ -14,7 +14,7 @@ import hashlib
 import json
 import sqlite3
 
-from . import nav_catalog, fund_disclosures, fund_portfolios, fund_peer_shortlist, fund_local_evidence, fund_prospective, fund_growth_drivers, official_tri, official_amc_factsheet
+from . import official_amfi_ter, nav_catalog, fund_disclosures, fund_portfolios, fund_peer_shortlist, fund_local_evidence, fund_prospective, fund_growth_drivers, official_tri, official_amc_factsheet
 from .market_client import backend_json
 from .fund_categories import CATEGORIES, LABELS as OFFICIAL_CATEGORY_LABELS, DEBT, SPECIALIZED, COMPARABLE
 
@@ -593,7 +593,20 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
     operator_tri=official_tri.local_csv_exports(today)
     local_export=official_tri.combine(fund_local_evidence.load(today),downloaded_tri,operator_tri)
     local_ter=fund_local_evidence.load_ter(today)
+    website_ter=official_amfi_ter.read(today)
     local_reports=fund_local_evidence.reports(official,source_rows,local_export,today,ter=local_ter)
+    # Use only exact source-row identity; never promote an operator crosswalk
+    # to independently verified expenses for rank_candidates.
+    source_ids={}
+    duplicates=set()
+    for row in source_rows:
+        if not isinstance(row,dict) or type(row.get("scheme_code")) is not int:continue
+        code=str(row["scheme_code"])
+        if code in source_ids:duplicates.add(code)
+        source_ids[code]=row.get("isin_growth")
+    matched_ter={c:v for c,v in website_ter["items"].items()
+        if c in official_ids and c not in duplicates and source_ids.get(c)==v["isin_growth"]}
+    coverage["automatic_amfi_ter_matches"]=len(matched_ter)
     coverage["local_ter_component_matches"]=sum((r.get("ter_components_evidence") or {}).get("status")=="OPERATOR_NORMALIZED_TER_COMPONENTS" for r in local_reports.values())
     publisher_reports=official_amc_factsheet.matched(official,source_rows,datetime.now(timezone.utc))
     coverage["secondary_portfolio_composition_matches"]=len(compositions)
@@ -624,6 +637,13 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
         if report["identifier"] in risk_sources:
             report["official_riskometer_source"]=risk_sources[report["identifier"]]
         if report["identifier"] in local_reports:report["local_export_evidence"]=local_reports[report["identifier"]]
+        if report["identifier"] in matched_ter:
+            v=matched_ter[report["identifier"]]
+            manual=(local_reports.get(report["identifier"]) or {}).get("disclosure",{})
+            if manual.get("ter_date")==v["ter_date"] and manual.get("ter_percent") is not None and abs(manual["ter_percent"]-v["ter_percent"])>.0002:
+                report["automatic_amfi_ter_evidence"]={"status":"CONFLICTING_SAME_DATE_TER"}
+                report["local_export_evidence"]["disclosure"].update(ter_percent=None,ter_date=None)
+            else:report["automatic_amfi_ter_evidence"]={"status":"OPERATOR_CROSSWALK_MATCH",**v,"notice":official_amfi_ter.NOTICE}
         if report["identifier"] in publisher_reports:
             e=publisher_reports[report["identifier"]]
             # A publisher-reported current benchmark is a descriptive comparison
@@ -662,6 +682,7 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
       "suitability":ranked["suitability"],"blockers":blockers,
       "qualification_summary":{"evaluated_count":len(official),"top_eligible_count":ranked["top_eligible_count"],
           "growth_eligible_count":ranked["growth_eligible_count"],"excluded":ranked["excluded"]},
+      "automatic_amfi_ter_coverage":{"status":website_ter["status"],"matched_schemes":len(matched_ter),"notice":official_amfi_ter.NOTICE},
       "official_amc_coverage":{"status":"PUBLISHER_MATCHES" if publisher_reports else "AWAITING_MATCHED_SOURCE" if official_amc_factsheet.permitted() else "DISABLED_OR_NOT_AUTHORIZED",
           "matched_schemes":len(publisher_reports),"notice":official_amc_factsheet.NOTICE},
       "official_tri_coverage":{"status":downloaded_tri["status"],"configured_count":downloaded_tri["configured_count"],
