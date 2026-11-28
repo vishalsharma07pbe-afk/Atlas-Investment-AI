@@ -49,3 +49,19 @@ class FundPeerTests(unittest.TestCase):
         self.assertEqual(result["scope"],"CATEGORY_RESEARCH_ONLY")
         self.assertEqual(result["selected_suitability"],"POOR_FIT")
         self.assertTrue(all(x["qualified"] is False for x in result["items"]))
+
+
+    def test_weekly_recovery_keeps_open_drawdown_censored(self):
+        from datetime import timedelta
+        from hashlib import sha256
+        start=date(2023,11,30);days=[start+timedelta(days=7*i) for i in range(157)]
+        vals=[100]*157;vals[1]=80;vals[2]=100;vals[-2]=110;vals[-1]=90
+        row={"weekly_anchor_series":[{"date":d.isoformat(),"nav":v} for d,v in zip(days,vals)],
+             "matched_weekly_comparison":{"anchor_count":157,"first_date":days[0].isoformat(),"last_date":days[-1].isoformat(),
+                "date_digest":sha256("".join(d.isoformat()+"\n" for d in days).encode()).hexdigest()}}
+        out=p.recovery_context(row)
+        self.assertEqual(out["longest_completed_recovery_days"],14)
+        self.assertEqual(out["current_underwater_days"],7)
+        self.assertEqual(out["completed_recoveries"],1)
+        row["matched_weekly_comparison"]["date_digest"]="0"*64
+        self.assertIsNone(p.recovery_context(row))
