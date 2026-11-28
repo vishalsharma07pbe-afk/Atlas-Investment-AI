@@ -61,6 +61,9 @@ class AnalystTest(unittest.TestCase):
         self.assertFalse(pick["qualified"])
         row["adjustment_verified_for_screen"]=False
         self.assertIsNone(a.analyze(s,TODAY)["stocks"][0]["price_plan"])
+        row["as_of"]="2026-11-26"
+        self.assertEqual(a.analyze(s,TODAY)["stocks"][0]["tier"],"TECHNICAL_LEAD")
+        row["as_of"]="2026-11-27"
         row["adjustment_verified_for_screen"]=True
         row["price_plan"]["reward_risk"]=None
         self.assertIsNone(a.analyze(s,TODAY)["stocks"][0]["price_plan"])
