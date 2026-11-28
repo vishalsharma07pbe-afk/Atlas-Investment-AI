@@ -42,10 +42,27 @@ def nav(value):
 def valid_score(v):
     return type(v) in (int,float) and isfinite(v) and 50<=v<=100
 
-def publish(snapshot,instant,connect=None):
+def decision_states(report,today):
+    from . import decision_quality as q
+    result={};duplicates=set()
+    if not isinstance(report,dict) or report.get("research_date")!=today.isoformat() or report.get("status")!="RESEARCH_AVAILABLE" or q.obj(report.get("decision_quality")).get("methodology")!=q.VERSION:return {}
+    for group in q.rows(report.get("funds")):
+        if not isinstance(group,dict) or group.get("category") not in COMPARABLE:continue
+        for item in q.rows(group.get("items"))[:5]:
+            if not isinstance(item,dict) or item.get("qualified") is not False:continue
+            quality=q.obj(item.get("decision_quality"));state=quality.get("state")
+            if quality.get("methodology")!=q.VERSION or quality.get("qualified") is not False or state not in ("PRIORITY_RESEARCH","EVIDENCE_INCOMPLETE","REVIEW_REQUIRED"):continue
+            key=(group["category"],item.get("identifier"),item.get("nav_date"))
+            if not all(isinstance(k,str) for k in key):continue
+            if key in result:duplicates.add(key)
+            result[key]=state
+    return {k:v for k,v in result.items() if k not in duplicates}
+
+def publish(snapshot,instant,connect=None,*,final_report=None):
     connect=connect or nav_catalog._connect
     if not snapshot.get("enabled") or snapshot.get("scope")!="PUBLIC_MARKET_RESEARCH_ONLY":return 0
     today=instant.astimezone(IST).date();written=0
+    decisions=decision_states(final_report,today)
     with nav_catalog._LOCK,closing(connect()) as db,db:
         _table(db);db.execute("BEGIN IMMEDIATE")
         for section in snapshot.get("sections",[]):
@@ -64,6 +81,10 @@ def publish(snapshot,instant,connect=None):
                     if db.execute("SELECT 1 FROM mf_prospective_watch WHERE isin=? AND maturity_date>=? LIMIT 1",(isin,(today-timedelta(days=7)).isoformat())).fetchone():continue
                     e={"methodology":VERSION,"score":item["score"],"nav":str(original),"cohort_count":count,
                        "relative_risk":item.get("relative_risk"),"date_digest":s.get("date_digest")}
+                    decision=decisions.get((cat,code,observed.isoformat()))
+                    if decision:
+                        from .decision_quality import VERSION as decision_version
+                        e.update(decision_policy=decision_version,decision_state=decision)
                     if not isinstance(e["date_digest"],str) or not re.fullmatch(r"[a-f0-9]{64}",e["date_digest"]):continue
                     written+=db.execute("""INSERT OR IGNORE INTO mf_prospective_watch
                       (isin,observed_date,category,scheme_code,published_date,published_at,maturity_date,evidence)
@@ -100,9 +121,9 @@ def evaluate(row,payload,today):
             "nav_change_percent":round(float(100*(points[end]/points[start]-1)),6),"observed_drawdown_percent":round(float(100*dd),6)}
     except (KeyError,ValueError,TypeError,InvalidOperation,OverflowError,ZeroDivisionError,AttributeError):return None
 
-def refresh(snapshot,instant,connect=None,loader=backend_json):
+def refresh(snapshot,instant,connect=None,loader=backend_json,*,final_report=None):
     connect=connect or nav_catalog._connect
-    publish(snapshot,instant,connect)
+    publish(snapshot,instant,connect,final_report=final_report)
     today=instant.astimezone(IST).date()
     with nav_catalog._LOCK,closing(connect()) as db,db:
         _table(db)
@@ -132,14 +153,21 @@ def summary(category,today,connect=None):
         _table(db)
         rows=db.execute("""SELECT * FROM mf_prospective_watch WHERE category=? AND published_date>=?
             ORDER BY published_date,isin LIMIT 1001""",(category,(today-timedelta(days=365)).isoformat())).fetchall()
-    bands=[];immature=0;selected=[]
+    from .decision_quality import VERSION as decision_version
+    bands=[];immature=0;selected=[];decisions={k:{"published":0,"mature":0,"observed":[]} for k in ("PRIORITY_RESEARCH","EVIDENCE_INCOMPLETE","REVIEW_REQUIRED")}
     for r in rows[:1000]:
         try:
             maturity=date.fromisoformat(r["maturity_date"]);e=json.loads(r["evidence"]);score=e["score"]
             if not valid_score(score) or e.get("methodology")!=VERSION:continue
+            state=e.get("decision_state") if e.get("decision_policy")==decision_version else None
+            if state in decisions:decisions[state]["published"]+=1
             if today<=maturity+timedelta(days=7):immature+=1;continue
             outcome=json.loads(r["outcome"]) if r["status"]=="OBSERVED" and r["outcome"] else {}
             selected.append((r["isin"],r["published_date"],score,outcome))
+            if state in decisions:
+                d=decisions[state];d["mature"]+=1
+                if outcome.get("status")=="OBSERVED_AMFI_NAV_CASE" and all(type(outcome.get(k)) in (int,float) and isfinite(outcome[k]) for k in ("nav_change_percent","observed_drawdown_percent")):
+                    d["observed"].append(outcome["nav_change_percent"])
         except (ValueError,TypeError,KeyError):continue
     for name,lo,hi in (("50_TO_BELOW_65",50,65),("65_TO_BELOW_80",65,80),("80_OR_ABOVE",80,101)):
         cohort=[r for r in selected if lo<=r[2]<hi]
@@ -149,5 +177,6 @@ def summary(category,today,connect=None):
             "distinct_schemes":len({r[0] for r in observed}),"publication_dates":len({r[1] for r in observed}),
             "mean_nav_change_percent":round(mean(returns),4) if returns else None,"median_nav_change_percent":round(median(returns),4) if returns else None,
             "worst_observed_drawdown_percent":min(r[3]["observed_drawdown_percent"] for r in observed) if observed else None})
-    return {"status":"DESCRIPTIVE_OBSERVED_OUTCOMES" if any(b["observed_count"] for b in bands) else "AWAITING_MATURE_EVIDENCE",
+    decision_summary={k:{"published":v["published"],"mature":v["mature"],"observed":len(v["observed"]),"coverage_percent":round(100*len(v["observed"])/v["mature"],2) if v["mature"] else 0,"median_nav_change_percent":round(median(v["observed"]),4) if v["observed"] else None} for k,v in decisions.items()}
+    return {"decision_policy":decision_version,"decision_states":decision_summary,"status":"DESCRIPTIVE_OBSERVED_OUTCOMES" if any(b["observed_count"] for b in bands) else "AWAITING_MATURE_EVIDENCE",
         "mature_count":len(selected),"immature_count":immature,"truncated":len(rows)>1000,"bands":bands,"calibrated":False,"notice":NOTICE}
