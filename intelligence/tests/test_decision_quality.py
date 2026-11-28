@@ -46,3 +46,17 @@ class FinalDecisionQualityTest(unittest.TestCase):
         self.assertEqual(b["action"],"WATCH_FOR_CONFIRMATION")
         self.assertEqual(report["decision_quality"]["stock_allocation_hold"],"ADVERSE_OBSERVED_PRIORITY_SAMPLE")
         self.assertFalse(a["decision_quality"]["qualified"])
+
+    def test_allocation_requires_current_corroboration_without_relabeling_research(self):
+        a=stock();a["growth_outlook"]["observed_quarter"]="2026-09-30"
+        report={"status":"RESEARCH_AVAILABLE","stocks":[a],"funds":[]}
+        q.attach(report,TODAY)
+        self.assertEqual(a["decision_quality"]["state"],"PRIORITY_RESEARCH")
+        self.assertEqual(a["allocation_evidence_hold"],"CURRENT_FORECAST_ANCHOR_FILING_REQUIRED")
+        self.assertEqual(a["action"],"WATCH_FOR_CONFIRMATION")
+        b=stock();b["growth_outlook"]["observed_quarter"]="2026-09-30"
+        b["filing_context"]={"status":"CORROBORATED_REPORTED_QUARTER","period":"2026-09-30"}
+        q.attach({"status":"RESEARCH_AVAILABLE","stocks":[b],"funds":[]},TODAY)
+        self.assertEqual(b["action"],"RESEARCH_FOR_ENTRY")
+        b["filing_context"]["audit_opinion"]="QUALIFIED_OPINION"
+        self.assertEqual(q.stock(b,TODAY)["state"],"REVIEW_REQUIRED")
