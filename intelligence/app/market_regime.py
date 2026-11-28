@@ -51,6 +51,8 @@ def analyze(benchmark,calendar,today):
         return {"status":"OBSERVED_BENCHMARK_REGIME",**features,
                 "as_of":dates[-1].isoformat(),"previous_session":dates[-2].isoformat(),"first_session":dates[0].isoformat(),
                 "relative_strength_windows":relative_strength.benchmark_windows(indexed,calendar,today),
+                "beta_window":{"dates_digest":relative_strength.date_digest([d.isoformat() for d in dates]),
+                    "returns":[round(indexed[b]/indexed[a]-1,9) for a,b in zip(dates,dates[1:])]},
                 "calendar_checked_on":today.isoformat(),"last_five_sessions":[d.isoformat() for d in reversed(dates[-5:])],"notice":NOTICE}
     except (ValueError,TypeError,KeyError,AttributeError,OverflowError,ZeroDivisionError):
         return result

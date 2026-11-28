@@ -753,7 +753,7 @@ def multi_strategy_acceptance(overview):
     a=_obj(overview.get("investment_analyst"));r=_obj(a.get("multi_strategy"))
     items=r.get("items")
     count=_distinct_stock_count(items,10)
-    families={"QUALITY","VALUE","GROWTH","MOMENTUM","DEFENSIVE","SECTOR"}
+    families={"QUALITY","VALUE","GROWTH","MOMENTUM","DEFENSIVE","SECTOR","REVERSAL"}
     observed=set()
     ok=count is not None and all(item.get("qualified") is False and item.get("status")=="RESEARCH_MATCH_ONLY"
         and isinstance(item.get("families"),list) and bool(item["families"])

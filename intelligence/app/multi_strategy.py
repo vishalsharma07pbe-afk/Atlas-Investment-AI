@@ -200,6 +200,8 @@ def summarize(snapshot,connect,instant):
             prepared[isin]=company._enrich(report,today,instant)
         except (ValueError,TypeError,KeyError,AttributeError,OverflowError):continue
     qmj=pro.quality_ranks(prepared,classifications,today)
+    from . import earnings_expectations
+    surprises=earnings_expectations.read(instant)
     counts=Counter();items=[]
     for r in candidates:
         f=r["multi_strategy_price"];isin=r["isin"];report=prepared.get(isin,{})
@@ -235,11 +237,20 @@ def summarize(snapshot,connect,instant):
                 if qmj[isin]>=75:lanes.append("QMJ_STYLE")
             if adjusted and "EARNINGS_ACCELERATION" in lanes and "SEPA_TREND_TEMPLATE" in lanes and "RELATIVE_STRENGTH" in lanes:
                 lanes.append("CAN_SLIM_PROXY")
-            if adjusted:
-                beta=pro.matched_beta(f,regime,r,today)
-                if beta is not None:
-                    facts["historical_beta"]=beta
-                    if 0<=beta<=.75:lanes.append("LOW_BETA")
+        if adjusted:
+            event=surprises.get(isin)
+            if event:
+                # Require the earnings event to precede the completed price
+                # session; no post-close same-day inference.
+                release_day=datetime.fromisoformat(event["released_at"]).astimezone(ZoneInfo("Asia/Kolkata")).date()
+                if release_day<date.fromisoformat(r["as_of"]):
+                    surprise=pro.pead(event,instant)
+                    if surprise is not None:
+                        lanes.append("PEAD");facts["earnings_surprise_percent"]=surprise
+            beta=pro.matched_beta(f,regime,r,today)
+            if beta is not None:
+                facts["historical_beta"]=beta
+                if 0<=beta<=.75:lanes.append("LOW_BETA")
         # Unadjusted prices may be observed, but never pass price-only lanes.
         if not adjusted:lanes=[v for v in lanes if LANES[v] in ("QUALITY","VALUE","GROWTH") and v not in ("GROWTH_LEADERSHIP_PROXY","CAN_SLIM_PROXY","PEAD")]
         lanes=list(dict.fromkeys(lanes))
@@ -266,5 +277,5 @@ def summarize(snapshot,connect,instant):
     result.update(status="RESEARCH_AVAILABLE" if selected else "NO_SUPPORTED_MATCHES",items=selected[:10],
         coverage={"eligible_companies":len(candidates),"cached_company_reports":len(reports),"comparable_cohorts":len(bounds),"matched_companies":len(items)},
         lane_counts=dict(counts),regime=trend,regime_basis="DESCRIPTIVE_PRIORITY_ONLY",
-        strategy_catalog=pro.catalog(counts))
+        strategy_catalog=pro.catalog(counts,expectations_available=bool(surprises)))
     return result

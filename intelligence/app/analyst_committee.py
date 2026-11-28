@@ -44,7 +44,9 @@ def pack(report):
         bounds={"earnings_growth_percent":(10,100),"eps_growth_percent":(10,100),"sales_growth_percent":(5,10000),
             "reported_pe":(.0001,40),"reported_sector_pe":(.0001,1e6),"median_daily_turnover_cr":(5,1e10),
             "atr_percent":(.01,5),"return_60_percent":(-100,100),"historical_cagr_percent":(.00001,1e6),
-            "joint_coverage_weight_percent":(70,100.5),"joint_growth_weight_percent":(0,100.5),"review_weight_percent":(0,100.5)}
+            "joint_coverage_weight_percent":(70,100.5),"joint_growth_weight_percent":(0,100.5),"review_weight_percent":(0,100.5),"piotroski_score":(0,9),"qmj_style_percentile":(0,100),
+            "historical_beta":(-100,100),"earnings_surprise_percent":(5,100),"historical_profit_growth_to_pe_proxy":(0,1.5),
+            "quarterly_profit_growth_percent":(10,100),"quarterly_growth_acceleration_pp":(2,100)}
         facts={k:round(raw[k],4) for k,(lo,hi) in bounds.items() if num(raw.get(k),lo,hi)}
         allowed=["LIMITED_EVIDENCE"]
         if tier in ("ADJUSTED_JOINT","REPORTED_JOINT","BUSINESS_SCREEN") and all(k in facts for k in ("earnings_growth_percent","reported_pe","reported_sector_pe")):
@@ -61,7 +63,7 @@ def pack(report):
         if scenario and min(scenario)>0:allowed.append("POSITIVE_SCENARIO")
         if scenario and min(scenario)<0:allowed.append("NEGATIVE_SCENARIO")
         out[key]={"identity":identity,"group":group,"tier":tier,"date":row.get("as_of",row.get("nav_date")),
-            "score":score if num(score,0,100) else None,"risk":risk,"earnings_scenario":scenario,"facts":facts,"strategy_families":[v for v in rows(row.get("strategy_families")) if v in ("QUALITY","VALUE","GROWTH","MOMENTUM","DEFENSIVE","SECTOR")],
+            "score":score if num(score,0,100) else None,"risk":risk,"earnings_scenario":scenario,"facts":facts,"strategy_families":[v for v in rows(row.get("strategy_families")) if v in ("QUALITY","VALUE","GROWTH","MOMENTUM","DEFENSIVE","SECTOR","REVERSAL")],
             "allowed_reasons":allowed}
     for i,r in enumerate(rows(report.get("stocks"))[:6]):
         if isinstance(r,dict) and re.fullmatch(r"INE[A-Z0-9]{9}",str(r.get("isin",""))):add("S"+str(i+1),r,"EQUITY",r["isin"])

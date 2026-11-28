@@ -3,6 +3,7 @@ from datetime import date,datetime,timedelta
 from math import isfinite,sqrt
 from statistics import mean,pstdev,median
 from collections import defaultdict
+from bisect import bisect_left,bisect_right
 from .financial_strength import _block,_values,_recent_common
 from .relative_strength import date_digest
 
@@ -147,8 +148,9 @@ def quality_ranks(reports,classifications,today):
     result={}
     for cohort in cohorts.values():
         if len(cohort)<20:continue
+        columns=[sorted(v[j] for _,v in cohort) for j in range(4)]
         for isin,v in cohort:
-            ranks=[100*sum((other[j]<v[j])+.5*(other[j]==v[j]) for _,other in cohort)/len(cohort) for j in range(4)]
+            ranks=[50*(bisect_left(columns[j],v[j])+bisect_right(columns[j],v[j]))/len(cohort) for j in range(4)]
             result[isin]=round(mean(ranks),2)
     return result
 
@@ -166,8 +168,8 @@ def pead(event,instant):
         return round(surprise,4) if n(surprise,5,100) else None
     except (ValueError,TypeError,KeyError,OverflowError):return None
 
-def catalog(counts):
+def catalog(counts,expectations_available=False):
     from .multi_strategy import LANES
     partial={"QUALITY_PROXY","PIOTROSKI_PARTIAL","QUALITY_VALUE","QMJ_STYLE","GARP_PROXY","GROWTH_LEADERSHIP_PROXY","CAN_SLIM_PROXY","SEPA_TREND_TEMPLATE","VCP_PROXY","CONTRACTION_PROXY","STAGE2_PROXY","TURTLE_LONG_BREAKOUT","WYCKOFF_ACCUMULATION_PROXY","ANCHORED_VWAP_RECLAIM"}
-    return {k:{"status":"AWAITING_VERIFIED_EXPECTATIONS_FEED" if k=="PEAD" else "MATCHED_RESEARCH" if counts.get(k) else "NO_MATCH_OR_INSUFFICIENT_EVIDENCE",
+    return {k:{"status":"MATCHED_RESEARCH" if counts.get(k) else "AWAITING_VERIFIED_EXPECTATIONS_FEED" if k=="PEAD" and not expectations_available else "NO_MATCH_OR_INSUFFICIENT_EVIDENCE",
         "matches":counts.get(k,0),"implementation":"EVIDENCE_GATED_RULE" if k=="PEAD" else "FIXED_ADAPTATION" if k in partial else "FIXED_RESEARCH_RULE","qualified":False} for k in LANES}
