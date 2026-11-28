@@ -771,7 +771,47 @@ def multi_strategy_acceptance(overview):
         "populated_results_observed":bool(ok and count and len(observed)>=2 and replay_companies and tracked),
         "investment_qualification":"NOT_CERTIFIED"}
 
-def collect(request,include_qualification_audit=False,include_advanced_audit=False,include_recovery_audit=False,include_result_acceptance=False,include_analyst_audit=False,include_multi_strategy_audit=False):
+def advanced_engine_acceptance(overview,review):
+    """Redacted observation of integrated paths, never investment certification."""
+    a=_obj(overview.get("investment_analyst"))
+    stocks=[r for r in _list(a.get("stocks")) if isinstance(r,dict)]
+    groups=[g for g in _list(a.get("funds")) if isinstance(g,dict)]
+    funds=[r for g in groups for r in _list(g.get("items")) if isinstance(r,dict)]
+    def thesis(r):
+        t=_obj(r.get("research_thesis"))
+        return t.get("status")=="CONDITIONAL_EVIDENCE_THESIS" and t.get("qualified") is False and bool(t.get("bull_case")) and bool(t.get("bear_case"))
+    stock_plans=sum(bool(_obj(r.get("price_plan"))) for r in stocks)
+    amount_scenarios=sum(len(_list(_obj(r.get("growth_outlook")).get("amount_scenarios")))==3 for r in stocks)
+    fund_costs={}
+    for category in ("LARGE_CAP","MID_CAP","SMALL_CAP"):
+        fund_costs[category]=sum(_obj(r.get("fund_evidence")).get("ter_status")=="REPORTED_NOT_INDEPENDENTLY_AUTHENTICATED"
+            for g in groups if g.get("category")==category for r in _list(g.get("items")) if isinstance(r,dict))
+    required={"CHATGPT_PLAN","GEMINI","OLLAMA","GROQ"}
+    providers=sorted({v for v in _list(_obj(a.get("committee")).get("reviewed_provider_ids")) if isinstance(v,str) and v in required})
+    receipts=sum(r.get("financial_facts_verified") is False for r in _list(_obj(a.get("source_discovery")).get("document_receipts")) if isinstance(r,dict))
+    history=_obj(_obj(a.get("multi_strategy")).get("historical_validation"))
+    channel_count=_bounded_count(history.get("turtle_channel_experiments"),20000)
+    owner=_obj(review.get("investment_analysis"));stress=_obj(owner.get("stress_test"))
+    stress_ok=stress.get("status")=="ILLUSTRATIVE_SHOCKS" and len(_list(stress.get("scenarios")))==3
+    empty=owner.get("holding_count")==0 and owner.get("scope")=="OWNER_LOCAL"
+    blockers=[]
+    if not stocks or not all(thesis(r) for r in stocks):blockers.append("STOCK_THESIS_OUTPUT_REQUIRED")
+    if not stock_plans:blockers.append("STOCK_RISK_SCENARIO_REQUIRED")
+    if not amount_scenarios:blockers.append("STOCK_QUARTER_SCENARIO_REQUIRED")
+    if not funds or not all(thesis(r) for r in funds):blockers.append("FUND_THESIS_OUTPUT_REQUIRED")
+    if not all(fund_costs.values()):blockers.append("MATCHED_TER_IN_ALL_CORE_CATEGORIES_REQUIRED")
+    if set(providers)!=required:blockers.append("FOUR_ACTUAL_PROVIDER_REVIEWS_REQUIRED")
+    if not receipts:blockers.append("OFFICIAL_DOCUMENT_RECEIPT_REQUIRED")
+    if not channel_count:blockers.append("CHANNEL_REPLAY_OBSERVATION_REQUIRED")
+    if not stress_ok and not empty:blockers.append("OWNER_STRESS_SCENARIO_REQUIRED")
+    if any(r.get("qualified") is not False for r in stocks+funds):blockers.append("UNSUPPORTED_QUALIFICATION")
+    return {"status":"INTEGRATED_OUTPUTS_OBSERVED" if not blockers else "AWAITING_INTEGRATED_OUTPUTS",
+        "stock_risk_scenarios":stock_plans,"stock_amount_scenarios":amount_scenarios,"fund_matched_ter_counts":fund_costs,
+        "actual_review_providers":providers,"official_document_receipt_count":receipts,
+        "turtle_channel_experiments":channel_count,"owner_stress_status":"OBSERVED" if stress_ok else "NOT_APPLICABLE_EMPTY_PORTFOLIO" if empty else "AWAITING_EVIDENCE",
+        "blockers":blockers,"investment_qualification":"NOT_CERTIFIED"}
+
+def collect(request,include_qualification_audit=False,include_advanced_audit=False,include_recovery_audit=False,include_result_acceptance=False,include_analyst_audit=False,include_multi_strategy_audit=False,include_advanced_engine_audit=False):
     readiness=request("/intelligence/api/v1/intelligence/data-readiness")
     overview=request("/intelligence/api/v1/intelligence/research/overview")
     review=request("/api/v1/portfolio/review")
@@ -797,6 +837,8 @@ def collect(request,include_qualification_audit=False,include_advanced_audit=Fal
         result["analyst_acceptance"]=analyst_acceptance(overview,review)
     if include_multi_strategy_audit:
         result["multi_strategy_acceptance"]=multi_strategy_acceptance(overview)
+    if include_advanced_engine_audit:
+        result["advanced_engine_acceptance"]=advanced_engine_acceptance(overview,review)
     if include_recovery_audit:
         history=request("/api/v1/data-health/history-recovery")
         providers=request("/intelligence/api/v1/intelligence/data-hub/provider-adapters")
@@ -816,6 +858,7 @@ def main():
     parser.add_argument("--investment-analyst-audit",action="store_true",help="Verify current public and owner-local decision contracts; report actual populated output and model review counts separately")
     parser.add_argument("--require-analyst-results",action="store_true",help="Also require populated stock and all core fund decision lists and at least one current model review; absence may be legitimate")
     parser.add_argument("--require-multi-strategy-results",action="store_true",help="Require actual distinct company research across two families, replay and frozen paper publications; not certification")
+    parser.add_argument("--require-advanced-engine-results",action="store_true",help="Require actual integrated scenarios, matched TER, four provider reviews, document receipts and channel replay; not investment certification")
     args=parser.parse_args()
     session=LocalSession(args.base_url)
     result=None
@@ -831,7 +874,7 @@ def main():
         session.token=token
         del login,token
         session.request("/api/v1/auth/me")
-        result=collect(session.request,include_qualification_audit=args.qualification_audit,include_advanced_audit=args.advanced_audit,include_recovery_audit=args.recovery_audit,include_result_acceptance=args.require_research_results,include_analyst_audit=args.investment_analyst_audit or args.require_analyst_results,include_multi_strategy_audit=args.require_multi_strategy_results)
+        result=collect(session.request,include_qualification_audit=args.qualification_audit,include_advanced_audit=args.advanced_audit,include_recovery_audit=args.recovery_audit,include_result_acceptance=args.require_research_results,include_analyst_audit=args.investment_analyst_audit or args.require_analyst_results,include_multi_strategy_audit=args.require_multi_strategy_results,include_advanced_engine_audit=args.require_advanced_engine_results)
     except (RuntimeError,ValueError,TypeError,KeyError,AttributeError):
         print(json.dumps({"runtime":"BLOCKED","reason":"LOCAL_ACCEPTANCE_REQUEST_OR_CONTRACT_FAILED"}))
         return 1
@@ -842,6 +885,7 @@ def main():
                 if result is not None:result["runtime"]="BLOCKED";result["checks"]["session_logout"]="BLOCKED"
             finally:session.token=None
     print(json.dumps(result,indent=2,sort_keys=True))
+    if args.require_advanced_engine_results and result["advanced_engine_acceptance"]["status"]!="INTEGRATED_OUTPUTS_OBSERVED":return 1
     return 0 if result["runtime"]==result["stored_provider_evidence"]=="PASS" and (not args.require_live or result["live_feed"]=="OBSERVED") and (not args.advanced_audit or result["advanced_audit"]["status"]=="PASS") and (not args.recovery_audit or result["recovery_audit"]["status"]=="PASS") and (not args.require_research_results or result["result_acceptance"]["status"]=="POPULATED_RESEARCH_OBSERVED") and (not args.investment_analyst_audit or result["analyst_acceptance"]["status"]=="CONTRACTS_OBSERVED") and (not args.require_analyst_results or (result["analyst_acceptance"]["status"]=="CONTRACTS_OBSERVED" and result["analyst_acceptance"]["populated_outputs_observed"] and (result["analyst_acceptance"]["model_reviews"] or 0)>0)) and (not args.require_multi_strategy_results or (result["multi_strategy_acceptance"]["status"]=="CONTRACTS_OBSERVED" and result["multi_strategy_acceptance"]["populated_results_observed"])) else 1
 
 if __name__=="__main__":
