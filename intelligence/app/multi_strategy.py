@@ -242,7 +242,7 @@ def summarize(snapshot,connect,instant):
     if surprises:
         result["unavailable_strategies"].pop("PEAD",None)
     result["expectations_evidence_basis"]="AUTHORIZED_OPERATOR_REVIEWED_IMPORT" if surprises else "NO_AUTHORIZED_EVENT_INPUT"
-    counts=Counter();items=[]
+    counts=Counter();items=[];excluded_price_risk=0
     for r in candidates:
         f=r["multi_strategy_price"];isin=r["isin"];report=prepared.get(isin,{})
         if governance_review.assess(r,report,today)["findings"]:continue
@@ -295,11 +295,12 @@ def summarize(snapshot,connect,instant):
         if isin in momentum_ranks:
             rank=momentum_ranks[isin]
             facts.update(sample_momentum_percentile=rank["percentile"],sample_momentum_cohort_size=rank["sample_size"])
-        # Do not change strict FIP or its export. Keep financial-only observations,
-        # but suppress alternate price-dependent leads after a known pump/extension.
-        if pump_or_extended(f):
-            lanes=[v for v in lanes if v in ("FIP","QUALITY_PROXY","QUALITY_VALUE","PIOTROSKI_PARTIAL","PIOTROSKI_F_SCORE","QMJ_STYLE","GARP_PROXY","EARNINGS_ACCELERATION")]
-            facts["price_lead_exclusion"]="RECENT_JUMP_OR_ANNUAL_EXTENSION"
+        # Known adjusted price risks exclude the company from the independent
+        # opportunity list even when a financial-only rule also matches.
+        # The separate strict FIP shortlist/export is not modified.
+        if adjusted and pump_or_extended(f):
+            excluded_price_risk+=1
+            continue
         if not adjusted:lanes=[v for v in lanes if LANES[v] in ("QUALITY","VALUE","GROWTH") and v not in ("GROWTH_LEADERSHIP_PROXY","CAN_SLIM_PROXY","PEAD")]
         lanes=list(dict.fromkeys(lanes))
         if not lanes:continue
@@ -312,7 +313,8 @@ def summarize(snapshot,connect,instant):
             "risk":None,"price_plan":plan,"qualified":False,"status":"RESEARCH_MATCH_ONLY"})
     # Independent family breadth, not correlated-indicator voting. Regime is
     # a descriptive review lens only; no unvalidated regime performance claim.
-    trend=regime.get("trend") if regime.get("as_of") in {r["as_of"] for r in candidates} else None
+    trend=regime.get("trend") if (regime.get("calendar_checked_on")==today.isoformat()
+        and regime.get("as_of") in {r["as_of"] for r in candidates}) else None
     def order(r):
         preferred={"QUALITY","VALUE","DEFENSIVE"} if trend=="FALLING" else {"MOMENTUM","GROWTH","SECTOR"} if trend=="RISING" else {"VALUE","REVERSAL","QUALITY"} if trend=="SIDEWAYS" else set()
         rank=r["observed_facts"].get("sample_momentum_percentile") if "MOMENTUM" in r["families"] else None
@@ -325,7 +327,7 @@ def summarize(snapshot,connect,instant):
         if row:selected.append(row);seen.add(row["isin"])
     selected.extend(r for r in items if r["isin"] not in seen)
     result.update(status="RESEARCH_AVAILABLE" if selected else "NO_SUPPORTED_MATCHES",items=selected[:10],
-        coverage={"eligible_companies":len(candidates),"cached_company_reports":len(reports),"comparable_cohorts":len(bounds),"matched_companies":len(items)},
+        coverage={"eligible_companies":len(candidates),"cached_company_reports":len(reports),"comparable_cohorts":len(bounds),"matched_companies":len(items),"excluded_known_price_risk":excluded_price_risk},
         lane_counts=dict(counts),regime=trend,regime_basis="DESCRIPTIVE_PRIORITY_ONLY",
         strategy_catalog=pro.catalog(counts,expectations_available=bool(surprises)))
     return result
