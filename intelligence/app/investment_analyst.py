@@ -136,7 +136,16 @@ def stock_projection(snapshot,instant=None):
     # to three discovery slots without changing strict FIP exports/qualification.
     alternatives=obj(snapshot.get("multi_strategy"))
     if alternatives.get("methodology")=="MULTI-STRATEGY-1":
-        alt=[r for r in rows(alternatives.get("items")) if isinstance(r,dict) and r.get("qualified") is False and exact_isin(r.get("isin")) and r["isin"] not in prohibited and r["isin"] not in seen and num(r.get("close"),.0001,1e9)]
+        # Do not promote a cached candidate from an older completed session.
+        current_sessions=set()
+        for section in rows(snapshot.get("sections")):
+            if not isinstance(section,dict) or section.get("status")!="READY" or section.get("section") not in ("NSE","BSE"):continue
+            coverage=obj(obj(section.get("result")).get("discovery_coverage"))
+            if (coverage.get("calendar_checked_on")==snapshot.get("research_date") and coverage.get("calendar_status")=="PUBLISHED_SESSION"
+                and isinstance(coverage.get("expected_session"),str)):
+                current_sessions.add((section["section"],coverage["expected_session"]))
+        alt=[r for r in rows(alternatives.get("items")) if isinstance(r,dict) and r.get("qualified") is False and exact_isin(r.get("isin")) and r["isin"] not in prohibited and r["isin"] not in seen and num(r.get("close"),.0001,1e9)
+             and (r.get("exchange"),r.get("as_of")) in current_sessions]
         if alt:
             out=out[:max(7,10-min(3,len(alt)))]
             for r in alt:
