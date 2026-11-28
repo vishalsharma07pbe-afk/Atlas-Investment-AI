@@ -534,6 +534,9 @@ def read_snapshot(include_ai=True):
         from . import multi_strategy
         try:
             snapshot["multi_strategy"]=multi_strategy.summarize(snapshot,_connect,current)
+            snapshot["multi_strategy"]["historical_validation"]=(snapshot.get("strategy_validation") or {}).get("multi_strategy")
+            from . import multi_strategy_prospective
+            snapshot["multi_strategy"]["prospective_validation"]=multi_strategy_prospective.summary(_connect,current)
         except (ValueError,TypeError,KeyError,AttributeError,OverflowError,OSError,sqlite3.Error):
             snapshot["multi_strategy"]={"methodology":multi_strategy.VERSION,"status":"UNAVAILABLE","items":[],"notice":multi_strategy.NOTICE}
         try:
@@ -752,6 +755,13 @@ def _execute_job(job):
         return "DISABLED_OR_NOT_AUTHORIZED"
     if job=="COMPANY_NEWS" and not automatic_news.permitted():
         return "DISABLED_OR_NOT_AUTHORIZED"
+    if job=="MULTI_STRATEGY_PUBLICATION":
+        from . import multi_strategy_prospective
+        instant=now()
+        snapshot=read_snapshot()
+        if not snapshot.get("enabled"):return "DISABLED_OR_NOT_AUTHORIZED"
+        multi_strategy_prospective.publish(snapshot,_connect,instant)
+        return "PASS_COMPLETED"
     if job=="INVESTMENT_ANALYST_SOURCES":
         from . import investment_analyst,analyst_source_discovery
         if not analyst_source_discovery.enabled():return "DISABLED_OR_NOT_AUTHORIZED"
