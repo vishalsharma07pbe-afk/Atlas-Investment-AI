@@ -1,4 +1,5 @@
 import {useEffect,useState} from "react";
+import HistoryRecoveryProgress from "./HistoryRecoveryProgress";
 
 type Dataset={code:string;label:string;records:number|null;latest_observed_at:string|null;age:number|null;age_unit:string;freshness_threshold:number;status:string;ingestion_mode:string;independently_verified:boolean;automatic_collection_enabled:boolean;usable_as_live_market_data:boolean};
 type CalendarContext={status:string;observed_at?:string;sessions:{exchange:string;session_date:string;phase:string;open_at:string|null;close_at:string|null}[];notice?:string};
@@ -26,6 +27,7 @@ export default function DataReadiness(){
     <div className="sectionhead"><div className="section-copy"><small className="section-kicker">SOURCE STATUS</small><h2>Data source readiness</h2>
       <p>Independent freshness, provenance and access checks. Local evidence never counts as a licensed live feed.</p></div>
       <button className="secondary" type="button" onClick={()=>setRefresh(n=>n+1)} disabled={loading}>Refresh status</button></div>
+    <HistoryRecoveryProgress/>
     {error&&<p role="alert">{error}</p>}
     {!data&&!error&&<p role="status">Checking local data readiness…</p>}
     {data&&<>

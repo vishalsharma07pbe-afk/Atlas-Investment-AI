@@ -40,6 +40,7 @@ class LiveFeedsDatabaseIntegrationTest {
  @Autowired AmfiFeedService funds;
  @Autowired FundHistoryResearchService fundResearch;
  @Autowired DiscoveryHistoryScheduler discovery;
+ @Autowired HistoryRecoveryController historyRecovery;
  @Autowired DiscoveryQuoteScheduler quoteScreen;
  @Autowired ExchangeCalendarSync exchangeCalendar;
  @Autowired MockMvc mvc;
@@ -400,6 +401,44 @@ class LiveFeedsDatabaseIntegrationTest {
     org.springframework.test.util.ReflectionTestUtils.setField(discovery,"accessToken","");
     org.springframework.test.util.ReflectionTestUtils.setField(discovery,"requestGapMs",oldGap);
   }
+ }
+
+ @Test
+ @org.springframework.transaction.annotation.Transactional
+ void historyRecoveryReportsKnownTargetAndUnknownCalendarWithoutPrivateData(){
+  LocalDate target=LocalDate.of(2026,11,27),today=target.plusDays(1);
+  db.update("UPDATE instruments SET active=false WHERE exchange_id IN (SELECT id FROM exchanges WHERE code IN ('NSE','BSE'))");
+  long id=seedStock();
+  db.update("UPDATE instruments SET active=true WHERE id=?",id);
+  db.update("DELETE FROM discovery_history_attempts WHERE instrument_id=?",id);
+  db.update("DELETE FROM market_candles WHERE instrument_id=?",id);
+  db.update("DELETE FROM market_sessions WHERE session_date=?",target);
+  db.update("DELETE FROM exchange_holidays WHERE holiday_date=?",target);
+  db.update("""
+    INSERT INTO market_sessions(exchange_id,session_date,session_type,is_trading_day,open_time,close_time)
+    VALUES ((SELECT id FROM exchanges WHERE code='NSE'),?,'REGULAR',true,?,?)
+    """,target,java.sql.Timestamp.from(target.atTime(9,15).atZone(MarketCalendarService.IST).toInstant()),
+    java.sql.Timestamp.from(target.atTime(15,30).atZone(MarketCalendarService.IST).toInstant()));
+  @SuppressWarnings("unchecked")
+  Map<String,Object> snapshot=org.springframework.test.util.ReflectionTestUtils.invokeMethod(historyRecovery,"progress",today);
+  @SuppressWarnings("unchecked")
+  List<Map<String,Object>> rows=(List<Map<String,Object>>)snapshot.get("exchanges");
+  assertThat(snapshot).containsEntry("distinct_mapped_companies",1L);
+  assertThat(rows.getFirst()).containsEntry("exchange","NSE").containsEntry("target_session",target.toString())
+    .containsEntry("mapped_listings",1L).containsEntry("current_listings",0L).containsEntry("due_missing",1L);
+  assertThat(rows.getLast()).containsEntry("exchange","BSE").containsEntry("target_session",null)
+    .containsEntry("current_listings",null).containsEntry("due_missing",null);
+  db.update("""
+    INSERT INTO market_candles(instrument_id,timeframe,candle_time,source_id,open,high,low,close,volume,is_complete,quality_status,adjustment_status)
+    VALUES (?,'1d',(?::date::timestamp+interval '9 hours 15 minutes') AT TIME ZONE 'Asia/Kolkata',
+      (SELECT id FROM data_sources WHERE source_code='UPSTOX'),100,105,99,102,200,true,'PROVIDER_VALIDATED','RAW_UNADJUSTED')
+    """,id,target);
+  snapshot=org.springframework.test.util.ReflectionTestUtils.invokeMethod(historyRecovery,"progress",today);
+  rows=(List<Map<String,Object>>)snapshot.get("exchanges");
+  assertThat(rows.getFirst()).containsEntry("current_listings",1L).containsEntry("due_missing",0L)
+    .containsEntry("adjusted_depth_listings",0L);
+  assertThat(rows.getFirst()).doesNotContainKeys("instrument_key","isin","claim_token","access_token");
+  verifyNoInteractions(http,vault);
  }
 
  @Test void discoveryBackfillsMappedEquityWithoutBorrowingOwnerToken()throws Exception{

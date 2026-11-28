@@ -16,8 +16,8 @@ public class DiscoveryHistoryScheduler {
   // Acquisition target, not a qualification rule: 252 daily return intervals need
   // 253 closes. A 15-month window leaves room for exchange holidays and gaps.
   // Keep existing per-pass request budgets and raw/adjusted separation.
-  private static final int REQUIRED_DAILY_CANDLES=253;
-  private static final int BACKFILL_MONTHS=15;
+  static final int REQUIRED_DAILY_CANDLES=253;
+  static final int BACKFILL_MONTHS=15;
   private final JdbcTemplate jdbc;
   private final UpstoxFeedService stocks;
   private final MarketCalendarService calendar;
