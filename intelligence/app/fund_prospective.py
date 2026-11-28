@@ -127,18 +127,18 @@ def evaluate(row,payload,today):
             "nav_change_percent":round(float(100*(points[end]/points[start]-1)),6),"observed_drawdown_percent":round(float(100*dd),6)}
     except (KeyError,ValueError,TypeError,InvalidOperation,OverflowError,ZeroDivisionError,AttributeError):return None
 
-def paired_tri(row,outcome,series):
+def paired_tri(row,outcome,series,source_basis):
     """Exact endpoints only; no interpolation or price-index substitution."""
     from .fund_local_evidence import SEGMENTS
     try:
         e=json.loads(row["evidence"]);name=e.get("category_tri_proxy")
-        if not name or name!=SEGMENTS.get(row["category"]):return None
+        if not name or name!=SEGMENTS.get(row["category"]) or source_basis not in ("AUTHORIZED_DIRECT_CSV","AUTHORIZED_LOCAL_EXPORT"):return None
         start,end=date.fromisoformat(outcome["start_date"]),date.fromisoformat(outcome["end_date"])
         values=series.get(name,{})
         a,b=nav(values[start]),nav(values[end])
         change=float(100*(b/a-1))
         if not isfinite(change) or not -100<change<=1e6:return None
-        return {"methodology":"FROZEN-CATEGORY-TRI-1","benchmark":name,"start_date":start.isoformat(),"end_date":end.isoformat(),"start_tri":str(a),"end_tri":str(b),"tri_change_percent":round(change,6)}
+        return {"methodology":"FROZEN-CATEGORY-TRI-1","source_basis":source_basis,"benchmark":name,"start_date":start.isoformat(),"end_date":end.isoformat(),"start_tri":str(a),"end_tri":str(b),"tri_change_percent":round(change,6)}
     except (KeyError,ValueError,TypeError,InvalidOperation,OverflowError,AttributeError):return None
 
 def refresh(snapshot,instant,connect=None,loader=backend_json,*,final_report=None):
@@ -166,9 +166,11 @@ def refresh(snapshot,instant,connect=None,loader=backend_json,*,final_report=Non
         if result and json.loads(row["evidence"]).get("category_tri_proxy"):
             if series is None:
                 from . import fund_local_evidence as local,official_tri
-                try:series=official_tri.combine(local.load(today),official_tri.read(instant),official_tri.local_csv_exports(today)).get("indices",{})
+                try:series=official_tri.combine(local.load(today),official_tri.read(instant),official_tri.local_csv_exports(today))
                 except (OSError,ValueError,TypeError,KeyError,AttributeError,sqlite3.Error):series={}
-            pair=paired_tri(row,result,series)
+            name=json.loads(row["evidence"]).get("category_tri_proxy")
+            basis="AUTHORIZED_DIRECT_CSV" if name in series.get("downloaded_tri_provenance",{}) else "AUTHORIZED_LOCAL_EXPORT"
+            pair=paired_tri(row,result,series.get("indices",{}),basis)
             if pair:result["category_tri_comparison"]=pair
         with nav_catalog._LOCK,closing(connect()) as db,db:
             _table(db);db.execute("UPDATE mf_prospective_watch SET status=?,outcome=? WHERE isin=? AND observed_date=? AND status='PENDING'",
@@ -198,7 +200,7 @@ def summary(category,today,connect=None):
                     d["observed"].append(outcome["nav_change_percent"])
                     from . import fund_local_evidence as local,official_tri
                     pair=outcome.get("category_tri_comparison") or {}
-                    if (local.permitted() or official_tri.permitted()) and pair.get("methodology")=="FROZEN-CATEGORY-TRI-1" and pair.get("benchmark")==e.get("category_tri_proxy")==local.SEGMENTS.get(category) and pair.get("start_date")==outcome.get("start_date") and pair.get("end_date")==outcome.get("end_date"):
+                    if ((pair.get("source_basis")=="AUTHORIZED_LOCAL_EXPORT" and local.permitted()) or (pair.get("source_basis")=="AUTHORIZED_DIRECT_CSV" and official_tri.permitted())) and pair.get("methodology")=="FROZEN-CATEGORY-TRI-1" and pair.get("benchmark")==e.get("category_tri_proxy")==local.SEGMENTS.get(category) and pair.get("start_date")==outcome.get("start_date") and pair.get("end_date")==outcome.get("end_date"):
                         try:
                             change=float(100*(nav(pair["end_tri"])/nav(pair["start_tri"])-1))
                             if isfinite(change) and abs(change-pair["tri_change_percent"])<=.000001:d["paired"].append((r["isin"],r["published_date"],outcome["nav_change_percent"]-change))
