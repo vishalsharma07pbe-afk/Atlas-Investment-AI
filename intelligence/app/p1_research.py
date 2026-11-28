@@ -94,7 +94,7 @@ def _normalize_ratios(rows) -> list[dict]:
     return result
 
 
-def company_research(isin: str, instrument_key: str | None = None) -> dict:
+def company_research(isin: str, instrument_key: str | None = None, *, section_names=None) -> dict:
     isin = isin.strip().upper()
     if not ISIN_RE.fullmatch(isin):
         raise ValueError("INVALID_ISIN")
@@ -102,26 +102,36 @@ def company_research(isin: str, instrument_key: str | None = None) -> dict:
         raise ValueError("INVALID_INSTRUMENT_KEY")
 
     encoded_isin = quote(isin, safe="")
+    requested = None if section_names is None else set(section_names)
+    allowed = {"profile","ratios","income_statement","quarterly_income","balance_sheet","cash_flow","shareholding","corporate_actions","competitors"}
+    if requested is not None and (not requested or not requested<=allowed):
+        raise ValueError("INVALID_COMPANY_SECTIONS")
+    # Existing callers still receive all nine sections. Automatic refresh may
+    # request a subset; never issue a request for an already retained section.
+    def selected(name,endpoint,loader):
+        if requested is not None and name not in requested:
+            return None
+        return _safe_section(name,endpoint,loader)
     sections = {
-        "profile": _safe_section("profile", f"/v2/fundamentals/{encoded_isin}/profile",
+        "profile": selected("profile", f"/v2/fundamentals/{encoded_isin}/profile",
             lambda: _get(f"/v2/fundamentals/{encoded_isin}/profile")),
-        "ratios": _safe_section("ratios", f"/v2/fundamentals/{encoded_isin}/key-ratios",
+        "ratios": selected("ratios", f"/v2/fundamentals/{encoded_isin}/key-ratios",
             lambda: _normalize_ratios(_get(f"/v2/fundamentals/{encoded_isin}/key-ratios"))),
-        "income_statement": _safe_section("income_statement", f"/v2/fundamentals/{encoded_isin}/income-statement",
+        "income_statement": selected("income_statement", f"/v2/fundamentals/{encoded_isin}/income-statement",
             lambda: _get(f"/v2/fundamentals/{encoded_isin}/income-statement",
                          {"type": "consolidated", "time_period": "yearly", "fs": "true"})),
-        "quarterly_income": _safe_section("quarterly_income", f"/v2/fundamentals/{encoded_isin}/income-statement",
+        "quarterly_income": selected("quarterly_income", f"/v2/fundamentals/{encoded_isin}/income-statement",
             lambda: _get(f"/v2/fundamentals/{encoded_isin}/income-statement",
                          {"type": "consolidated", "time_period": "quarterly", "fs": "false"})),
-        "balance_sheet": _safe_section("balance_sheet", f"/v2/fundamentals/{encoded_isin}/balance-sheet",
+        "balance_sheet": selected("balance_sheet", f"/v2/fundamentals/{encoded_isin}/balance-sheet",
             lambda: _get(f"/v2/fundamentals/{encoded_isin}/balance-sheet",
                          {"type": "consolidated", "time_period": "yearly", "fs": "true"})),
-        "cash_flow": _safe_section("cash_flow", f"/v2/fundamentals/{encoded_isin}/cash-flow",
+        "cash_flow": selected("cash_flow", f"/v2/fundamentals/{encoded_isin}/cash-flow",
             lambda: _get(f"/v2/fundamentals/{encoded_isin}/cash-flow",
                          {"type": "consolidated", "time_period": "yearly", "fs": "true"})),
-        "shareholding": _safe_section("shareholding", f"/v2/fundamentals/{encoded_isin}/share-holdings",
+        "shareholding": selected("shareholding", f"/v2/fundamentals/{encoded_isin}/share-holdings",
             lambda: _get(f"/v2/fundamentals/{encoded_isin}/share-holdings")),
-        "corporate_actions": _safe_section("corporate_actions", f"/v2/fundamentals/{encoded_isin}/corporate-actions",
+        "corporate_actions": selected("corporate_actions", f"/v2/fundamentals/{encoded_isin}/corporate-actions",
             lambda: _get(f"/v2/fundamentals/{encoded_isin}/corporate-actions")),
     }
     # Public guide specifies ISIN; Swagger specifies instrument_key.
@@ -130,8 +140,9 @@ def company_research(isin: str, instrument_key: str | None = None) -> dict:
     mapped=instrument_key in ("NSE_EQ|"+isin,"BSE_EQ|"+isin)
     competitor_id=quote(instrument_key,safe="") if mapped else encoded_isin
     competitor_path=f"/v2/fundamentals/{competitor_id}/competitors"
-    sections["competitors"] = _safe_section(
+    sections["competitors"] = selected(
         "competitors", competitor_path, lambda: _get(competitor_path))
+    sections = {key:value for key,value in sections.items() if value is not None}
     available = sum(1 for value in sections.values() if value["status"] == "AVAILABLE")
     return {
         "isin": isin,

@@ -26,6 +26,16 @@ class P1ResearchTests(unittest.TestCase):
         self.assertEqual(calls,[{"type":"consolidated","time_period":"yearly","fs":"true"},
                                 {"type":"consolidated","time_period":"quarterly","fs":"false"}])
 
+    def test_selective_sections_keep_existing_routes_and_budget(self):
+        with patch.object(p1,"_get",return_value={"sector":"Example"}) as get:
+            result=p1.company_research("INE002A01018",section_names=["profile"])
+        self.assertEqual(set(result["sections"]),{"profile"})
+        get.assert_called_once_with("/v2/fundamentals/INE002A01018/profile")
+        with patch.object(p1,"_get") as get:
+            with self.assertRaises(ValueError):
+                p1.company_research("INE002A01018",section_names=["unknown"])
+            get.assert_not_called()
+
     def test_ratio_unit_mismatch_cannot_produce_relative_difference(self):
         ratio=p1._normalize_ratios([{"name":"ROE","company_value":"12%","sector_value":"0.1"}])[0]
         self.assertEqual(ratio["unit"],"PERCENT")
