@@ -590,7 +590,8 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
     portfolios=fund_portfolios.matched(prioritized)
     quality_watch=fund_peer_shortlist.quality_watch(official,portfolios,category,fit,today)
     downloaded_tri=official_tri.read(datetime.now(timezone.utc))
-    local_export=official_tri.combine(fund_local_evidence.load(today),downloaded_tri)
+    operator_tri=official_tri.local_csv_exports(today)
+    local_export=official_tri.combine(fund_local_evidence.load(today),downloaded_tri,operator_tri)
     local_reports=fund_local_evidence.reports(official,source_rows,local_export,today)
     publisher_reports=official_amc_factsheet.matched(official,source_rows,datetime.now(timezone.utc))
     coverage["secondary_portfolio_composition_matches"]=len(compositions)
@@ -631,7 +632,7 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
                 comparison=fund_local_evidence.compare(matches[0],idx)
                 if comparison:
                     e={**e,"historical_tri_context":comparison,
-                       "tri_provenance":local_export.get("downloaded_tri_provenance",{}).get(e["benchmark"])}
+                       "tri_provenance":local_export.get("downloaded_tri_provenance",{}).get(e["benchmark"]) or local_export.get("operator_tri_provenance",{}).get(e["benchmark"])}
             report["publisher_factsheet_evidence"]=e
     try:
         prospective=fund_prospective.summary(category,today)
@@ -662,7 +663,7 @@ def dashboard(category:str="LARGE_CAP",horizon_months:int=60,risk_tolerance:str=
       "official_amc_coverage":{"status":"PUBLISHER_MATCHES" if publisher_reports else "AWAITING_MATCHED_SOURCE" if official_amc_factsheet.permitted() else "DISABLED_OR_NOT_AUTHORIZED",
           "matched_schemes":len(publisher_reports),"notice":official_amc_factsheet.NOTICE},
       "official_tri_coverage":{"status":downloaded_tri["status"],"configured_count":downloaded_tri["configured_count"],
-          "available_count":len(downloaded_tri["indices"]),"conflicting_series":local_export["tri_conflicts"],"notice":official_tri.NOTICE},
+          "available_count":len(downloaded_tri["indices"]),"local_csv_count":len(operator_tri["indices"]),"local_csv_invalid_count":operator_tri["invalid_count"],"conflicting_series":local_export["tri_conflicts"],"notice":official_tri.NOTICE},
       "market_overview":fund_local_evidence.overview(local_export,today),
       "recommendation_status":"QUALIFIED_RESEARCH_AVAILABLE" if ranked["top_performers"] or ranked["growth_outlook"] else "NO_QUALIFYING_FUNDS_INCOMPLETE_EVIDENCE",
       "notice":"Discovery records are not recommendations. Top Performer and Growth Outlook use independent evidence gates; zero picks is allowed."}

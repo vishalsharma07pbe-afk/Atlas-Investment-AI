@@ -62,3 +62,22 @@ class OfficialTRITest(unittest.TestCase):
                 path.write_text(json.dumps({"schema":t.VERSION,"authorization_attested":True,"sources":[
                     {"benchmark":NAME,"url":URL},{"benchmark":"NIFTY 50 TRI","url":"https://www.niftyindices.com/second-example.csv"}]}))
                 self.assertFalse(t.refresh(failed+timedelta(hours=8),path=path,loader=lambda u:self.fail("publisher blocked across indices"),connect=connect))
+
+    def test_original_operator_csv_is_independent_of_direct_url_and_conflicts_fail_closed(self):
+        with tempfile.TemporaryDirectory() as d:
+            folder=Path(d);file=folder/"tri-nifty-100-tri.csv";file.write_bytes(csv_bytes())
+            with patch.object(t.local,"permitted",return_value=False):
+                self.assertEqual(t.local_csv_exports(NOW.date(),folder)["indices"],{})
+            with patch.object(t.local,"permitted",return_value=True):
+                result=t.local_csv_exports(NOW.date(),folder)
+                self.assertEqual(result["status"],"LOCAL_CSV_AVAILABLE")
+                self.assertEqual(result["provenance"][NAME]["status"],"AUTHORIZED_OPERATOR_CSV")
+                self.assertEqual(len(result["indices"][NAME]),157)
+                combined=t.combine({},{"indices":{}},result)
+                self.assertIn(NAME,combined["operator_tri_provenance"])
+                day=max(result["indices"][NAME])
+                conflict=t.combine({"indices":{NAME:{day:1}}},{"indices":result["indices"],"provenance":result["provenance"]},result)
+                self.assertNotIn(NAME,conflict["indices"])
+                self.assertEqual(conflict["tri_conflicts"],[NAME])
+                file.write_bytes(csv_bytes().replace(b"Total Returns Index",b"Close"))
+                self.assertEqual(t.local_csv_exports(NOW.date(),folder)["invalid_count"],1)

@@ -114,10 +114,16 @@ def compare(row,values):
 def reports(candidates,source_rows,loaded,today):
     result={}
     if loaded.get("status")!="LOCAL_EXPORTS_LOADED":return result
-    by_code={str(r["scheme_code"]):r for r in source_rows if isinstance(r,dict) and type(r.get("scheme_code")) is int}
+    by_code={}
+    conflicts=set()
+    for r in source_rows:
+        if not isinstance(r,dict) or type(r.get("scheme_code")) is not int:continue
+        code=str(r["scheme_code"])
+        if code in by_code:conflicts.add(code)
+        by_code[code]=r
     for f in candidates:
         r=by_code.get(f.identifier) or {}
-        if not f.identifier.isdigit():continue
+        if not f.identifier.isdigit() or f.identifier in conflicts:continue
         s=loaded["schemes"].get(int(f.identifier))
         if not s or s["isin_growth"]!=r.get("isin_growth") or f.plan!="DIRECT" or f.option!="GROWTH":continue
         if not 0<=(today-day(s["disclosure_date"])).days<=60:continue
@@ -128,6 +134,8 @@ def reports(candidates,source_rows,loaded,today):
         comparison=compare(r,index)
         provenance=(loaded.get("downloaded_tri_provenance") or {}).get(s["benchmark"])
         if comparison and provenance:comparison={**comparison,"status":"MATCHED_AUTHORIZED_DIRECT_TRI_CSV","source_provenance":provenance}
+        elif comparison and (loaded.get("operator_tri_provenance") or {}).get(s["benchmark"]):
+            comparison={**comparison,"source_provenance":loaded["operator_tri_provenance"][s["benchmark"]]}
         result[f.identifier]={"status":"LOCAL_EXPORT_EVIDENCE_ONLY","disclosure":disclosure,"benchmark_comparison":comparison,
             "input_sha256":loaded["sha256"],"notice":NOTICE}
     return result
