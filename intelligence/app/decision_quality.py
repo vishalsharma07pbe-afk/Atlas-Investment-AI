@@ -114,6 +114,8 @@ def attach(report,today):
         for r in stocks:
             if r.get("action")=="RESEARCH_FOR_ENTRY":r["action"]="WATCH_FOR_CONFIRMATION"
         report["next_steps"]=["Observed priority stock cohort has nonpositive median net excess versus the matched price index. Defer new stock allocations and reassess the policy.",*rows(report.get("next_steps"))[1:]]
+    if report["decision_quality"].get("forecast_allocation_hold"):
+        report["next_steps"]=["Mature earnings persistence results warrant model reassessment. Defer allocations depending on the uncalibrated persistence scenario.",*rows(report.get("next_steps"))[1:]]
     if not counts["PRIORITY_RESEARCH"]:
         report["next_steps"]=["No complete priority-research case under the current evidence policy. Keep new capital uncommitted to these candidates; inspect the missing or adverse evidence first.",*rows(report.get("next_steps"))[1:]]
     return report
