@@ -456,6 +456,11 @@ def read_snapshot(include_ai=True):
             snapshot["strategy_validation"] = automatic_strategy_validation.read(_connect,current,snapshot=snapshot) if enabled else {"status":"DISABLED"}
         except (ValueError, OSError, sqlite3.Error):
             snapshot["strategy_validation"] = {"status":"UNAVAILABLE"}
+        from . import long_history_validation
+        try:
+            snapshot["long_history_validation"]=long_history_validation.read(_connect) if enabled else {"status":"DISABLED"}
+        except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,AttributeError):
+            snapshot["long_history_validation"]={"status":"UNAVAILABLE","qualified":False,"notice":long_history_validation.NOTICE}
         try:
             snapshot["institutional_activity"] = automatic_institutional.read(_connect) if enabled else {"status":"AUTOMATION_DISABLED"}
         except (ValueError, OSError, sqlite3.Error):
@@ -877,6 +882,10 @@ def _execute_job(job):
         automatic_news.refresh(snapshot,_connect)
     elif job=="STRATEGY_REPLAY":
         automatic_strategy_validation.refresh(snapshot,_connect)
+        from . import long_history_validation
+        # Independent offline experiment must not prevent existing replay.
+        try:long_history_validation.refresh(_connect,now())
+        except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,AttributeError):pass
     elif job=="AI_REVIEW":
         # Same cached public evidence assembly as the dashboard; no extra provider calls.
         automatic_ai_review.refresh(snapshot,_connect)
