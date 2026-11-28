@@ -55,6 +55,7 @@ def baseline_growth(baseline):
         "revenue_yoy_percent":baseline["metrics"]["revenue"]["persisted_growth_percent"],
         "profit_yoy_percent":baseline["metrics"]["net_profit"]["persisted_growth_percent"],
         "amount_scenarios":research_synthesis.quarter_scenarios(baseline),
+        "forecast_challengers":research_synthesis.forecast_challengers(baseline),
         "notice":"Quarterly persistence scenario, not consensus earnings or stock return forecast."}
 
 def fund_growth(driver,today):
@@ -171,7 +172,7 @@ def stock_projection(snapshot,instant=None):
                 out.append({**{k:r[k] for k in ("id","isin","symbol","exchange","as_of","close")},
                     "tier":"MULTI_STRATEGY_RESEARCH","horizon":"RESEARCH","score":None,"qualified":False,"action":"WATCH_FOR_CONFIRMATION",
                     "risk":None,"growth_outlook":growth,"price_plan":plan,"evidence_confidence":"LIMITED",
-                    "strategy_diagnostics":obj(r.get("strategy_diagnostics")),
+                    "strategy_diagnostics":obj(r.get("strategy_diagnostics")),"regime_priority":r.get("regime_priority"),
                     "cash_sensitivity":research_synthesis.cash_context(r.get("cash_sensitivity")),
                     "strategies":r["strategies"],"strategy_families":r["families"],"observed_facts":r["observed_facts"],
                     "reasons":["Independent strategy research matches: "+", ".join(x.replace("_"," ").lower() for x in r["strategies"])],
@@ -258,6 +259,7 @@ def analyze(snapshot,today,instant=None):
     for group in funds:
         for row in group["items"]:row["research_thesis"]=research_synthesis.thesis(row,True)
     out["multi_strategy"]=obj(snapshot.get("multi_strategy"))
+    out["forecast_model_review"]=obj(obj(snapshot.get("forward_earnings_validation")).get("model_review"))
     out.update(stocks=stocks,funds=funds,status="RESEARCH_AVAILABLE" if stocks or any(f["items"] for f in funds) else "NO_SUPPORTED_CANDIDATES")
     if stocks:out["next_steps"].append("Review the highest evidence-tier stock first; confirm current price and independent business evidence before allocating cash.")
     else:out["next_steps"].append("Do not force a new equity position from the current sample.")
