@@ -17,7 +17,7 @@ def summarize(equities,reports,instant):
     today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
     out={"methodology":VERSION,"status":"AWAITING_QUARTERLY_EVIDENCE","exact_weight_percent":None,
          "assessed_weight_percent":0,"review_weight_percent":0,"unassessed_weight_percent":100,
-         "quarter_cohorts":[],"forward_earnings_coverage_percent":None,"forecast_nav_return_percent":None,"notice":NOTICE}
+         "quarter_cohorts":[],"experimental_forward_cohorts":[],"forward_earnings_coverage_percent":None,"forecast_nav_return_percent":None,"notice":NOTICE}
     seen=set();exact=0
     for h in equities:
         isin,w=h.get("isin"),h.get("weight_percent")
@@ -27,6 +27,8 @@ def summarize(equities,reports,instant):
     if exact>100.5:return {**out,"status":"INVALID_HOLDING_IDENTITIES"}
     cohorts=defaultdict(lambda:{"assessed":0.,"review":0.,"joint_coverage":0.,"joint_growth":0.,"joint_acceleration":0.,
         "joint_acceleration_coverage":0.,"profit_loss":0.,"metrics":{}})
+    from . import forward_earnings
+    experimental=defaultdict(lambda:{"weight":0.,"positive":0.,"revenue":0.,"profit":0.})
     assessed=flagged=0.
     for h in equities:
         isin,w=h["isin"],h["weight_percent"]
@@ -38,6 +40,17 @@ def summarize(equities,reports,instant):
             q=quarterly_financials.summarize(raw,today)
         except (ValueError,TypeError,KeyError,AttributeError,OverflowError):continue
         if q.get("status") not in ("REPORTED_QUARTERLY_COMPARISONS","PARTIAL_LATEST_QUARTER"):continue
+        baseline=forward_earnings.baseline(raw,instant)
+        if baseline and baseline.get("qualified") is False:
+            # Original NAV weights and shared target fiscal quarter only.
+            # These experimental persistence rates are not aggregate fund
+            # earnings or an independently calibrated forward estimate.
+            key=(baseline["observed_quarter"],baseline["target_quarter"])
+            b=experimental[key]
+            a=baseline["metrics"]["revenue"]["persisted_growth_percent"]
+            v=baseline["metrics"]["net_profit"]["persisted_growth_percent"]
+            b["weight"]+=w;b["revenue"]+=w*a;b["profit"]+=w*v
+            if a>0 and v>0:b["positive"]+=w
         rows={r["metric"]:r for r in q["items"]}
         if not rows:continue
         bucket=cohorts[q["latest_period"]]
@@ -76,6 +89,13 @@ def summarize(equities,reports,instant):
             metrics.append({"metric":key,**{k+"_weight_percent":rd(v) for k,v in m.items() if k!="sum_yoy"},
               "covered_subset_weighted_yoy_percent":rd(m["sum_yoy"]/m["yoy_coverage"]) if m["yoy_coverage"] else None})
         out["quarter_cohorts"].append({"period":period,**{k+"_weight_percent":rd(v) for k,v in b.items() if k!="metrics"},"metrics":metrics})
+    for (observed,target),b in sorted(experimental.items(),reverse=True):
+        if b["weight"]<=0:continue
+        out["experimental_forward_cohorts"].append({"observed_quarter":observed,"target_quarter":target,
+            "covered_weight_percent":rd(b["weight"]),"positive_joint_growth_weight_percent":rd(b["positive"]),
+            "covered_subset_revenue_persistence_percent":rd(b["revenue"]/b["weight"]),
+            "covered_subset_profit_persistence_percent":rd(b["profit"]/b["weight"]),
+            "status":"UNCALIBRATED_PERSISTENCE_EXPERIMENT","qualified":False})
     out.update(status="REPORTED_QUARTERLY_DRIVERS_ONLY" if assessed else "AWAITING_QUARTERLY_EVIDENCE",
         exact_weight_percent=rd(exact),assessed_weight_percent=rd(assessed),review_weight_percent=rd(flagged),
         unassessed_weight_percent=rd(max(0,100-assessed)))
@@ -106,13 +126,32 @@ def readiness(category,reports,portfolios,today):
         candidates=[c for c in q.get("quarter_cohorts",[]) if num(c.get("joint_coverage_weight_percent")) and c["joint_coverage_weight_percent"]>=70]
         if len(candidates)!=1:continue
         c=candidates[0];coverage=c["joint_coverage_weight_percent"];growth=c.get("joint_growth_weight_percent");review=c.get("review_weight_percent")
+        try:
+            observed=date.fromisoformat(c["period"])
+            if not 0<=(today-observed).days<=150:continue
+        except (ValueError,TypeError,KeyError):continue
         if not all(num(v) for v in (growth,review)) or not 0<=growth<=coverage<=100.5 or not 0<=review<=100.5:continue
+        baselines=[]
+        for b in q.get("experimental_forward_cohorts",[]):
+            if not isinstance(b,dict) or b.get("status")!="UNCALIBRATED_PERSISTENCE_EXPERIMENT" or b.get("qualified") is not False or b.get("observed_quarter")!=c["period"]:continue
+            try:
+                target=date.fromisoformat(b["target_quarter"])
+                if target!=quarterly_financials.shift(observed,3) or not observed<today<target:continue
+            except (ValueError,TypeError,KeyError):continue
+            weight=b.get("covered_weight_percent");positive=b.get("positive_joint_growth_weight_percent")
+            a=b.get("covered_subset_revenue_persistence_percent");v=b.get("covered_subset_profit_persistence_percent")
+            if all(num(x) for x in (weight,positive,a,v)) and 0<=positive<=weight<=100.5 and weight>=70 and -50<=a<=100 and -50<=v<=100:
+                baselines.append({k:b[k] for k in ("observed_quarter","target_quarter","covered_weight_percent","positive_joint_growth_weight_percent","covered_subset_revenue_persistence_percent","covered_subset_profit_persistence_percent","status","qualified")})
         seen.add(code)
         out["items"].append({"identifier":code,"name":r[0].get("name"),"portfolio_date":p["portfolio_date"],
             "quarter":c["period"],"nav_date":r[0]["nav_date"],"joint_coverage_weight_percent":coverage,"joint_growth_weight_percent":growth,
             "review_weight_percent":review,"state":"DRIVER_REVIEW_REQUIRED" if review>20 or growth<50 else "POSITIVE_HISTORICAL_DRIVERS_ONLY",
-            "qualified":False,"forecast_return_percent":None,"blockers":["INDEPENDENT_OFFICIAL_HOLDINGS_REQUIRED",
+            "qualified":False,"forecast_return_percent":None,"experimental_forward":baselines[0] if len(baselines)==1 else None,"blockers":["INDEPENDENT_OFFICIAL_HOLDINGS_REQUIRED",
               "DATED_FORWARD_EARNINGS_ESTIMATES_REQUIRED","DATED_INTRINSIC_VALUATION_REQUIRED","PROSPECTIVE_GROWTH_VALIDATION_REQUIRED"]})
-    out["items"].sort(key=lambda r:r["identifier"])
+    # Positive reported drivers first, then largest original-weight coverage.
+    # This prioritizes investigation; it is not a forward-performance rank.
+    out["items"].sort(key=lambda r:(r["state"]!="POSITIVE_HISTORICAL_DRIVERS_ONLY",
+        -r["joint_growth_weight_percent"],-r["joint_coverage_weight_percent"],r["identifier"]))
+    out["items"]=out["items"][:5]
     if out["items"]:out["status"]="MATCHED_HISTORICAL_DRIVERS"
     return out

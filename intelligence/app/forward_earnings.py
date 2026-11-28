@@ -31,7 +31,11 @@ def _series(report,instant):
         stamp=datetime.fromisoformat(report["retrieved_at"])
         if stamp.tzinfo is None or not instant-timedelta(hours=24)<=stamp<=instant:return None
         b=report["sections"]["quarterly_income"]
-        if datetime.fromisoformat(b["source"]["retrieved_at"])!=stamp:return None
+        captured=datetime.fromisoformat(b["source"]["retrieved_at"])
+        # Incremental company reports keep the oldest section date at report
+        # level. Use the actual quarterly source capture, never refresh it.
+        if captured.tzinfo is None or not stamp<=captured<=instant or captured<instant-timedelta(hours=24):return None
+        stamp=captured
         today=instant.astimezone(IST).date()
         result=q.summarize(report,today)
         if result["status"] not in ("REPORTED_QUARTERLY_COMPARISONS","PARTIAL_LATEST_QUARTER"):return None

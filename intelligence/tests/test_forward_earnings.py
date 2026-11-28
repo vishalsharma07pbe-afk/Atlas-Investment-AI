@@ -47,3 +47,12 @@ class ForwardEarningsTest(unittest.TestCase):
                 loader.reset_mock()
                 self.assertEqual(f.refresh(snapshot,connect,NOW),0)
                 loader.assert_not_called()
+
+    def test_incremental_capture_uses_quarterly_source_timestamp_not_oldest_section(self):
+        raw=report()
+        raw["retrieved_at"]=(NOW-timedelta(hours=6)).isoformat()
+        self.assertEqual(f.baseline(raw,NOW)["capture_at"],NOW.isoformat())
+        raw["sections"]["quarterly_income"]["source"]["retrieved_at"]=(NOW+timedelta(minutes=1)).isoformat()
+        self.assertIsNone(f.baseline(raw,NOW))
+        raw["sections"]["quarterly_income"]["source"]["retrieved_at"]=(NOW-timedelta(hours=7)).isoformat()
+        self.assertIsNone(f.baseline(raw,NOW))
