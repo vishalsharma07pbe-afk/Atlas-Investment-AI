@@ -19,6 +19,7 @@ from .company_venues import collect
 VERSION="QUARTER-PERSISTENCE-1"
 IST=ZoneInfo("Asia/Kolkata")
 METRICS=("revenue","net_profit")
+MODELS=("UNCHANGED","PERSISTENCE","HALF_PERSISTENCE","DAMPED_ACCELERATION")
 NOTICE=("Experimental next-quarter reported amount baseline: persist the latest year-over-year growth "
         "onto the same quarter one year earlier, versus unchanged year-ago amount. Frozen before target quarter end. "
         "Source is the existing consolidated provider cache, not analyst estimates or independently verified filings. "
@@ -121,7 +122,8 @@ def evaluate(row,report,instant):
             a=100*abs(actual-f["persistence_amount_cr"])/base
             b=100*abs(actual-base)/base
             if not all(isfinite(x) and 0<=x<=1e6 for x in (a,b)):return None
-            rows[key]={"actual_amount_cr":actual,"persistence_absolute_error_pp":round(a,6),"unchanged_absolute_error_pp":round(b,6)}
+            rows[key]={"actual_amount_cr":actual,"persistence_absolute_error_pp":round(a,6),"unchanged_absolute_error_pp":round(b,6),
+                "signed_errors_pp":{"UNCHANGED":round(100*(actual-base)/base,6),"PERSISTENCE":round(100*(actual-f["persistence_amount_cr"])/base,6)}}
             # Old immutable records remain comparable only for the models
             # actually frozen when published; never backfill challengers.
             if e.get("challenger_policy")=="FIXED_CHALLENGERS_V1":
@@ -142,7 +144,9 @@ def evaluate(row,report,instant):
                     amount=round(base*(1+expected_growth/100),6)
                     if model.get("growth_percent")!=round(expected_growth,6) or model.get("amount_cr")!=amount:continue
                     error=100*abs(actual-amount)/base
-                    if isfinite(error) and 0<=error<=1e6:errors[name]=round(error,6)
+                    if isfinite(error) and 0<=error<=1e6:
+                        errors[name]=round(error,6)
+                        rows[key]["signed_errors_pp"][name]=round(100*(actual-amount)/base,6)
                 if errors:rows[key]["challenger_absolute_errors_pp"]=errors
         return {"status":"OBSERVED_PROVIDER_QUARTER","observed_at":stamp.isoformat(),"metrics":rows}
     except (ValueError,TypeError,KeyError,AttributeError,OverflowError,ZeroDivisionError):return None
@@ -204,6 +208,41 @@ def refresh(snapshot,connect,instant):
                     ("OBSERVED" if result["status"]=="OBSERVED_PROVIDER_QUARTER" else "REVISED_BASE_EVIDENCE",json.dumps(result,allow_nan=False),row["isin"],row["target_quarter"]))
     return written
 
+def matched_model_comparison(observed,published):
+    """All four models, both metrics, exact same complete observations.
+
+    Never infer missing signed errors or retroactively add challengers. Error
+    summaries are descriptive, not calibrated prediction intervals.
+    """
+    result={"status":"INSUFFICIENT_COMMON_COHORT","matched_count":0,"coverage_percent":0,"models":[],"qualified":False}
+    common=[]
+    for row in observed:
+        clean={}
+        for metric in METRICS:
+            raw=row.get(metric,{});signed=raw.get("signed_errors_pp",{})
+            if not isinstance(signed,dict):break
+            errors={"UNCHANGED":raw.get("unchanged_absolute_error_pp"),"PERSISTENCE":raw.get("persistence_absolute_error_pp"),
+                **(raw.get("challenger_absolute_errors_pp") or {})}
+            if not all(type(signed.get(k)) in (float,int) and isfinite(signed[k]) and abs(signed[k])<=1e6 and type(errors.get(k)) in (float,int) and abs(abs(signed[k])-errors[k])<=.000002 for k in MODELS):break
+            clean[metric]=signed
+        if len(clean)==len(METRICS):common.append(clean)
+    n=len(common);coverage=n/published if published else 0
+    result.update(matched_count=n,coverage_percent=round(100*coverage,2))
+    if n<30 or coverage<.8:return result
+    result["status"]="MATCHED_FOUR_MODEL_DESCRIPTIVE_SAMPLE"
+    for name in MODELS:
+        metrics={}
+        for metric in METRICS:
+            values=[r[metric][name] for r in common]
+            ordered=sorted(abs(v) for v in values)
+            # nearest-rank historical absolute error; not a probability band.
+            from math import ceil
+            metrics[metric]={"mean_absolute_error_pp":round(mean(ordered),4),"median_absolute_error_pp":round(median(ordered),4),
+                "mean_signed_error_pp":round(mean(values),4),"p80_absolute_error_pp":round(ordered[ceil(.8*n)-1],4),
+                "lower_error_than_unchanged_count":sum(abs(r[metric][name])<abs(r[metric]["UNCHANGED"]) for r in common)}
+        result["models"].append({"model":name,"metrics":metrics})
+    return result
+
 def summary(connect,instant):
     out={"methodology":VERSION,"status":"DISABLED_OR_NOT_AUTHORIZED","pending_count":None,"quarter_cohorts":[],"calibrated":False,"notice":NOTICE}
     if not company.permitted():return out
@@ -247,6 +286,7 @@ def summary(connect,instant):
         out["quarter_cohorts"].append({"target_quarter":quarter,"published_count":len(items),"observed_count":len(observed),
             "revised_count":sum(r["status"]=="REVISED_BASE_EVIDENCE" for r in items),
             "coverage_percent":round(100*len(observed)/len(items),2),"metrics":metrics,
+            "matched_four_model_comparison":matched_model_comparison(observed,len(items)) if len(rows)<=5000 else {"status":"TRUNCATED","models":[]},
             "status":"DESCRIPTIVE_SAMPLE_ONLY" if len(rows)<=5000 and len(observed)>=30 and len(observed)/len(items)>=.8 else "INSUFFICIENT_EVIDENCE"})
     out.update(status="PROSPECTIVE_EXPERIMENT" if rows else "AWAITING_PUBLICATIONS",pending_count=pending,truncated=len(rows)>5000)
     # Require multiple mature quarters and both metrics, on matched original
@@ -270,4 +310,15 @@ def summary(connect,instant):
             review.append({"model":name,"comparable_quarters":len(eligible),"quarters_beating_unchanged_on_both_metrics":sum(eligible),
                 "status":"INSUFFICIENT_EVIDENCE" if len(eligible)<2 else "REVIEW_WEAK_BASELINE" if not all(eligible) else "CONSISTENT_DESCRIPTIVE_IMPROVEMENT"})
         out["model_review"]={"status":"MATURE_MODEL_COMPARISON","models":review,"qualified":False}
+    common=[c for c in out["quarter_cohorts"] if c["matched_four_model_comparison"]["status"]=="MATCHED_FOUR_MODEL_DESCRIPTIVE_SAMPLE"][:3]
+    comparison={"status":"AWAITING_MULTIPLE_COMMON_QUARTERS","qualified":False,"quarters":[],"models":[]}
+    if len(common)>=2 and not out["truncated"]:
+        comparison.update(status="MATCHED_MULTI_QUARTER_REVIEW",quarters=[c["target_quarter"] for c in common])
+        for name in MODELS:
+            wins=0
+            for c in common:
+                models={m["model"]:m["metrics"] for m in c["matched_four_model_comparison"]["models"]}
+                wins+=all(models[name][k]["mean_absolute_error_pp"]<models["UNCHANGED"][k]["mean_absolute_error_pp"] for k in METRICS)
+            comparison["models"].append({"model":name,"quarters_beating_unchanged_on_both_metrics":wins,"comparable_quarters":len(common)})
+    out["common_model_review"]=comparison
     return out
