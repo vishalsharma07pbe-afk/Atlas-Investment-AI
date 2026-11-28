@@ -620,7 +620,7 @@ def read_overview():
             if category not in investment_analyst.CORE_FUNDS:continue
             try:
                 observation=fund_prospective.summary(category,instant.astimezone(ZoneInfo("Asia/Kolkata")).date())
-                fund_outcomes[category]={"states":observation.get("decision_states",{}),"truncated":observation.get("truncated",False)}
+                fund_outcomes[category]={"states":observation.get("decision_states",{}),"truncated":observation.get("truncated",False),"final_action_comparison":observation.get("final_action_comparison")}
             except (sqlite3.Error,OSError,ValueError,TypeError,KeyError):continue
         report=snapshot["investment_analyst"]
         report["fund_decision_outcomes"]=fund_outcomes
@@ -642,7 +642,12 @@ def read_overview():
         for group in report.get("funds",[]):
             for row in group.get("items",[]):row["action"]="WATCH_FOR_CONFIRMATION"
         report["decision_quality"]={"methodology":decision_quality.VERSION,"status":"UNAVAILABLE","qualified":False,"notice":decision_quality.NOTICE}
-    from . import decision_lifecycle,performance_protection
+    from . import decision_lifecycle,performance_protection,action_effectiveness
+    try:
+        if snapshot.get("enabled") is True:
+            snapshot["investment_analyst"]["daily_action_audit"]=action_effectiveness.daily_summary(_connect,instant.astimezone(ZoneInfo("Asia/Kolkata")).date())
+    except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,AttributeError):
+        snapshot["investment_analyst"]["daily_action_audit"]={"status":"UNAVAILABLE"}
     try:
         if snapshot.get("enabled") is True:performance_protection.attach(snapshot["investment_analyst"],_connect)
     except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,AttributeError):
@@ -848,8 +853,9 @@ def _execute_job(job):
         multi_strategy_prospective.publish(snapshot,_connect,instant)
         from . import ranking_challenger
         ranking_challenger.publish(snapshot,_connect,instant)
-        from . import decision_outcomes,performance_protection
+        from . import decision_outcomes,performance_protection,action_effectiveness
         report=snapshot.get("investment_analyst",{})
+        action_effectiveness.capture(snapshot,_connect,instant)
         performance_protection.update(report,_connect,instant)
         decision_outcomes.publish(report,_connect,instant)
         return "PASS_COMPLETED"
