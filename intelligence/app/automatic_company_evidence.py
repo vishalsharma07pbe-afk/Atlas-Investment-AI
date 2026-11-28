@@ -17,7 +17,7 @@ from .fundamental_quality import summarize as fundamental_quality
 from .financial_strength import summarize as financial_strength, DETAIL_NAMES
 from .earnings_quality import summarize as earnings_quality, INCOME_NAMES
 from . import peer_research, shareholding_research, quarterly_financials
-from .corporate_action_normalization import normalize_reported_actions
+from .corporate_action_normalization import normalize_reported_actions, reported_crossings
 
 ISIN = re.compile(r"^IN[A-Z0-9]{10}$")
 HORIZONS = ("LONG_TERM", "SHORT_TERM", "SWING")
@@ -121,6 +121,9 @@ def _table(db):
         status TEXT NOT NULL, payload TEXT)""")
     db.execute("""CREATE TABLE IF NOT EXISTS automatic_company_annual_archive(
         isin TEXT PRIMARY KEY, retrieved_at TEXT NOT NULL, payload TEXT NOT NULL)""")
+    db.execute("""CREATE TABLE IF NOT EXISTS automatic_company_action_archive(
+        isin TEXT NOT NULL,event_date TEXT NOT NULL,action_type TEXT NOT NULL,
+        observed_at TEXT NOT NULL,PRIMARY KEY(isin,event_date,action_type))""")
     db.execute("""CREATE TABLE IF NOT EXISTS automatic_company_rotation(
         scope TEXT PRIMARY KEY, priority_streak INTEGER NOT NULL)""")
 
@@ -157,7 +160,27 @@ def annual_capture(report,isin,instant):
         return None
 
 
+def _archive_actions(db,report,isin,instant):
+    """Keep positive historical reports, never a certification of completeness."""
+    try:
+        source=report["sections"]["corporate_actions"]["source"]
+        observed=datetime.fromisoformat(source["retrieved_at"])
+        today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
+        if observed.tzinfo is None or not instant-timedelta(days=1101)<=observed<=instant:return
+        # Validate original exact provider/endpoint and event schema at its
+        # original capture time. No freshness promotion of the company report.
+        events=reported_crossings(report,isin,today-timedelta(days=1101),today,observed)
+        for event in events:
+            if event["date"]>observed.astimezone(ZoneInfo("Asia/Kolkata")).date().isoformat():continue
+            db.execute("""INSERT INTO automatic_company_action_archive VALUES(?,?,?,?)
+                ON CONFLICT(isin,event_date,action_type) DO UPDATE SET observed_at=excluded.observed_at
+                WHERE automatic_company_action_archive.observed_at<excluded.observed_at""",
+                (isin,event["date"],event["action_type"],observed.isoformat()))
+    except (TypeError,ValueError,KeyError,AttributeError,OverflowError):return
+
+
 def _archive(db,report,isin,instant):
+    _archive_actions(db,report,isin,instant)
     captured=annual_capture(report,isin,instant)
     if captured:
         db.execute("""INSERT INTO automatic_company_annual_archive VALUES(?,?,?)
@@ -488,6 +511,7 @@ def _refresh(snapshot, connect, loader, instant, *, explicit_isins=None):
             _archive(db,report,isin,instant)
         db.execute("DELETE FROM automatic_company_evidence WHERE attempted_at<?",((instant-timedelta(days=30)).isoformat(),))
         db.execute("DELETE FROM automatic_company_annual_archive WHERE retrieved_at<?",((instant-timedelta(days=ANNUAL_HISTORY_CACHE_DAYS)).isoformat(),))
+        db.execute("DELETE FROM automatic_company_action_archive WHERE event_date<?",((instant.astimezone(ZoneInfo("Asia/Kolkata")).date()-timedelta(days=1100)).isoformat(),))
     return status
 
 
@@ -648,6 +672,38 @@ def cached_action_reports(connect,identities,instant):
         return {}
     except __import__("sqlite3").Error:
         return {}
+
+
+def cached_action_events(connect,identities,instant):
+    """Historical positive observations; a missing result is not action clearance.
+
+    Old archive rows cannot provide current company evidence or adjustment
+    authorization. Retain crossings across report failures and expiry.
+    """
+    if not permitted():return {}
+    wanted={i for i in identities if isinstance(i,str) and re.fullmatch(r"INE[A-Z0-9]{9}",i)}
+    if not wanted or len(wanted)>40000:return {}
+    today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
+    first=today-timedelta(days=1101)
+    found={}
+    # Legacy current reports remain readable before archive population.
+    for isin,report in cached_action_reports(connect,wanted,instant).items():
+        for event in reported_crossings(report,isin,first,today,instant):
+            found.setdefault(isin,set()).add((event["date"],event["action_type"]))
+    try:
+        with closing(connect()) as db:
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='automatic_company_action_archive'").fetchone():
+                for row in db.execute("""SELECT isin,event_date,action_type,observed_at FROM automatic_company_action_archive
+                    WHERE event_date BETWEEN ? AND ? AND observed_at<=?""",(first.isoformat(),today.isoformat(),instant.isoformat())):
+                    if row["isin"] in wanted and row["action_type"] in ("DIVIDEND","BONUS","SPLIT","RIGHTS","OTHER"):
+                        try:
+                            observed=datetime.fromisoformat(row["observed_at"])
+                            day=datetime.fromisoformat(row["event_date"]).date()
+                            if observed.tzinfo is None or not first<=day<=observed.astimezone(ZoneInfo("Asia/Kolkata")).date() or observed>instant:continue
+                        except (TypeError,ValueError):continue
+                        found.setdefault(row["isin"],set()).add((row["event_date"],row["action_type"]))
+    except (OSError,ValueError,TypeError,KeyError,AttributeError,__import__("sqlite3").Error):pass
+    return {isin:[{"date":day,"action_type":kind} for day,kind in sorted(events)] for isin,events in found.items()}
 
 
 def _enrich(report,today,instant=None):

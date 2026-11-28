@@ -6,8 +6,8 @@ import json
 from .market_client import backend_json
 from .strategy_validation import replay, WINDOWS, attach_market_benchmark
 from .horizon_research import VERSION
-from .automatic_company_evidence import cached_action_reports
-from .corporate_action_normalization import reported_crossings
+from .automatic_company_evidence import cached_action_reports, cached_action_events
+from .corporate_action_normalization import reported_crossings, archived_crossings
 from .replay_evidence import (VERSION as EVIDENCE_VERSION, exact_isin, fingerprint,
     full_manifest, corporate_action_status, revision_audit, session_audit, listing_audit)
 CACHE_VERSION = VERSION + ':' + EVIDENCE_VERSION + ':market-price-index-v1:signal-regime-v1:chronological-folds-v1:execution-proxy-v1:full-provenance-v1:session-continuity-v1:listing-evidence-v1:scoped-action-v1:provider-action-and-rotation-v1'
@@ -148,6 +148,9 @@ def refresh(snapshot,connect,loader=backend_json,instant=None):
                     cached=cached_action_reports(connect,[selected["isin"]],instant)
                     crossings=reported_crossings(cached.get(selected["isin"]),selected["isin"],
                         date.fromisoformat(manifest["first_date"]),date.fromisoformat(manifest["last_date"]),instant)
+                    events=cached_action_events(connect,[selected["isin"]],instant)
+                    crossings=archived_crossings([*crossings,*events.get(selected["isin"],[])],
+                        date.fromisoformat(manifest["first_date"]),date.fromisoformat(manifest["last_date"]))
                     if crossings and action=="NO_RECORDED_CROSSING_ACTION":
                         action="REPORTED_ACTION_RECONCILIATION_REQUIRED"
                     audit=revision_audit(manifest,prior_manifest)

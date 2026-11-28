@@ -5,7 +5,7 @@ from math import isfinite
 from .technical import Candle, compute
 from .horizon_research import evaluate, summarize, MIN_HISTORY as HORIZON_MIN_HISTORY
 from .price_structure import analyze as price_structure
-from .corporate_action_normalization import preview as action_preview, reported_crossings
+from .corporate_action_normalization import preview as action_preview, reported_crossings, archived_crossings
 from .replay_evidence import fingerprint, exact_isin
 from . import price_volume_pressure, steady_momentum, relative_strength, company_venues, sector_price_context, score_calibration, fip_research, bracket_research
 
@@ -20,7 +20,7 @@ def report_close_history(candles):
             "points": [{"date": c.date, "close": round(c.close, 4)} for c in candles[-30:]]}
 
 
-def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit=MAX_INSTRUMENTS, include_horizons=False, *, batch_loaded=False, expected_session=None, action_reports=None, instant=None, fip_dates=()):
+def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit=MAX_INSTRUMENTS, include_horizons=False, *, batch_loaded=False, expected_session=None, action_reports=None, instant=None, fip_dates=(), action_events=None):
     limit = max(1, min(200 if batch_loaded else 60, universe_limit))
     today = as_of or date.today()
     rows = []
@@ -93,6 +93,7 @@ def screen(instruments, load_candles, as_of=None, max_age_days=7, universe_limit
                 # the separate local action ledger. It cannot authorize adjustment.
                 isin=instrument.get("isin")
                 crossings=reported_crossings((action_reports or {}).get(isin),isin,first_day,last_day,instant) if instant is not None else []
+                crossings=archived_crossings([*crossings,*(action_events or {}).get(isin,[])],first_day,last_day)
                 raw_history=candles[-1].adjustment_status=="RAW_UNADJUSTED"
                 if crossings:
                     provider_crossing_count+=1

@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from .market_client import backend_json
 from . import steady_momentum, amfi_equity_caps, company_reports, nse_surveillance, nse_pledge_filings, nse_financial_filings, sector_price_context, sector_benchmarks, score_calibration, fip_research, bracket_research
 from .screener import screen
-from .corporate_action_normalization import reported_crossings
+from .corporate_action_normalization import archived_crossings
 from .replay_evidence import exact_isin
 from . import discovery_scan, research_display_archive
 from .mutual_fund_recommendations import CATEGORIES, dashboard
@@ -147,10 +147,10 @@ def _market_page(exchange,instruments,cutoff=None,*,fip_dates=()):
         if any(len(histories[i])>history_limit for i in batch):
             raise ValueError("DISCOVERY_HISTORY_LIMIT_EXCEEDED")
     instant=now()
-    action_reports=automatic_company_evidence.cached_action_reports(_connect,[r.get("isin") for r in instruments],instant)
+    action_events=automatic_company_evidence.cached_action_events(_connect,[r.get("isin") for r in instruments],instant)
     result = screen(instruments, lambda identifier:{"candles":histories[identifier]}, as_of=today,
                     universe_limit=200, max_age_days=4, include_horizons=True, batch_loaded=True, expected_session=expected_session,
-                    action_reports=action_reports,instant=instant,fip_dates=fip_dates)
+                    action_events=action_events,instant=instant,fip_dates=fip_dates)
     result["discovery_coverage"]={"recent_registry_count":recent_count,"selected_count":len(ids),
         "selection_limit":200,"selection_method":"EXPECTED_SESSION_THEN_DAILY_TRADED_VALUE",
         "expected_session_count":matching if expected_session else None,
@@ -339,9 +339,9 @@ def _revalidate_reported_actions(sections,current):
             valid.append((row["isin"],first,last))
         work.append((section,valid))
     if not identities:return
-    reports=automatic_company_evidence.cached_action_reports(_connect,identities,current)
+    events=automatic_company_evidence.cached_action_events(_connect,identities,current)
     for section,rows in work:
-        if any(reported_crossings(reports.get(isin),isin,first,last,current) for isin,first,last in rows if isin in reports):
+        if any(archived_crossings(events.get(isin),first,last) for isin,first,last in rows if isin in events):
             section["status"]="STALE"
             section["error_code"]="NEW_REPORTED_ACTION_RESCAN_REQUIRED"
 

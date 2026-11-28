@@ -362,5 +362,11 @@ class AutonomousResearchTests(unittest.TestCase):
                 self.assertEqual(snapshot["sections"][0]["status"],"STALE")
                 self.assertEqual(snapshot["sections"][0]["error_code"],"NEW_REPORTED_ACTION_RESCAN_REQUIRED")
                 self.assertEqual(snapshot["sections"][1]["status"],"READY")
+            with closing(research._connect()) as db,db:
+                company._archive(db,report,isin,now)
+                db.execute("DELETE FROM automatic_company_evidence")
+            later=now+__import__("datetime").timedelta(hours=25)
+            self.assertEqual(company.cached_action_events(research._connect,[isin],later)[isin],
+                [{"date":"2026-11-25","action_type":"SPLIT"}])
             research._save("NSE",{"company_research_universe":[]})
             self.assertEqual(research.read_market_snapshot()["sections"][0]["status"],"READY")
