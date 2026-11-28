@@ -277,7 +277,7 @@ def fund_snapshot(category):
         snapshot["historical_research_shortlist"]={k:shortlist.get(k) for k in
             ("methodology","category","status","eligible_count","matched_count","cohort_count","first_date","last_date","date_digest","notice","scope","selected_suitability")}
         snapshot["historical_research_shortlist"]["items"]=[
-            {k:r.get(k) for k in ("identifier","name","isin_growth","nav","nav_date","score","weekly_cagr_percent","weekly_drawdown_percent","worst_rolling_year_percent","annualized_volatility_percent","rolling_peer_above_median_percent","relative_risk","status","qualified")}
+            {k:r.get(k) for k in ("identifier","name","isin_growth","nav","nav_date","score","weekly_cagr_percent","weekly_drawdown_percent","worst_rolling_year_percent","annualized_volatility_percent","rolling_peer_above_median_percent","relative_risk","status","qualified","recovery_context")}
             for r in shortlist.get("items",[])[:5] if isinstance(r,dict) and r.get("qualified") is False and r.get("status")=="HISTORICAL_RESEARCH_ONLY"]
         from . import research_synthesis
         snapshot["fund_decision_evidence"]=research_synthesis.compact_fund_context(shortlist.get("items",[]),result.get("research_reports",[]),category,now().astimezone(ZoneInfo("Asia/Kolkata")).date())
@@ -632,6 +632,13 @@ def read_overview():
         for group in report.get("funds",[]):
             for row in group.get("items",[]):row["action"]="WATCH_FOR_CONFIRMATION"
         report["decision_quality"]={"methodology":decision_quality.VERSION,"status":"UNAVAILABLE","qualified":False,"notice":decision_quality.NOTICE}
+    from . import decision_lifecycle
+    try:
+        if snapshot.get("enabled") is True:
+            report=snapshot["investment_analyst"]
+            report["lifecycle_review"]=decision_lifecycle.attach(report,decision_lifecycle.original_stocks(_connect,instant),research_jobs.status(_connect,research_jobs.definitions(SECTIONS),instant.timestamp()))
+    except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,AttributeError,OverflowError):
+        snapshot["investment_analyst"]["lifecycle_review"]={"methodology":decision_lifecycle.VERSION,"status":"UNAVAILABLE","recovery":[],"changes":{},"notice":decision_lifecycle.NOTICE}
     return snapshot
 
 
