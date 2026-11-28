@@ -126,7 +126,11 @@ CAP_GROUPS=("LARGE_CAP","MID_CAP","SMALL_CAP")
 def strict_fip_match(row):
     from . import fip_research
     e=row.get("strict_fip_evidence") or {}
-    return (row.get("adjustment_status")=="ADJUSTED" and e.get("methodology")==fip_research.VERSION
+    return (exact_isin(row.get("isin")) and row.get("exchange") in ("NSE","BSE")
+            and type(row.get("id")) is int and row["id"]>0
+            and row.get("security_state") not in company_venues.SPECIAL
+            and numeric(row.get("median_daily_turnover_cr")) and row["median_daily_turnover_cr"]>=5
+            and row.get("adjustment_status")=="ADJUSTED" and e.get("methodology")==fip_research.VERSION
             and e.get("status")=="FIP_PRICE_MATCH" and e.get("calendar_status")=="STORED_SESSIONS_MATCHED"
             and e.get("adjustment_status")=="ADJUSTED" and e.get("as_of")==row.get("as_of")
             and numeric(e.get("score")) and 0<=e["score"]<=100
@@ -141,7 +145,11 @@ def strict_suggestions(candidates,observations,instant):
     """
     def rank(row):
         return (-row["strict_fip_evidence"]["score"],-row["median_daily_turnover_cr"],row["isin"],row["exchange"])
-    matches=[row for row in candidates if strict_fip_match(row)]
+    today=instant.astimezone(ZoneInfo("Asia/Kolkata")).date()
+    def current(row):
+        try:return 1<=(today-date.fromisoformat(row["as_of"])).days<=4
+        except (KeyError,TypeError,ValueError):return False
+    matches=[row for row in candidates if strict_fip_match(row) and current(row)]
     # Keep restrictions found on non-matching venues, and reject duplicate listings.
     matches=company_venues.consolidate(matches,observations,instant,rank)
     matches=[r for r in matches if strict_fip_match(r)]

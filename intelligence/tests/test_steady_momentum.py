@@ -128,3 +128,58 @@ class SteadyMomentumTests(unittest.TestCase):
         self.assertEqual([r["isin"] for r in matches],[r["isin"] for r in rows[4:]])
         self.assertEqual(matches[0]["exchange"],"BSE")
         self.assertEqual(len({r["isin"] for r in matches}),len(matches))
+
+    def test_full_stored_evidence_path_produces_joint_suggestion_and_company_report(self):
+        from datetime import datetime,timezone
+        from dataclasses import replace
+        from contextlib import closing
+        from unittest.mock import patch
+        import json,sqlite3,tempfile
+        from app import fip_research,steady_momentum,company_venues,company_reports,automatic_company_evidence
+        now=datetime(2026,11,28,5,tzinfo=timezone.utc);today=now.date()
+        day=date(2026,11,27);dates=[]
+        while len(dates)<253:
+            if day.weekday()<5:dates.append(day.isoformat())
+            day-=timedelta(days=1)
+        dates=tuple(reversed(dates))
+        candles=[replace(c,date=d) for c,d in zip(bars(count=253),dates)]
+        raw=[{"trade_date":c.date,"open":c.open,"high":c.high,"low":c.low,"close":c.close,
+              "volume":c.volume,"adjustment_status":"ADJUSTED","quality_status":"PROVIDER_VALIDATED",
+              "source_code":"TEST","revision":1} for c in candles]
+        price=fip_research.observe(raw,dates,today)
+        self.assertEqual(price["status"],"FIP_PRICE_MATCH")
+        identity={"id":1,"isin":"INE002A01018","symbol":"TEST","exchange":"NSE","security_state":"NORMAL","as_of":dates[-1]}
+        technical_match=technical(candles,indicators(candles))
+        self.assertIsNotNone(technical_match)
+        candidate={**technical_match,**identity}
+        evidence=report()
+        evidence["retrieved_at"]=now.isoformat()
+        cap={"isin":identity["isin"],"average_cap_cr":2000,"cap_category":"SMALL_CAP","cap_as_of":"2026-06-30"}
+        snapshot={"enabled":True,"scope":"PUBLIC_MARKET_RESEARCH_ONLY","research_date":today.isoformat(),"sections":[{
+          "section":"NSE","status":"READY","result":{"universe_size":1,"eligible_count":1,
+            "discovery_coverage":{"calendar_checked_on":today.isoformat(),"calendar_status":"PUBLISHED_SESSION","expected_session":dates[-1]},
+            "steady_momentum_candidates":[candidate],"company_research_universe":[{**identity,"fip_research":price}],
+            "venue_observations":[company_venues.observation(identity,candles)]}}]}
+        with tempfile.TemporaryDirectory() as folder:
+            def connect():
+                db=sqlite3.connect(folder+"/evidence.sqlite")
+                db.row_factory=sqlite3.Row
+                return db
+            with closing(connect()) as db,db:
+                automatic_company_evidence._table(db)
+                db.execute("INSERT INTO automatic_company_evidence VALUES(?,?,?,?,?)",
+                    (identity["isin"],now.isoformat(),now.isoformat(),"PARTIAL",json.dumps(evidence)))
+            with patch.object(automatic_company_evidence,"permitted",return_value=True),patch("app.amfi_equity_caps.read",return_value={identity["isin"]:cap}):
+                snapshot["steady_momentum"]=steady_momentum.summarize(snapshot,connect,now)
+                result=snapshot["steady_momentum"]
+                self.assertEqual(result["strict_suggestions"]["status"],"JOINT_SCREEN_MATCHES")
+                self.assertEqual(result["strict_suggestions"]["matched_count"],1)
+                self.assertEqual(result["strict_suggestions"]["items"][0]["isin"],identity["isin"])
+                self.assertFalse(result["strict_suggestions"]["qualification_eligible"])
+                self.assertEqual(result["qualified_count"],0)
+                company_reports.attach(snapshot,now)
+                self.assertIn(identity["isin"],snapshot["company_reports"]["items"])
+                self.assertFalse(snapshot["company_reports"]["items"][identity["isin"]]["qualified"])
+                with closing(connect()) as db,db:
+                    db.execute("DELETE FROM automatic_company_evidence")
+                self.assertEqual(steady_momentum.summarize(snapshot,connect,now)["strict_suggestions"]["items"],[])
