@@ -602,6 +602,16 @@ def read_overview():
         snapshot["investment_analyst"]["decision_outcomes"]={"status":"UNAVAILABLE","states":{},"notice":decision_outcomes.NOTICE}
     try:
         decision_quality.attach(snapshot["investment_analyst"],instant.astimezone(ZoneInfo("Asia/Kolkata")).date())
+        # Category-scoped NAV outcome evidence is descriptive; no cross-asset ranking.
+        fund_outcomes={}
+        for group in snapshot["investment_analyst"].get("funds",[]):
+            category=group.get("category")
+            if category not in investment_analyst.CORE_FUNDS:continue
+            try:
+                observation=fund_prospective.summary(category,instant.astimezone(ZoneInfo("Asia/Kolkata")).date())
+                fund_outcomes[category]={"states":observation.get("decision_states",{}),"truncated":observation.get("truncated",False)}
+            except (sqlite3.Error,OSError,ValueError,TypeError,KeyError):continue
+        snapshot["investment_analyst"]["fund_decision_outcomes"]=fund_outcomes
     except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
         # Failure of final policy must not leave a positive allocation action.
         report=snapshot["investment_analyst"]
@@ -741,7 +751,8 @@ def _execute_job(job):
         enabled,interval=config()
         if not enabled:return "DISABLED_OR_NOT_AUTHORIZED"
         current=now()
-        fund_prospective.refresh(_read_sections(CATEGORIES,enabled,interval,current),current)
+        snapshot=read_overview()
+        fund_prospective.refresh(snapshot,current,final_report=snapshot.get("investment_analyst"))
         return "PASS_COMPLETED"
     if job=="FUND_COMPANY_EVIDENCE":
         if not fund_portfolios.permitted() or not automatic_company_evidence.permitted():
