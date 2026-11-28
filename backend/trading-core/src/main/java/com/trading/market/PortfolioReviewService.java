@@ -41,7 +41,10 @@ public class PortfolioReviewService {
         AND result->>'journal_revision'=?
       """,String.class,owner,revision,journalRevision(owner));
     if(!cached.isEmpty()){
-      try{return json.readValue(cached.get(0),new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>(){});}
+      try{
+        Map<String,Object> saved=json.readValue(cached.get(0),new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>(){});
+        return PortfolioInvestmentAnalyst.attach(saved,json,LocalDate.now(MarketCalendarService.IST));
+      }
       catch(com.fasterxml.jackson.core.JsonProcessingException ignored){/* Rebuild corrupted cache. */}
     }
     return refresh(owner);
@@ -173,6 +176,7 @@ public class PortfolioReviewService {
     report=PortfolioOwnershipChanges.attach(report,previous,json,now);
     report=PortfolioReassessment.finalizeReview(report,json,today);
     report.put("portfolio_level_risk",PortfolioLevelRisk.assess(report,json,today));
+    report=PortfolioInvestmentAnalyst.attach(report,json,today);
     report.put("sale_research",PortfolioSaleResearch.assess(rows,report,json,today));
     report.put("fund_exit_load_research",PortfolioFundExitLoad.assess(report,json,now));
     report.put("rebalancing_funding",PortfolioRebalancingFunding.assess(report));
