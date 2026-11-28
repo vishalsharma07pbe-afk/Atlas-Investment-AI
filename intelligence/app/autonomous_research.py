@@ -277,8 +277,10 @@ def fund_snapshot(category):
         snapshot["historical_research_shortlist"]={k:shortlist.get(k) for k in
             ("methodology","category","status","eligible_count","matched_count","cohort_count","first_date","last_date","date_digest","notice","scope","selected_suitability")}
         snapshot["historical_research_shortlist"]["items"]=[
-            {k:r.get(k) for k in ("identifier","name","isin_growth","nav","nav_date","score","weekly_cagr_percent","relative_risk","status","qualified")}
+            {k:r.get(k) for k in ("identifier","name","isin_growth","nav","nav_date","score","weekly_cagr_percent","weekly_drawdown_percent","worst_rolling_year_percent","annualized_volatility_percent","rolling_peer_above_median_percent","relative_risk","status","qualified")}
             for r in shortlist.get("items",[])[:5] if isinstance(r,dict) and r.get("qualified") is False and r.get("status")=="HISTORICAL_RESEARCH_ONLY"]
+        from . import research_synthesis
+        snapshot["fund_decision_evidence"]=research_synthesis.compact_fund_context(shortlist.get("items",[]),result.get("research_reports",[]),category,now().astimezone(ZoneInfo("Asia/Kolkata")).date())
     return snapshot
 
 
@@ -418,6 +420,15 @@ def _read_sections(section_names,enabled,interval,current):
         if section in CATEGORIES and isinstance(result,dict):
             if not official_tri.permitted():result.pop("official_tri_coverage",None)
             if not official_amc_factsheet.permitted():result.pop("official_amc_coverage",None)
+            # Only retain source-specific context while the respective permissions remain enabled.
+            from . import research_synthesis, fund_local_evidence
+            records=result.pop("fund_decision_evidence",[])
+            kept=[]
+            for item in (result.get("historical_research_shortlist") or {}).get("items",[])[:5]:
+                if not isinstance(item,dict):continue
+                context=research_synthesis.saved_fund_context(item,records,section,today,website=official_amfi_ter.permitted(),local=fund_local_evidence.permitted(),tri=official_tri.permitted(),secondary=fund_disclosures.permitted())
+                kept.append({k:item.get(k) for k in ("identifier","isin_growth","nav_date")} | {"category":section,"context":context})
+            if kept:result["fund_decision_evidence"]=kept
         sections.append({"section": section, "status": status,
                          "generated_at": row["generated_at"], "attempted_at": row["attempted_at"],
                          "result": result, "error_code": error_code})
