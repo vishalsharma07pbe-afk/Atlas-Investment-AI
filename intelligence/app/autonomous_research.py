@@ -228,8 +228,23 @@ def fund_snapshot(category):
     if drivers.get("methodology")=="MF-QUARTERLY-DRIVERS-1":
         snapshot["growth_driver_review"]={"methodology":drivers["methodology"],"status":drivers.get("status"),
             "items":[{k:row.get(k) for k in ("identifier","name","portfolio_date","quarter","nav_date","joint_coverage_weight_percent",
-                "joint_growth_weight_percent","review_weight_percent","state","qualified","forecast_return_percent","experimental_forward")}
+                "joint_growth_weight_percent","review_weight_percent","state","qualified","forecast_return_percent")}
                 for row in drivers.get("items",[])[:5] if isinstance(row,dict) and row.get("qualified") is False]}
+        # Persist only validated public numerical scenarios, never arbitrary
+        # nested publisher/model fields from the full fund research response.
+        from .investment_analyst import fund_growth
+        today=now().astimezone(ZoneInfo("Asia/Kolkata")).date()
+        for compact,original in zip(snapshot["growth_driver_review"]["items"],
+                (row for row in drivers.get("items",[])[:5] if isinstance(row,dict) and row.get("qualified") is False)):
+            growth=fund_growth(original,today)
+            if growth:
+                compact["experimental_forward"]={
+                    "status":"UNCALIBRATED_PERSISTENCE_EXPERIMENT","qualified":False,
+                    "observed_quarter":growth["observed_quarter"],"target_quarter":growth["target_quarter"],
+                    "covered_weight_percent":growth["coverage_percent"],
+                    "positive_joint_growth_weight_percent":original["experimental_forward"]["positive_joint_growth_weight_percent"],
+                    "covered_subset_revenue_persistence_percent":growth["revenue_yoy_percent"],
+                    "covered_subset_profit_persistence_percent":growth["profit_yoy_percent"]}
     # Compact exact public composition targets for the existing underlying
     # research scheduler. No raw holdings, names or source URLs are persisted.
     targets=[]
@@ -532,14 +547,22 @@ def read_overview():
     """UI-only projection, appended after all current qualification consumers."""
     snapshot=read_snapshot()
     snapshot["historical_display"]=research_display_archive.display(_connect,snapshot,now())
-    from . import investment_analyst
+    from . import investment_analyst,analyst_committee
+    from copy import deepcopy
+    instant=now()
     try:
-        from . import analyst_committee
-        instant=now()
         snapshot["investment_analyst"]=investment_analyst.analyze(snapshot,instant.astimezone(ZoneInfo("Asia/Kolkata")).date(),instant)
-        analyst_committee.attach(snapshot["investment_analyst"],_connect,instant)
     except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
         snapshot["investment_analyst"]={"methodology":investment_analyst.VERSION,"status":"UNAVAILABLE","stocks":[],"funds":[],"next_steps":[],"notice":investment_analyst.NOTICE}
+    try:
+        # Optional model cache corruption or a failed read must not replace
+        # the usable deterministic report with an empty research screen.
+        with_committee=deepcopy(snapshot["investment_analyst"])
+        analyst_committee.attach(with_committee,_connect,instant)
+        snapshot["investment_analyst"]=with_committee
+    except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,AttributeError,OverflowError):
+        snapshot["investment_analyst"]["committee"]={"methodology":analyst_committee.VERSION,
+            "status":"UNAVAILABLE","reviewed_providers":0,"notice":analyst_committee.NOTICE}
     return snapshot
 
 
