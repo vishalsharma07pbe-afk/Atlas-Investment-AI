@@ -12,6 +12,7 @@ from . import automatic_ai_review as ai, ai_failover
 from .investment_analyst import obj, rows, num
 
 VERSION="ANALYST-COMMITTEE-1"
+EVIDENCE_POLICY="CONDITIONAL_VALUE_AND_FUND_COST_V2"
 NOTICE="Model judgments are conditional research priorities, not independently verified facts, return probabilities or order instructions. Disagreement is caution, not a vote to trade."
 TIERS={"ADJUSTED_JOINT","REPORTED_JOINT","BUSINESS_SCREEN","TECHNICAL_LEAD","MULTI_STRATEGY_RESEARCH","DRIVER_SUPPORTED","HISTORICAL_ONLY","DRIVER_REVIEW"}
 REASONS={
@@ -28,6 +29,9 @@ REASONS={
  "ADJUSTMENT_UNKNOWN":"Price adjustment is not independently verified.",
  "DRIVER_RISK":"Reported underlying-business evidence requires review.",
  "LIMITED_EVIDENCE":"Missing independent evidence limits the conclusion.",
+ "CONFLICTING_TER":"Conflicting reported expense evidence prevents an informed new SIP comparison.",
+ "CONDITIONAL_VALUE_DOWNSIDE":"The operator-reviewed base valuation scenario is below the recorded reference price; verify assumptions.",
+ "BENCHMARK_LAG":"Matched historical TRI comparison shows lag; verify the benchmark mandate and future thesis.",
 }
 def pack(report):
     if report.get("status")!="RESEARCH_AVAILABLE":return {}
@@ -49,6 +53,18 @@ def pack(report):
             "quarterly_profit_growth_percent":(10,100),"quarterly_growth_acceleration_pp":(2,100)}
         facts={k:round(raw[k],4) for k,(lo,hi) in bounds.items() if num(raw.get(k),lo,hi)}
         allowed=["LIMITED_EVIDENCE"]
+        fund=obj(row.get("fund_evidence"));benchmark=obj(fund.get("benchmark_context"))
+        valuation=obj(row.get("valuation_scenario"))
+        base=[x for x in rows(valuation.get("scenarios")) if isinstance(x,dict) and x.get("case")=="BASE"]
+        if group=="EQUITY" and valuation.get("status")=="OPERATOR_SOURCE_BOUND_VALUATION_SCENARIO" and valuation.get("isin")==identity and valuation.get("qualified") is False and len(base)==1 and num(base[0].get("upside_downside_percent"),-1e6,1e6):
+            facts["conditional_valuation_upside_percent"]=base[0]["upside_downside_percent"]
+            if facts["conditional_valuation_upside_percent"]<0:allowed.append("CONDITIONAL_VALUE_DOWNSIDE")
+        if group!="EQUITY":
+            if fund.get("ter_status")=="CONFLICTING_SAME_DATE_TER":allowed.append("CONFLICTING_TER")
+            if num(fund.get("ter_percent"),0,100) and fund.get("ter_status")=="REPORTED_NOT_INDEPENDENTLY_AUTHENTICATED":facts["reported_ter_percent"]=fund["ter_percent"]
+            if benchmark.get("basis") in ("MATCHED_LOCAL_TRI_EXPORT","MATCHED_AUTHORIZED_DIRECT_TRI_CSV") and num(benchmark.get("three_year_difference_pp"),-1e6,1e6):
+                facts["matched_tri_difference_pp"]=benchmark["three_year_difference_pp"]
+                if facts["matched_tri_difference_pp"]<0:allowed.append("BENCHMARK_LAG")
         if tier in ("ADJUSTED_JOINT","REPORTED_JOINT","BUSINESS_SCREEN") and all(k in facts for k in ("earnings_growth_percent","reported_pe","reported_sector_pe")):
             if facts["reported_pe"]<=facts["reported_sector_pe"] and facts["earnings_growth_percent"]>=15:allowed.append("GROWTH_AND_VALUATION")
             elif facts["reported_pe"]>facts["reported_sector_pe"]:allowed.append("VALUATION_CAUTION")
@@ -75,7 +91,7 @@ def pack(report):
     return out
 
 def key(evidence,providers,today):
-    return sha256(json.dumps([VERSION,today,evidence,providers],sort_keys=True,separators=(",",":"),allow_nan=False).encode()).hexdigest()
+    return sha256(json.dumps([VERSION,EVIDENCE_POLICY,today,evidence,providers],sort_keys=True,separators=(",",":"),allow_nan=False).encode()).hexdigest()
 
 def validate(response,evidence):
     """Retain only allowed decision/rationale pairs with exact candidate citations."""
@@ -89,8 +105,8 @@ def validate(response,evidence):
             if candidate not in evidence or r.get("evidence_ids")!=[candidate] or reason not in evidence[candidate]["allowed_reasons"]:continue
             if decision not in ("PRIORITIZE_REVIEW","DEFER_REVIEW"):continue
             if decision=="PRIORITIZE_REVIEW" and (reason not in ("JOINT_SCREEN","BUSINESS_SCREEN","STRATEGY_MATCH","HISTORICAL_PEERS","GROWTH_DRIVERS","POSITIVE_SCENARIO","GROWTH_AND_VALUATION")
-                or evidence[candidate]["tier"]=="DRIVER_REVIEW"):continue
-            if decision=="DEFER_REVIEW" and reason not in ("LIMITED_EVIDENCE","HIGH_HISTORICAL_RISK","ADJUSTMENT_UNKNOWN","DRIVER_RISK","NEGATIVE_SCENARIO","VALUATION_CAUTION"):continue
+                or evidence[candidate]["tier"]=="DRIVER_REVIEW" or "CONFLICTING_TER" in evidence[candidate]["allowed_reasons"]):continue
+            if decision=="DEFER_REVIEW" and reason not in ("LIMITED_EVIDENCE","HIGH_HISTORICAL_RISK","ADJUSTMENT_UNKNOWN","DRIVER_RISK","NEGATIVE_SCENARIO","VALUATION_CAUTION","CONFLICTING_TER","CONDITIONAL_VALUE_DOWNSIDE","BENCHMARK_LAG"):continue
             if candidate in found:duplicate.add(candidate)
             found[candidate]={"decision":decision,"reason":reason}
         except (ValueError,TypeError,KeyError,AttributeError):continue
@@ -126,7 +142,7 @@ def refresh(report,connect,instant,runner=ai_failover.grounded_research):
             "Return up to eight findings, each statement a JSON string with exactly candidate, decision, reason. "
             "decision must be PRIORITIZE_REVIEW or DEFER_REVIEW. Use only allowed_reasons for that candidate; "
             "cite exactly its candidate ID. No prose is retained. A score is not return probability. "
-            "A positive earnings scenario is an uncalibrated assumption, not a forecast. Evidence: "+
+            "A positive earnings scenario is an uncalibrated assumption, not a forecast. Conditional valuation uses operator assumptions, and historical TRI lag is not predictive. Evidence: "+
             json.dumps(evidence,separators=(",",":"),ensure_ascii=True,allow_nan=False))
         result=runner(prompt,list(evidence),providers=[p])
         if result.get("status")=="MODEL_GROUNDED" and result.get("provider")==p:
