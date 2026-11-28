@@ -51,3 +51,17 @@ class ResearchSynthesisTest(unittest.TestCase):
         self.assertEqual(out["reported_metadata"]["basis"],"SECONDARY_REPORTED")
         self.assertNotIn("reported_metadata",s.fund_context(r,d,today+timedelta(days=100)))
         self.assertNotIn("benchmark_context",s.fund_context({**r,"nav_date":"2026-11-26"},d,today))
+
+    def test_filing_context_requires_identity_date_and_permission(self):
+        from unittest.mock import patch
+        now=datetime(2026,11,28,5,tzinfo=timezone.utc)
+        r={"isin":"INE002A01018","independent_financial_evidence":{"isin":"INE002A01018","status":"REPORTED_CONSOLIDATED_FILING",
+            "scope":"CONSOLIDATED","period":"2026-09-30","retrieved_at":now.isoformat(),"source_sha256":"a"*64,
+            "comparison":{"status":"WITHIN_ILLUSTRATIVE_TOLERANCE","profit_comparison":{"status":"ONE_REPORTED_BASIS_WITHIN_TOLERANCE"}}}}
+        with patch("app.nse_financial_filings.permitted",return_value=True):
+            self.assertEqual(s.filing_context(r,now)["status"],"CORROBORATED_REPORTED_QUARTER")
+            self.assertIsNone(s.filing_context({**r,"isin":"INE467B01029"},now))
+            self.assertIsNone(s.filing_context(r,now+timedelta(hours=25)))
+            r["independent_financial_evidence"]["comparison"]["profit_comparison"]["status"]="PROFIT_DIFFERENCE_REVIEW"
+            self.assertEqual(s.filing_context(r,now)["status"],"CONFLICT_REVIEW")
+        with patch("app.nse_financial_filings.permitted",return_value=False):self.assertIsNone(s.filing_context(r,now))
