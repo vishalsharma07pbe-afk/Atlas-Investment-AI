@@ -320,3 +320,21 @@ class AutonomousResearchTests(unittest.TestCase):
                 with patch.dict(os.environ,{"MARKET_DATA_USAGE_RIGHTS_CONFIRMED":"false"}):
                     self.assertEqual(research.research_display_archive.display(research._connect,current,research.now()),[])
                 self.assertEqual(research.research_display_archive.display(research._connect,current,instant+timedelta(days=8)),[])
+
+    def test_legacy_fund_snapshot_is_archived_on_failed_refresh_and_hidden_after_recovery(self):
+        from datetime import timedelta
+        instant=datetime(2026,11,26,4,tzinfo=timezone.utc)
+        item={"scheme_code":123456,"scheme_name":"Example Fund","nav_date":"2026-11-25","cagr_3y_percent":12}
+        result={"category":"LARGE_CAP","historical_coverage":{"comparison_date":"2026-11-25","items":[item]}}
+        with patch.dict(os.environ,{"MARKET_DATA_USAGE_RIGHTS_CONFIRMED":"false"}),patch.object(research,"now",return_value=instant):
+            research._save("LARGE_CAP",result)
+        with patch.dict(os.environ,{"MARKET_DATA_USAGE_RIGHTS_CONFIRMED":"true"}),patch.object(research,"now",return_value=instant+timedelta(hours=2)):
+            research._save("LARGE_CAP")
+            current=research.read_snapshot(False)
+            self.assertEqual(next(s for s in current["sections"] if s["section"]=="LARGE_CAP")["status"],"FAILED")
+            archive=research.research_display_archive.display(research._connect,current,research.now())
+            self.assertEqual(archive[0]["metric"],"3_YEAR_CAGR")
+            self.assertEqual(archive[0]["generated_at"],instant.isoformat())
+            self.assertNotIn("123456",str(archive))
+            research._save("LARGE_CAP",result)
+            self.assertEqual(research.research_display_archive.display(research._connect,research.read_snapshot(False),research.now()),[])

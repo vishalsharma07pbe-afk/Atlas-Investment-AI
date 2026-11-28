@@ -53,33 +53,34 @@ def _connect():
 
 
 def _save(section, result=None):
-    stamp = now().isoformat()
+    instant=now()
+    stamp=instant.isoformat()
     with closing(_connect()) as db, db:
+        # Seed a legacy last-successful payload even when the first post-upgrade
+        # refresh fails. A historical capture always retains its original date.
+        if research_display_archive.permitted():
+            old=db.execute("SELECT generated_at,payload FROM research_sections WHERE section=?",(section,)).fetchone()
+            if old and old["generated_at"] and old["payload"]:
+                try:
+                    original=datetime.fromisoformat(old["generated_at"])
+                    previous=json.loads(old["payload"])
+                    if original.tzinfo is not None and original<=instant:
+                        research_display_archive.capture(db,section,previous,original,
+                            _published_evidence_current(section,previous,original.astimezone(ZoneInfo("Asia/Kolkata")).date()))
+                except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
+                    pass
+            if result is not None:
+                try:
+                    research_display_archive.capture(db,section,result,instant,
+                        _published_evidence_current(section,result,instant.astimezone(ZoneInfo("Asia/Kolkata")).date()))
+                except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
+                    pass
         if result is None:
             db.execute("""INSERT INTO research_sections(section,attempted_at,status,error_code)
                 VALUES(?,?,'FAILED','RESEARCH_REFRESH_FAILED')
                 ON CONFLICT(section) DO UPDATE SET attempted_at=excluded.attempted_at,
                 status=excluded.status,error_code=excluded.error_code""", (section, stamp))
         else:
-            # Capture the previous successful payload before a successful but
-            # empty refresh overwrites it. Legacy snapshots retain their dates.
-            if research_display_archive.permitted():
-                old=db.execute("SELECT generated_at,payload FROM research_sections WHERE section=?",(section,)).fetchone()
-                if old and old["generated_at"] and old["payload"]:
-                    try:
-                        original=datetime.fromisoformat(old["generated_at"])
-                        previous=json.loads(old["payload"])
-                        if original.tzinfo is not None and original<=now():
-                            research_display_archive.capture(db,section,previous,original,
-                                _published_evidence_current(section,previous,original.astimezone(ZoneInfo("Asia/Kolkata")).date()))
-                    except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
-                        pass
-                try:
-                    original=datetime.fromisoformat(stamp)
-                    research_display_archive.capture(db,section,result,original,
-                        _published_evidence_current(section,result,original.astimezone(ZoneInfo("Asia/Kolkata")).date()))
-                except (ValueError,TypeError,KeyError,AttributeError,OverflowError):
-                    pass
             db.execute("""INSERT INTO research_sections VALUES(?,?,?,'READY',?,NULL)
                 ON CONFLICT(section) DO UPDATE SET generated_at=excluded.generated_at,
                 attempted_at=excluded.attempted_at,status=excluded.status,
