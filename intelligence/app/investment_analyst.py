@@ -143,9 +143,15 @@ def stock_projection(snapshot,instant=None):
                 if len(out)>=10:break
                 if r["isin"] in seen:continue
                 seen.add(r["isin"])
+                plan=obj(r.get("price_plan"))
+                if (r.get("adjustment_verified_for_screen") is not True or plan.get("qualified") is not False
+                    or plan.get("method")!="STRATEGY_RISK_GEOMETRY_V1" or plan.get("strategy") not in r["strategies"]
+                    or not all(num(plan.get(k),.01,1e9) for k in ("reference","stop_scenario","target_scenario"))
+                    or not plan["stop_scenario"]<plan["reference"]<plan["target_scenario"]
+                    or abs(plan["reference"]-r["close"])>.0051):plan=None
                 out.append({**{k:r[k] for k in ("id","isin","symbol","exchange","as_of","close")},
                     "tier":"MULTI_STRATEGY_RESEARCH","horizon":"RESEARCH","score":None,"qualified":False,"action":"WATCH_FOR_CONFIRMATION",
-                    "risk":None,"growth_outlook":None,"price_plan":None,"evidence_confidence":"LIMITED",
+                    "risk":None,"growth_outlook":None,"price_plan":plan,"evidence_confidence":"LIMITED",
                     "strategies":r["strategies"],"strategy_families":r["families"],"observed_facts":r["observed_facts"],
                     "reasons":["Independent strategy research matches: "+", ".join(x.replace("_"," ").lower() for x in r["strategies"])],
                     "limitations":["Fixed research proxies; independent strategy performance not established.","No allocation or execution qualification; price adjustment and valuation evidence may be incomplete."]})
