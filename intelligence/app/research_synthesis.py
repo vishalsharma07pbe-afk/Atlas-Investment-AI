@@ -46,6 +46,11 @@ def fund_context(shortlist,detail,today):
     result={}
     for k,lo,hi in (("weekly_drawdown_percent",-100,0),("worst_rolling_year_percent",-100,1e6),("annualized_volatility_percent",0,1e6),("rolling_peer_above_median_percent",0,100)):
         if num(shortlist.get(k),lo,hi):result[k]=shortlist[k]
+    recovery=obj(shortlist.get("recovery_context"))
+    if recovery.get("basis")=="MATCHED_WEEKLY_NAV_ANCHORS" and recovery.get("qualified") is False and recovery.get("last_date")==shortlist.get("nav_date"):
+        n=recovery.get("completed_recoveries");longest=recovery.get("longest_completed_recovery_days");current=recovery.get("current_underwater_days");draw=recovery.get("current_drawdown_percent")
+        if type(n) is int and 0<=n<=156 and (longest is None and n==0 or type(longest) is int and n>0 and 0<longest<=1095) and type(current) is int and 0<=current<=1095 and num(draw,-100,0):
+            result["recovery_context"]={k:recovery[k] for k in ("basis","last_date","completed_recoveries","longest_completed_recovery_days","current_underwater_days","current_drawdown_percent","qualified")}
     if detail.get("identifier")!=shortlist.get("identifier") or detail.get("plan")!="DIRECT" or detail.get("option")!="GROWTH":return result
     ter=obj(detail.get("automatic_amfi_ter_evidence"));local=obj(detail.get("local_export_evidence"))
     secondary=obj(detail.get("secondary_disclosure"))
